@@ -1,5 +1,5 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v2.3.2：记忆状态改由图标饱和度表达）
+// DSH「提示词优化」插件 · Client 半部（v2.3.3：输入框按钮三合一——字体对齐/空输入=记忆开关/hover 闪烁修复）
 // v2.3（方案「提示词优化方案.md」§7）：
 // ① EnhanceButton idle = emoji ✨ + 模式短标签（MODE_OPTIONS.short / i18n modeShort* 键），
 //    订阅 configState——模式切换即时同步；
@@ -8,6 +8,9 @@
 // ③ 记忆状态（v2.3.2 §7.9）：移除输入区记忆开关模块；记忆开/关只影响 ✨ 图标饱和度
 //    （开=正常彩色 / 关=低饱和 dsh-enh-icon-dim），文字（模式短标签）饱和度不变；
 //    空输入时按钮不再降低饱和度（disabled 仅保留点击无效与 cursor）。
+// v2.3.3（§7.10）：① font-weight:500 对齐 DSH ModelSelect trigger（按钮与短标签）；
+//    ② 空输入时按钮 = 记忆开关（disabled=false，点击 toggle config.memory，title 提示当前状态）；
+//    ③ busy hover 闪烁修复——progress 文档流占位（宽度恒定）+ cancel absolute 覆盖 + opacity 切换。
 // v2.3.1：动态 client 半部无浏览器 timer 全局（setInterval 不可用）——声明 inject:['timer']，
 //    轮询改经 timerSvc.interval(callback, 500)，disposer 由 effect cleanup 调用；
 //    timer 服务不可用时静默降级默认「优化中…」文案。
@@ -260,6 +263,9 @@ const ZH = {
   titleEmpty: '请输入内容后再优化',
   titleCommand: '命令内容为空，无可优化',
   titleBusyInput: '当前输入状态不允许优化',
+  // v2.3.3（§7.10）：空输入时按钮 = 记忆开关（点击切换记忆）
+  titleMemoryOn: '记忆开关：点击切换记忆功能（当前：开）',
+  titleMemoryOff: '记忆开关：点击切换记忆功能（当前：关）',
   errorPrefix: '优化失败：',
   dismiss: '知道了',
   cancel: '取消',
@@ -382,6 +388,9 @@ const EN = {
   titleEmpty: 'Type something first to optimize',
   titleCommand: 'Empty command, nothing to optimize',
   titleBusyInput: 'Input is not ready',
+  // v2.3.3（§7.10）：空输入时按钮 = 记忆开关（点击切换记忆）
+  titleMemoryOn: 'Memory toggle: click to switch (currently on)',
+  titleMemoryOff: 'Memory toggle: click to switch (currently off)',
   errorPrefix: 'Optimize failed: ',
   dismiss: 'Dismiss',
   cancel: 'Cancel',
@@ -784,8 +793,12 @@ function EnhanceButton(props) {
       'aria-label': t('enhanceButton'),
     },
       React.createElement('span', { className: 'dsh-enh-spin', 'aria-hidden': true }),
-      React.createElement('span', { className: 'dsh-enh-progress', 'aria-hidden': true }, prog),
-      React.createElement('span', { className: 'dsh-enh-cancel', 'aria-hidden': true }, t('cancel')),
+      // v2.3.3（§7.10）：hover 闪烁修复——progress 文档流占位（宽度恒定），
+      // cancel absolute 覆盖其上，hover 只切 opacity（无尺寸抖动）
+      React.createElement('span', { className: 'dsh-enh-status', 'aria-hidden': true },
+        React.createElement('span', { className: 'dsh-enh-progress' }, prog),
+        React.createElement('span', { className: 'dsh-enh-cancel' }, t('cancel')),
+      ),
     );
   }
   if (phase === 'result') {
@@ -793,17 +806,24 @@ function EnhanceButton(props) {
     title = t('titleResult');
     cls += ' dsh-enh-btn-result dsh-enh-btn-text';
   } else {
-    // v2.3（§7.2）：idle = emoji ✨ + 模式短标签（emoji 系统彩色，不承担状态色）
+    // v2.3.3（§7.10）：空输入时按钮 = 记忆开关（点击切换 config.memory，外观不变——
+    // ✨ 图标饱和度已表达记忆状态；非空时守卫/优化逻辑照旧）
     const ok = guardPasses(draft, input);
-    disabled = !ok;
-    onClick = () => {
-      if (!guardPasses(draft, input)) return;
-      enhance(sessionId, draft, inputActions, draftRef);
-    };
-    title = ok ? t('titleIdle')
-      : draft.trim() === '' ? t('titleEmpty')
-      : draft.startsWith('/') ? t('titleCommand')
-      : t('titleBusyInput');
+    const empty = draft.trim() === '';
+    if (empty) {
+      disabled = false;
+      onClick = () => { saveConfig({ memory: !configState.value.memory }); };
+      title = configState.value.memory ? t('titleMemoryOn') : t('titleMemoryOff');
+    } else {
+      disabled = !ok;
+      onClick = () => {
+        if (!guardPasses(draft, input)) return;
+        enhance(sessionId, draft, inputActions, draftRef);
+      };
+      title = ok ? t('titleIdle')
+        : draft.startsWith('/') ? t('titleCommand')
+        : t('titleBusyInput');
+    }
     cls += ' dsh-enh-btn-text';
   }
 
@@ -1526,7 +1546,8 @@ function CordisBadgePlaceholder() {
 }
 
 const CSS = [
-  '.dsh-enh-btn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease;white-space:nowrap}',
+  // v2.3.3（§7.10）：font-weight:500 对齐 DSH ModelSelect trigger 样式
+  '.dsh-enh-btn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:20px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease;white-space:nowrap}',
   '.dsh-enh-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
   // v2.3.2（§7.2）：空输入不再降低按钮饱和度——disabled 仅保留点击无效提示，无 opacity 变暗
   '.dsh-enh-btn:disabled{cursor:not-allowed}',
@@ -1535,12 +1556,16 @@ const CSS = [
   // v2.3.2（§7.2）：记忆状态 → 图标饱和度——开=正常（无 dim）/ 关=低饱和（saturate(.2)，文字不受影响）
   '.dsh-enh-icon{font-size:14px;line-height:20px}',
   '.dsh-enh-icon-dim{filter:saturate(.2)}',
-  '.dsh-enh-mode{font-size:13px;line-height:20px}',
+  // v2.3.3（§7.10）：短标签 font-weight:500 与按钮一致
+  '.dsh-enh-mode{font-size:13px;font-weight:500;line-height:20px}',
   '.dsh-enh-btn-busy{border-color:var(--dsw-alias-state-warn-primary);color:var(--dsw-alias-state-warn-primary)}',
-  // v2.3（§7.4）：enhancing hover 切「取消」——层叠 span（进度文案默认、取消 hover 显示，错误红）
-  '.dsh-enh-btn-busy .dsh-enh-cancel{display:none}',
-  '.dsh-enh-btn-busy:hover .dsh-enh-progress{display:none}',
-  '.dsh-enh-btn-busy:hover .dsh-enh-cancel{display:inline;color:var(--dsw-alias-state-error-primary)}',
+  // v2.3.3（§7.10）：busy hover 闪烁修复——progress 文档流占位（宽度恒定），
+  // cancel absolute 覆盖其上，hover 只切 opacity（无尺寸抖动，hover 判定区不变）
+  '.dsh-enh-btn-busy .dsh-enh-status{position:relative;display:inline-block;text-align:center}',
+  '.dsh-enh-btn-busy .dsh-enh-progress{transition:opacity .12s ease}',
+  '.dsh-enh-btn-busy .dsh-enh-cancel{position:absolute;inset:0;display:block;white-space:nowrap;opacity:0;color:var(--dsw-alias-state-error-primary);transition:opacity .12s ease}',
+  '.dsh-enh-btn-busy:hover .dsh-enh-progress{opacity:0}',
+  '.dsh-enh-btn-busy:hover .dsh-enh-cancel{opacity:1}',
   '.dsh-enh-btn-result{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}',
   '.dsh-enh-spin{width:11px;height:11px;border-radius:50%;border:2px solid var(--dsw-alias-border-l2);border-top-color:var(--dsw-alias-state-warn-primary);display:inline-block;animation:dsh-enh-rotate .8s linear infinite}',
   '@keyframes dsh-enh-rotate{to{transform:rotate(360deg)}}',
