@@ -1,6 +1,6 @@
 # 文件索引 · release-notes
 
-> 由 sync.mjs 自动同步。2026-08-14T22:41 刷新。
+> 由 sync.mjs 自动同步。2026-08-14T23:20 刷新。
 
 - `release-notes/v2.4.0.md` — (491 B) (职责待填)
 - `release-notes/v2.4.1.md` — (320 B) (职责待填)
