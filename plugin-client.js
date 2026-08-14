@@ -1,13 +1,16 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v2.3：优化按钮交互升级——步骤进度 + 记忆开关可视化）
+// DSH「提示词优化」插件 · Client 半部（v2.3.2：记忆状态改由图标饱和度表达）
 // v2.3（方案「提示词优化方案.md」§7）：
 // ① EnhanceButton idle = emoji ✨ + 模式短标签（MODE_OPTIONS.short / i18n modeShort* 键），
 //    订阅 configState——模式切换即时同步；
 // ② enhancing = spinner + 步骤进度文案（500ms 轮询 enhance/progress，stage→i18n 文案，
 //    轮询失败静默降级「优化中…」）+ hover 切「取消」（错误红）；
-// ③ 新增 MemoryToggle（conversation.input.left）：关=变暗置灰（不可选中视觉，可点击开启）/
-//    开=高饱和橙，点击切换 config.memory，与设置面板下拉双向同步；
-// ④ 放弃自定义图标方案（emoji ✨ 不承担状态色）。
+// ③ 记忆状态（v2.3.2 §7.9）：移除输入区记忆开关模块；记忆开/关只影响 ✨ 图标饱和度
+//    （开=正常彩色 / 关=低饱和 dsh-enh-icon-dim），文字（模式短标签）饱和度不变；
+//    空输入时按钮不再降低饱和度（disabled 仅保留点击无效与 cursor）。
+// v2.3.1：动态 client 半部无浏览器 timer 全局（setInterval 不可用）——声明 inject:['timer']，
+//    轮询改经 timerSvc.interval(callback, 500)，disposer 由 effect cleanup 调用；
+//    timer 服务不可用时静默降级默认「优化中…」文案。
 // v2.2（方案「提示词优化方案.md」§0.2/§2/§6）：
 // ① 模式体系收敛 4 模式（base/lite/standard/smart）——记忆模式删除；
 // ② 记忆功能改为所有模式可开/关的独立开关（config.memory，缺省 false）；
@@ -367,9 +370,6 @@ const ZH = {
   stageContext: '组装上下文…',
   stageLlm: 'LLM 优化中…',
   stageDone: '✓',
-  memoryToggle: '记忆',
-  memoryToggleOn: '记忆：开，点击关闭',
-  memoryToggleOff: '记忆：关，点击开启',
 };
 
 const EN = {
@@ -493,9 +493,6 @@ const EN = {
   stageContext: 'Assembling context…',
   stageLlm: 'Optimizing…',
   stageDone: '✓',
-  memoryToggle: 'Memory',
-  memoryToggleOn: 'Memory: on · click to turn off',
-  memoryToggleOff: 'Memory: off · click to turn on',
 };
 
 function errorKey(code) {
@@ -822,30 +819,16 @@ function EnhanceButton(props) {
   },
     phase === 'result' ? null
       : React.createElement(React.Fragment, null,
-          React.createElement('span', { className: 'dsh-enh-icon', 'aria-hidden': true }, '✨'),
+          // v2.3.2（§7.2）：记忆状态 → 图标饱和度（仅影响 ✨，文字饱和度不变）：
+          // 记忆开=正常彩色（无 dim 类）/ 记忆关=低饱和（dsh-enh-icon-dim，filter:saturate(.2)）
+          React.createElement('span', {
+            className: 'dsh-enh-icon' + (configState.value.memory === true ? '' : ' dsh-enh-icon-dim'),
+            'aria-hidden': true,
+          }, '✨'),
           React.createElement('span', { className: 'dsh-enh-mode' }, modeShortLabel(t, configState.value.mode)),
         ),
     phase === 'result' ? t('result') : null,
   );
-}
-
-// v2.3（§7.2）：记忆开关——输入框工具行左端（conversation.input.left），用控件自身状态表达记忆：
-// 关=变暗置灰（不可选中视觉，仍可点击开启）/ 开=高饱和橙（点击关闭）；
-// 与设置面板记忆开关下拉同一 config.memory（saveConfig 双向即时同步）。
-function MemoryToggle(props) {
-  const t = makeT(props);
-  const [, force] = React.useState(0);
-  React.useEffect(() => subscribeConfig(() => force((v) => v + 1)), []);
-  const memoryOn = configState.value.memory === true;
-  const aria = memoryOn ? t('memoryToggleOn') : t('memoryToggleOff');
-  return React.createElement('button', {
-    type: 'button',
-    className: 'dsh-enh-mem' + (memoryOn ? ' dsh-enh-mem-on' : ' dsh-enh-mem-off'),
-    onClick: () => saveConfig({ memory: !memoryOn }),
-    title: aria,
-    tabIndex: -1,
-    'aria-label': aria,
-  }, t('memoryToggle'));
 }
 
 function EnhanceBar(props) {
@@ -1545,21 +1528,19 @@ function CordisBadgePlaceholder() {
 const CSS = [
   '.dsh-enh-btn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease;white-space:nowrap}',
   '.dsh-enh-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
-  '.dsh-enh-btn:disabled{opacity:.45;cursor:not-allowed}',
+  // v2.3.2（§7.2）：空输入不再降低按钮饱和度——disabled 仅保留点击无效提示，无 opacity 变暗
+  '.dsh-enh-btn:disabled{cursor:not-allowed}',
   '.dsh-enh-btn-text{padding:0 10px}',
   // v2.3（§7.2）：idle 态 = emoji ✨ + 模式短标签（emoji 系统彩色，不承担状态色）
+  // v2.3.2（§7.2）：记忆状态 → 图标饱和度——开=正常（无 dim）/ 关=低饱和（saturate(.2)，文字不受影响）
   '.dsh-enh-icon{font-size:14px;line-height:20px}',
+  '.dsh-enh-icon-dim{filter:saturate(.2)}',
   '.dsh-enh-mode{font-size:13px;line-height:20px}',
   '.dsh-enh-btn-busy{border-color:var(--dsw-alias-state-warn-primary);color:var(--dsw-alias-state-warn-primary)}',
   // v2.3（§7.4）：enhancing hover 切「取消」——层叠 span（进度文案默认、取消 hover 显示，错误红）
   '.dsh-enh-btn-busy .dsh-enh-cancel{display:none}',
   '.dsh-enh-btn-busy:hover .dsh-enh-progress{display:none}',
   '.dsh-enh-btn-busy:hover .dsh-enh-cancel{display:inline;color:var(--dsw-alias-state-error-primary)}',
-  // v2.3（§7.2）：记忆开关——关=变暗置灰（不可选中视觉）/ 开=高饱和橙；点击切换
-  '.dsh-enh-mem{display:inline-flex;align-items:center;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:transparent;font-size:13px;line-height:20px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease;white-space:nowrap}',
-  '.dsh-enh-mem:hover{background:var(--dsw-alias-bg-layer-2)}',
-  '.dsh-enh-mem-on{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}',
-  '.dsh-enh-mem-off{color:var(--dsw-alias-label-tertiary);opacity:.55}',
   '.dsh-enh-btn-result{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}',
   '.dsh-enh-spin{width:11px;height:11px;border-radius:50%;border:2px solid var(--dsw-alias-border-l2);border-top-color:var(--dsw-alias-state-warn-primary);display:inline-block;animation:dsh-enh-rotate .8s linear infinite}',
   '@keyframes dsh-enh-rotate{to{transform:rotate(360deg)}}',
@@ -1658,10 +1639,6 @@ return {
     slots.inject('sidebar.footer.action', () => slots.register(
       { name: 'sidebar.footer.action', id: 'cordis-panel', order: 0 },
       CordisBadgePlaceholder,
-    ));
-    slots.inject('conversation.input.left', () => slots.register(
-      { name: 'conversation.input.left', id: 'prompt-enhance-memory', order: 5, label: '记忆开关', locale: 'enhance' },
-      MemoryToggle,
     ));
     slots.inject('conversation.input.right', () => slots.register(
       { name: 'conversation.input.right', id: 'prompt-enhance', order: 10, label: '提示词优化', locale: 'enhance' },
