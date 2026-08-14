@@ -11,6 +11,7 @@
 // v19：fresh install / 恢复默认的链补足改经 host models/autochain（自适应解析）
 // v20：内置兜底链（BUILTIN_CHAIN）硬编码指向 DeepSeek 官方模型（deepseek-official），
 //      供「恢复默认」与 autochain 失败兜底使用；host 侧 autochain 亦返回 DeepSeek 官方链。
+// v21：P1-3 修复 sessionStores 内存泄漏——组件卸载且状态空闲时 releaseStoreIfIdle 释放条目
 // ============================================================================
 
 const CONFIG_KEY = 'dsh.enhance.config.v2';
@@ -395,6 +396,15 @@ function notify(sessionId) {
   for (const fn of [...s.listeners]) fn();
 }
 
+// v21（P1-3）：组件卸载且状态空闲时释放 store 条目，防止 sessionStores 无限增长（内存泄漏修复）
+function releaseStoreIfIdle(sessionId) {
+  const s = sessionStores.get(sessionId);
+  if (!s) return;
+  if (s.phase === 'idle' && s.listeners.size === 0 && s.error === null) {
+    sessionStores.delete(sessionId);
+  }
+}
+
 function safeSetDraft(inputActions, text) {
   if (!inputActions || typeof inputActions.setDraft !== 'function') return;
   try { inputActions.setDraft(text); } catch (e) { /* 忽略 */ }
@@ -525,6 +535,8 @@ function EnhanceButton(props) {
       s.error = null;
       notify(sessionId);
     }
+    // v21（P1-3）：卸载后空闲即释放，防内存泄漏
+    releaseStoreIfIdle(sessionId);
   }, [sessionId]);
 
   if (!inputActions || sessionId === undefined) return null;
@@ -587,6 +599,21 @@ function EnhanceBar(props) {
 
   const [, setVersion] = React.useState(0);
   React.useEffect(() => subscribe(sessionId, () => setVersion((v) => v + 1)), [sessionId]);
+
+  // v21（P1-3）：卸载后空闲即释放，防内存泄漏（与 EnhanceButton 对称）
+  React.useEffect(() => () => {
+    const s = storeFor(sessionId);
+    if (s.phase === 'enhancing') {
+      const seq = s.seq;
+      s.seq += 1;
+      host.call('cancel', { sessionId, seq }).catch(() => {});
+      s.phase = 'idle';
+      s.enhanced = '';
+      s.error = null;
+      notify(sessionId);
+    }
+    releaseStoreIfIdle(sessionId);
+  }, [sessionId]);
 
   React.useEffect(() => {
     const s = storeFor(sessionId);

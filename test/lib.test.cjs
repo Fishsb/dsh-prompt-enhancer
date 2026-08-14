@@ -114,3 +114,41 @@ test('collectStream 无 finish → cancelled', async () => {
   const r = await collectStream(gen(), 8000);
   assert.equal(r.kind, 'cancelled');
 });
+
+// ---- v21（P1-4）模型能力解析缓存单测 ----
+// resolveModelInfoCached 在 PURE 区段之前（模块级），独立提取求值。
+const cacheStart = src.indexOf('const modelInfoCache = new Map();');
+const cacheEnd = src.indexOf('function wrapUserText');
+assert.ok(cacheStart !== -1 && cacheEnd > cacheStart, 'cache region not found in plugin-host.js');
+const cacheText = src.slice(cacheStart, cacheEnd);
+const cacheFn = new Function(cacheText + `
+  ;return { resolveModelInfoCached, MODEL_INFO_TTL_MS };
+`);
+const { resolveModelInfoCached, MODEL_INFO_TTL_MS } = cacheFn();
+assert.equal(MODEL_INFO_TTL_MS, 300000, 'TTL 应为 5 分钟');
+
+test('resolveModelInfoCached 命中缓存（第二次不重复解析）', async () => {
+  let calls = 0;
+  const fakeLlm = {
+    resolveModelInfo: async (provider, model) => {
+      calls += 1;
+      return { provider, model, reasoning: { efforts: [{ id: 'high', name: 'High' }], defaultEffort: 'high' } };
+    },
+  };
+  const a = await resolveModelInfoCached(fakeLlm, 'p1', 'm1');
+  const b = await resolveModelInfoCached(fakeLlm, 'p1', 'm1');
+  assert.equal(calls, 1, '同键第二次应命中缓存');
+  assert.equal(a.model, 'm1');
+  assert.equal(b.model, 'm1');
+  assert.equal(a.reasoning.efforts[0].name, 'High');
+});
+
+test('resolveModelInfoCached 不同键独立缓存', async () => {
+  let calls = 0;
+  const fakeLlm = {
+    resolveModelInfo: async () => { calls += 1; return { ok: true }; },
+  };
+  await resolveModelInfoCached(fakeLlm, 'pA', 'mA');
+  await resolveModelInfoCached(fakeLlm, 'pB', 'mB');
+  assert.equal(calls, 2, '不同 provider/model 键应各自解析');
+});

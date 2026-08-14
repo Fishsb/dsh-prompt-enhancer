@@ -11,6 +11,7 @@
 // v19：新增 resolveAdaptiveChain（60s TTL 缓存）与 models/autochain RPC
 // v20：内置兜底链硬编码指向 DeepSeek 官方模型（deepseek-official/deepseek-v4-flash、deepseek-v4-pro），
 //      不再扫描任意 provider——主模型优先 currentSelection，兜底补足固定 DeepSeek 官方。
+// v21：P1-4 模型能力解析缓存（resolveModelInfoCached，TTL 5min，按 provider:model 键，200 条上限清理）
 // ============================================================================
 
 // —— v14 诊断日志：环形缓冲（最近 300 行），供 logs/last RPC 读取 ——
@@ -48,6 +49,26 @@ const DEFAULT_OUTPUT_LIMIT = 8000;
 // 兜底链 TTL 缓存（避免每次 enhance 都重新解析）
 const adaptiveChainCache = { value: null, at: 0 };
 const ADAPTIVE_CHAIN_TTL_MS = 60000;
+// v21（P1-4）：模型能力解析缓存（resolveModelInfo 结果，TTL 5 分钟，按 provider:model 键）
+// 避免 models/resolve 每次调用都重复走适配器能力查询（可能含网络发现，毫秒~秒级开销）
+const modelInfoCache = new Map();
+const MODEL_INFO_TTL_MS = 300000;
+
+async function resolveModelInfoCached(llmService, provider, model) {
+  const key = provider + '/' + model;
+  const hit = modelInfoCache.get(key);
+  const now = Date.now();
+  if (hit && (now - hit.at) < MODEL_INFO_TTL_MS) return hit.value;
+  const info = await llmService.resolveModelInfo(provider, model);
+  modelInfoCache.set(key, { value: info, at: now });
+  // 防无限增长：超过 200 条时清理过期项
+  if (modelInfoCache.size > 200) {
+    for (const [k, v] of modelInfoCache) {
+      if ((now - v.at) >= MODEL_INFO_TTL_MS) modelInfoCache.delete(k);
+    }
+  }
+  return info;
+}
 
 async function resolveAdaptiveChain(llmSvc, adm) {
   const now = Date.now();
@@ -423,7 +444,8 @@ return {
       }
       if (!provider || !model) return { ok: false, code: 'BAD_ARGS', message: 'provider and model required' };
       try {
-        const info = await llmService.resolveModelInfo(provider, model);
+        // v21（P1-4）：走 TTL 缓存，避免重复适配器能力查询
+        const info = await resolveModelInfoCached(llmService, provider, model);
         const reasoning = info && info.reasoning ? {
           efforts: info.reasoning.efforts.map((e) => ({
             id: String(e.id),
