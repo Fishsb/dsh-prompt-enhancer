@@ -1,14 +1,20 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Host 半部（v2.4.0：版本检测与一键更新 + 输入框按钮字体对齐）
+// DSH「提示词优化」插件 · Host 半部（v2.4.1：真实环境实测回填——host 不再出网/会话策略写入）
+// v2.4.1（方案 §9-T5/T6 实测回填）：
+// ① 架构修订：本部署 ctx.web.fetch 无可用 provider（实机抛错）——检测/下载改由 client 浏览器
+//    直连 GitHub API（CORS 实测 200），host 经 update/check（tagsPayload/releasePayload 载荷）
+//    与 update/pull（files 清单载荷）只做解析/校验/比较/写入；
+// ② 写入/默认目录基于**会话策略**（resolve({ session })）——无会话时 workspaceRoot 回退 DSH
+//    安装目录且写工作区 FS_SANDBOX_DENIED；带会话后 root=会话工作区（实机验证写 ok）。
 // v2.4.0（方案「插件版本检测与一键更新方案.md」）：
 // ① 新增 PLUGIN_VERSION（本地版本单一事实源，发布时 bump）/ UPDATE_MANIFEST（拉取文件清单）常量，
 //    与版本比较纯函数族（parseVersion/compareVersions/versionStatus/normalizeRepo/pickMaxTag/
 //    rawFileUrl/defaultDirFor/isValidTag，入 PURE 区段供单测切片）；
 // ② 新增 update/check RPC——检测指定 GitHub 公开仓库版本（tags 主路径取最大，releases 仅作同名展示
 //    元数据；300s TTL 缓存；返回 remote/remoteTag/defaultDir/status/ahead）；
-// ③ 新增 update/pull RPC——按 remoteTag 从 raw.githubusercontent.com 拉取 6 个发布文件，
-//    全部下载成功才零写入落盘到目标目录（默认 <workspaceRoot>/dsh-prompt-enhancer-<tag>/，
-//    携带 sandboxPolicy；in-flight 锁防重入 PULL_BUSY；tag 白名单校验防注入）。
+// ③ 新增 update/pull RPC——校验客户端拉取的 6 个发布文件清单（validateManifestFiles），
+//    按会话策略零写入落盘到目标目录（默认 <workspaceRoot>/dsh-prompt-enhancer-<tag>/，
+//    root 取自会话策略；in-flight 锁防重入 PULL_BUSY；tag 白名单校验防注入）。
 // v2.3（方案「提示词优化方案.md」§7）：① STAGE_* 常量 + pending 记录 stage 标记
 // （prepare→history→analyze→files→events→context→llm），buildV2ContextBlock 注入 onStage 回调；
 // ② 新增 enhance/progress 轮询 RPC（client 500ms 轮询展示步骤进度，纯展示、失败静默降级）；
@@ -788,7 +794,7 @@ async function pingStream(llmService, entry, ref) {
 // ================= v2.4.0 版本检测与一键更新 · 纯函数族 =================
 // 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
-const PLUGIN_VERSION = '2.4.0';
+const PLUGIN_VERSION = '2.4.1';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
 const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）
@@ -901,11 +907,46 @@ function defaultDirFor(workspaceRoot, tag) {
   return workspaceRoot.replace(/[\\/]+$/, '') + '/' + 'dsh-prompt-enhancer-' + tag;
 }
 
-// GitHub contents API 下载 URL（update/pull 主路径）：
-// 实机验证（方案 §9-T1）：raw.githubusercontent.com 在本机 DNS 解析为 0.0.0.0 不可达，
-// api.github.com 可达；contents API 返回 base64 content，host 内置 atob 解码；文件 >1MB 不支持。
-function contentsApiUrl(repo, tag, file) {
-  return 'https://api.github.com/repos/' + repo + '/contents/' + file + '?ref=' + tag;
+// GitHub contents API 下载 URL 契约（客户端构建；host 侧不再出网，见 §9-T6 实测回填）
+// 实机验证：raw.githubusercontent.com 本机 DNS 屏蔽（0.0.0.0）；api.github.com 浏览器 CORS 可直连。
+// 默认目标目录：<workspaceRoot>/dsh-prompt-enhancer-<tag>/；workspaceRoot 缺失 → ''
+function defaultDirFor(workspaceRoot, tag) {
+  if (typeof workspaceRoot !== 'string' || workspaceRoot.trim() === '') return '';
+  return workspaceRoot.replace(/[\\/]+$/, '') + '/' + 'dsh-prompt-enhancer-' + tag;
+}
+
+// tags/releases 载荷解析（客户端浏览器 fetch 得到原始 JSON 文本，host 侧解析）
+// 返回数组或 null（非 JSON / 非数组）
+function parseTagsPayload(payload) {
+  if (typeof payload !== 'string' || payload === '') return null;
+  try {
+    const data = JSON.parse(payload);
+    return Array.isArray(data) ? data : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// 拉取文件清单校验（update/pull 入参）：必须恰好覆盖 UPDATE_MANIFEST 全部 6 个文件，
+// 无重复/无多余；content 为已解码文本且 ≤1MB。返回 { ok, files } | { ok:false, message }
+function validateManifestFiles(files) {
+  if (!Array.isArray(files)) return { ok: false, message: 'files array required' };
+  const seen = new Set();
+  const out = [];
+  for (const f of files) {
+    if (!f || typeof f !== 'object') return { ok: false, message: 'malformed file entry' };
+    const name = typeof f.name === 'string' ? f.name : '';
+    const content = typeof f.content === 'string' ? f.content : '';
+    if (!UPDATE_MANIFEST.includes(name)) return { ok: false, message: 'unexpected file: ' + name };
+    if (seen.has(name)) return { ok: false, message: 'duplicate file: ' + name };
+    if (content.length > 1000000) return { ok: false, message: 'file too large: ' + name };
+    seen.add(name);
+    out.push({ name, content });
+  }
+  for (const name of UPDATE_MANIFEST) {
+    if (!seen.has(name)) return { ok: false, message: 'missing file: ' + name };
+  }
+  return { ok: true, files: out };
 }
 
 // ==PURE-END==
@@ -1427,68 +1468,69 @@ return {
 
     // ================= v2.4.0 版本检测与一键更新 RPC =================
     // 方案「插件版本检测与一键更新方案.md」§3：检测（update/check）→ 一键拉取（update/pull）。
+    // v2.4.1（实测回填 §9-T5/T6）架构：**host 不再出网**——本部署 web.fetch 无可用 provider
+    // （实机抛 WEB_PROVIDER_UNAVAILABLE）；改由 client 浏览器直连 GitHub API（CORS 实测 200），
+    // host 只做解析/校验/比较/写入（能力均已实机验证可用）。
     const updateCache = new Map();      // repo → { at, value }（TTL UPDATE_CACHE_TTL_MS）
     const pullInFlight = new Set();     // repo → 拉取中（防重入 PULL_BUSY）
 
-    // GitHub JSON 请求包装：403 → RATE_LIMIT；非 200 → GITHUB_HTTP(status)；解析失败 → GITHUB_FAILED
-    async function fetchGithubJson(webSvc, url) {
-      let res;
+    // v2.4.1（实测回填 §9-T5）：策略必须**带会话解析**——无会话时 workspaceRoot 回退到 DSH
+    // 安装目录且写工作区返回 FS_SANDBOX_DENIED（实机验证）；带 session 后 mode=会话预设
+    // （如 danger-full-access）、root=会话工作区（实机验证写 ok）。
+    function resolveSessionPolicy(sessionId) {
+      const sp = ctx.get('sandboxPolicy');
+      if (!sp || typeof sp.resolve !== 'function') return null;
+      let session;
       try {
-        res = await webSvc.fetch({ url });
-      } catch (e) {
-        return { ok: false, code: 'GITHUB_FAILED', message: String(e && e.message ? e.message : e) };
-      }
-      if (!res || typeof res.statusCode !== 'number') {
-        return { ok: false, code: 'GITHUB_FAILED', message: 'empty fetch result' };
-      }
-      if (res.statusCode === 403) {
-        return { ok: false, code: 'RATE_LIMIT', message: 'GitHub API rate limit exceeded, retry later' };
-      }
-      if (res.statusCode !== 200) {
-        return { ok: false, code: 'GITHUB_HTTP', status: res.statusCode, message: 'GitHub request failed (HTTP ' + res.statusCode + ')' };
-      }
-      const body = res.body && typeof res.body.content === 'string' ? res.body.content : '';
+        const ss = ctx.get('sessions');
+        if (ss && typeof ss.get === 'function' && typeof sessionId === 'string' && sessionId) {
+          session = ss.get(sessionId) || undefined;
+        }
+      } catch (e) { /* 会话解析失败 → 回退无会话策略 */ }
       try {
-        return { ok: true, data: JSON.parse(body) };
+        return sp.resolve(session ? { session } : undefined);
       } catch (e) {
-        return { ok: false, code: 'GITHUB_FAILED', message: 'unexpected response body' };
+        return null;
       }
     }
 
     harness.handle('update/check', async (args) => {
       const repo = normalizeRepo(args && args.repo);
+      const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : '';
+      const tagsPayload = args && typeof args.tagsPayload === 'string' ? args.tagsPayload : '';
+      const releasePayload = args && typeof args.releasePayload === 'string' ? args.releasePayload : '';
       if (!repo) return { ok: false, code: 'BAD_REPO', message: 'repo must be "owner/name" (letters, digits, . _ -)' };
-      const webSvc = ctx.get('web');
-      if (!webSvc || typeof webSvc.fetch !== 'function') {
-        return { ok: false, code: 'WEB_UNAVAILABLE', message: 'web fetch service unavailable' };
+      if (tagsPayload === '') {
+        return { ok: false, code: 'BAD_ARGS', message: 'tagsPayload required (client fetches GitHub tags, host evaluates)' };
       }
       const hit = updateCache.get(repo);
       if (hit && Date.now() - hit.at < UPDATE_CACHE_TTL_MS) {
         return { ...hit.value, cached: true };
       }
       try {
-        // 主路径：tags 列表取最大可解析版本（§1.2-1）
-        const tagsRes = await fetchGithubJson(webSvc, 'https://api.github.com/repos/' + repo + '/tags?per_page=100');
-        if (!tagsRes.ok) {
-          return { ok: false, code: tagsRes.code === 'GITHUB_HTTP' && tagsRes.status === 404 ? 'GITHUB_404' : tagsRes.code, status: tagsRes.status, message: tagsRes.code === 'GITHUB_HTTP' && tagsRes.status === 404 ? 'repository not found' : tagsRes.message };
-        }
-        const best = pickMaxTag(tagsRes.data);
+        // 主路径：tags 载荷（客户端已校验 HTTP 200）取最大可解析版本（§1.2-1）
+        const tags = parseTagsPayload(tagsPayload);
+        if (!tags) return { ok: false, code: 'BAD_ARGS', message: 'tagsPayload is not a valid JSON array' };
+        const best = pickMaxTag(tags);
         if (!best) return { ok: false, code: 'NO_REMOTE_VERSION', message: 'no version-like tags found' };
         const status = versionStatus(PLUGIN_VERSION, best.version);
-        const sp = ctx.get('sandboxPolicy');
-        const defaultDir = defaultDirFor(sp && sp.workspaceRoot, best.raw);
-        // 附加展示元数据：仅当 release 的 tag 与最大 tag 同名（§1.2-2；失败不阻断）
+        // v2.4.1：默认目录基于**会话策略**的 workspaceRoot（无会话回退配置根）
+        const policy = resolveSessionPolicy(sessionId);
+        const defaultDir = defaultDirFor(policy && policy.workspaceRoot, best.raw);
+        // 附加展示元数据：仅当 release 的 tag 与最大 tag 同名（§1.2-2；缺失/失败不阻断）
         let releaseMeta = null;
-        try {
-          const relRes = await fetchGithubJson(webSvc, 'https://api.github.com/repos/' + repo + '/releases/latest');
-          if (relRes.ok && relRes.data && relRes.data.tag_name === best.raw) {
-            releaseMeta = {
-              releaseName: typeof relRes.data.name === 'string' ? relRes.data.name : '',
-              publishedAt: typeof relRes.data.published_at === 'string' ? relRes.data.published_at : '',
-              body: typeof relRes.data.body === 'string' ? relRes.data.body.slice(0, 500) : '',
-            };
-          }
-        } catch (e) { /* release 元数据失败不阻断检测 */ }
+        if (releasePayload !== '') {
+          try {
+            const rel = JSON.parse(releasePayload);
+            if (rel && typeof rel === 'object' && rel.tag_name === best.raw) {
+              releaseMeta = {
+                releaseName: typeof rel.name === 'string' ? rel.name : '',
+                publishedAt: typeof rel.published_at === 'string' ? rel.published_at : '',
+                body: typeof rel.body === 'string' ? rel.body.slice(0, 500) : '',
+              };
+            }
+          } catch (e) { /* release 元数据失败不阻断检测 */ }
+        }
         const value = {
           ok: true,
           repo,
@@ -1507,20 +1549,19 @@ return {
         return value;
       } catch (e) {
         herr('[enhance] update/check failed', e);
-        return { ok: false, code: 'GITHUB_FAILED', message: String(e && e.message ? e.message : e) };
+        return { ok: false, code: 'CHECK_FAILED', message: String(e && e.message ? e.message : e) };
       }
     });
 
     harness.handle('update/pull', async (args) => {
       const repo = normalizeRepo(args && args.repo);
       const tag = args && typeof args.tag === 'string' ? args.tag.trim() : '';
+      const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : '';
       let dir = args && typeof args.dir === 'string' ? args.dir.trim() : '';
       if (!repo) return { ok: false, code: 'BAD_REPO', message: 'repo must be "owner/name"' };
       if (!isValidTag(tag)) return { ok: false, code: 'BAD_TAG', message: 'invalid tag' };
-      const webSvc = ctx.get('web');
-      if (!webSvc || typeof webSvc.fetch !== 'function') {
-        return { ok: false, code: 'WEB_UNAVAILABLE', message: 'web fetch service unavailable' };
-      }
+      const manifestCheck = validateManifestFiles(args && args.files);
+      if (!manifestCheck.ok) return { ok: false, code: 'BAD_FILES', message: manifestCheck.message };
       const fsSvc = ctx.get('fs');
       if (!fsSvc || typeof fsSvc.resolve !== 'function' || typeof fsSvc.writeText !== 'function') {
         return { ok: false, code: 'FS_UNAVAILABLE', message: 'fs service unavailable' };
@@ -1530,46 +1571,18 @@ return {
       }
       pullInFlight.add(repo);
       try {
+        // v2.4.1：会话策略（写入边界 = 会话工作区；无会话回退配置根）
+        const policy = resolveSessionPolicy(sessionId);
         // dir 空串 → 默认目录（§3.2-0/4）
         if (dir === '') {
-          const sp = ctx.get('sandboxPolicy');
-          dir = defaultDirFor(sp && sp.workspaceRoot, tag);
+          dir = defaultDirFor(policy && policy.workspaceRoot, tag);
         }
         if (dir === '') return { ok: false, code: 'NO_DIR', message: 'target directory required' };
-        // 1) 全部下载成功才进入写入（任一失败 → 整体失败、零写入）
-        // 下载主路径 = GitHub contents API（§9-T1：raw.githubusercontent.com 本机 DNS 屏蔽，
-        // api.github.com 可达）：响应 JSON { encoding:'base64', content, size }，内置 atob 解码；
-        // >1MB 文件 contents API 不支持 → 明确报错。
-        const downloads = [];
-        for (const name of UPDATE_MANIFEST) {
-          let res;
-          try {
-            res = await webSvc.fetch({ url: contentsApiUrl(repo, tag, name) });
-          } catch (e) {
-            return { ok: false, code: 'PULL_DOWNLOAD_FAILED', file: name, message: String(e && e.message ? e.message : e) };
-          }
-          if (!res || res.statusCode !== 200 || !res.body || typeof res.body.content !== 'string') {
-            return { ok: false, code: 'PULL_DOWNLOAD_FAILED', file: name, status: res && res.statusCode, message: 'download failed (HTTP ' + (res && res.statusCode) + ')' };
-          }
-          let meta;
-          try {
-            meta = JSON.parse(res.body.content);
-          } catch (e) {
-            return { ok: false, code: 'PULL_DOWNLOAD_FAILED', file: name, message: 'unexpected contents API response' };
-          }
-          if (!meta || meta.encoding !== 'base64' || typeof meta.content !== 'string') {
-            return { ok: false, code: 'PULL_DOWNLOAD_FAILED', file: name, message: 'unexpected contents payload' };
-          }
-          if (typeof meta.size === 'number' && meta.size > 1000000) {
-            return { ok: false, code: 'PULL_DOWNLOAD_FAILED', file: name, message: 'file too large for contents API' };
-          }
-          downloads.push({ name, content: atob(meta.content) });
-        }
-        // 2) 逐文件写入（携带 sandboxPolicy 按实例策略执行；失败返回已写清单）
-        const policySvc = ctx.get('sandboxPolicy');
-        const sandboxPolicy = policySvc && typeof policySvc.resolve === 'function' ? policySvc.resolve() : undefined;
+        // 逐文件写入（文件内容由客户端经浏览器直连 contents API 获取并解码——§9-T6；
+        // 本侧仅校验清单完整性 + 会话策略写入；失败返回已写清单）
+        const sandboxPolicy = policy;
         const written = [];
-        for (const f of downloads) {
+        for (const f of manifestCheck.files) {
           try {
             const fileTarget = await fsSvc.resolve(f.name, { cwd: dir });
             await fsSvc.writeText(fileTarget, f.content, undefined, undefined, sandboxPolicy);

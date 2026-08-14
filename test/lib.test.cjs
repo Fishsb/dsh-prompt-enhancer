@@ -29,7 +29,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     buildMemoryBlock, MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE,
     STAGE_SEQUENCE, STAGE_LABELS,
     PLUGIN_VERSION, UPDATE_MANIFEST, parseVersion, compareVersions, versionStatus,
-    normalizeRepo, isValidTag, pickMaxTag, contentsApiUrl, defaultDirFor };
+    normalizeRepo, isValidTag, pickMaxTag, parseTagsPayload, validateManifestFiles, defaultDirFor };
 `);
 const {
   wrapUserText,
@@ -66,7 +66,8 @@ const {
   normalizeRepo,
   isValidTag,
   pickMaxTag,
-  contentsApiUrl,
+  parseTagsPayload,
+  validateManifestFiles,
   defaultDirFor,
 } = pureFn();
 
@@ -621,10 +622,29 @@ test('U35 pickMaxTag 取最大可解析版本', () => {
   assert.equal(pickMaxTag(null), null);
 });
 
-test('U36 contentsApiUrl / defaultDirFor', () => {
-  assert.equal(contentsApiUrl('a/b', 'v2.4.0', 'plugin-host.js'), 'https://api.github.com/repos/a/b/contents/plugin-host.js?ref=v2.4.0');
+test('U36 defaultDirFor', () => {
   assert.equal(defaultDirFor('D:\\lk\\deepseek', 'v2.4.0'), 'D:\\lk\\deepseek/dsh-prompt-enhancer-v2.4.0');
   assert.equal(defaultDirFor('D:\\lk\\deepseek\\', 'v2.4.0'), 'D:\\lk\\deepseek/dsh-prompt-enhancer-v2.4.0', '尾部斜杠归一');
   assert.equal(defaultDirFor('', 'v2.4.0'), '');
   assert.equal(defaultDirFor(null, 'v2.4.0'), '');
+});
+
+test('U37 parseTagsPayload / validateManifestFiles（v2.4.1 新契约）', () => {
+  // parseTagsPayload：JSON 数组文本 → 数组；非法/非数组 → null
+  assert.equal(parseTagsPayload('[{"name":"v2.4.0"}]')[0].name, 'v2.4.0');
+  assert.equal(parseTagsPayload('{"message":"Not Found"}'), null, 'GitHub 错误对象非数组 → null');
+  assert.equal(parseTagsPayload('not json'), null);
+  assert.equal(parseTagsPayload(''), null);
+  assert.equal(parseTagsPayload(null), null);
+  // validateManifestFiles：恰好 6 个清单文件、无重复/多余、内容 ≤1MB
+  const okFiles = UPDATE_MANIFEST.map((name) => ({ name, content: 'x' }));
+  const r1 = validateManifestFiles(okFiles);
+  assert.equal(r1.ok, true);
+  assert.equal(r1.files.length, 6);
+  assert.equal(validateManifestFiles(okFiles.slice(0, 5)).ok, false, '缺文件');
+  assert.equal(validateManifestFiles(okFiles.concat([{ name: 'extra.js', content: 'x' }])).ok, false, '多余文件');
+  assert.equal(validateManifestFiles([...okFiles, { name: 'LICENSE', content: 'dup' }]).ok, false, '重复文件');
+  assert.equal(validateManifestFiles([{ name: 'plugin-host.js', content: 'x'.repeat(1000001) }]).ok, false, '超 1MB');
+  assert.equal(validateManifestFiles(null).ok, false);
+  assert.equal(validateManifestFiles([{ name: 'plugin-host.js' }]).ok, false, '缺 content');
 });

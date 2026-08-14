@@ -337,6 +337,7 @@ const ZH = {
   updApplyDynamic: '动态安装：让 agent 读取新文件后 cordis_define 新包并 cordis_run（update）',
   updApplyCopy: '脚本分发：用拉取结果覆盖本地副本目录',
   updError: '操作失败，请重试',
+  updRepoNotFound: '仓库不存在或无法访问（HTTP 404）',
   cfgNav: '优化配置',
   cfgProvider: '模型提供方',
   cfgModel: '模型',
@@ -482,6 +483,7 @@ const EN = {
   updApplyDynamic: 'Dynamic install: have an agent read the new files, cordis_define a new package and cordis_run (update)',
   updApplyCopy: 'Script copy: overwrite the local distribution folder with the pulled files',
   updError: 'Operation failed, please retry',
+  updRepoNotFound: 'Repository not found or unreachable (HTTP 404)',
   cfgNav: 'Optimize settings',
   cfgProvider: 'Provider',
   cfgModel: 'Model',
@@ -976,7 +978,15 @@ function stateKey(state) {
 // v2.4.0（方案「插件版本检测与一键更新方案.md」§4）：版本检测与更新卡片——
 // repo 输入 + 检测版本 → 本地/远端/状态徽标 → 目标目录 + 一键拉取更新 → 拉取结果 + 应用指引。
 // 状态机：repo 变更即清空陈旧结果（防误拉）；检测/拉取中按钮 busy 置灰。
+// v2.4.1（实测回填 §9-T6）：host 侧无出网能力（web.fetch 无 provider）——**数据获取移到浏览器**：
+// GitHub API 支持 CORS（实机验证 200）；本组件直连 api.github.com 取 tags/release 载荷与
+// contents API 文件（base64 → atob 解码），host 只做解析/校验/写入（update/check、update/pull）。
 const UPDATER_DEFAULT_REPO = 'Fishsb/dsh-prompt-enhancer';
+// 与 host PURE UPDATE_MANIFEST 同步（host 侧 validateManifestFiles 为权威校验）
+const UPDATER_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
+const updaterContentsUrl = (repo, tag, file) => 'https://api.github.com/repos/' + repo + '/contents/' + file + '?ref=' + tag;
+const updaterTagsUrl = (repo) => 'https://api.github.com/repos/' + repo + '/tags?per_page=100';
+const updaterReleaseUrl = (repo) => 'https://api.github.com/repos/' + repo + '/releases/latest';
 
 function updaterRepoOf(cfg) {
   const r = cfg && cfg.updater && typeof cfg.updater.repo === 'string' ? cfg.updater.repo.trim() : '';
@@ -992,6 +1002,9 @@ function UpdaterCard(props) {
   const [result, setResult] = React.useState(null);
   const [pullRes, setPullRes] = React.useState(null);
   const [error, setError] = React.useState(null);
+
+  // v2.4.1（§9-T5）：RPC 携带 sessionId——host 需经会话解析 sandboxPolicy（写入边界=会话工作区）
+  const sessionId = props.useSessions ? props.useSessions((s) => s.current) : undefined;
 
   const repo = updaterRepoOf({ updater: { repo: repoInput, targetDir: '' } });
 
@@ -1018,7 +1031,13 @@ function UpdaterCard(props) {
     setChecking(true);
     setError(null);
     setPullRes(null);
-    host.call('update/check', { repo }).then((res) => {
+    // v2.4.1（§9-T6）：浏览器直连 GitHub API（CORS），host 只做解析/比较
+    Promise.all([
+      fetch(updaterTagsUrl(repo)).then((r) => r.status === 200 ? r.text() : Promise.reject(new Error('tags HTTP ' + r.status))),
+      fetch(updaterReleaseUrl(repo)).then((r) => r.text()), // 404 属正常（无 release），透传载荷
+    ]).then(([tagsText, releaseText]) => {
+      return host.call('update/check', { repo, sessionId, tagsPayload: tagsText, releasePayload: releaseText });
+    }).then((res) => {
       const r = res && typeof res === 'object' ? res : {};
       if (r.ok !== true) {
         setError(r.message || t('updError'));
@@ -1028,8 +1047,9 @@ function UpdaterCard(props) {
           setDirInput(r.defaultDir);
         }
       }
-    }).catch(() => {
-      setError(t('updError'));
+    }).catch((e) => {
+      // 404 = 仓库不存在（tags 接口）；其余网络/解析失败统一提示
+      setError(e && e.message && e.message.indexOf('HTTP 404') !== -1 ? t('updRepoNotFound') : t('updError'));
     }).then(() => {
       setChecking(false);
     });
@@ -1039,7 +1059,19 @@ function UpdaterCard(props) {
     if (pulling || !result || !result.remoteTag) return;
     setPulling(true);
     setError(null);
-    host.call('update/pull', { repo, tag: result.remoteTag, dir: dirInput }).then((res) => {
+    // v2.4.1（§9-T6）：浏览器直连 contents API 拉取 6 文件（base64 → atob 解码）→ host 校验写入
+    Promise.all(UPDATER_MANIFEST.map((name) =>
+      fetch(updaterContentsUrl(repo, result.remoteTag, name)).then((r) => {
+        if (r.status !== 200) throw new Error(name + ' HTTP ' + r.status);
+        return r.json();
+      }).then((meta) => {
+        if (!meta || meta.encoding !== 'base64' || typeof meta.content !== 'string') throw new Error(name + ' bad payload');
+        if (typeof meta.size === 'number' && meta.size > 1000000) throw new Error(name + ' too large');
+        return { name, content: atob(meta.content) };
+      }),
+    )).then((files) => {
+      return host.call('update/pull', { repo, tag: result.remoteTag, dir: dirInput, sessionId, files });
+    }).then((res) => {
       const r = res && typeof res === 'object' ? res : {};
       if (r.ok !== true) {
         setError((r.message ? r.message + ' ' : '') + t('updError'));
