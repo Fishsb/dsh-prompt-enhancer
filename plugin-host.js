@@ -1,11 +1,12 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Host 半部（v2.1.0：模式体系表驱动 + 记忆模式）
-// v2.1（方案「提示词优化方案.md」§0/§2/§4）：
-// ① 模式体系 5 模式（base/lite/standard/smart/memory），MODE_TABLE 表驱动（阶段 A/B/C 分发）；
-// ② 旧 engine/context.mode 配置自动迁移（v1→base、basic→standard、smart 保留，缺省 base）；
-// ③ 记忆模式：基于上一轮优化对迭代（跳过历史/工作区检索），记忆对由 client 传入；
-// ④ 常量层：预算档位/联动表/超时/截断全部命名化（BUDGET_OPTIONS/BUDGET_WORKSPACE_TABLE/V2_*）；
-// ⑤ 日志 mode=base|lite|standard|smart|memory（seed 场景标注 standard(seed)）。
+// DSH「提示词优化」插件 · Host 半部（v2.2：4 模式体系 + 记忆独立开关）
+// v2.2（方案「提示词优化方案.md」§0.2/§2/§6）：
+// ① 模式体系收敛 4 模式（base/lite/standard/smart），MODE_TABLE 表驱动（阶段 A/B/C 分发）；
+// ② 记忆功能改为所有模式可开/关的独立开关（config.memory，缺省 false）——记忆块作为
+//    叠加模块注入（shouldInjectMemory），记忆优先占用预算（≤1200），模式块用剩余预算；
+// ③ 配置迁移：mode='memory' → mode='lite' + memory=true；autoMemory 并入 memory；
+// ④ 日志 mode=base|lite|standard|smart（seed 场景标注 (seed)），ctx 日志含 memory chars=。
+// v2.1：记忆模式（5 模式）——v2.2 已删除，历史值迁移见 ②。
 // v14：新增日志环形缓冲 + logs/last 诊断 RPC（供客户端诊断日志查看器与故障排查）
 // v17：① models/resolve：逐模型解析 reasoning 元数据（efforts/defaultEffort，懒加载）
 //      ② models/test：连通性测试（resolveCallConfig 预校验失败不阻断 + 探测流计时，15s 超时）
@@ -147,8 +148,9 @@ const SYSTEM_PROMPT = [
 
 // ==PURE-BEGIN==  (unit-testable pure functions; keep free of ctx/harness/pending/module-state)
 
-// ================= v2.1 模式体系 · 常量层与行为表（表驱动，单测切片求值） =================
-// 方案「提示词优化方案.md」§4：新增模式 = 加 MODE_TABLE 行 + MODE_OPTIONS 项 + 用例，管道零改动。
+// ================= v2.2 模式体系 · 常量层与行为表（表驱动，单测切片求值） =================
+// 方案「提示词优化方案.md」§4/§6：4 模式 + 记忆独立开关（memoryOn，扩散到所有模式）；
+// 记忆模式已删除——记忆块作为叠加模块注入（shouldInjectMemory）。
 const BUDGET_OPTIONS = [0, 2000, 4000, 8000];
 // 预算 → 扫描上限查表（仅 scanLimit:'by-budget' 模式消费；maxFiles = 注入 Top-N 上限）
 const BUDGET_WORKSPACE_TABLE = [
@@ -163,11 +165,12 @@ const MODE_TABLE = {
   lite: { phaseA: 'rule', phaseB: 'none', phaseC: 'none', budgetDefault: 0, scanLimit: 'fixed' },
   standard: { phaseA: 'rule', phaseB: 'file+event', phaseC: 'inject', budgetDefault: 4000, scanLimit: 'fixed' },
   smart: { phaseA: 'llm', phaseB: 'file+event', phaseC: 'inject', budgetDefault: 4000, scanLimit: 'by-budget' },
-  memory: { phaseA: 'memory', phaseB: 'none', phaseC: 'memory', budgetDefault: 4000, scanLimit: 'fixed' },
 };
 const MODE_KEYS = Object.keys(MODE_TABLE);
 const DEFAULT_MODE = 'base';
 const DEFAULT_BUDGET = 4000;
+// 记忆开关默认（§6.4：缺省 false，行为零变化）
+const DEFAULT_MEMORY = false;
 // 模式 → 扫描上限（fixed 模式固定值）
 const FIXED_SCAN_LIMIT = { maxFiles: 3, depth: 2 };
 // V2 阶段超时/上限/截断
@@ -188,10 +191,13 @@ const CONTEXT_EVENT_DIVISOR = 4;
 const CONTEXT_FILE_COUNT = 3;
 const MEMORY_PREV_INPUT_MAX = 400;
 const MEMORY_PREV_OUTPUT_MAX = 800;
+// 记忆块预算上限（§6.5：记忆优先占用，合计 ≤1200）
+const MEMORY_BLOCK_BUDGET_MAX = MEMORY_PREV_INPUT_MAX + MEMORY_PREV_OUTPUT_MAX;
 // 记忆块模板（§2.3）
 const MEMORY_BLOCK_TEMPLATE = '【上一轮优化】仅供参考，禁止回显\n原始输入：{prevInput}\n优化输出：{prevOutput}';
 
-// 模式解析（表驱动）：显式 mode 白名单；旧 engine/context.mode 迁移；缺省/非法 → base
+// 模式解析（表驱动）：显式 mode 白名单（4 模式）；旧 engine/context.mode 迁移；缺省/非法 → base
+// v2.2：记忆模式已删除——'memory' 值由 validateConfig 迁移为 lite + memory:true（此处落到 base 兜底）
 function parseMode(mode, engine, legacyMode) {
   if (typeof mode === 'string' && MODE_KEYS.includes(mode)) return mode;
   if (engine === 'v2') {
@@ -199,6 +205,16 @@ function parseMode(mode, engine, legacyMode) {
     if (legacyMode === 'smart') return 'smart';
   }
   return DEFAULT_MODE; // engine v1 / 缺省 / 非法 → base（行为零变化）
+}
+
+// 记忆开关解析（v2.2 §6.4）：优先级 memory = (mode==='memory') || autoMemory===true；缺省 false
+function parseMemory(mode, autoMemory) {
+  return mode === 'memory' || autoMemory === true;
+}
+
+// 记忆注入判定（v2.2 §6.5）：开关开 + 有记忆 + 预算>0 → 注入记忆块（叠加模块，所有模式适用）
+function shouldInjectMemory(memoryOn, hasMemory, budgetChars) {
+  return memoryOn === true && hasMemory === true && typeof budgetChars === 'number' && budgetChars > 0;
 }
 
 // 预算白名单校验（缺省 → 默认值）
@@ -303,10 +319,10 @@ function validateConfig(raw) {
     outputLimit: DEFAULT_OUTPUT_LIMIT,
     templateMode: 'builtin',
     templateText: '',
-    // v2.1（§0.2）：模式体系——显式 mode（表驱动白名单）；旧 engine/context.mode 迁移；缺省 base
+    // v2.2（§6.4）：4 模式 + 记忆开关（缺省 false，行为零变化）
     mode: DEFAULT_MODE,
     context: { mode: 'smart', budgetChars: DEFAULT_BUDGET, workspace: { maxFiles: 3, depth: 2 } },
-    autoMemory: true,
+    memory: DEFAULT_MEMORY,
   };
   if (typeof main.provider === 'string' && main.provider.trim() !== '') out.provider = main.provider.trim();
   if (typeof main.model === 'string' && main.model.trim() !== '') out.model = main.model.trim();
@@ -356,8 +372,9 @@ function validateConfig(raw) {
   if (Number.isInteger(p.outputLimit) && p.outputLimit >= 500 && p.outputLimit <= 50000) out.outputLimit = p.outputLimit;
   if (t.templateMode === 'custom' || t.templateMode === 'builtin') out.templateMode = t.templateMode;
   if (typeof t.templateText === 'string' && t.templateText.length <= 4000) out.templateText = t.templateText;
-  // v2.1（§0.2）：mode 解析（显式白名单 / 旧 engine+context.mode 迁移 / 缺省非法 → base）
-  out.mode = parseMode(src.mode, src.engine, src.context && src.context.mode);
+  // v2.2（§6.4）：mode 解析（4 模式白名单；'memory' 历史值 → lite + memory:true）
+  const rawMode = src.mode === 'memory' ? 'lite' : src.mode;
+  out.mode = parseMode(rawMode, src.engine, src.context && src.context.mode);
   const ctxCfg = src.context && typeof src.context === 'object' ? src.context : {};
   out.context.budgetChars = parseBudgetChars(ctxCfg.budgetChars);
   // 旧 workspace 字段仅作上限兼容（不超联动值），不再单独生效（§0.2）
@@ -366,8 +383,9 @@ function validateConfig(raw) {
     if (Number.isInteger(ctxCfg.workspace.maxFiles) && ctxCfg.workspace.maxFiles >= 1 && ctxCfg.workspace.maxFiles <= lim.maxFiles) out.context.workspace.maxFiles = ctxCfg.workspace.maxFiles;
     if (Number.isInteger(ctxCfg.workspace.depth) && ctxCfg.workspace.depth >= 1 && ctxCfg.workspace.depth <= lim.depth) out.context.workspace.depth = ctxCfg.workspace.depth;
   }
-  // autoMemory（连续优化默认启用开关，缺省 true）
-  out.autoMemory = src.autoMemory !== false;
+  // v2.2（§6.4）：记忆开关——显式 memory 字段（client config.memory）最高优先（含 false 关闭）；
+  // 无 memory 字段时回退 mode='memory' / autoMemory 历史值；缺省 false
+  out.memory = src.memory === true ? true : (src.memory === false ? false : parseMemory(src.mode, src.autoMemory));
   return out;
 }
 
@@ -908,59 +926,76 @@ async function v2SearchEvents(services, sessionId, keywords, cfg) {
 }
 
 // 阶段 A/B/C 汇总：返回 { block, log }（全部不可用 → { block: '', log: 'none' }）
-// v2.1 表驱动：memory 模式走记忆块分支（跳过历史/工作区/事件检索）；其余按 MODE_TABLE phase 分发。
+// v2.2（§6.5）：4 模式管道（base/lite 空块 / standard/smart 检索）+ 记忆块叠加模块——
+// 记忆开 + 有记忆 → block = 模式块 + 记忆块（记忆优先占用预算 ≤1200，模式块用剩余）。
 async function buildV2ContextBlock(services, sessionId, text, cfg) {
   const row = MODE_TABLE[cfg.mode] || MODE_TABLE[DEFAULT_MODE];
-  // ===== memory 分支（phaseC='memory'）：仅记忆对，跳过全部检索 =====
-  if (row.phaseC === 'memory') {
-    const mem = services.memory;
-    const block = mem && mem.prevInput ? buildMemoryBlock(mem.prevInput, mem.prevOutput, cfg.context.budgetChars) : '';
-    return { block, log: block === '' ? 'none' : 'memory chars=' + block.length };
-  }
-  // ===== 标准/智能：历史 + 阶段A + 阶段B + 阶段C =====
-  let events = [];
-  let historyText = '';
-  const sq = services.sessionQuery;
-  if (sq && typeof sq.listEvents === 'function' && typeof sq.filterEvents === 'function') {
-    try {
-      const records = await sq.listEvents(sessionId);
-      // 尾部反向找最近的消息事件 seq（listEvents 升序，无文本；seq 用于 filterEvents 范围过滤）
-      const msgSeqs = [];
-      for (let i = records.length - 1; i >= 0 && msgSeqs.length < V2_MSG_SEQ_SCAN; i--) {
-        const r = records[i];
-        const t = String(r && r.type || '');
-        if (t === 'user/message' || t === 'assistant/message') msgSeqs.push(r && r.seq);
-      }
-      if (msgSeqs.length > 0) {
-        const minSeq = msgSeqs[msgSeqs.length - 1];
-        const docs = await sq.filterEvents(sessionId, [{ kind: 'seq', from: minSeq }]);
-        events = extractHistory(docs, V2_HISTORY_LIMIT);
-        historyText = events.map((e) => (e.type === 'user' ? '[用户] ' : '[助手] ') + e.text).join('\n');
-        hlog('[enhance] v2 history raw=' + records.length + ' msgSeqs=' + msgSeqs.length + ' minSeq=' + minSeq + ' docs=' + (docs ? docs.length : 'null') + ' events=' + events.length + ' chars=' + historyText.length + ' firstType=' + (events.length ? events[0].type : '-'));
-      } else {
-        hlog('[enhance] v2 history raw=' + records.length + ' msgSeqs=0 tailTypes=' + JSON.stringify(records.slice(-3).map((e) => e && e.type)));
-      }
-    } catch (e) {
-      hlog('[enhance] v2 listEvents/filterEvents failed', e && e.message ? e.message : e);
-    }
-  } else {
-    hlog('[enhance] v2 sessionQuery unavailable');
-  }
-  const root = services.sandboxPolicy && services.sandboxPolicy.workspaceRoot;
-  hlog('[enhance] v2 workspaceRoot=' + (root || '(none)') + ' fs=' + (services.fs ? 'yes' : 'no'));
-  // 阶段 A（表驱动 phaseA：llm 智能 / rule 正则 / none 跳过——none 时 historyText 为空则直接空 focus）
-  const { progress, mode } = await v2ResolveProgress(services, historyText, cfg);
-  // 阶段 B（表驱动 phaseB：file+event 全量 / none 跳过）
-  const focus = progress && Array.isArray(progress.focus) ? progress.focus : [];
-  const keywords = extractKeywords(text, focus);
-  const files = await v2SearchWorkspace(services, keywords, cfg);
-  const eventsHits = await v2SearchEvents(services, sessionId, keywords, cfg);
-  // 阶段 C（phaseC='inject'）
   const budget = cfg.context.budgetChars || 0;
-  const block = buildContextBlock(progress, files, eventsHits, budget);
-  const ctxLog = block === ''
-    ? 'none'
-    : (mode + ' files=' + files.length + ' events=' + eventsHits.length + ' chars=' + block.length);
+  // ===== 记忆块（叠加模块，所有模式适用）=====
+  let memoryBlock = '';
+  const mem = services.memory;
+  if (mem && mem.prevInput && budget > 0) {
+    memoryBlock = buildMemoryBlock(mem.prevInput, mem.prevOutput, Math.min(budget, MEMORY_BLOCK_BUDGET_MAX));
+  }
+  const memoryUsed = memoryBlock.length;
+  // ===== 模式管道（base/lite：phaseB='none' 无检索 → 空模式块）=====
+  let modeBlock = '';
+  let modeLog = 'none';
+  if (row.phaseC === 'inject') {
+    // 历史 + 阶段A + 阶段B
+    let events = [];
+    let historyText = '';
+    const sq = services.sessionQuery;
+    if (sq && typeof sq.listEvents === 'function' && typeof sq.filterEvents === 'function') {
+      try {
+        const records = await sq.listEvents(sessionId);
+        // 尾部反向找最近的消息事件 seq（listEvents 升序，无文本；seq 用于 filterEvents 范围过滤）
+        const msgSeqs = [];
+        for (let i = records.length - 1; i >= 0 && msgSeqs.length < V2_MSG_SEQ_SCAN; i--) {
+          const r = records[i];
+          const t = String(r && r.type || '');
+          if (t === 'user/message' || t === 'assistant/message') msgSeqs.push(r && r.seq);
+        }
+        if (msgSeqs.length > 0) {
+          const minSeq = msgSeqs[msgSeqs.length - 1];
+          const docs = await sq.filterEvents(sessionId, [{ kind: 'seq', from: minSeq }]);
+          events = extractHistory(docs, V2_HISTORY_LIMIT);
+          historyText = events.map((e) => (e.type === 'user' ? '[用户] ' : '[助手] ') + e.text).join('\n');
+          hlog('[enhance] v2 history raw=' + records.length + ' msgSeqs=' + msgSeqs.length + ' minSeq=' + minSeq + ' docs=' + (docs ? docs.length : 'null') + ' events=' + events.length + ' chars=' + historyText.length + ' firstType=' + (events.length ? events[0].type : '-'));
+        } else {
+          hlog('[enhance] v2 history raw=' + records.length + ' msgSeqs=0 tailTypes=' + JSON.stringify(records.slice(-3).map((e) => e && e.type)));
+        }
+      } catch (e) {
+        hlog('[enhance] v2 listEvents/filterEvents failed', e && e.message ? e.message : e);
+      }
+    } else {
+      hlog('[enhance] v2 sessionQuery unavailable');
+    }
+    const root = services.sandboxPolicy && services.sandboxPolicy.workspaceRoot;
+    hlog('[enhance] v2 workspaceRoot=' + (root || '(none)') + ' fs=' + (services.fs ? 'yes' : 'no'));
+    // 阶段 A（表驱动 phaseA：llm 智能 / rule 正则 / none 跳过）
+    const { progress, mode } = await v2ResolveProgress(services, historyText, cfg);
+    // 阶段 B（表驱动 phaseB：file+event 全量 / none 跳过）
+    const focus = progress && Array.isArray(progress.focus) ? progress.focus : [];
+    const keywords = extractKeywords(text, focus);
+    const files = await v2SearchWorkspace(services, keywords, cfg);
+    const eventsHits = await v2SearchEvents(services, sessionId, keywords, cfg);
+    // 阶段 C（inject）：模式块使用剩余预算（记忆优先占用）
+    modeBlock = buildContextBlock(progress, files, eventsHits, Math.max(0, budget - memoryUsed));
+    modeLog = modeBlock === '' ? 'none' : (mode + ' files=' + files.length + ' events=' + eventsHits.length + ' chars=' + modeBlock.length);
+  }
+  // ===== 汇总：模式块 + 记忆块（叠加）=====
+  const parts = [];
+  if (modeBlock) parts.push(modeBlock);
+  if (memoryBlock) parts.push(memoryBlock);
+  const block = parts.join('\n\n');
+  let ctxLog = 'none';
+  if (block !== '') {
+    const tags = [];
+    if (modeBlock) tags.push(modeLog);
+    if (memoryBlock) tags.push('memory chars=' + memoryBlock.length);
+    ctxLog = tags.join('+');
+  }
   return { block, log: ctxLog };
 }
 
@@ -1243,11 +1278,12 @@ return {
       // v23（D6）：模型链 = cfg.fallback 按序（每条独立 reasoningEffort）；
       // 链为空 → 自适应解析当前环境默认链（不再区分 main/fallback）
       const chain = buildTryChain(cfg.fallback, await resolveAdaptiveChain(ctx.get('llm'), ctx.get('agentDefaultModel')));
-      // v2.1（§4.1）：模式分支（表驱动）——V2 阶段 A/B/C 在优化超时计时器启动前执行（各自独立超时，不占 timeoutMs 预算）
+      // v2.2（§6.5）：入口条件——模式注入或记忆叠加（记忆开 + 有记忆时 base/lite 也进入管道）
       let v2Block = '';
       let v2Log = 'none';
       let system = cfg.templateMode === 'custom' && cfg.templateText.trim() !== '' ? cfg.templateText.trim() : SYSTEM_PROMPT;
-      if (shouldInjectV2(cfg.mode, cfg.context.budgetChars)) {
+      const hasMemory = !!(args && args.memory && typeof args.memory === 'object' && args.memory.prevInput);
+      if (shouldInjectV2(cfg.mode, cfg.context.budgetChars) || shouldInjectMemory(cfg.memory, hasMemory, cfg.context.budgetChars)) {
         const v2 = await buildV2ContextBlock({
           llm: ctx.get('llm'),
           sessionQuery: ctx.get('sessionQuery'),
