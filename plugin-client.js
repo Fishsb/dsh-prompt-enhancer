@@ -26,6 +26,9 @@
 //      行 gap 8→6px、思考开关 64px/等级 56px、图标按钮 22px 收紧，让位主下拉。
 // v23.2：布局再分配——思考开关宽 2/3（43px）、厂家减 1/5（136px）、模型吃满整行剩余；
 //      字体与字号恢复默认设置（移除 font-family:inherit 强制统一）。
+// v2.0.0（v24）：V1/V2 引擎共存——config 新增 engine（v1 默认）/context{mode,budgetChars}；
+//      优化参数栏新增「优化引擎」切换（V2 选中显示上下文理解/预算子配置）；
+//      恢复默认只重置模型链，不动 engine/context。
 // ============================================================================
 
 const CONFIG_KEY = 'dsh.enhance.config.v2';
@@ -38,6 +41,9 @@ const CONFIG_DEFAULTS = {
   order: [],
   params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
   template: { mode: 'builtin', text: '' },
+  // v2.0.0（C1）：优化引擎（v1 默认，行为零变化）+ V2 上下文配置
+  engine: 'v1',
+  context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
 };
 // v20：内置兜底链硬编码指向 DeepSeek 官方模型（fresh install 补足与「恢复默认」）
 const BUILTIN_CHAIN = [
@@ -56,6 +62,8 @@ function cloneDefaults() {
     order: [],
     params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
     template: { mode: 'builtin', text: '' },
+    engine: 'v1',
+    context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
   };
 }
 
@@ -102,6 +110,15 @@ function sanitizeV2(parsed) {
   const t = parsed.template && typeof parsed.template === 'object' ? parsed.template : {};
   if (t.mode === 'custom' || t.mode === 'builtin') v.template.mode = t.mode;
   if (typeof t.text === 'string' && t.text.length <= 4000) v.template.text = t.text;
+  // v2.0.0（C1）：engine 白名单 v1/v2；context 白名单校验（缺省默认，向后兼容）
+  if (parsed.engine === 'v2') v.engine = 'v2';
+  const ctxCfg = parsed.context && typeof parsed.context === 'object' ? parsed.context : {};
+  if (ctxCfg.mode === 'basic' || ctxCfg.mode === 'smart') v.context.mode = ctxCfg.mode;
+  if ([0, 2000, 4000, 8000].includes(ctxCfg.budgetChars)) v.context.budgetChars = ctxCfg.budgetChars;
+  if (ctxCfg.workspace && typeof ctxCfg.workspace === 'object') {
+    if (Number.isInteger(ctxCfg.workspace.maxFiles) && ctxCfg.workspace.maxFiles >= 1 && ctxCfg.workspace.maxFiles <= 10) v.context.workspace.maxFiles = ctxCfg.workspace.maxFiles;
+    if (Number.isInteger(ctxCfg.workspace.depth) && ctxCfg.workspace.depth >= 1 && ctxCfg.workspace.depth <= 4) v.context.workspace.depth = ctxCfg.workspace.depth;
+  }
   return v;
 }
 
@@ -282,6 +299,16 @@ const ZH = {
   cfgCustomNote: '仅限已有 provider 路由下的模型 ID；添加后自动连通性测试',
   cfgOrderNote: '仅影响模型下拉与候选的展示顺序',
   cfgInherited: '已继承当前使用模型（含推理等级）',
+  // v2.0.0（C3）：引擎与上下文配置文案
+  cfgEngine: '优化引擎',
+  cfgEngineV1: 'V1 基础优化',
+  cfgEngineV2: 'V2 上下文感知',
+  cfgContextMode: '上下文理解',
+  cfgContextModeSmart: '智能',
+  cfgContextModeBasic: '基础',
+  cfgContextBudget: '上下文预算',
+  cfgContextBudget0: '0（关闭注入）',
+  cfgContextNote: 'V2 按任务进度与提示词主题检索工作区相关文件后注入优化参考；预算 0 = 不注入（等价基础优化）',
 };
 
 const EN = {
@@ -380,6 +407,16 @@ const EN = {
   cfgCustomNote: 'Model IDs under existing provider routes only; connectivity is tested on add',
   cfgOrderNote: 'Affects dropdown and candidate display order only',
   cfgInherited: 'Inherited from the current model (incl. reasoning level)',
+  // v2.0.0（C3）：引擎与上下文配置文案
+  cfgEngine: 'Engine',
+  cfgEngineV1: 'V1 Basic',
+  cfgEngineV2: 'V2 Context-aware',
+  cfgContextMode: 'Context understanding',
+  cfgContextModeSmart: 'Smart',
+  cfgContextModeBasic: 'Basic',
+  cfgContextBudget: 'Context budget',
+  cfgContextBudget0: '0 (no injection)',
+  cfgContextNote: 'V2 analyzes task progress and retrieves relevant workspace files before optimizing; budget 0 = no injection (equivalent to basic)',
 };
 
 function errorKey(code) {
@@ -1203,6 +1240,46 @@ function ParamsTab(props) {
   const onNumber = (key) => (e) => save({ params: { ...cfg.params, [key]: Number(e.target.value) } });
   const selectProps = (key, options) => ({ className: 'dsh-plg-select', value: String(cfg.params[key]), onChange: onNumber(key), children: options });
   return React.createElement(React.Fragment, null,
+    // v2.0.0（C2）：优化引擎切换（V1/V2 共存，切换入口在优化参数栏）
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('label', { className: 'dsh-plg-label' }, t('cfgEngine')),
+      React.createElement('select', {
+        className: 'dsh-plg-select',
+        value: cfg.engine,
+        onChange: (e) => save({ engine: e.target.value }),
+        children: [
+          React.createElement('option', { key: 'v1', value: 'v1' }, t('cfgEngineV1')),
+          React.createElement('option', { key: 'v2', value: 'v2' }, t('cfgEngineV2')),
+        ],
+      }),
+    ),
+    // v2.0.0（C2）：V2 专属子配置（V1 时隐藏）
+    cfg.engine === 'v2'
+      ? React.createElement(React.Fragment, null,
+          React.createElement('div', { className: 'dsh-plg-row' },
+            React.createElement('label', { className: 'dsh-plg-label' }, t('cfgContextMode')),
+            React.createElement('select', {
+              className: 'dsh-plg-select',
+              value: cfg.context.mode,
+              onChange: (e) => save({ context: { ...cfg.context, mode: e.target.value } }),
+              children: [
+                React.createElement('option', { key: 'smart', value: 'smart' }, t('cfgContextModeSmart')),
+                React.createElement('option', { key: 'basic', value: 'basic' }, t('cfgContextModeBasic')),
+              ],
+            }),
+          ),
+          React.createElement('div', { className: 'dsh-plg-row' },
+            React.createElement('label', { className: 'dsh-plg-label' }, t('cfgContextBudget')),
+            React.createElement('select', {
+              className: 'dsh-plg-select',
+              value: String(cfg.context.budgetChars),
+              onChange: (e) => save({ context: { ...cfg.context, budgetChars: Number(e.target.value) } }),
+              children: [0, 2000, 4000, 8000].map((v) => React.createElement('option', { key: String(v), value: String(v) }, v === 0 ? t('cfgContextBudget0') : String(v))),
+            }),
+          ),
+          React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgContextNote')),
+        )
+      : null,
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label' }, t('cfgTimeout')),
       React.createElement('select', selectProps('timeoutMs', TIMEOUT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, (v / 1000) + 's')))),

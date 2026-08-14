@@ -1,5 +1,5 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Host 半部（v20：内置兜底链硬编码 DeepSeek 官方模型）
+// DSH「提示词优化」插件 · Host 半部（v2.0.7：V2 工作区检索改用 FsTarget 契约）
 // v14：新增日志环形缓冲 + logs/last 诊断 RPC（供客户端诊断日志查看器与故障排查）
 // v17：① models/resolve：逐模型解析 reasoning 元数据（efforts/defaultEffort，懒加载）
 //      ② models/test：连通性测试（resolveCallConfig 预校验失败不阻断 + 探测流计时，15s 超时）
@@ -14,6 +14,10 @@
 // v21：P1-4 模型能力解析缓存（resolveModelInfoCached，TTL 5min，按 provider:model 键，200 条上限清理）
 // v23：模型链整合——enhance 不再区分 main/fallback，直接按链顺序逐一尝试（buildTryChain）；
 //      老 v2 main 字段保留解析但尝试逻辑忽略（client 侧已迁移为链首条）。
+// v2.0.0：引擎共存——engine=v1（默认，行为零变化）/ engine=v2（上下文感知：阶段 A 任务进度
+//      smart|basic → 阶段 B 工作区文件/会话事件相关性检索 → 阶段 C 预算组装注入）；
+//      各阶段独立降级；阶段 A/B 在优化超时计时器前执行（独立超时）；防上下文回显约束；
+//      敏感文件硬过滤（shouldIgnoreFile）。
 // ============================================================================
 
 // —— v14 诊断日志：环形缓冲（最近 300 行），供 logs/last RPC 读取 ——
@@ -210,6 +214,9 @@ function validateConfig(raw) {
     outputLimit: DEFAULT_OUTPUT_LIMIT,
     templateMode: 'builtin',
     templateText: '',
+    // v2.0.0（H1）：引擎选择 + V2 上下文配置（默认 v1，行为零变化）
+    engine: 'v1',
+    context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
   };
   if (typeof main.provider === 'string' && main.provider.trim() !== '') out.provider = main.provider.trim();
   if (typeof main.model === 'string' && main.model.trim() !== '') out.model = main.model.trim();
@@ -259,6 +266,15 @@ function validateConfig(raw) {
   if (Number.isInteger(p.outputLimit) && p.outputLimit >= 500 && p.outputLimit <= 50000) out.outputLimit = p.outputLimit;
   if (t.templateMode === 'custom' || t.templateMode === 'builtin') out.templateMode = t.templateMode;
   if (typeof t.templateText === 'string' && t.templateText.length <= 4000) out.templateText = t.templateText;
+  // v2.0.0（H1）：engine 白名单 v1/v2（缺省/非法 → v1）；context 白名单校验
+  if (src.engine === 'v2') out.engine = 'v2';
+  const ctxCfg = src.context && typeof src.context === 'object' ? src.context : {};
+  if (ctxCfg.mode === 'basic' || ctxCfg.mode === 'smart') out.context.mode = ctxCfg.mode;
+  if ([0, 2000, 4000, 8000].includes(ctxCfg.budgetChars)) out.context.budgetChars = ctxCfg.budgetChars;
+  if (ctxCfg.workspace && typeof ctxCfg.workspace === 'object') {
+    if (Number.isInteger(ctxCfg.workspace.maxFiles) && ctxCfg.workspace.maxFiles >= 1 && ctxCfg.workspace.maxFiles <= 10) out.context.workspace.maxFiles = ctxCfg.workspace.maxFiles;
+    if (Number.isInteger(ctxCfg.workspace.depth) && ctxCfg.workspace.depth >= 1 && ctxCfg.workspace.depth <= 4) out.context.workspace.depth = ctxCfg.workspace.depth;
+  }
   return out;
 }
 
@@ -324,6 +340,242 @@ function buildTryChain(fallback, adaptive) {
   return chain;
 }
 
+// ================= V2 上下文感知优化 · 纯函数族 =================
+// （v2.0.0 方案 §3：阶段 A 规则提取 / 阶段 B 检索排序与摘要 / 阶段 C 预算组装）
+
+// V2 分支判定：engine='v2' 且预算 > 0 才走注入路径（U12）
+function shouldInjectV2(engine, budgetChars) {
+  return engine === 'v2' && typeof budgetChars === 'number' && budgetChars > 0;
+}
+
+// 事件 → 文本消息列表（过滤噪音；**从尾部反向遍历**取最近 limit 条——DSH 日志可能达百万级）
+// DSH 事件类型形如 'user/message'、'assistant/message'、'assistant/chunk'、'tool/call'；
+// 只认 role/kind 前缀为 user|assistant 且 kind 非 chunk 的文本消息；
+// 文本在 text/content/payload/message/data 容器（DSH 实际为 ev.data.content[].text）。
+function extractHistory(events, limit) {
+  const arr = Array.isArray(events) ? events : [];
+  const out = [];
+  // 候选文本容器（顺序优先；第一个能取出非空文本的胜出）
+  const pickText = (container) => {
+    if (!container || typeof container !== 'object') return '';
+    if (typeof container.text === 'string') return container.text;
+    if (Array.isArray(container.content)) {
+      return container.content.map((b) => (b && typeof b === 'object' && typeof b.text === 'string') ? b.text : '').join(' ');
+    }
+    return '';
+  };
+  for (let i = arr.length - 1; i >= 0 && out.length < limit; i--) {
+    const ev = arr[i];
+    if (!ev || typeof ev !== 'object') continue;
+    const type = String(ev.type || ev.kind || '').toLowerCase();
+    let role = ev.role || (ev.payload && ev.payload.role) || (ev.message && ev.message.role) || (ev.data && ev.data.role) || (ev.content && typeof ev.content === 'object' && ev.content.role);
+    const slash = type.indexOf('/');
+    const typeRole = slash > 0 ? type.slice(0, slash) : type;
+    if (typeRole === 'user' || typeRole === 'assistant') {
+      if (slash > 0 && type.slice(slash + 1) === 'chunk') continue; // 流片段噪音
+      if (role !== 'user' && role !== 'assistant') role = typeRole;
+    }
+    if (role !== 'user' && role !== 'assistant') continue;
+    let text = '';
+    if (typeof ev.text === 'string') text = ev.text;
+    else text = pickText(ev.content) || pickText(ev.payload) || pickText(ev.message) || pickText(ev.data);
+    text = text.trim();
+    if (!text) continue;
+    if (text.startsWith('/')) continue;
+    if (/^(\[工具|tool|function call)/i.test(text)) continue;
+    out.push({ type: role, text: text.slice(0, 1200) });
+  }
+  return out.reverse();
+}
+
+// 规则版任务焦点提取（basic 模式）：代码/路径/扩展名 token + 中文主题词
+function inferFocusRules(historyText) {
+  const focus = [];
+  const seen = new Set();
+  const add = (w) => {
+    if (!w || seen.has(w) || w.length < 2) return;
+    seen.add(w);
+    focus.push(w);
+  };
+  const s = String(historyText || '');
+  // 路径与文件名 token（src/xxx.py、foo_bar.ts、package.json 等）
+  // 注意：长扩展名（json/tsx/jsx/yaml）必须在短前缀（js/ts/ya）之前，避免交替误匹配
+  for (const m of s.matchAll(/[A-Za-z0-9_\-./\\]+\.(?:json|yaml|yml|tsx|jsx|toml|svelte|python|html|css|typescript|javascript|py|ts|js|md|txt|go|rs|java|cpp|c|h|sh|sql|vue)/g)) {
+    const path = m[0];
+    const base = path.split(/[\\/]/).pop();
+    add(base);
+    add(base.replace(/\.[^.]+$/, ''));
+  }
+  // 中英文主题词（2-8 字中文词组 / 驼峰与下划线英文词）
+  for (const m of s.matchAll(/[\u4e00-\u9fa5]{2,8}/g)) add(m[0]);
+  for (const m of s.matchAll(/[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+/g)) add(m[0]);
+  for (const m of s.matchAll(/\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b/g)) add(m[0]);
+  // 去除常见停用词
+  const stop = new Set(['这个', '那个', '我们', '你们', '他们', '可以', '需要', '进行', '使用', '一个', '一些', '什么', '怎么', '如何', '如果', '因为', '所以', '但是', '然后', '并且', '或者', '以及', '还是', '没有', '就是', '不是', '对于', '关于', '通过', '根据', '按照', '项目', '文件', '功能', '实现', '添加', '修改', '删除', '创建', '优化', '提示', '词优', 'the', 'and', 'for', 'with', 'this', 'that', 'from', 'into']);
+  const filtered = focus.filter((w) => !stop.has(w.toLowerCase()));
+  return filtered.slice(0, 8);
+}
+
+// 主题词提取：提示词关键词 ∪ focus（5–8 词）
+function extractKeywords(text, focus) {
+  const kw = inferFocusRules(text);
+  const seen = new Set();
+  const out = [];
+  const add = (w) => {
+    if (!w || seen.has(w) || w.length < 2) return;
+    seen.add(w);
+    out.push(w);
+  };
+  for (const w of kw) add(w);
+  for (const w of (focus || [])) add(w);
+  return out.slice(0, 8);
+}
+
+// 敏感文件硬过滤（防密钥/凭据注入外发）：.env/密钥/凭据/日志 等
+function shouldIgnoreFile(name) {
+  const n = String(name || '').toLowerCase();
+  if (n.includes('.env')) return true;
+  if (/(\.pem|\.key|\.p12|\.pfx|\.jks|\.keystore|\.crt|\.cer)$/.test(n)) return true;
+  // 路径任意段命中凭据/密钥类文件名（含目录段，如 config/credentials.json）
+  if (/(^|[\\/.])(credentials|secret|secrets|token|id_rsa|id_ed25519|id_ecdsa|\.npmrc|\.pypirc|\.netrc|\.htpasswd)([\\/.]|$)/.test(n)) return true;
+  if (/\.log(\.|$)/.test(n)) return true;
+  if (/^(node_modules|\.git|dist|build|\.venv|venv|__pycache__|\.next|\.cache|coverage)/.test(n)) return true;
+  return false;
+}
+
+// 文件排序：名称/路径命中关键词计分（路径深度浅加分）→ Top-K
+function rankFiles(files, keywords, topK) {
+  const kws = (keywords || []).filter((k) => typeof k === 'string' && k.length >= 2);
+  if (kws.length === 0 || !Array.isArray(files)) return [];
+  const scored = [];
+  for (const f of files) {
+    const name = String(f || '');
+    if (shouldIgnoreFile(name)) continue;
+    const lower = name.toLowerCase();
+    let score = 0;
+    for (const k of kws) {
+      const kl = k.toLowerCase();
+      if (lower.includes(kl)) score += 2;          // 名称/路径命中
+      const base = lower.split(/[\\/]/).pop();
+      if (base.includes(kl)) score += 3;           // 文件名命中权重更高
+    }
+    if (score > 0) {
+      const depth = name.split(/[\\/]/).length - 1;
+      scored.push({ path: name, score: score - depth * 0.1 });  // 浅路径优先
+    }
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, topK || 3);
+}
+
+// 行摘要：命中行 ±2 上下文；无命中取头部 40 行；≤预算字符
+function snippetFromLines(lines, keywords, budget) {
+  const arr = Array.isArray(lines) ? lines : [];
+  const b = typeof budget === 'number' && budget > 0 ? budget : 800;
+  const kws = (keywords || []).filter((k) => typeof k === 'string' && k.length >= 2);
+  const hits = [];
+  if (kws.length > 0) {
+    for (let i = 0; i < arr.length; i++) {
+      const ln = String(arr[i] || '');
+      if (kws.some((k) => ln.toLowerCase().includes(k.toLowerCase()))) {
+        hits.push(i);
+        if (hits.length >= 8) break;
+      }
+    }
+  }
+  let out = [];
+  if (hits.length > 0) {
+    const picked = new Set();
+    for (const h of hits) {
+      for (let i = Math.max(0, h - 2); i <= Math.min(arr.length - 1, h + 2); i++) picked.add(i);
+    }
+    out = [...picked].sort((a, b) => a - b).map((i) => String(arr[i] || ''));
+  } else {
+    out = arr.slice(0, 40);
+  }
+  let text = out.join('\n');
+  if (text.length > b) text = text.slice(0, b);
+  return text;
+}
+
+// 上下文块组装：任务进度(≤800) + 文件(≤3×800) + 事件(≤800)；
+// 截断优先级：进度 > 文件 > 事件 > 原文完整（原文由调用方保证不截断）
+function buildContextBlock(progress, files, events, budgetChars) {
+  const budget = typeof budgetChars === 'number' && budgetChars > 0 ? budgetChars : 0;
+  if (budget <= 0) return '';
+  const MAX_PROGRESS = Math.min(800, budget);
+  const MAX_EVENT = Math.min(800, Math.floor(budget / 4));
+  const MAX_FILE = budget > 800 ? Math.min(800, Math.floor((budget - Math.min(800, MAX_PROGRESS) - MAX_EVENT) / 3)) : 0;
+  const parts = [];
+  let used = 0;
+  // 1) 任务进度（最高优先级）
+  if (progress && (progress.task || progress.currentStep || (progress.completed && progress.completed.length))) {
+    const lines = [];
+    if (progress.task) lines.push('任务：' + progress.task);
+    if (progress.currentStep) lines.push('当前步骤：' + progress.currentStep);
+    if (Array.isArray(progress.completed) && progress.completed.length) lines.push('已完成：' + progress.completed.join('；'));
+    const text = lines.join('\n').slice(0, MAX_PROGRESS);
+    if (text) {
+      parts.push('【任务进度】\n' + text);
+      used += text.length + 20;
+    }
+  }
+  // 2) 相关文件（其次）
+  if (MAX_FILE > 0 && Array.isArray(files) && files.length) {
+    const segs = [];
+    for (const f of files.slice(0, 3)) {
+      if (!f || typeof f !== 'object') continue;
+      const snip = String(f.snippet || '').slice(0, MAX_FILE);
+      if (snip) segs.push('📄 ' + (f.path || '?') + '\n' + snip);
+    }
+    if (segs.length) {
+      const text = segs.join('\n\n').slice(0, Math.max(0, budget - used));
+      if (text) {
+        parts.push('【相关项目文件】\n' + text);
+        used += text.length + 20;
+      }
+    }
+  }
+  // 3) 相关会话片段（最后，预算余量）
+  if (Array.isArray(events) && events.length) {
+    const text = String(events.slice(0, 3).map((e) => typeof e === 'string' ? e : '').join('\n'))
+      .slice(0, Math.max(0, Math.min(MAX_EVENT, budget - used)));
+    if (text) parts.push('【相关会话片段】\n' + text);
+  }
+  return parts.join('\n\n');
+}
+
+// smart 模式 JSON 容错解析（剥离 ```json 代码块与前后缀噪音）
+function parseTaskProgress(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  s = s.slice(start, end + 1);
+  let obj;
+  try {
+    obj = JSON.parse(s);
+  } catch (e) {
+    return null;
+  }
+  if (!obj || typeof obj !== 'object') return null;
+  const out = {};
+  if (typeof obj.task === 'string' && obj.task.trim()) out.task = obj.task.trim().slice(0, 200);
+  if (typeof obj.currentStep === 'string' && obj.currentStep.trim()) out.currentStep = obj.currentStep.trim().slice(0, 200);
+  if (Array.isArray(obj.completed)) {
+    out.completed = obj.completed.filter((c) => typeof c === 'string' && c.trim()).map((c) => c.trim().slice(0, 120)).slice(0, 5);
+  }
+  if (Array.isArray(obj.focus)) {
+    out.focus = obj.focus.filter((f) => typeof f === 'string' && f.trim()).map((f) => f.trim().slice(0, 40)).slice(0, 4);
+  }
+  if (!out.task && !out.currentStep && !out.completed) return null;
+  return out;
+}
+// ================= V2 纯函数族结束 =================
+
 // v17：1-token 连通性探测（计时 TTFT/总耗时；ref.current 供外部超时 abort）
 async function pingStream(llmService, entry, ref) {
   const startedAt = Date.now();
@@ -388,6 +640,219 @@ async function pingStream(llmService, entry, ref) {
 }
 
 // ==PURE-END==
+
+// ================= V2 上下文感知优化 · 运行时（阶段 A/B/C） =================
+// v2.0.0 方案 §3：阶段 A 任务进度（smart LLM / basic 规则）→ 阶段 B 相关性检索
+// （工作区文件 + 会话事件）→ 阶段 C 预算组装注入。各阶段独立降级，不阻断优化。
+
+const TASK_ANALYSIS_PROMPT = [
+  '你是一个会话任务分析器。根据给定的会话对话历史，输出当前任务的执行进度。',
+  '只输出 JSON（不要任何其他文字），格式：',
+  '{"task":"任务目标一句话","currentStep":"当前正在执行的步骤","completed":["已完成步骤1","已完成步骤2"],"focus":["焦点方向1","焦点方向2"]}',
+  'focus 为 2-4 个关键词/短语（中英文均可），用于后续检索项目文件。',
+  '如果历史不足以判断，task 与 currentStep 可为空字符串，completed 与 focus 可为空数组。',
+].join('\n');
+
+// V2 防上下文回显约束：追加到优化 system 末尾（方案 §3 阶段 C）
+const CONTEXT_GUARD = '【参考上下文】仅供理解任务与项目背景，禁止复述、引用或回显其中任何内容；只输出优化后的提示词本身。';
+
+const V2_WORKSPACE_IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.venv', 'venv', '__pycache__', '.next', '.cache', 'coverage', 'target', '.idea', '.vscode']);
+
+// 阶段 A：任务进度理解（smart → basic 降级；失败返回 null 不抛错）
+async function v2ResolveProgress(services, historyText, cfg) {
+  if (cfg.context.mode === 'smart' && services.llm && services.chain && services.chain.length > 0 && historyText.trim() !== '') {
+    const entry = services.chain[0];
+    let timedOut = false;
+    const timer = services.timer.timeout(() => { timedOut = true; }, 15000);
+    try {
+      const stream = services.llm.stream({
+        provider: entry.provider,
+        model: entry.model,
+        ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+        maxTokens: 400,
+        system: TASK_ANALYSIS_PROMPT,
+        messages: [{
+          id: 'enhance-task-progress',
+          role: 'user',
+          content: [{ type: 'text', text: historyText.slice(0, 8000) }],
+          source: { kind: 'user' },
+        }],
+      });
+      const iterator = stream[Symbol.asyncIterator]();
+      const result = await collectStream(iterator, 2000);
+      if (!timedOut && result.kind === 'ok') {
+        const parsed = parseTaskProgress(result.text);
+        if (parsed) {
+          hlog('[enhance] v2 smart progress ok');
+          return { progress: parsed, mode: 'smart' };
+        }
+        hlog('[enhance] v2 smart progress bad-json');
+      } else {
+        hlog('[enhance] v2 smart progress ' + (timedOut ? 'timeout' : 'empty'));
+      }
+    } catch (e) {
+      hlog('[enhance] v2 smart progress failed', e && e.message ? e.message : e);
+    } finally {
+      timer();
+    }
+  }
+  // basic 规则提取（零成本；无历史时返回空 focus）
+  const focus = inferFocusRules(historyText);
+  if (focus.length > 0) return { progress: { focus }, mode: 'basic' };
+  return { progress: null, mode: 'basic' };
+}
+
+// 阶段 B：工作区文件检索（fs 扫描 + 名称/内容命中 → Top-3 摘要；2s 超时降级）
+// v2.0.7：fs 契约修正——listDir/readText 接收 FsTarget（resolve 产出），条目 shape 为
+// {name, type:'file'|'directory', target}；不再传字符串路径。
+async function v2SearchWorkspace(services, keywords, cfg) {
+  const fsSvc = services.fs;
+  const root = services.sandboxPolicy && services.sandboxPolicy.workspaceRoot;
+  if (!fsSvc || !root || typeof fsSvc.listDir !== 'function' || typeof fsSvc.readText !== 'function' || typeof fsSvc.resolve !== 'function') return [];
+  const depth = cfg.context.workspace.depth || 2;
+  const maxFiles = cfg.context.workspace.maxFiles || 3;
+  let aborted = false;
+  const timer = services.timer.timeout(() => { aborted = true; }, 2000);
+  try {
+    let rootTarget;
+    try {
+      rootTarget = await fsSvc.resolve(root);
+    } catch (e) {
+      hlog('[enhance] v2 workspace resolve-root failed', e && e.message ? e.message : e);
+      return [];
+    }
+    const files = [];
+    const walk = async (target, rel, level) => {
+      if (aborted || files.length >= 2000 || level > depth) return;
+      let entries;
+      try {
+        entries = await fsSvc.listDir(target);
+      } catch (e) { return; }
+      for (const en of entries || []) {
+        if (aborted) return;
+        const name = en && en.name;
+        if (!name) continue;
+        if (V2_WORKSPACE_IGNORE_DIRS.has(name)) continue;
+        const relPath = rel ? rel + '/' + name : name;
+        if (en.type === 'directory') {
+          await walk(en.target, relPath, level + 1);
+        } else if (en.type === 'file') {
+          files.push(relPath);
+        }
+      }
+    };
+    await walk(rootTarget, '', 1);
+    if (aborted) { hlog('[enhance] v2 workspace scan timeout'); return []; }
+    hlog('[enhance] v2 workspace scanned files=' + files.length);
+    // 名称匹配 → 候选
+    const candidates = rankFiles(files, keywords, 10).map((c) => c.path);
+    if (candidates.length === 0) {
+      hlog('[enhance] v2 workspace no-name-match files=' + files.length + ' kws=' + JSON.stringify(keywords));
+      return [];
+    }
+    // 内容命中加分 → 排序 Top-maxFiles
+    const scored = [];
+    for (const rel of candidates) {
+      if (aborted) break;
+      if (shouldIgnoreFile(rel)) continue;
+      let text = '';
+      try {
+        const target = await fsSvc.resolve(rel, { cwd: root });
+        text = await fsSvc.readText(target);
+      } catch (e) { continue; } // 只读权限/读取失败 → 跳过该文件
+      const lines = text.split('\n');
+      let contentHits = 0;
+      const kws = (keywords || []).filter((k) => typeof k === 'string' && k.length >= 2);
+      for (const ln of lines) {
+        if (kws.some((k) => ln.toLowerCase().includes(k.toLowerCase()))) contentHits++;
+        if (contentHits >= 8) break;
+      }
+      if (contentHits > 0) scored.push({ path: rel, lines, contentHits });
+    }
+    if (scored.length === 0) {
+      hlog('[enhance] v2 workspace no-content-match candidates=' + candidates.length + ' kws=' + JSON.stringify(keywords));
+      return [];
+    }
+    scored.sort((a, b) => b.contentHits - a.contentHits);
+    const top = scored.slice(0, maxFiles);
+    return top.map((f) => ({ path: f.path, snippet: snippetFromLines(f.lines, keywords, 800) }));
+  } finally {
+    timer();
+  }
+}
+
+// 阶段 B3：会话事件检索（增强；searchEvents 契约：{sessionId,query,limit} → {items:[{snippet}]}；失败跳过）
+async function v2SearchEvents(services, sessionId, keywords) {
+  const sq = services.sessionQuery;
+  const kws = (keywords || []).filter((k) => typeof k === 'string' && k.trim() !== '');
+  if (!sq || typeof sq.searchEvents !== 'function' || kws.length === 0) {
+    hlog('[enhance] v2 searchEvents skipped kws=' + kws.length);
+    return [];
+  }
+  try {
+    const page = await sq.searchEvents({ sessionId, query: kws.join(' '), limit: 3 });
+    const hits = page && Array.isArray(page.items) ? page.items : [];
+    hlog('[enhance] v2 searchEvents kws=' + JSON.stringify(kws) + ' hits=' + hits.length);
+    if (hits.length === 0) return [];
+    return hits.slice(0, 3).map((h) => {
+      const txt = h && (typeof h.snippet === 'string' ? h.snippet : (typeof h.text === 'string' ? h.text : ''));
+      return txt ? txt.slice(0, 300) : '';
+    }).filter(Boolean);
+  } catch (e) {
+    hlog('[enhance] v2 searchEvents failed', e && e.message ? e.message : e);
+    return []; // 服务缺失/请求形状不符/失败 → 跳过事件段
+  }
+}
+
+// 阶段 A/B/C 汇总：返回 { block, log }（全部不可用 → { block: '', log: 'none' }）
+// v2.0.5：listEvents 仅返回元数据（无文本）——历史文本改用 filterEvents seq 范围取文档。
+async function buildV2ContextBlock(services, sessionId, text, cfg) {
+  let events = [];
+  let historyText = '';
+  const sq = services.sessionQuery;
+  if (sq && typeof sq.listEvents === 'function' && typeof sq.filterEvents === 'function') {
+    try {
+      const records = await sq.listEvents(sessionId);
+      // 尾部反向找最近的消息事件 seq（listEvents 升序，无文本；seq 用于 filterEvents 范围过滤）
+      const msgSeqs = [];
+      for (let i = records.length - 1; i >= 0 && msgSeqs.length < 16; i--) {
+        const r = records[i];
+        const t = String(r && r.type || '');
+        if (t === 'user/message' || t === 'assistant/message') msgSeqs.push(r && r.seq);
+      }
+      if (msgSeqs.length > 0) {
+        const minSeq = msgSeqs[msgSeqs.length - 1];
+        const docs = await sq.filterEvents(sessionId, [{ kind: 'seq', from: minSeq }]);
+        events = extractHistory(docs, 12);
+        historyText = events.map((e) => (e.type === 'user' ? '[用户] ' : '[助手] ') + e.text).join('\n');
+        hlog('[enhance] v2 history raw=' + records.length + ' msgSeqs=' + msgSeqs.length + ' minSeq=' + minSeq + ' docs=' + (docs ? docs.length : 'null') + ' events=' + events.length + ' chars=' + historyText.length + ' firstType=' + (events.length ? events[0].type : '-'));
+      } else {
+        hlog('[enhance] v2 history raw=' + records.length + ' msgSeqs=0 tailTypes=' + JSON.stringify(records.slice(-3).map((e) => e && e.type)));
+      }
+    } catch (e) {
+      hlog('[enhance] v2 listEvents/filterEvents failed', e && e.message ? e.message : e);
+    }
+  } else {
+    hlog('[enhance] v2 sessionQuery unavailable');
+  }
+  const root = services.sandboxPolicy && services.sandboxPolicy.workspaceRoot;
+  hlog('[enhance] v2 workspaceRoot=' + (root || '(none)') + ' fs=' + (services.fs ? 'yes' : 'no'));
+  // 阶段 A
+  const { progress, mode } = await v2ResolveProgress(services, historyText, cfg);
+  // 阶段 B
+  const focus = progress && Array.isArray(progress.focus) ? progress.focus : [];
+  const keywords = extractKeywords(text, focus);
+  const files = await v2SearchWorkspace(services, keywords, cfg);
+  const eventsHits = await v2SearchEvents(services, sessionId, keywords);
+  // 阶段 C
+  const budget = cfg.context.budgetChars || 0;
+  const block = buildContextBlock(progress, files, eventsHits, budget);
+  const ctxLog = block === ''
+    ? 'none'
+    : (mode + ' files=' + files.length + ' events=' + eventsHits.length + ' chars=' + block.length);
+  return { block, log: ctxLog };
+}
+
 function selfState(reference) {
   const status = reference.latestRun && reference.latestRun.status;
   if (status === 'awaiting-approval') return 'awaiting-approval';
@@ -665,11 +1130,28 @@ return {
       // v23（D6）：模型链 = cfg.fallback 按序（每条独立 reasoningEffort）；
       // 链为空 → 自适应解析当前环境默认链（不再区分 main/fallback）
       const chain = buildTryChain(cfg.fallback, await resolveAdaptiveChain(ctx.get('llm'), ctx.get('agentDefaultModel')));
+      // v2.0.0（H2）：引擎分支——V2 阶段 A/B/C 在优化超时计时器启动前执行（各自独立超时，不占 timeoutMs 预算）
+      let v2Block = '';
+      let v2Log = 'none';
+      let system = cfg.templateMode === 'custom' && cfg.templateText.trim() !== '' ? cfg.templateText.trim() : SYSTEM_PROMPT;
+      if (shouldInjectV2(cfg.engine, cfg.context.budgetChars)) {
+        const v2 = await buildV2ContextBlock({
+          llm: ctx.get('llm'),
+          sessionQuery: ctx.get('sessionQuery'),
+          sandboxPolicy: ctx.get('sandboxPolicy'),
+          fs: ctx.get('fs'),
+          timer: ctx.timer,
+          chain,
+        }, sessionId, text, cfg);
+        v2Block = v2.block;
+        v2Log = v2.log;
+        if (v2Block !== '') system = system + '\n\n' + CONTEXT_GUARD;
+      }
       const timeoutMs = cfg.timeoutMs;
       const maxTokens = cfg.maxTokens;
       const outputLimit = cfg.outputLimit;
-      const system = cfg.templateMode === 'custom' && cfg.templateText.trim() !== '' ? cfg.templateText.trim() : SYSTEM_PROMPT;
-      hlog('[enhance] cfg session=' + sessionId + ' chain=' + (chain.length > 0 ? chain.map((f) => f.provider + '/' + f.model).join(',') : '-') + ' timeout=' + timeoutMs + ' maxTokens=' + maxTokens + ' outputLimit=' + outputLimit + ' template=' + (system === SYSTEM_PROMPT ? 'builtin' : 'custom'));
+      const userText = v2Block !== '' ? v2Block + '\n\n' + wrapUserText(text) : wrapUserText(text);
+      hlog('[enhance] cfg session=' + sessionId + ' engine=' + cfg.engine + ' ctx=' + v2Log + ' chain=' + (chain.length > 0 ? chain.map((f) => f.provider + '/' + f.model).join(',') : '-') + ' timeout=' + timeoutMs + ' maxTokens=' + maxTokens + ' outputLimit=' + outputLimit + ' template=' + (system === SYSTEM_PROMPT ? 'builtin' : (system.indexOf(CONTEXT_GUARD) !== -1 ? 'custom+v2guard' : 'custom')));
 
       const rec = { cancelled: false, timedOut: false, iterator: null };
       pending.set(key, rec);
@@ -694,7 +1176,7 @@ return {
             messages: [{
               id: 'enhance-' + sessionId + '-' + seq,
               role: 'user',
-              content: [{ type: 'text', text: wrapUserText(text) }],
+              content: [{ type: 'text', text: userText }],
               source: { kind: 'user' },
             }],
           });
