@@ -23,8 +23,9 @@
 //      ④ 单行元素宽度合理分配（厂家弹性 / 模型主体 / 思考等级固定 / 图标固定）；
 //      ⑤ 老 v2 main 配置首次加载迁移为链首条（migrateMainIntoChain），此后忽略 main。
 // v23.1：UI 视觉协调——厂家/模型下拉加宽（厂家 130–220px、模型保底 120px，箭头完全可见）；
-//      行 gap 8→6px、思考开关 64px/等级 56px、图标按钮 22px 收紧，让位主下拉；
-//      select/btn 统一 font-family:inherit，字号行内全部 12px 一致。
+//      行 gap 8→6px、思考开关 64px/等级 56px、图标按钮 22px 收紧，让位主下拉。
+// v23.2：布局再分配——思考开关宽 2/3（43px）、厂家减 1/5（136px）、模型吃满整行剩余；
+//      字体与字号恢复默认设置（移除 font-family:inherit 强制统一）。
 // ============================================================================
 
 const CONFIG_KEY = 'dsh.enhance.config.v2';
@@ -1306,11 +1307,11 @@ const CSS = [
   '.dsh-plg-col{display:flex;flex-direction:column;gap:6px}',
   '.dsh-plg-label{font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary);flex:none;min-width:96px}',
   '.dsh-plg-muted{font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}',
-  '.dsh-plg-select{flex:1;min-width:0;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;line-height:16px;padding:4px 6px}',
+  '.dsh-plg-select{flex:1;min-width:0;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:4px 6px}',
   '.dsh-plg-textarea{flex:1;min-width:0;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:6px 8px;resize:vertical;font-family:inherit}',
   '.dsh-plg-approval{color:var(--dsw-alias-state-warn-primary);font-size:12px;line-height:16px;flex-wrap:wrap}',
   '.dsh-plg-actions{display:flex;gap:8px;justify-content:flex-end}',
-  '.dsh-plg-btn{background:transparent;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;line-height:16px;padding:3px 10px;cursor:pointer}',
+  '.dsh-plg-btn{background:transparent;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:3px 10px;cursor:pointer}',
   '.dsh-plg-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
   '.dsh-plg-btn:disabled{opacity:.45;cursor:not-allowed}',
   '.dsh-plg-btn-primary{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}',
@@ -1346,12 +1347,12 @@ const CSS = [
   // v22（C5）：行内测试连通性小图标（与整体一致：无背景 + token 边框/圆角 + hover 反馈）
   '.dsh-plg-testicon{min-width:22px;padding:2px 3px;font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary)}',
   '.dsh-plg-testicon:hover:not(:disabled){color:var(--dsw-alias-label-primary)}',
-  // v23（D5）/v23.1：单行元素宽度分配——序号固定右对齐 / 厂家弹性（130–220px，箭头完全可见）/
-  // 模型占主体且保底 120px / 思考等级固定窄宽；行 gap 收紧为 6px 整体紧凑
+  // v23.2：布局再分配——思考开关宽 2/3（43px）、厂家减 1/5（136px）、
+  // 模型框 flex:1 1 0 吃满整行全部剩余空间；字体字号恢复默认（移除 font-family:inherit 强制统一）
   '.dsh-plg-num{width:18px;text-align:right;flex:none}',
-  '.dsh-plg-select-provider{flex:0 1 170px;min-width:130px;max-width:220px}',
-  '.dsh-plg-select-model{flex:1 1 auto;min-width:120px}',
-  '.dsh-plg-select-thinking{flex:0 0 auto;width:64px}',
+  '.dsh-plg-select-provider{flex:0 1 136px;min-width:104px;max-width:176px}',
+  '.dsh-plg-select-model{flex:1 1 0;min-width:120px}',
+  '.dsh-plg-select-thinking{flex:0 0 auto;width:43px}',
   '.dsh-plg-select-level{flex:0 0 auto;width:56px}',
   // v23.1（D4）：测试结果集中单点区（链列表下方、操作按钮上方；空态隐藏）
   '.dsh-plg-testarea{display:flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:4px 8px;background:var(--dsw-alias-bg-layer-1)}',
