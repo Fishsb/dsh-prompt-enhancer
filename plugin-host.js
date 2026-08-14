@@ -12,6 +12,8 @@
 // v20：内置兜底链硬编码指向 DeepSeek 官方模型（deepseek-official/deepseek-v4-flash、deepseek-v4-pro），
 //      不再扫描任意 provider——主模型优先 currentSelection，兜底补足固定 DeepSeek 官方。
 // v21：P1-4 模型能力解析缓存（resolveModelInfoCached，TTL 5min，按 provider:model 键，200 条上限清理）
+// v23：模型链整合——enhance 不再区分 main/fallback，直接按链顺序逐一尝试（buildTryChain）；
+//      老 v2 main 字段保留解析但尝试逻辑忽略（client 侧已迁移为链首条）。
 // ============================================================================
 
 // —— v14 诊断日志：环形缓冲（最近 300 行），供 logs/last RPC 读取 ——
@@ -295,6 +297,31 @@ async function collectStream(iterator, outputLimit) {
     return { kind: 'error', failure: finish.failure };
   }
   return { kind: 'error', failure: { code: 'EMPTY_RESPONSE', message: 'stream ended without a finish chunk' } };
+}
+
+// v23（D6）：模型链构建——按 cfg.fallback 顺序逐一尝试（去重）；
+// 链为空时才用自适应/内置链补足；不再有 main 优先概念。
+function buildTryChain(fallback, adaptive) {
+  const chain = [];
+  for (const item of fallback || []) {
+    if (!item || typeof item !== 'object') continue;
+    if (typeof item.provider !== 'string' || typeof item.model !== 'string') continue;
+    const provider = item.provider.trim();
+    const model = item.model.trim();
+    if (!provider || !model) continue;
+    if (chain.some((e) => e.provider === provider && e.model === model)) continue;
+    const entry = { provider, model };
+    if (item.reasoningEffort) entry.reasoningEffort = item.reasoningEffort;
+    chain.push(entry);
+  }
+  if (chain.length === 0) {
+    for (const d of adaptive || []) {
+      if (!d || typeof d.provider !== 'string' || typeof d.model !== 'string') continue;
+      if (chain.some((e) => e.provider === d.provider && e.model === d.model)) continue;
+      chain.push({ ...d });
+    }
+  }
+  return chain;
 }
 
 // v17：1-token 连通性探测（计时 TTFT/总耗时；ref.current 供外部超时 abort）
@@ -635,33 +662,14 @@ return {
       }
 
       const cfg = validateConfig(args && args.config);
-      const mainEntry = cfg.provider !== '' && cfg.model !== ''
-        ? { provider: cfg.provider, model: cfg.model, ...(cfg.reasoningEffort !== '' ? { reasoningEffort: cfg.reasoningEffort } : {}) }
-        : null;
-      // v19：尝试链 = main + fallback 按序（每条独立 reasoningEffort）；
-      // fallback 为空或 main 不可用 → 自适应解析当前环境默认链（不再写死 provider）
-      const chain = [];
-      if (mainEntry) chain.push(mainEntry);
-      for (const item of cfg.fallback) {
-        if (chain.some((e) => e.provider === item.provider && e.model === item.model)) continue;
-        chain.push({ provider: item.provider, model: item.model, ...(item.reasoningEffort ? { reasoningEffort: item.reasoningEffort } : {}) });
-      }
-      if (cfg.fallback.length === 0) {
-        const adaptive = await resolveAdaptiveChain(ctx.get('llm'), ctx.get('agentDefaultModel'));
-        for (const d of adaptive) {
-          if (chain.some((e) => e.provider === d.provider && e.model === d.model)) continue;
-          chain.push({ ...d });
-        }
-      }
-      if (chain.length === 0) {
-        const adaptive = await resolveAdaptiveChain(ctx.get('llm'), ctx.get('agentDefaultModel'));
-        chain.push(...adaptive);
-      }
+      // v23（D6）：模型链 = cfg.fallback 按序（每条独立 reasoningEffort）；
+      // 链为空 → 自适应解析当前环境默认链（不再区分 main/fallback）
+      const chain = buildTryChain(cfg.fallback, await resolveAdaptiveChain(ctx.get('llm'), ctx.get('agentDefaultModel')));
       const timeoutMs = cfg.timeoutMs;
       const maxTokens = cfg.maxTokens;
       const outputLimit = cfg.outputLimit;
       const system = cfg.templateMode === 'custom' && cfg.templateText.trim() !== '' ? cfg.templateText.trim() : SYSTEM_PROMPT;
-      hlog('[enhance] cfg session=' + sessionId + ' main=' + (mainEntry ? mainEntry.provider + '/' + mainEntry.model : 'builtin-chain') + (cfg.reasoningEffort !== '' ? ' effort=' + cfg.reasoningEffort : '') + ' chain=' + (cfg.fallback.length > 0 ? cfg.fallback.map((f) => f.provider + '/' + f.model).join(',') : '-') + ' timeout=' + timeoutMs + ' maxTokens=' + maxTokens + ' outputLimit=' + outputLimit + ' template=' + (system === SYSTEM_PROMPT ? 'builtin' : 'custom'));
+      hlog('[enhance] cfg session=' + sessionId + ' chain=' + (chain.length > 0 ? chain.map((f) => f.provider + '/' + f.model).join(',') : '-') + ' timeout=' + timeoutMs + ' maxTokens=' + maxTokens + ' outputLimit=' + outputLimit + ' template=' + (system === SYSTEM_PROMPT ? 'builtin' : 'custom'));
 
       const rec = { cancelled: false, timedOut: false, iterator: null };
       pending.set(key, rec);

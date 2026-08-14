@@ -22,7 +22,7 @@ const grabConst = (name) => {
 };
 const defaultsBlock = [grabConst('DEFAULT_TIMEOUT_MS'), grabConst('DEFAULT_MAX_TOKENS'), grabConst('DEFAULT_OUTPUT_LIMIT')].join('\n');
 const pureFn = new Function(defaultsBlock + '\n' + pureText + `
-  ;return { wrapUserText, cleanOutput, friendlyMessage, validateConfig, collectStream };
+  ;return { wrapUserText, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain };
 `);
 const {
   wrapUserText,
@@ -30,6 +30,7 @@ const {
   friendlyMessage,
   validateConfig,
   collectStream,
+  buildTryChain,
 } = pureFn();
 
 test('wrapUserText 包装用户输入', () => {
@@ -151,4 +152,35 @@ test('resolveModelInfoCached 不同键独立缓存', async () => {
   await resolveModelInfoCached(fakeLlm, 'pA', 'mA');
   await resolveModelInfoCached(fakeLlm, 'pB', 'mB');
   assert.equal(calls, 2, '不同 provider/model 键应各自解析');
+});
+
+// ---- v23（D6）模型链构建单测 ----
+test('buildTryChain 按链顺序尝试（含去重与 reasoningEffort）', () => {
+  const chain = buildTryChain(
+    [
+      { provider: 'p1', model: 'm1' },
+      { provider: 'p1', model: 'm1' }, // 重复应去重
+      { provider: 'p2', model: 'm2', reasoningEffort: 'high' },
+    ],
+    [{ provider: 'p9', model: 'm9' }],
+  );
+  assert.equal(chain.length, 2);
+  assert.deepEqual(chain[0], { provider: 'p1', model: 'm1' });
+  assert.deepEqual(chain[1], { provider: 'p2', model: 'm2', reasoningEffort: 'high' });
+});
+
+test('buildTryChain 链为空 → 用自适应/内置链补足', () => {
+  const adaptive = [
+    { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+  ];
+  const chain = buildTryChain([], adaptive);
+  assert.deepEqual(chain, adaptive);
+  // 无效条目过滤
+  const mixed = buildTryChain(
+    [{ provider: '', model: 'x' }, null, { provider: '  ', model: 'y' }, { provider: 'p', model: 'm' }],
+    adaptive,
+  );
+  assert.equal(mixed.length, 1);
+  assert.deepEqual(mixed[0], { provider: 'p', model: 'm' });
 });

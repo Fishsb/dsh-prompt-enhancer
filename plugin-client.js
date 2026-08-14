@@ -1,5 +1,5 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v22：设置页调整——兜底链并入主模型 + 按厂家配置 + 测试图标）
+// DSH「提示词优化」插件 · Client 半部（v23：主模型/兜底整合为单一「模型配置」链 + 测试结果集中单点）
 // v16：整合「模型与插件」单入口（三区 tab + 折叠区块）+ 斜杠命令守卫修复
 // v17：思考开关/等级 + 连通性测试
 // v18：① config 升级 v2（键 dsh.enhance.config.v2；v1 自动迁移写回并清理）：
@@ -17,6 +17,11 @@
 //      ③ FallbackRow 按厂家区分：provider/model 双联动下拉；
 //      ④ 每条兜底末尾加测试连通性小图标（行内结果）；
 //      ⑤ 优化按钮不可选中（tabIndex=-1，无焦点环），仅点击触发。
+// v23：① 主模型与兜底链整合为单一「模型配置」链——所有行同构，无主/兜之分；
+//      ② 移除独立主模型表单区（厂家/模型/思考/等级/主测试按钮）；
+//      ③ 测试结果块内固定单点集中显示（链列表下方、操作按钮上方），行结构测试前后不变；
+//      ④ 单行元素宽度合理分配（厂家弹性 / 模型主体 / 思考等级固定 / 图标固定）；
+//      ⑤ 老 v2 main 配置首次加载迁移为链首条（migrateMainIntoChain），此后忽略 main。
 // ============================================================================
 
 const CONFIG_KEY = 'dsh.enhance.config.v2';
@@ -96,6 +101,22 @@ function sanitizeV2(parsed) {
   return v;
 }
 
+// v23（D7）：老 v2 `main` → 模型链首条迁移（链中已含该组合则不重复；迁移后清空 main 供 UI 忽略）
+function migrateMainIntoChain(cfg) {
+  const m = cfg.main && typeof cfg.main === 'object' ? cfg.main : null;
+  if (m && typeof m.provider === 'string' && m.provider && typeof m.model === 'string' && m.model) {
+    if (!cfg.fallback.some((x) => x.provider === m.provider && x.model === m.model)) {
+      const entry = { provider: m.provider, model: m.model };
+      if (m.reasoning && typeof m.reasoning === 'object' && m.reasoning.enabled === true && typeof m.reasoning.effort === 'string' && m.reasoning.effort) {
+        entry.reasoning = { enabled: true, effort: m.reasoning.effort };
+      }
+      cfg.fallback = [entry].concat(cfg.fallback || []);
+    }
+  }
+  cfg.main = { provider: '', model: '', reasoning: { enabled: false, effort: '' } };
+  return cfg;
+}
+
 function migrateFromV1(parsed) {
   const v = cloneDefaults();
   if (typeof parsed.provider === 'string' && parsed.provider) v.main.provider = parsed.provider;
@@ -118,8 +139,10 @@ function loadConfigFromStorage() {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
-        configState.value = sanitizeV2(parsed);
+        // v23（D7）：老 v2 main → 链首条迁移（写回，此后 main 置空不再使用）
+        configState.value = migrateMainIntoChain(sanitizeV2(parsed));
         configState.fresh = false;
+        try { localStorage.setItem(CONFIG_KEY, JSON.stringify(configState.value)); } catch (e) { /* 忽略 */ }
         return;
       }
     }
@@ -127,7 +150,7 @@ function loadConfigFromStorage() {
     if (rawV1) {
       const parsed = JSON.parse(rawV1);
       if (parsed && typeof parsed === 'object') {
-        configState.value = migrateFromV1(parsed);
+        configState.value = migrateMainIntoChain(migrateFromV1(parsed));
         configState.fresh = false;
         try {
           localStorage.setItem(CONFIG_KEY, JSON.stringify(configState.value));
@@ -137,7 +160,7 @@ function loadConfigFromStorage() {
       }
     }
     configState.value = cloneDefaults();
-    configState.fresh = true; // 首次安装：兜底链将继承当前使用模型（§3.3）
+    configState.fresh = true; // 首次安装：模型链将继承当前使用模型
   } catch (e) {
     configState.value = cloneDefaults();
     configState.fresh = true;
@@ -227,15 +250,15 @@ const ZH = {
   tabModels: '模型配置',
   tabParams: '优化参数',
   tabPlugins: '插件管理',
-  secMain: '主模型',
+  secMain: '模型配置',
   secFallback: '兜底链',
   secCustom: '自定义模型',
   secOrder: '加载顺序',
-  secFallbackEmpty: '暂无兜底模型（使用内置链）',
+  secFallbackEmpty: '暂无模型（使用内置链）',
   secCustomEmpty: '暂无自定义模型',
   secOrderEmpty: '暂无模型',
-  secFallbackBuiltin: '当前使用内置兜底链（v18 起可在此配置）',
-  secFallbackCount: '{n} 个模型（按序尝试）',
+  secFallbackBuiltin: '当前使用内置链',
+  secFallbackCount: '{n} 模型 · 按序尝试',
   cfgReasoning: '思考能力',
   cfgReasoningLevel: '思考等级',
   cfgReasoningOn: '开',
@@ -247,11 +270,11 @@ const ZH = {
   cfgTestOk: '✓ 可用 · {ms}ms',
   cfgTestTtft: '（TTFT {ms}ms）',
   cfgTestFail: '✗ {msg}',
-  cfgAddFallback: '＋ 添加兜底模型',
+  cfgAddFallback: '＋ 添加模型',
   cfgRestoreDefaults: '恢复默认',
   cfgCustomName: '显示名',
   cfgAddCustom: '＋ 添加',
-  cfgFallbackNote: '主模型失败后按此顺序尝试（可增删改序，每条可单独设置思考）',
+  cfgFallbackNote: '按顺序逐一尝试，失败则用下一条（可增删改序，每条可设思考）',
   cfgCustomNote: '仅限已有 provider 路由下的模型 ID；添加后自动连通性测试',
   cfgOrderNote: '仅影响模型下拉与候选的展示顺序',
   cfgInherited: '已继承当前使用模型（含推理等级）',
@@ -325,15 +348,15 @@ const EN = {
   tabModels: 'Models',
   tabParams: 'Optimization',
   tabPlugins: 'Plugins',
-  secMain: 'Main model',
+  secMain: 'Model chain',
   secFallback: 'Fallback chain',
   secCustom: 'Custom models',
   secOrder: 'Load order',
-  secFallbackEmpty: 'No fallback models (built-in chain in effect)',
+  secFallbackEmpty: 'No models (built-in chain in effect)',
   secCustomEmpty: 'No custom models',
   secOrderEmpty: 'No models',
-  secFallbackBuiltin: 'Built-in fallback chain in effect (configurable from v18)',
-  secFallbackCount: '{n} models (tried in order)',
+  secFallbackBuiltin: 'Built-in chain in effect',
+  secFallbackCount: '{n} models · tried in order',
   cfgReasoning: 'Thinking',
   cfgReasoningLevel: 'Reasoning level',
   cfgReasoningOn: 'On',
@@ -345,11 +368,11 @@ const EN = {
   cfgTestOk: '✓ OK · {ms}ms',
   cfgTestTtft: '（TTFT {ms}ms）',
   cfgTestFail: '✗ {msg}',
-  cfgAddFallback: '+ Add fallback model',
+  cfgAddFallback: '+ Add model',
   cfgRestoreDefaults: 'Restore defaults',
   cfgCustomName: 'Display name',
   cfgAddCustom: '+ Add',
-  cfgFallbackNote: 'Tried in order after the main model fails (reorderable; per-entry thinking settings)',
+  cfgFallbackNote: 'Tried in order; the next entry is used when one fails (reorderable; per-entry thinking settings)',
   cfgCustomNote: 'Model IDs under existing provider routes only; connectivity is tested on add',
   cfgOrderNote: 'Affects dropdown and candidate display order only',
   cfgInherited: 'Inherited from the current model (incl. reasoning level)',
@@ -870,255 +893,18 @@ function CollapsibleSection(props) {
   );
 }
 
-// 主模型区块（v18：main.reasoning 结构 + 思考开关/等级（懒加载 efforts）+ 连通性测试）
+// 模型配置区块（v23：主模型/兜底整合为单一模型链——所有行同构，无主/兜之分；
+// 测试结果块内固定单点集中显示，行结构测试前后不变）
 function ModelMainSection(props) {
   const t = makeT(props);
-  const cfg = props.cfg;
   const providers = props.providers;
-  const modelOptions = props.modelOptions;
-  const saveMain = props.saveMain;
-  const saveReasoning = props.saveReasoning;
-  const onProvider = props.onProvider;
-  const onModel = props.onModel;
-  // v22（C3）：并入兜底链子分区
-  const fallback = props.fallback;
-  const candidates = props.candidates;
-  const saveFallback = props.saveFallback;
-  const [reasoning, setReasoning] = React.useState(null);   // {efforts, defaultEffort} | null
-  const [resolveError, setResolveError] = React.useState(null);
-  const [testing, setTesting] = React.useState(false);
-  const [testResult, setTestResult] = React.useState(null); // {ok,latencyMs,ttftMs} | {ok:false,code,message} | null
-
-  const reasoningEffort = cfg.main.reasoning.enabled ? cfg.main.reasoning.effort : '';
-
-  // v17：模型变更 → 懒加载 reasoning 元数据（一次一模型）
-  React.useEffect(() => {
-    setReasoning(null);
-    setResolveError(null);
-    setTestResult(null);
-    if (!cfg.main.provider || !cfg.main.model) return;
-    let cancelled = false;
-    host.call('models/resolve', { provider: cfg.main.provider, model: cfg.main.model }).then((res) => {
-      if (cancelled) return;
-      const r = res && typeof res === 'object' ? res : {};
-      if (r.ok && r.reasoning && Array.isArray(r.reasoning.efforts) && r.reasoning.efforts.length > 0) {
-        setReasoning(r.reasoning);
-        // 当前 effort 不在该模型 efforts 中 → 自动重置为默认
-        if (cfg.main.reasoning.enabled && !r.reasoning.efforts.some((e) => e.id === cfg.main.reasoning.effort)) {
-          saveReasoning({ enabled: true, effort: r.reasoning.defaultEffort || r.reasoning.efforts[0].id });
-        }
-      } else if (!r.ok) {
-        setResolveError(r.message || t('cfgResolveFailed'));
-      } else {
-        setReasoning(null); // 模型无 reasoning 元数据
-      }
-    }).catch(() => {
-      if (!cancelled) setResolveError(t('cfgResolveFailed'));
-    });
-    return () => { cancelled = true; };
-  }, [cfg.main.provider, cfg.main.model]);
-
-  const runTest = () => {
-    if (testing || !cfg.main.provider || !cfg.main.model) return;
-    setTesting(true);
-    setTestResult(null);
-    const effort = reasoningEffort !== '' ? reasoningEffort : undefined;
-    host.call('models/test', { provider: cfg.main.provider, model: cfg.main.model, ...(effort ? { reasoningEffort: effort } : {}) }).then((res) => {
-      const r = res && typeof res === 'object' ? res : {};
-      setTestResult(r.ok ? { ok: true, latencyMs: r.latencyMs, ttftMs: r.ttftMs, precheck: r.precheck || null } : { ok: false, code: r.code || 'UNKNOWN', message: r.message || '' });
-    }).catch(() => {
-      setTestResult({ ok: false, code: 'NETWORK', message: t('errNETWORK') });
-    }).then(() => setTesting(false));
-  };
-
-  // v22（C3）：摘要追加兜底链数量
-  const summary = (cfg.main.provider || '—') + ' / ' + (cfg.main.model || '—') + (reasoningEffort !== '' ? ' · ' + reasoningEffort : '') + (fallback && fallback.length > 0 ? ' · 兜底 ' + fallback.length : ' · 兜底 0');
-  let body;
-  if (providers === null) {
-    body = React.createElement('p', { className: 'dsh-plg-note' }, t('pluginsClientPending'));
-  } else if (providers.length === 0) {
-    body = React.createElement('p', { className: 'dsh-plg-note' }, t('cfgNoProvider'));
-  } else {
-    const providerOptions = providers.map((p) => React.createElement('option', { key: p.provider, value: p.provider }, p.name || p.provider));
-    const effortOn = cfg.main.reasoning.enabled;
-    const levelOptions = reasoning ? reasoning.efforts.map((e) => React.createElement('option', { key: e.id, value: e.id }, e.name)) : [];
-    const levelValue = effortOn ? cfg.main.reasoning.effort : (reasoning ? (reasoning.defaultEffort || reasoning.efforts[0].id) : '');
-    const onReasoningToggle = (e) => {
-      const next = e.target.value === 'on';
-      if (next) saveReasoning({ enabled: true, effort: (reasoning && reasoning.defaultEffort) || (reasoning && reasoning.efforts[0] && reasoning.efforts[0].id) || '' });
-      else saveReasoning({ enabled: false, effort: '' });
-    };
-    let testLine = null;
-    if (testResult) {
-      if (testResult.ok) {
-        testLine = React.createElement('div', { className: 'dsh-plg-row', role: 'status' },
-          React.createElement('span', { className: 'dsh-plg-test-ok' }, t('cfgTestOk').replace('{ms}', String(testResult.latencyMs))),
-          React.createElement('span', { className: 'dsh-plg-muted' }, t('cfgTestTtft').replace('{ms}', String(testResult.ttftMs))),
-        );
-      } else {
-        testLine = React.createElement('div', { className: 'dsh-plg-row', role: 'status' },
-          React.createElement('span', { className: 'dsh-plg-test-fail' }, t('cfgTestFail').replace('{msg}', testResult.message || testResult.code || '')),
-        );
-      }
-    }
-    body = React.createElement(React.Fragment, null,
-      React.createElement('div', { className: 'dsh-plg-row' },
-        React.createElement('label', { className: 'dsh-plg-label' }, t('cfgProvider')),
-        React.createElement('select', { className: 'dsh-plg-select', value: cfg.main.provider, onChange: onProvider }, providerOptions),
-      ),
-      React.createElement('div', { className: 'dsh-plg-row' },
-        React.createElement('label', { className: 'dsh-plg-label' }, t('cfgModel')),
-        modelOptions.length === 0
-          ? React.createElement('span', { className: 'dsh-plg-muted' }, t('cfgEmptyModels'))
-          : React.createElement('select', { className: 'dsh-plg-select', value: cfg.main.model, onChange: onModel, children: modelOptions.map((m) => React.createElement('option', { key: m.id, value: m.id }, m.name || m.id)) }),
-      ),
-      reasoning
-        ? React.createElement('div', { className: 'dsh-plg-row' },
-            React.createElement('label', { className: 'dsh-plg-label' }, t('cfgReasoning')),
-            React.createElement('select', { className: 'dsh-plg-select dsh-plg-select-narrow', value: effortOn ? 'on' : 'off', onChange: onReasoningToggle, children: [React.createElement('option', { key: 'off', value: 'off' }, t('cfgReasoningOff')), React.createElement('option', { key: 'on', value: 'on' }, t('cfgReasoningOn'))] }),
-            React.createElement('label', { className: 'dsh-plg-label' }, t('cfgReasoningLevel')),
-            React.createElement('select', { className: 'dsh-plg-select dsh-plg-select-narrow', value: levelValue, disabled: !effortOn, onChange: (e) => saveReasoning({ enabled: true, effort: e.target.value }), children: levelOptions }),
-          )
-        : resolveError
-          ? React.createElement('p', { className: 'dsh-plg-note' }, resolveError)
-          : React.createElement('p', { className: 'dsh-plg-note' }, t('cfgNoReasoning')),
-      React.createElement('div', { className: 'dsh-plg-row' },
-        React.createElement('button', {
-          type: 'button',
-          className: 'dsh-plg-btn',
-          disabled: testing || !cfg.main.provider || !cfg.main.model,
-          onClick: runTest,
-        }, testing ? t('cfgTesting') : t('cfgTest')),
-        testLine,
-      ),
-      // v22（C3）：兜底链子分区并入主模型区块
-      React.createElement(ModelFallbackSection, { t: t, fallback: fallback || [], candidates: candidates || [], providers: providers, saveFallback: saveFallback }),
-    );
-  }
-  return React.createElement(CollapsibleSection, { title: t('secMain'), summary }, body);
-}
-
-// 兜底链条目行（v22：按厂家区分——provider/model 双联动下拉 + 行尾测试连通性图标 + 思考开关/等级 + 上移/下移/删除）
-function FallbackRow(props) {
-  const t = makeT(props);
-  const entry = props.entry;
-  const index = props.index;
-  const count = props.count;
-  const providers = props.providers;       // [{provider, name, models:[{id,name}]}]
-  const candidates = props.candidates;     // 跨厂家候选（含自定义，兼容存量）
-  const onChange = props.onChange;
-  const onMove = props.onMove;
-  const onRemove = props.onRemove;
-  const [reasoning, setReasoning] = React.useState(null);
-  const [testing, setTesting] = React.useState(false);
-  const [testResult, setTestResult] = React.useState(null); // {ok,latencyMs} | {ok:false,message} | null
-
-  React.useEffect(() => {
-    setReasoning(null);
-    if (!entry.provider || !entry.model) return;
-    let cancelled = false;
-    host.call('models/resolve', { provider: entry.provider, model: entry.model }).then((res) => {
-      if (cancelled) return;
-      const r = res && typeof res === 'object' ? res : {};
-      if (r.ok && r.reasoning && r.reasoning.efforts && r.reasoning.efforts.length > 0) setReasoning(r.reasoning);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [entry.provider, entry.model]);
-
-  // v22（C5）：行内连通性测试（复用 host models/test）
-  const runTest = () => {
-    if (testing || !entry.provider || !entry.model) return;
-    setTesting(true);
-    setTestResult(null);
-    host.call('models/test', { provider: entry.provider, model: entry.model }).then((res) => {
-      const r = res && typeof res === 'object' ? res : {};
-      setTestResult(r.ok ? { ok: true, latencyMs: r.latencyMs } : { ok: false, message: r.message || r.code || '' });
-    }).catch(() => {
-      setTestResult({ ok: false, message: t('errNETWORK') });
-    }).then(() => setTesting(false));
-  };
-
-  const effortOn = !!(entry.reasoning && entry.reasoning.enabled);
-  const levelOptions = reasoning ? reasoning.efforts.map((e) => React.createElement('option', { key: e.id, value: e.id }, e.name)) : [];
-  const levelValue = effortOn ? entry.reasoning.effort : (reasoning ? (reasoning.defaultEffort || reasoning.efforts[0].id) : '');
-
-  // v22（C4）：按厂家区分——厂家下拉选项 = providers；模型下拉 = 当前厂家模型 + 该厂家自定义候选
-  const currentProvider = providers && providers.find((p) => p.provider === entry.provider);
-  const modelOptions = (currentProvider ? currentProvider.models || [] : [])
-    .concat(candidates ? candidates.filter((c) => c.custom && c.provider === entry.provider).map((c) => ({ id: c.model, name: c.name })) : []);
-  const onProviderChange = (e) => {
-    const provider = e.target.value;
-    const p = providers && providers.find((x) => x.provider === provider);
-    const first = p && p.models && p.models[0] ? p.models[0].id : '';
-    onChange({ provider, model: first, reasoning: { enabled: false, effort: '' } });
-  };
-
-  let testLine = null;
-  if (testResult) {
-    testLine = testResult.ok
-      ? React.createElement('span', { className: 'dsh-plg-test-ok' }, t('cfgTestOk').replace('{ms}', String(testResult.latencyMs)))
-      : React.createElement('span', { className: 'dsh-plg-test-fail' }, t('cfgTestFail').replace('{msg}', testResult.message || ''));
-  }
-
-  return React.createElement('div', { className: 'dsh-plg-row' },
-    React.createElement('span', { className: 'dsh-plg-muted' }, String(index + 1)),
-    React.createElement('select', {
-      className: 'dsh-plg-select dsh-plg-select-narrow',
-      value: entry.provider || '',
-      onChange: onProviderChange,
-      children: (providers || []).map((p) => React.createElement('option', { key: p.provider, value: p.provider }, p.name || p.provider)),
-    }),
-    React.createElement('select', {
-      className: 'dsh-plg-select',
-      value: entry.model || '',
-      onChange: (e) => onChange({ provider: entry.provider, model: e.target.value, reasoning: { enabled: false, effort: '' } }),
-      children: modelOptions.map((m) => React.createElement('option', { key: m.id, value: m.id }, m.name || m.id)),
-    }),
-    reasoning
-      ? React.createElement(React.Fragment, null,
-          React.createElement('select', {
-            className: 'dsh-plg-select dsh-plg-select-narrow',
-            value: effortOn ? 'on' : 'off',
-            onChange: (e) => {
-              const next = e.target.value === 'on';
-              onChange({ ...entry, reasoning: next ? { enabled: true, effort: (reasoning.defaultEffort || (reasoning.efforts[0] && reasoning.efforts[0].id) || '') } : { enabled: false, effort: '' } });
-            },
-            children: [React.createElement('option', { key: 'off', value: 'off' }, t('cfgReasoningOff')), React.createElement('option', { key: 'on', value: 'on' }, t('cfgReasoningOn'))],
-          }),
-          React.createElement('select', {
-            className: 'dsh-plg-select dsh-plg-select-narrow',
-            value: levelValue,
-            disabled: !effortOn,
-            onChange: (e) => onChange({ ...entry, reasoning: { enabled: true, effort: e.target.value } }),
-            children: levelOptions,
-          }),
-        )
-      : null,
-    // v22（C5）：测试连通性小图标（风格与整体一致：无背景 + token 边框/圆角 + hover 反馈）
-    React.createElement('button', {
-      type: 'button',
-      className: 'dsh-plg-btn dsh-plg-btn-icononly dsh-plg-testicon',
-      disabled: testing || !entry.provider || !entry.model,
-      onClick: runTest,
-      title: t('cfgTest'),
-      'aria-label': t('cfgTest'),
-    }, testing ? '…' : '⛓'),
-    testLine,
-    React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', disabled: index === 0, onClick: () => onMove(-1), title: '↑' }, '↑'),
-    React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', disabled: index === count - 1, onClick: () => onMove(1), title: '↓' }, '↓'),
-    React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', onClick: onRemove, title: '✕' }, '✕'),
-  );
-}
-
-// 兜底链子分区（v22：并入主模型区块，按厂家区分配置）
-function ModelFallbackSection(props) {
-  const t = makeT(props);
   const fallback = props.fallback || [];
   const candidates = props.candidates || [];
-  const providers = props.providers || [];
   const saveFallback = props.saveFallback;
+  // 测试集中单点状态：{ index, entry, phase:'testing'|'done', result } | null
+  const [testState, setTestState] = React.useState(null);
 
-  const addFallback = () => {
+  const addModel = () => {
     const next = fallback.slice();
     const pick = candidates.find((c) => !next.some((x) => x.provider === c.provider && x.model === c.model));
     if (!pick) return;
@@ -1143,9 +929,11 @@ function ModelFallbackSection(props) {
     const next = fallback.slice();
     next.splice(index, 1);
     saveFallback(next);
+    // 删除正在测试的行 → 清空结果区
+    if (testState && testState.index === index) setTestState(null);
   };
   const restore = () => {
-    // v19：恢复默认 → 优先自适应链（host 解析当前环境默认模型），失败才用静态链
+    // 恢复默认 → 优先自适应链（host 解析当前环境默认模型），失败才用静态链
     host.call('models/autochain').then((auto) => {
       const a = auto && typeof auto === 'object' && Array.isArray(auto.chain) && auto.chain.length > 0
         ? auto.chain : BUILTIN_CHAIN;
@@ -1153,33 +941,176 @@ function ModelFallbackSection(props) {
     }).catch(() => {
       saveFallback(BUILTIN_CHAIN.map((b) => ({ ...b })));
     });
+    setTestState(null);
+  };
+  // v23（D4）：单点测试——点某行 ⛓ → 结果区集中显示该行测试；行内不注入结果
+  const runTest = (index, entry) => {
+    if (!entry || !entry.provider || !entry.model) return;
+    setTestState({ index, entry, phase: 'testing', result: null });
+    host.call('models/test', { provider: entry.provider, model: entry.model }).then((res) => {
+      const r = res && typeof res === 'object' ? res : {};
+      setTestState({
+        index,
+        entry,
+        phase: 'done',
+        result: r.ok
+          ? { ok: true, latencyMs: r.latencyMs, ttftMs: r.ttftMs }
+          : { ok: false, message: r.message || r.code || '' },
+      });
+    }).catch(() => {
+      setTestState({ index, entry, phase: 'done', result: { ok: false, message: t('errNETWORK') } });
+    });
   };
 
+  // v23：摘要 = 模型数 + 按序尝试（不再有「主模型」指向）
   const summary = fallback.length > 0 ? t('secFallbackCount').replace('{n}', String(fallback.length)) : t('secFallbackEmpty');
-  const body = React.createElement(React.Fragment, null,
-    fallback.map((entry, index) => React.createElement(FallbackRow, {
-      key: index,
-      t: t,
-      entry: entry,
-      index: index,
-      count: fallback.length,
-      providers: providers,
-      candidates: candidates,
-      onChange: (e) => updateEntry(index, e),
-      onMove: (d) => move(index, d),
-      onRemove: () => remove(index),
-    })),
-    fallback.length === 0 ? React.createElement('p', { className: 'dsh-plg-note' }, t('secFallbackEmpty')) : null,
-    React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: addFallback }, t('cfgAddFallback')),
-      React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: restore }, t('cfgRestoreDefaults')),
-    ),
-    React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgFallbackNote')),
-  );
-  // v22（C3）：作为主模型区块内的子分区内容返回（不再独立折叠区块）
-  return React.createElement('div', { className: 'dsh-cfg-sec-body dsh-cfg-fallback-inner' },
-    React.createElement('div', { className: 'dsh-cfg-sec-subtitle' }, t('secFallback')),
-    body,
+  let body;
+  if (providers === null) {
+    body = React.createElement('p', { className: 'dsh-plg-note' }, t('pluginsClientPending'));
+  } else if (providers.length === 0) {
+    body = React.createElement('p', { className: 'dsh-plg-note' }, t('cfgNoProvider'));
+  } else {
+    // 测试结果集中区（链列表下方、操作按钮上方；空态隐藏）
+    let testArea = null;
+    if (testState) {
+      const p = providers.find((x) => x.provider === testState.entry.provider);
+      const label = '测试 #' + String(testState.index + 1) + ' · ' + (p && p.name ? p.name : testState.entry.provider) + ' / ' + testState.entry.model;
+      let resultNode;
+      if (testState.phase === 'testing') {
+        resultNode = React.createElement('span', { className: 'dsh-plg-muted' }, t('cfgTesting'));
+      } else if (testState.result && testState.result.ok) {
+        resultNode = React.createElement('span', { className: 'dsh-plg-test-ok' }, t('cfgTestOk').replace('{ms}', String(testState.result.latencyMs)));
+      } else {
+        resultNode = React.createElement('span', { className: 'dsh-plg-test-fail' }, t('cfgTestFail').replace('{msg}', (testState.result && testState.result.message) || ''));
+      }
+      testArea = React.createElement('div', { className: 'dsh-plg-testarea', role: 'status' },
+        React.createElement('span', { className: 'dsh-plg-muted' }, label),
+        resultNode,
+        React.createElement('button', {
+          type: 'button',
+          className: 'dsh-plg-btn dsh-plg-btn-icononly',
+          onClick: () => setTestState(null),
+          title: '✕',
+          'aria-label': t('dismiss'),
+        }, '✕'),
+      );
+    }
+    body = React.createElement(React.Fragment, null,
+      fallback.map((entry, index) => React.createElement(FallbackRow, {
+        key: index,
+        t: t,
+        entry: entry,
+        index: index,
+        count: fallback.length,
+        providers: providers,
+        candidates: candidates,
+        testing: !!(testState && testState.index === index && testState.phase === 'testing'),
+        onChange: (e) => updateEntry(index, e),
+        onMove: (d) => move(index, d),
+        onRemove: () => remove(index),
+        onTest: () => runTest(index, entry),
+      })),
+      fallback.length === 0 ? React.createElement('p', { className: 'dsh-plg-note' }, t('secFallbackEmpty')) : null,
+      testArea,
+      React.createElement('div', { className: 'dsh-plg-row' },
+        React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: addModel }, t('cfgAddFallback')),
+        React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: restore }, t('cfgRestoreDefaults')),
+      ),
+      React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgFallbackNote')),
+    );
+  }
+  return React.createElement(CollapsibleSection, { title: t('secMain'), summary }, body);
+}
+
+// 模型链条目行（v23：统一格式——序号 + 厂家/模型双联动下拉 + 思考开关/等级 + 测试触发 + ↑↓✕；
+// 测试结果不注入行内，由父级单点集中显示）
+function FallbackRow(props) {
+  const t = makeT(props);
+  const entry = props.entry;
+  const index = props.index;
+  const count = props.count;
+  const providers = props.providers;       // [{provider, name, models:[{id,name}]}]
+  const candidates = props.candidates;     // 跨厂家候选（含自定义，兼容存量）
+  const testing = props.testing;           // 本行是否测试中（父级单点状态）
+  const onChange = props.onChange;
+  const onMove = props.onMove;
+  const onRemove = props.onRemove;
+  const onTest = props.onTest;
+  const [reasoning, setReasoning] = React.useState(null);
+
+  React.useEffect(() => {
+    setReasoning(null);
+    if (!entry.provider || !entry.model) return;
+    let cancelled = false;
+    host.call('models/resolve', { provider: entry.provider, model: entry.model }).then((res) => {
+      if (cancelled) return;
+      const r = res && typeof res === 'object' ? res : {};
+      if (r.ok && r.reasoning && r.reasoning.efforts && r.reasoning.efforts.length > 0) setReasoning(r.reasoning);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [entry.provider, entry.model]);
+
+  const effortOn = !!(entry.reasoning && entry.reasoning.enabled);
+  const levelOptions = reasoning ? reasoning.efforts.map((e) => React.createElement('option', { key: e.id, value: e.id }, e.name)) : [];
+  const levelValue = effortOn ? entry.reasoning.effort : (reasoning ? (reasoning.defaultEffort || reasoning.efforts[0].id) : '');
+
+  // v22（C4）/v23：按厂家区分——厂家下拉选项 = providers；模型下拉 = 当前厂家模型 + 该厂家自定义候选
+  const currentProvider = providers && providers.find((p) => p.provider === entry.provider);
+  const modelOptions = (currentProvider ? currentProvider.models || [] : [])
+    .concat(candidates ? candidates.filter((c) => c.custom && c.provider === entry.provider).map((c) => ({ id: c.model, name: c.name })) : []);
+  const onProviderChange = (e) => {
+    const provider = e.target.value;
+    const p = providers && providers.find((x) => x.provider === provider);
+    const first = p && p.models && p.models[0] ? p.models[0].id : '';
+    onChange({ provider, model: first, reasoning: { enabled: false, effort: '' } });
+  };
+
+  return React.createElement('div', { className: 'dsh-plg-row' },
+    React.createElement('span', { className: 'dsh-plg-muted dsh-plg-num' }, String(index + 1)),
+    React.createElement('select', {
+      className: 'dsh-plg-select dsh-plg-select-provider',
+      value: entry.provider || '',
+      onChange: onProviderChange,
+      children: (providers || []).map((p) => React.createElement('option', { key: p.provider, value: p.provider }, p.name || p.provider)),
+    }),
+    React.createElement('select', {
+      className: 'dsh-plg-select dsh-plg-select-model',
+      value: entry.model || '',
+      onChange: (e) => onChange({ provider: entry.provider, model: e.target.value, reasoning: { enabled: false, effort: '' } }),
+      children: modelOptions.map((m) => React.createElement('option', { key: m.id, value: m.id }, m.name || m.id)),
+    }),
+    reasoning
+      ? React.createElement(React.Fragment, null,
+          React.createElement('select', {
+            className: 'dsh-plg-select dsh-plg-select-thinking',
+            value: effortOn ? 'on' : 'off',
+            onChange: (e) => {
+              const next = e.target.value === 'on';
+              onChange({ ...entry, reasoning: next ? { enabled: true, effort: (reasoning.defaultEffort || (reasoning.efforts[0] && reasoning.efforts[0].id) || '') } : { enabled: false, effort: '' } });
+            },
+            children: [React.createElement('option', { key: 'off', value: 'off' }, t('cfgReasoningOff')), React.createElement('option', { key: 'on', value: 'on' }, t('cfgReasoningOn'))],
+          }),
+          React.createElement('select', {
+            className: 'dsh-plg-select dsh-plg-select-level',
+            value: levelValue,
+            disabled: !effortOn,
+            onChange: (e) => onChange({ ...entry, reasoning: { enabled: true, effort: e.target.value } }),
+            children: levelOptions,
+          }),
+        )
+      : null,
+    // v23（D4）：测试触发图标（结果由父级集中显示）
+    React.createElement('button', {
+      type: 'button',
+      className: 'dsh-plg-btn dsh-plg-btn-icononly dsh-plg-testicon',
+      disabled: testing || !entry.provider || !entry.model,
+      onClick: onTest,
+      title: t('cfgTest'),
+      'aria-label': t('cfgTest'),
+    }, testing ? '…' : '⛓'),
+    React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', disabled: index === 0, onClick: () => onMove(-1), title: '↑' }, '↑'),
+    React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', disabled: index === count - 1, onClick: () => onMove(1), title: '↓' }, '↓'),
+    React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', onClick: onRemove, title: '✕' }, '✕'),
   );
 }
 // 模型配置 tab（v18：helpers + fresh install 继承 + 四区块）
@@ -1213,18 +1144,7 @@ function ModelConfigTab(props) {
       const r = res && typeof res === 'object' ? res : {};
       if (r.ok && Array.isArray(r.providers)) {
         setProviders(r.providers);
-        const cfg = configState.value;
-        const withModels = r.providers.filter((p) => p.models && p.models.length > 0);
-        if (withModels.length > 0) {
-          const current = r.providers.find((p) => p.provider === cfg.main.provider);
-          if (!current || (current.models && current.models.length === 0)) {
-            const first = withModels[0];
-            saveConfig({ main: { ...cfg.main, provider: first.provider, model: first.models[0].id } });
-          } else if (!cfg.main.model || !current.models.some((m) => m.id === cfg.main.model)) {
-            saveConfig({ main: { ...cfg.main, model: current.models[0].id } });
-          }
-        }
-        // v18/v19：fresh install → 兜底链继承当前使用模型（含推理等级）+ 自适应链补足
+        // v18/v19：fresh install → 模型链继承当前使用模型（含推理等级）+ 自适应链补足
         if (configState.fresh && configState.value.fallback.length === 0) {
           // 先取当前默认模型作首项（含推理等级），再用自适应链 / 静态链做补足
           host.call('models/current').then((res2) => {
@@ -1248,7 +1168,7 @@ function ModelConfigTab(props) {
               chain = fill(a.map((x) => ({ provider: x.provider, model: x.model })));
               if (chain.length > 0) { saveConfig({ fallback: chain }); configState.fresh = false; setInherited(true); }
             }).catch(() => {
-              // autochain 失败 → 静态链补齐（尽量先保证有兜底）
+              // autochain 失败 → 静态链补齐（尽量先保证有模型链）
               chain = fill(BUILTIN_CHAIN);
               if (chain.length > 0) { saveConfig({ fallback: chain }); configState.fresh = false; setInherited(true); }
             });
@@ -1261,25 +1181,14 @@ function ModelConfigTab(props) {
   }, []);
 
   const cfg = configState.value;
-  const currentProvider = providers && providers.find((p) => p.provider === cfg.main.provider);
-  const modelOptions = currentProvider ? currentProvider.models : [];
   const candidates = buildCandidates(providers, cfg.customModels, cfg.order);
-  const saveMain = (patch) => saveConfig({ main: { ...cfg.main, ...patch } });
-  const saveReasoning = (r) => saveConfig({ main: { ...cfg.main, reasoning: { ...cfg.main.reasoning, ...r } } });
   const saveFallback = (fallback) => saveConfig({ fallback });
-  const onProvider = (e) => {
-    const provider = e.target.value;
-    const p = providers.find((x) => x.provider === provider);
-    const first = p && p.models && p.models[0] ? p.models[0].id : '';
-    saveMain({ provider, model: first, reasoning: { enabled: false, effort: '' } });
-  };
-  const onModel = (e) => saveMain({ model: e.target.value, reasoning: { enabled: false, effort: '' } });
 
   return React.createElement(React.Fragment, null,
     error ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, error) : null,
     inherited ? React.createElement('p', { className: 'dsh-plg-note dsh-plg-inherit' }, t('cfgInherited')) : null,
-    // v22：兜底链并入主模型区块（C3）；自定义模型/加载顺序模块已移除（C1/C2）
-    React.createElement(ModelMainSection, { t: t, cfg: cfg, providers: providers, modelOptions: modelOptions, saveMain: saveMain, saveReasoning: saveReasoning, onProvider: onProvider, onModel: onModel, fallback: cfg.fallback, candidates: candidates, saveFallback: saveFallback }),
+    // v23：单一「模型配置」链区块（无主/兜之分；main 已迁移并忽略）
+    React.createElement(ModelMainSection, { t: t, providers: providers, fallback: cfg.fallback, candidates: candidates, saveFallback: saveFallback }),
   );
 }
 
@@ -1431,12 +1340,17 @@ const CSS = [
   '.dsh-plg-input{flex:1;min-width:0;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:4px 6px}',
   '.dsh-plg-btn-icononly{min-width:26px;padding:3px 4px}',
   '.dsh-plg-inherit{color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:16px}',
-  // v22（C5）：兜底行内测试连通性小图标（与整体一致：无背景 + token 边框/圆角 + hover 反馈）
+  // v22（C5）：行内测试连通性小图标（与整体一致：无背景 + token 边框/圆角 + hover 反馈）
   '.dsh-plg-testicon{min-width:24px;padding:2px 3px;font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary)}',
   '.dsh-plg-testicon:hover:not(:disabled){color:var(--dsw-alias-label-primary)}',
-  // v22（C3）：主模型区块内兜底链子分区（小标题 + 内边距层级）
-  '.dsh-cfg-fallback-inner{border-top:1px solid var(--dsw-alias-border-l1);margin-top:8px;padding-top:8px}',
-  '.dsh-cfg-sec-subtitle{font-size:12px;line-height:16px;font-weight:600;color:var(--dsw-alias-label-secondary);margin:0 0 6px}',
+  // v23（D5）：单行元素宽度分配——序号固定右对齐 / 厂家弹性（96–180px）/ 模型占主体 / 思考等级固定窄宽
+  '.dsh-plg-num{width:20px;text-align:right;flex:none}',
+  '.dsh-plg-select-provider{flex:0 1 140px;min-width:96px;max-width:180px}',
+  '.dsh-plg-select-model{flex:1 1 auto;min-width:0}',
+  '.dsh-plg-select-thinking{flex:0 0 auto;width:72px}',
+  '.dsh-plg-select-level{flex:0 0 auto;width:64px}',
+  // v23（D4）：测试结果集中单点区（链列表下方、操作按钮上方；空态隐藏）
+  '.dsh-plg-testarea{display:flex;align-items:center;gap:8px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:4px 8px;background:var(--dsw-alias-bg-layer-1)}',
 ].join('\n');
 
 return {
