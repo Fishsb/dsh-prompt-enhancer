@@ -7,6 +7,9 @@
 # ---- 项目地图（本地管理用，不推 GitHub）----
 docs/map/
 
+# ---- agent 协作治理文档（本地管理用，不推 GitHub）----
+AGENTS.md
+
 # ---- 临时与系统文件 ----
 *.log
 *.tmp
