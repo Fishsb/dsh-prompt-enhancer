@@ -1,5 +1,12 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v2.3.3：输入框按钮三合一——字体对齐/空输入=记忆开关/hover 闪烁修复）
+// DSH「提示词优化」插件 · Client 半部（v2.4.0：版本检测与一键更新 + 输入框按钮字体对齐）
+// v2.4.0（方案「插件版本检测与一键更新方案.md」）：
+// ① 插件管理 tab 顶部新增「版本检测与更新」卡片（UpdaterCard）——repo 输入 + 检测版本按钮 →
+//    本地/远端版本与状态徽标（outdated 显示「一键拉取更新」）→ 目标目录（默认 host 计算的
+//    defaultDir）→ 拉取结果 + 应用指引；repo 变更清空陈旧结果（方案 §4/§10）；
+// ② config v2 新增 updater: { repo, targetDir }（sanitizeV2 白名单校验，旧配置兼容）；
+// ③ 字体对齐（方案 §10.2）：.dsh-enh-btn-text 显式声明 13px/500/20px 三态共用锚点，
+//    移除 .dsh-enh-mode 独立字号声明（继承锚点），杜绝继承链失效。
 // v2.3（方案「提示词优化方案.md」§7）：
 // ① EnhanceButton idle = emoji ✨ + 模式短标签（MODE_OPTIONS.short / i18n modeShort* 键），
 //    订阅 configState——模式切换即时同步；
@@ -66,6 +73,8 @@ const CONFIG_DEFAULTS = {
   mode: 'base',
   context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
   memory: false,
+  // v2.4.0（方案 §4）：版本检测与更新配置（repo 空 = 默认仓库；targetDir 空 = 使用 defaultDir）
+  updater: { repo: '', targetDir: '' },
 };
 // v20：内置兜底链硬编码指向 DeepSeek 官方模型（fresh install 补足与「恢复默认」）
 const BUILTIN_CHAIN = [
@@ -106,6 +115,7 @@ function cloneDefaults() {
     mode: 'base',
     context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
     memory: false,
+    updater: { repo: '', targetDir: '' },
   };
 }
 
@@ -169,6 +179,10 @@ function sanitizeV2(parsed) {
   }
   // v2.2（§6.4）：记忆开关——mode='memory' 显式选择优先，autoMemory 并入；缺省 false
   v.memory = parsed.mode === 'memory' || parsed.autoMemory === true || parsed.memory === true;
+  // v2.4.0（方案 §4）：updater 白名单校验（repo 格式 + 长度；targetDir 长度），旧配置缺字段 → 默认
+  const u = parsed.updater && typeof parsed.updater === 'object' ? parsed.updater : {};
+  if (typeof u.repo === 'string' && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(u.repo) && u.repo.length <= 100) v.updater.repo = u.repo;
+  if (typeof u.targetDir === 'string' && u.targetDir.length <= 200) v.updater.targetDir = u.targetDir;
   return v;
 }
 
@@ -303,6 +317,26 @@ const ZH = {
   pluginsApproveOnce: '批准（仅此版本）',
   pluginsActionFailed: '操作失败',
   pluginsRefresh: '刷新',
+  // v2.4.0（方案 §4）：版本检测与更新卡片
+  updTitle: '版本检测与更新',
+  updRepo: 'GitHub 仓库',
+  updCheck: '检测版本',
+  updChecking: '检测中…',
+  updLocal: '本地',
+  updRemote: '远端',
+  updOutdated: '发现新版本',
+  updCurrent: '已是最新',
+  updAhead: '本地已领先',
+  updUnknown: '状态未知',
+  updDir: '目标目录',
+  updPull: '一键拉取更新',
+  updPulling: '拉取中…',
+  updDone: '✓ 已拉取',
+  updApplyTitle: '应用更新（运行中的插件不可自替换，请按需选择）：',
+  updApplyBundle: 'bundle 安装：dsh plugin --profile web update dsh-prompt-enhancer 后重启 dsh web',
+  updApplyDynamic: '动态安装：让 agent 读取新文件后 cordis_define 新包并 cordis_run（update）',
+  updApplyCopy: '脚本分发：用拉取结果覆盖本地副本目录',
+  updError: '操作失败，请重试',
   cfgNav: '优化配置',
   cfgProvider: '模型提供方',
   cfgModel: '模型',
@@ -428,6 +462,26 @@ const EN = {
   pluginsApproveOnce: 'Approve (this version only)',
   pluginsActionFailed: 'Operation failed',
   pluginsRefresh: 'Refresh',
+  // v2.4.0（方案 §4）：版本检测与更新卡片
+  updTitle: 'Version check & update',
+  updRepo: 'GitHub repo',
+  updCheck: 'Check version',
+  updChecking: 'Checking…',
+  updLocal: 'Local',
+  updRemote: 'Remote',
+  updOutdated: 'New version available',
+  updCurrent: 'Up to date',
+  updAhead: 'Local is ahead',
+  updUnknown: 'Unknown',
+  updDir: 'Target directory',
+  updPull: 'Pull update',
+  updPulling: 'Pulling…',
+  updDone: '✓ Pulled',
+  updApplyTitle: 'Apply (a running plugin cannot replace itself; pick one):',
+  updApplyBundle: 'Bundle install: dsh plugin --profile web update dsh-prompt-enhancer, then restart dsh web',
+  updApplyDynamic: 'Dynamic install: have an agent read the new files, cordis_define a new package and cordis_run (update)',
+  updApplyCopy: 'Script copy: overwrite the local distribution folder with the pulled files',
+  updError: 'Operation failed, please retry',
   cfgNav: 'Optimize settings',
   cfgProvider: 'Provider',
   cfgModel: 'Model',
@@ -919,6 +973,163 @@ function stateKey(state) {
   return map[state] || 'pluginsDefined';
 }
 
+// v2.4.0（方案「插件版本检测与一键更新方案.md」§4）：版本检测与更新卡片——
+// repo 输入 + 检测版本 → 本地/远端/状态徽标 → 目标目录 + 一键拉取更新 → 拉取结果 + 应用指引。
+// 状态机：repo 变更即清空陈旧结果（防误拉）；检测/拉取中按钮 busy 置灰。
+const UPDATER_DEFAULT_REPO = 'Fishsb/dsh-prompt-enhancer';
+
+function updaterRepoOf(cfg) {
+  const r = cfg && cfg.updater && typeof cfg.updater.repo === 'string' ? cfg.updater.repo.trim() : '';
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) && r.length <= 100 ? r : UPDATER_DEFAULT_REPO;
+}
+
+function UpdaterCard(props) {
+  const t = makeT(props);
+  const [repoInput, setRepoInput] = React.useState(updaterRepoOf(configState.value));
+  const [dirInput, setDirInput] = React.useState((configState.value.updater && configState.value.updater.targetDir) || '');
+  const [checking, setChecking] = React.useState(false);
+  const [pulling, setPulling] = React.useState(false);
+  const [result, setResult] = React.useState(null);
+  const [pullRes, setPullRes] = React.useState(null);
+  const [error, setError] = React.useState(null);
+
+  const repo = updaterRepoOf({ updater: { repo: repoInput, targetDir: '' } });
+
+  const persist = (nextRepo, nextDir) => {
+    saveConfig({ updater: { repo: nextRepo, targetDir: nextDir } });
+  };
+
+  const onRepoChange = (value) => {
+    setRepoInput(value);
+    // 方案 §4（L6）：repo 变更 → 清空陈旧结果与拉取态
+    setResult(null);
+    setPullRes(null);
+    setError(null);
+    persist(value, dirInput);
+  };
+
+  const onDirChange = (value) => {
+    setDirInput(value);
+    persist(repoInput, value);
+  };
+
+  const doCheck = () => {
+    if (checking) return;
+    setChecking(true);
+    setError(null);
+    setPullRes(null);
+    host.call('update/check', { repo }).then((res) => {
+      const r = res && typeof res === 'object' ? res : {};
+      if (r.ok !== true) {
+        setError(r.message || t('updError'));
+      } else {
+        setResult(r);
+        if (dirInput === '' && typeof r.defaultDir === 'string' && r.defaultDir) {
+          setDirInput(r.defaultDir);
+        }
+      }
+    }).catch(() => {
+      setError(t('updError'));
+    }).then(() => {
+      setChecking(false);
+    });
+  };
+
+  const doPull = () => {
+    if (pulling || !result || !result.remoteTag) return;
+    setPulling(true);
+    setError(null);
+    host.call('update/pull', { repo, tag: result.remoteTag, dir: dirInput }).then((res) => {
+      const r = res && typeof res === 'object' ? res : {};
+      if (r.ok !== true) {
+        setError((r.message ? r.message + ' ' : '') + t('updError'));
+      } else {
+        setPullRes(r);
+      }
+    }).catch(() => {
+      setError(t('updError'));
+    }).then(() => {
+      setPulling(false);
+    });
+  };
+
+  let statusNode = null;
+  if (result) {
+    const text = result.status === 'outdated' ? t('updOutdated')
+      : result.status === 'current' ? (result.ahead ? t('updAhead') : t('updCurrent'))
+      : t('updUnknown');
+    statusNode = React.createElement('span', {
+      className: result.status === 'outdated' ? 'dsh-plg-upd-outdated' : 'dsh-plg-upd-ok',
+    }, text);
+  }
+
+  return React.createElement('div', { className: 'dsh-plg-card dsh-plg-upd' },
+    React.createElement('div', { className: 'dsh-plg-head' },
+      React.createElement('span', { className: 'dsh-plg-name' }, t('updTitle')),
+    ),
+    // 行 1：repo 输入 + 检测按钮
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('label', { className: 'dsh-plg-label' }, t('updRepo')),
+      React.createElement('input', {
+        className: 'dsh-plg-input',
+        value: repoInput,
+        spellCheck: false,
+        placeholder: UPDATER_DEFAULT_REPO,
+        onChange: (e) => onRepoChange(e.target.value),
+      }),
+      React.createElement('button', {
+        type: 'button',
+        className: 'dsh-plg-btn dsh-plg-btn-primary',
+        disabled: checking || pulling,
+        onClick: doCheck,
+      }, checking ? t('updChecking') : t('updCheck')),
+    ),
+    // 行 2：结果区（本地/远端/状态；release 元数据仅同名时展示）
+    result
+      ? React.createElement('div', { className: 'dsh-plg-row' },
+          React.createElement('span', { className: 'dsh-plg-muted' }, t('updLocal') + ' v' + result.local),
+          React.createElement('span', { className: 'dsh-plg-muted' }, t('updRemote') + ' v' + result.remote),
+          statusNode,
+        )
+      : null,
+    result && result.body
+      ? React.createElement('div', { className: 'dsh-plg-upd-body' }, result.body)
+      : null,
+    // 行 3：目标目录 + 一键拉取（仅 outdated 可用）
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('label', { className: 'dsh-plg-label' }, t('updDir')),
+      React.createElement('input', {
+        className: 'dsh-plg-input',
+        value: dirInput,
+        spellCheck: false,
+        placeholder: result && result.defaultDir ? result.defaultDir : '',
+        onChange: (e) => onDirChange(e.target.value),
+      }),
+      React.createElement('button', {
+        type: 'button',
+        className: 'dsh-plg-btn dsh-plg-btn-primary',
+        disabled: pulling || !result || result.status !== 'outdated',
+        onClick: doPull,
+      }, pulling ? t('updPulling') : t('updPull')),
+    ),
+    // 行 4：拉取结果 + 应用指引
+    pullRes
+      ? React.createElement('div', { className: 'dsh-plg-upd-done' },
+          React.createElement('div', null, t('updDone') + ' ' + pullRes.tag + ' → ' + pullRes.dir),
+          React.createElement('div', { className: 'dsh-plg-muted' },
+            (pullRes.files || []).map((f) => f.name + ' (' + f.bytes + 'B)').join(' · ')),
+          React.createElement('div', { className: 'dsh-plg-upd-apply' },
+            React.createElement('div', { className: 'dsh-plg-label' }, t('updApplyTitle')),
+            React.createElement('div', { className: 'dsh-plg-hint' }, t('updApplyBundle')),
+            React.createElement('div', { className: 'dsh-plg-hint' }, t('updApplyDynamic')),
+            React.createElement('div', { className: 'dsh-plg-hint' }, t('updApplyCopy')),
+          ),
+        )
+      : null,
+    error ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, error) : null,
+  );
+}
+
 function PluginsSection(props) {
   const t = makeT(props);
   const [plugins, setPlugins] = React.useState(null);
@@ -1085,6 +1296,8 @@ function PluginsSection(props) {
   }
 
   return React.createElement('div', { className: 'dsh-plg-root' },
+    // v2.4.0（方案 §4）：版本检测与更新卡片（置于插件清单上方，与清单状态无关）
+    React.createElement(UpdaterCard, props),
     error ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, error) : null,
     content,
     logsOpen
@@ -1551,13 +1764,14 @@ const CSS = [
   '.dsh-enh-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
   // v2.3.2（§7.2）：空输入不再降低按钮饱和度——disabled 仅保留点击无效提示，无 opacity 变暗
   '.dsh-enh-btn:disabled{cursor:not-allowed}',
-  '.dsh-enh-btn-text{padding:0 10px}',
+  // v2.4.0（方案 §10.2）：三态文字显式字体锚点——13px/500/20px 与模型 trigger 对齐（实机实测），
+  // idle/busy/result 均携带 dsh-enh-btn-text 类；子文本继承，不再依赖隐式继承链
+  '.dsh-enh-btn-text{padding:0 10px;font-size:13px;font-weight:500;line-height:20px;font-family:inherit}',
   // v2.3（§7.2）：idle 态 = emoji ✨ + 模式短标签（emoji 系统彩色，不承担状态色）
   // v2.3.2（§7.2）：记忆状态 → 图标饱和度——开=正常（无 dim）/ 关=低饱和（saturate(.2)，文字不受影响）
   '.dsh-enh-icon{font-size:14px;line-height:20px}',
   '.dsh-enh-icon-dim{filter:saturate(.2)}',
-  // v2.3.3（§7.10）：短标签 font-weight:500 与按钮一致
-  '.dsh-enh-mode{font-size:13px;font-weight:500;line-height:20px}',
+  // v2.4.0（方案 §10.2）：模式短标签不再独立声明字号——继承 .dsh-enh-btn-text 锚点（13px/500/20px）
   '.dsh-enh-btn-busy{border-color:var(--dsw-alias-state-warn-primary);color:var(--dsw-alias-state-warn-primary)}',
   // v2.3.3（§7.10）：busy hover 闪烁修复——progress 文档流占位（宽度恒定），
   // cancel absolute 覆盖其上，hover 只切 opacity（无尺寸抖动，hover 判定区不变）
@@ -1635,6 +1849,12 @@ const CSS = [
   '.dsh-plg-select-level{flex:0 0 auto;width:56px}',
   // v23.1（D4）：测试结果集中单点区（链列表下方、操作按钮上方；空态隐藏）
   '.dsh-plg-testarea{display:flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:4px 8px;background:var(--dsw-alias-bg-layer-1)}',
+  // v2.4.0（方案 §4）：版本检测与更新卡片样式
+  '.dsh-plg-upd-outdated{color:var(--dsw-alias-state-warn-primary);font-size:12px;line-height:16px;font-weight:600}',
+  '.dsh-plg-upd-ok{color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:16px;font-weight:600}',
+  '.dsh-plg-upd-body{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:16px;max-height:64px;overflow:auto;white-space:pre-wrap;word-break:break-all}',
+  '.dsh-plg-upd-done{display:flex;flex-direction:column;gap:6px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:8px 10px;background:var(--dsw-alias-bg-layer-1);font-size:12px;line-height:16px;color:var(--dsw-alias-label-primary)}',
+  '.dsh-plg-upd-apply{display:flex;flex-direction:column;gap:2px}',
 ].join('\n');
 
 return {

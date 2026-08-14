@@ -1,5 +1,14 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Host 半部（v2.3：优化按钮交互升级——阶段进度 + 记忆开关可视化）
+// DSH「提示词优化」插件 · Host 半部（v2.4.0：版本检测与一键更新 + 输入框按钮字体对齐）
+// v2.4.0（方案「插件版本检测与一键更新方案.md」）：
+// ① 新增 PLUGIN_VERSION（本地版本单一事实源，发布时 bump）/ UPDATE_MANIFEST（拉取文件清单）常量，
+//    与版本比较纯函数族（parseVersion/compareVersions/versionStatus/normalizeRepo/pickMaxTag/
+//    rawFileUrl/defaultDirFor/isValidTag，入 PURE 区段供单测切片）；
+// ② 新增 update/check RPC——检测指定 GitHub 公开仓库版本（tags 主路径取最大，releases 仅作同名展示
+//    元数据；300s TTL 缓存；返回 remote/remoteTag/defaultDir/status/ahead）；
+// ③ 新增 update/pull RPC——按 remoteTag 从 raw.githubusercontent.com 拉取 6 个发布文件，
+//    全部下载成功才零写入落盘到目标目录（默认 <workspaceRoot>/dsh-prompt-enhancer-<tag>/，
+//    携带 sandboxPolicy；in-flight 锁防重入 PULL_BUSY；tag 白名单校验防注入）。
 // v2.3（方案「提示词优化方案.md」§7）：① STAGE_* 常量 + pending 记录 stage 标记
 // （prepare→history→analyze→files→events→context→llm），buildV2ContextBlock 注入 onStage 回调；
 // ② 新增 enhance/progress 轮询 RPC（client 500ms 轮询展示步骤进度，纯展示、失败静默降级）；
@@ -776,6 +785,129 @@ async function pingStream(llmService, entry, ref) {
   return { ok: true, latencyMs, ttftMs: sawFirst ? ttftMs : latencyMs, model: entry.model };
 }
 
+// ================= v2.4.0 版本检测与一键更新 · 纯函数族 =================
+// 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
+// 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
+const PLUGIN_VERSION = '2.4.0';
+// 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
+const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
+// update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）
+const UPDATE_CACHE_TTL_MS = 300000;
+
+// 版本解析：去 v/V 前缀 → 去 +build 元数据 → 主/次/补丁 3 段数值（缺段补 0）→ - 预发布段
+// （数值段转 number，其余保留字符串）。返回 { ok, seg, pre, raw }；无法解析 → { ok:false }。
+function parseVersion(str) {
+  if (typeof str !== 'string') return { ok: false };
+  const s0 = str.trim();
+  if (s0 === '') return { ok: false };
+  let s = s0.replace(/^[vV]/, '');
+  const plus = s.indexOf('+');
+  if (plus !== -1) s = s.slice(0, plus);
+  let pre = null;
+  const dash = s.indexOf('-');
+  if (dash !== -1) {
+    const preRaw = s.slice(dash + 1);
+    s = s.slice(0, dash);
+    if (preRaw === '') return { ok: false };
+    pre = preRaw.split('.').map((seg) => (/^\d+$/.test(seg) ? Number(seg) : seg));
+  }
+  const parts = s.split('.');
+  if (parts.length < 1 || parts.length > 3) return { ok: false };
+  const seg = [];
+  for (const p of parts) {
+    if (!/^\d+$/.test(p)) return { ok: false };
+    seg.push(Number(p));
+  }
+  while (seg.length < 3) seg.push(0);
+  return { ok: true, seg, pre, raw: s0 };
+}
+
+// semver 比较：-1 | 0 | 1；任一侧无法解析 → null。
+// 主/次/补丁数值逐段比；无预发布 > 有预发布；预发布逐段比（数值<字符串；前缀相同短者更小）。
+function compareVersions(a, b) {
+  const pa = parseVersion(a);
+  const pb = parseVersion(b);
+  if (!pa.ok || !pb.ok) return null;
+  for (let i = 0; i < 3; i++) {
+    if (pa.seg[i] !== pb.seg[i]) return pa.seg[i] > pb.seg[i] ? 1 : -1;
+  }
+  if (pa.pre === null && pb.pre === null) return 0;
+  if (pa.pre === null) return 1;
+  if (pb.pre === null) return -1;
+  const len = Math.max(pa.pre.length, pb.pre.length);
+  for (let i = 0; i < len; i++) {
+    const x = pa.pre[i];
+    const y = pb.pre[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    if (typeof x === 'number' && typeof y === 'number') {
+      if (x !== y) return x > y ? 1 : -1;
+    } else if (typeof x === 'string' && typeof y === 'string') {
+      if (x !== y) return x > y ? 1 : -1;
+    } else {
+      return typeof x === 'number' ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+// 状态判定：remote > local → 'outdated'；否则 'current'；任一侧无法解析 → 'unknown'
+function versionStatus(local, remote) {
+  const pa = parseVersion(local);
+  const pb = parseVersion(remote);
+  if (!pa.ok || !pb.ok) return 'unknown';
+  return compareVersions(remote, local) > 0 ? 'outdated' : 'current';
+}
+
+// 仓库归一化校验：owner/name，仅 [A-Za-z0-9_.-]，长度 ≤100，拒绝 '..'；非法 → null
+function normalizeRepo(input) {
+  if (typeof input !== 'string') return null;
+  const s = input.trim();
+  if (s.length === 0 || s.length > 100) return null;
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(s)) return null;
+  if (s.indexOf('..') !== -1) return null;
+  return s;
+}
+
+// tag 白名单校验（update/pull 入参，防 URL/路径注入）：/^v?[0-9A-Za-z._-]+$/ 且不含 '..'
+function isValidTag(tag) {
+  return typeof tag === 'string' && tag !== '' && tag.length <= 100 &&
+    /^v?[0-9A-Za-z._-]+$/.test(tag) && tag.indexOf('..') === -1;
+}
+
+// tags 列表（GitHub /tags 响应数组）取最大可解析版本：返回 { raw, version } | null；
+// 不可解析的 tag 直接排除；全部不可解析/空列表 → null（host 映射 NO_REMOTE_VERSION）
+function pickMaxTag(tags) {
+  if (!Array.isArray(tags)) return null;
+  let best = null;
+  for (const t of tags) {
+    const name = t && typeof t === 'object' && typeof t.name === 'string' ? t.name
+      : (typeof t === 'string' ? t : '');
+    if (name === '') continue;
+    const pv = parseVersion(name);
+    if (!pv.ok) continue;
+    if (!best || compareVersions(name, best.raw) > 0) {
+      best = { raw: name, version: pv.seg.join('.') + (pv.pre ? '-' + pv.pre.join('.') : '') };
+    }
+  }
+  return best;
+}
+
+// raw 文件 URL（update/pull 下载）——已废弃：本机实测 raw.githubusercontent.com 被 DNS 屏蔽（0.0.0.0），
+// 统一改用 contents API（见 contentsApiUrl）。
+// 默认目标目录：<workspaceRoot>/dsh-prompt-enhancer-<tag>/；workspaceRoot 缺失 → ''
+function defaultDirFor(workspaceRoot, tag) {
+  if (typeof workspaceRoot !== 'string' || workspaceRoot.trim() === '') return '';
+  return workspaceRoot.replace(/[\\/]+$/, '') + '/' + 'dsh-prompt-enhancer-' + tag;
+}
+
+// GitHub contents API 下载 URL（update/pull 主路径）：
+// 实机验证（方案 §9-T1）：raw.githubusercontent.com 在本机 DNS 解析为 0.0.0.0 不可达，
+// api.github.com 可达；contents API 返回 base64 content，host 内置 atob 解码；文件 >1MB 不支持。
+function contentsApiUrl(repo, tag, file) {
+  return 'https://api.github.com/repos/' + repo + '/contents/' + file + '?ref=' + tag;
+}
+
 // ==PURE-END==
 
 // ================= V2 上下文感知优化 · 运行时（阶段 A/B/C） =================
@@ -1292,6 +1424,168 @@ return {
     });
 
     harness.handle('logs/last', async () => ({ ok: true, lines: LOG_RING.slice() }));
+
+    // ================= v2.4.0 版本检测与一键更新 RPC =================
+    // 方案「插件版本检测与一键更新方案.md」§3：检测（update/check）→ 一键拉取（update/pull）。
+    const updateCache = new Map();      // repo → { at, value }（TTL UPDATE_CACHE_TTL_MS）
+    const pullInFlight = new Set();     // repo → 拉取中（防重入 PULL_BUSY）
+
+    // GitHub JSON 请求包装：403 → RATE_LIMIT；非 200 → GITHUB_HTTP(status)；解析失败 → GITHUB_FAILED
+    async function fetchGithubJson(webSvc, url) {
+      let res;
+      try {
+        res = await webSvc.fetch({ url });
+      } catch (e) {
+        return { ok: false, code: 'GITHUB_FAILED', message: String(e && e.message ? e.message : e) };
+      }
+      if (!res || typeof res.statusCode !== 'number') {
+        return { ok: false, code: 'GITHUB_FAILED', message: 'empty fetch result' };
+      }
+      if (res.statusCode === 403) {
+        return { ok: false, code: 'RATE_LIMIT', message: 'GitHub API rate limit exceeded, retry later' };
+      }
+      if (res.statusCode !== 200) {
+        return { ok: false, code: 'GITHUB_HTTP', status: res.statusCode, message: 'GitHub request failed (HTTP ' + res.statusCode + ')' };
+      }
+      const body = res.body && typeof res.body.content === 'string' ? res.body.content : '';
+      try {
+        return { ok: true, data: JSON.parse(body) };
+      } catch (e) {
+        return { ok: false, code: 'GITHUB_FAILED', message: 'unexpected response body' };
+      }
+    }
+
+    harness.handle('update/check', async (args) => {
+      const repo = normalizeRepo(args && args.repo);
+      if (!repo) return { ok: false, code: 'BAD_REPO', message: 'repo must be "owner/name" (letters, digits, . _ -)' };
+      const webSvc = ctx.get('web');
+      if (!webSvc || typeof webSvc.fetch !== 'function') {
+        return { ok: false, code: 'WEB_UNAVAILABLE', message: 'web fetch service unavailable' };
+      }
+      const hit = updateCache.get(repo);
+      if (hit && Date.now() - hit.at < UPDATE_CACHE_TTL_MS) {
+        return { ...hit.value, cached: true };
+      }
+      try {
+        // 主路径：tags 列表取最大可解析版本（§1.2-1）
+        const tagsRes = await fetchGithubJson(webSvc, 'https://api.github.com/repos/' + repo + '/tags?per_page=100');
+        if (!tagsRes.ok) {
+          return { ok: false, code: tagsRes.code === 'GITHUB_HTTP' && tagsRes.status === 404 ? 'GITHUB_404' : tagsRes.code, status: tagsRes.status, message: tagsRes.code === 'GITHUB_HTTP' && tagsRes.status === 404 ? 'repository not found' : tagsRes.message };
+        }
+        const best = pickMaxTag(tagsRes.data);
+        if (!best) return { ok: false, code: 'NO_REMOTE_VERSION', message: 'no version-like tags found' };
+        const status = versionStatus(PLUGIN_VERSION, best.version);
+        const sp = ctx.get('sandboxPolicy');
+        const defaultDir = defaultDirFor(sp && sp.workspaceRoot, best.raw);
+        // 附加展示元数据：仅当 release 的 tag 与最大 tag 同名（§1.2-2；失败不阻断）
+        let releaseMeta = null;
+        try {
+          const relRes = await fetchGithubJson(webSvc, 'https://api.github.com/repos/' + repo + '/releases/latest');
+          if (relRes.ok && relRes.data && relRes.data.tag_name === best.raw) {
+            releaseMeta = {
+              releaseName: typeof relRes.data.name === 'string' ? relRes.data.name : '',
+              publishedAt: typeof relRes.data.published_at === 'string' ? relRes.data.published_at : '',
+              body: typeof relRes.data.body === 'string' ? relRes.data.body.slice(0, 500) : '',
+            };
+          }
+        } catch (e) { /* release 元数据失败不阻断检测 */ }
+        const value = {
+          ok: true,
+          repo,
+          local: PLUGIN_VERSION,
+          remote: best.version,
+          remoteTag: best.raw,
+          status,
+          ahead: status === 'current' && compareVersions(PLUGIN_VERSION, best.version) > 0,
+          defaultDir,
+          source: 'tag',
+          ...(releaseMeta ? releaseMeta : {}),
+          checkedAt: Date.now(),
+        };
+        updateCache.set(repo, { at: Date.now(), value });
+        hlog('[enhance] update/check repo=' + repo + ' local=' + PLUGIN_VERSION + ' remote=' + best.version + ' tag=' + best.raw + ' status=' + status + ' dir=' + defaultDir);
+        return value;
+      } catch (e) {
+        herr('[enhance] update/check failed', e);
+        return { ok: false, code: 'GITHUB_FAILED', message: String(e && e.message ? e.message : e) };
+      }
+    });
+
+    harness.handle('update/pull', async (args) => {
+      const repo = normalizeRepo(args && args.repo);
+      const tag = args && typeof args.tag === 'string' ? args.tag.trim() : '';
+      let dir = args && typeof args.dir === 'string' ? args.dir.trim() : '';
+      if (!repo) return { ok: false, code: 'BAD_REPO', message: 'repo must be "owner/name"' };
+      if (!isValidTag(tag)) return { ok: false, code: 'BAD_TAG', message: 'invalid tag' };
+      const webSvc = ctx.get('web');
+      if (!webSvc || typeof webSvc.fetch !== 'function') {
+        return { ok: false, code: 'WEB_UNAVAILABLE', message: 'web fetch service unavailable' };
+      }
+      const fsSvc = ctx.get('fs');
+      if (!fsSvc || typeof fsSvc.resolve !== 'function' || typeof fsSvc.writeText !== 'function') {
+        return { ok: false, code: 'FS_UNAVAILABLE', message: 'fs service unavailable' };
+      }
+      if (pullInFlight.has(repo)) {
+        return { ok: false, code: 'PULL_BUSY', message: 'a pull is already in progress' };
+      }
+      pullInFlight.add(repo);
+      try {
+        // dir 空串 → 默认目录（§3.2-0/4）
+        if (dir === '') {
+          const sp = ctx.get('sandboxPolicy');
+          dir = defaultDirFor(sp && sp.workspaceRoot, tag);
+        }
+        if (dir === '') return { ok: false, code: 'NO_DIR', message: 'target directory required' };
+        // 1) 全部下载成功才进入写入（任一失败 → 整体失败、零写入）
+        // 下载主路径 = GitHub contents API（§9-T1：raw.githubusercontent.com 本机 DNS 屏蔽，
+        // api.github.com 可达）：响应 JSON { encoding:'base64', content, size }，内置 atob 解码；
+        // >1MB 文件 contents API 不支持 → 明确报错。
+        const downloads = [];
+        for (const name of UPDATE_MANIFEST) {
+          let res;
+          try {
+            res = await webSvc.fetch({ url: contentsApiUrl(repo, tag, name) });
+          } catch (e) {
+            return { ok: false, code: 'PULL_DOWNLOAD_FAILED', file: name, message: String(e && e.message ? e.message : e) };
+          }
+          if (!res || res.statusCode !== 200 || !res.body || typeof res.body.content !== 'string') {
+            return { ok: false, code: 'PULL_DOWNLOAD_FAILED', file: name, status: res && res.statusCode, message: 'download failed (HTTP ' + (res && res.statusCode) + ')' };
+          }
+          let meta;
+          try {
+            meta = JSON.parse(res.body.content);
+          } catch (e) {
+            return { ok: false, code: 'PULL_DOWNLOAD_FAILED', file: name, message: 'unexpected contents API response' };
+          }
+          if (!meta || meta.encoding !== 'base64' || typeof meta.content !== 'string') {
+            return { ok: false, code: 'PULL_DOWNLOAD_FAILED', file: name, message: 'unexpected contents payload' };
+          }
+          if (typeof meta.size === 'number' && meta.size > 1000000) {
+            return { ok: false, code: 'PULL_DOWNLOAD_FAILED', file: name, message: 'file too large for contents API' };
+          }
+          downloads.push({ name, content: atob(meta.content) });
+        }
+        // 2) 逐文件写入（携带 sandboxPolicy 按实例策略执行；失败返回已写清单）
+        const policySvc = ctx.get('sandboxPolicy');
+        const sandboxPolicy = policySvc && typeof policySvc.resolve === 'function' ? policySvc.resolve() : undefined;
+        const written = [];
+        for (const f of downloads) {
+          try {
+            const fileTarget = await fsSvc.resolve(f.name, { cwd: dir });
+            await fsSvc.writeText(fileTarget, f.content, undefined, undefined, sandboxPolicy);
+            written.push({ name: f.name, bytes: new TextEncoder().encode(f.content).length });
+          } catch (e) {
+            herr('[enhance] update/pull write failed', f.name, e);
+            const code = e && typeof e.code === 'string' && e.code ? e.code : 'PULL_WRITE_FAILED';
+            return { ok: false, code, file: f.name, written: written.map((w) => w.name), message: String(e && e.message ? e.message : e) };
+          }
+        }
+        hlog('[enhance] update/pull ok repo=' + repo + ' tag=' + tag + ' dir=' + dir + ' files=' + written.length);
+        return { ok: true, repo, tag, dir, files: written };
+      } finally {
+        pullInFlight.delete(repo);
+      }
+    });
 
     // v2.3（§7.3）：优化进度轮询 RPC——从 pending Map 读 stage（纯展示，失败静默降级）
     harness.handle('enhance/progress', async (args) => {

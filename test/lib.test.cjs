@@ -27,7 +27,9 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
     buildMemoryBlock, MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE,
-    STAGE_SEQUENCE, STAGE_LABELS };
+    STAGE_SEQUENCE, STAGE_LABELS,
+    PLUGIN_VERSION, UPDATE_MANIFEST, parseVersion, compareVersions, versionStatus,
+    normalizeRepo, isValidTag, pickMaxTag, contentsApiUrl, defaultDirFor };
 `);
 const {
   wrapUserText,
@@ -56,6 +58,16 @@ const {
   BUDGET_WORKSPACE_TABLE,
   STAGE_SEQUENCE,
   STAGE_LABELS,
+  PLUGIN_VERSION,
+  UPDATE_MANIFEST,
+  parseVersion,
+  compareVersions,
+  versionStatus,
+  normalizeRepo,
+  isValidTag,
+  pickMaxTag,
+  contentsApiUrl,
+  defaultDirFor,
 } = pureFn();
 
 test('wrapUserText 包装用户输入', () => {
@@ -540,4 +552,79 @@ test('U15 parseTaskProgress JSON 容错', () => {
 test('U13 既有用例回归计数', () => {
   // 此用例仅占位：既有 13 项由上方用例共同构成，node --test 汇总 pass 数
   assert.ok(true);
+});
+
+// ================= v2.4.0 版本检测与一键更新 · 纯函数用例 =================
+// 方案「插件版本检测与一键更新方案.md」§2/§3：版本比较 / 归一化 / 检测目标。
+
+test('U30 PLUGIN_VERSION / UPDATE_MANIFEST 常量', () => {
+  assert.match(PLUGIN_VERSION, /^\d+\.\d+\.\d+$/, '本地版本须为纯 semver（v 前缀不保留）');
+  assert.deepEqual(UPDATE_MANIFEST, ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml']);
+});
+
+test('U31 parseVersion 归一化', () => {
+  assert.deepEqual(parseVersion('v2.4.0').seg, [2, 4, 0]);
+  assert.equal(parseVersion('v2.4.0').pre, null);
+  assert.equal(parseVersion('2.4').seg[2], 0, '缺段补 0');
+  assert.deepEqual(parseVersion('V1.2.3').seg, [1, 2, 3], '大写 V 前缀可去');
+  assert.deepEqual(parseVersion('2.4.0-rc.1').pre, ['rc', 1], '预发布：数值段转 number');
+  assert.deepEqual(parseVersion('2.4.0+build5').seg, [2, 4, 0], 'build 元数据剥离');
+  assert.equal(parseVersion('master').ok, false);
+  assert.equal(parseVersion('').ok, false);
+  assert.equal(parseVersion('  ').ok, false);
+  assert.equal(parseVersion('1.2.3.4').ok, false, '超过 3 段非法');
+  assert.equal(parseVersion('2.x').ok, false);
+  assert.equal(parseVersion(null).ok, false);
+});
+
+test('U32 compareVersions semver 比较', () => {
+  assert.equal(compareVersions('2.4.0', '2.3.3'), 1);
+  assert.equal(compareVersions('1.9.9', '2.0.0'), -1);
+  assert.equal(compareVersions('2.4.0', '2.4.0'), 0);
+  assert.equal(compareVersions('2.4', '2.4.0'), 0, '缺段等价');
+  assert.equal(compareVersions('2.4.0', '2.4.0-rc.1'), 1, '无预发布 > 有预发布');
+  assert.equal(compareVersions('2.4.0-rc.1', '2.4.0-rc.2'), -1);
+  assert.equal(compareVersions('2.4.0-alpha.1', '2.4.0-rc.1'), -1, '字符串段字典序');
+  assert.equal(compareVersions('2.4.0-rc', '2.4.0-rc.1'), -1, '前缀相同短者更小');
+  assert.equal(compareVersions('master', '2.0.0'), null, '无法解析 → null');
+});
+
+test('U33 versionStatus 状态判定', () => {
+  assert.equal(versionStatus('2.3.3', '2.4.0'), 'outdated');
+  assert.equal(versionStatus('2.4.0', '2.4.0'), 'current');
+  assert.equal(versionStatus('2.4.0', '2.3.3'), 'current', '本地领先仍为 current');
+  assert.equal(versionStatus('x', '2.0.0'), 'unknown');
+  assert.equal(versionStatus('2.0.0', 'y'), 'unknown');
+});
+
+test('U34 normalizeRepo / isValidTag 白名单', () => {
+  assert.equal(normalizeRepo('Fishsb/dsh-prompt-enhancer'), 'Fishsb/dsh-prompt-enhancer');
+  assert.equal(normalizeRepo('  a/b  '), 'a/b', '两侧空白去除');
+  assert.equal(normalizeRepo('a'), null);
+  assert.equal(normalizeRepo('a/b/c'), null);
+  assert.equal(normalizeRepo('../x'), null);
+  assert.equal(normalizeRepo('a/' + 'x'.repeat(100)), null, '超长非法');
+  assert.equal(normalizeRepo(''), null);
+  assert.equal(isValidTag('v2.4.0'), true);
+  assert.equal(isValidTag('2.4.0-rc.1'), true);
+  assert.equal(isValidTag('v2.4.0/evil'), false, '斜杠拒绝');
+  assert.equal(isValidTag('..'), false);
+  assert.equal(isValidTag('a b'), false, '空白拒绝');
+});
+
+test('U35 pickMaxTag 取最大可解析版本', () => {
+  const tags = [{ name: 'v1.0.0' }, { name: 'v2.3.3' }, { name: 'release-candidate' }, { name: 'v2.4.0' }];
+  assert.deepEqual(pickMaxTag(tags), { raw: 'v2.4.0', version: '2.4.0' });
+  assert.deepEqual(pickMaxTag([{ name: 'v2.4.0-rc.1' }, { name: 'v2.4.0' }]), { raw: 'v2.4.0', version: '2.4.0' });
+  assert.equal(pickMaxTag([{ name: 'master' }, { name: 'nightly' }]), null, '全不可解析 → null');
+  assert.equal(pickMaxTag([]), null);
+  assert.equal(pickMaxTag(null), null);
+});
+
+test('U36 contentsApiUrl / defaultDirFor', () => {
+  assert.equal(contentsApiUrl('a/b', 'v2.4.0', 'plugin-host.js'), 'https://api.github.com/repos/a/b/contents/plugin-host.js?ref=v2.4.0');
+  assert.equal(defaultDirFor('D:\\lk\\deepseek', 'v2.4.0'), 'D:\\lk\\deepseek/dsh-prompt-enhancer-v2.4.0');
+  assert.equal(defaultDirFor('D:\\lk\\deepseek\\', 'v2.4.0'), 'D:\\lk\\deepseek/dsh-prompt-enhancer-v2.4.0', '尾部斜杠归一');
+  assert.equal(defaultDirFor('', 'v2.4.0'), '');
+  assert.equal(defaultDirFor(null, 'v2.4.0'), '');
 });

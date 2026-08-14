@@ -13,7 +13,9 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 - 🧠 **Independent memory switch (v2.2.0)** — available in every mode; when on, the previous optimization pair is injected into the next round (first run falls back to Lite automatically); when off, memory is never read or written; memory is written while on and cleared on undo
 - 🔀 **Combined stacking** — mode context block + memory block can inject together (memory takes budget first, ≤1200 chars; the mode block uses the remainder)
 - 🔄 **Automatic config migration** — v2.1 `mode:'memory'` / `autoMemory` migrate to `mode:'lite'` + `memory:true`; an explicit `memory` field takes precedence (including `false`)
-- 🧪 **Unit-tested** — host pure-function tests (node:test, 30/30 passing) slice the PURE section, so tests run the very code that is shipped
+- 🧪 **Unit-tested** — host pure-function tests (node:test, 38/38 passing) slice the PURE section, so tests run the very code that is shipped
+- 🚀 **Version check & one-click update (v2.4.0)** — a new card at the top of the plugin-management page checks any public GitHub repo (default: this one) against the local version (remote tags are the source of truth); when a newer version exists, pull the 6 release files into a target directory with one click (default `<workspace>/dsh-prompt-enhancer-<tag>/`, configurable & persisted), then apply via the on-screen instructions (bundle `dsh plugin update` / dynamic re-define / script copy). A running plugin cannot replace itself — pull ≠ apply
+- 🔤 **Composer font parity (v2.4.0)** — the ✨ button's idle / busy / undo text is explicitly anchored at 13px/500/20px, matching the composer model selector; the distribution copy has been upgraded (it previously lagged at v2.1.0)
 
 ## Install
 
