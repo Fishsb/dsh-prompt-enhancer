@@ -1,5 +1,11 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v2.4.0：版本检测与一键更新 + 输入框按钮字体对齐）
+// DSH「提示词优化」插件 · Client 半部（v2.4.1：版本检测与一键更新 + 输入框按钮字体对齐）
+// v2.4.1（方案「插件版本检测与一键更新方案.md」§9-T5/T6 实测回填）：
+// ① 数据获取移至浏览器：host 无出网能力（web.fetch 无 provider）——本半部直连
+//    api.github.com（CORS 实测 200）取 tags/release 载荷与 contents API 文件
+//    （base64 → atob 解码），host 只做解析/校验/写入；新增 updRepoNotFound 错误文案；
+// ② RPC 携带 sessionId——host 经会话策略解析沙箱边界（写入限定会话工作区）；
+// ③ UPDATER_MANIFEST 与 host PURE 区段同步（validateManifestFiles 为权威校验）。
 // v2.4.0（方案「插件版本检测与一键更新方案.md」）：
 // ① 插件管理 tab 顶部新增「版本检测与更新」卡片（UpdaterCard）——repo 输入 + 检测版本按钮 →
 //    本地/远端版本与状态徽标（outdated 显示「一键拉取更新」）→ 目标目录（默认 host 计算的
