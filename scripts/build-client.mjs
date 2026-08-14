@@ -49,7 +49,7 @@ window.__ModuleLoader__.load({
     // with the static environment's symbols closed over.
     const plugin = new Function('React', 'host', 'styles', ${embedded})(React, host, styles);
 
-    module.exports = { ...plugin, inject: ['slots', 'locale'] };
+    module.exports = { ...plugin, inject: ['slots', 'locale', 'timer'] };
     return module.exports;
   },
 });

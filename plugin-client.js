@@ -1,5 +1,13 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v2.2：4 模式体系 + 记忆独立开关）
+// DSH「提示词优化」插件 · Client 半部（v2.3：优化按钮交互升级——步骤进度 + 记忆开关可视化）
+// v2.3（方案「提示词优化方案.md」§7）：
+// ① EnhanceButton idle = emoji ✨ + 模式短标签（MODE_OPTIONS.short / i18n modeShort* 键），
+//    订阅 configState——模式切换即时同步；
+// ② enhancing = spinner + 步骤进度文案（500ms 轮询 enhance/progress，stage→i18n 文案，
+//    轮询失败静默降级「优化中…」）+ hover 切「取消」（错误红）；
+// ③ 新增 MemoryToggle（conversation.input.left）：关=变暗置灰（不可选中视觉，可点击开启）/
+//    开=高饱和橙，点击切换 config.memory，与设置面板下拉双向同步；
+// ④ 放弃自定义图标方案（emoji ✨ 不承担状态色）。
 // v2.2（方案「提示词优化方案.md」§0.2/§2/§6）：
 // ① 模式体系收敛 4 模式（base/lite/standard/smart）——记忆模式删除；
 // ② 记忆功能改为所有模式可开/关的独立开关（config.memory，缺省 false）；
@@ -59,13 +67,22 @@ const BUILTIN_CHAIN = [
   { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
 ];
 // v2.2（§4.3/§6.6）：模式选项单点（4 模式，记忆模式已删除——记忆为独立开关）
+// v2.3（§7.2）：short = 模式短标签（idle 按钮内显示；i18n modeShort* 键优先，此字段为回退）
 const MODE_OPTIONS = [
-  { value: 'base', label: '基础模式', hint: '直发优化，不读取任何上下文，全体系最快最省' },
-  { value: 'lite', label: '轻量模式', hint: '仅本地规则分析输入，不注入上下文，速度接近基础' },
-  { value: 'standard', label: '标准模式', hint: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本' },
-  { value: 'smart', label: '智能模式', hint: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准' },
+  { value: 'base', label: '基础模式', short: '基础', hint: '直发优化，不读取任何上下文，全体系最快最省' },
+  { value: 'lite', label: '轻量模式', short: '轻量', hint: '仅本地规则分析输入，不注入上下文，速度接近基础' },
+  { value: 'standard', label: '标准模式', short: '标准', hint: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本' },
+  { value: 'smart', label: '智能模式', short: '智能', hint: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准' },
 ];
 const MODE_VALUES = MODE_OPTIONS.map((m) => m.value);
+// v2.3（§7.2）：模式短标签解析——i18n 键（modeShort+Cap）优先（EN 正确），MODE_OPTIONS.short 回退
+function modeShortLabel(t, mode) {
+  const key = 'modeShort' + (mode ? mode.charAt(0).toUpperCase() + mode.slice(1) : '');
+  const localized = t(key);
+  if (localized !== key) return localized;
+  const row = MODE_OPTIONS.find((m) => m.value === mode);
+  return row && row.short ? row.short : '';
+}
 // 已优化标记键（§2.4）：localStorage 按会话布尔标记（区分首次与 reload；仅记忆开启期打标）
 const SEEN_KEY_PREFIX = 'dsh.enhance.seen.';
 
@@ -235,7 +252,7 @@ const ZH = {
   enhancing: '优化中',
   result: '✓ 已优化，可撤回',
   titleIdle: '一键优化提示词（独立 LLM 调用）',
-  titleBusy: '点击取消并恢复原文',
+  titleBusy: '点击取消优化并恢复原文',
   titleResult: '恢复优化前的原文',
   titleEmpty: '请输入内容后再优化',
   titleCommand: '命令内容为空，无可优化',
@@ -337,6 +354,22 @@ const ZH = {
   cfgContextBudget: '上下文预算',
   cfgContextBudget0: '0（关闭注入）',
   cfgContextNote: 'V2 按任务进度与提示词主题检索工作区相关文件后注入优化参考；预算 0 = 不注入（等价基础优化）',
+  // v2.3（§7.2/§7.3）：模式短标签 + 步骤进度文案 + 记忆开关
+  modeShortBase: '基础',
+  modeShortLite: '轻量',
+  modeShortStandard: '标准',
+  modeShortSmart: '智能',
+  stagePrepare: '准备中…',
+  stageHistory: '读取会话…',
+  stageAnalyze: '分析任务…',
+  stageFiles: '检索文件…',
+  stageEvents: '检索会话…',
+  stageContext: '组装上下文…',
+  stageLlm: 'LLM 优化中…',
+  stageDone: '✓',
+  memoryToggle: '记忆',
+  memoryToggleOn: '记忆：开，点击关闭',
+  memoryToggleOff: '记忆：关，点击开启',
 };
 
 const EN = {
@@ -344,7 +377,7 @@ const EN = {
   enhancing: 'Optimizing',
   result: '✓ Optimized · Undo',
   titleIdle: 'Optimize the prompt with an independent LLM call',
-  titleBusy: 'Click to cancel and restore the original text',
+  titleBusy: 'Click to cancel optimization and restore the original text',
   titleResult: 'Restore the original text',
   titleEmpty: 'Type something first to optimize',
   titleCommand: 'Empty command, nothing to optimize',
@@ -447,6 +480,22 @@ const EN = {
   cfgContextBudget: 'Context budget',
   cfgContextBudget0: '0 (no injection)',
   cfgContextNote: 'V2 analyzes task progress and retrieves relevant workspace files before optimizing; budget 0 = no injection (equivalent to basic)',
+  // v2.3（§7.2/§7.3）：模式短标签 + 步骤进度文案 + 记忆开关
+  modeShortBase: 'Basic',
+  modeShortLite: 'Lite',
+  modeShortStandard: 'Standard',
+  modeShortSmart: 'Smart',
+  stagePrepare: 'Preparing…',
+  stageHistory: 'Reading history…',
+  stageAnalyze: 'Analyzing task…',
+  stageFiles: 'Searching files…',
+  stageEvents: 'Searching events…',
+  stageContext: 'Assembling context…',
+  stageLlm: 'Optimizing…',
+  stageDone: '✓',
+  memoryToggle: 'Memory',
+  memoryToggleOn: 'Memory: on · click to turn off',
+  memoryToggleOff: 'Memory: off · click to turn on',
 };
 
 function errorKey(code) {
@@ -658,6 +707,10 @@ function EnhanceButton(props) {
 
   React.useEffect(() => subscribe(sessionId, () => setVersion((v) => v + 1)), [sessionId]);
 
+  // v2.3（§7.2/T25）：订阅配置——模式/记忆切换后按钮标签即时同步
+  const [, setCfg] = React.useState(0);
+  React.useEffect(() => subscribeConfig(() => setCfg((v) => v + 1)), []);
+
   React.useEffect(() => {
     const s = storeFor(sessionId);
     if (s.phase === 'result' && draft !== s.enhanced) {
@@ -683,29 +736,67 @@ function EnhanceButton(props) {
     releaseStoreIfIdle(sessionId);
   }, [sessionId]);
 
+  // v2.3（§7.3）：enhancing 期间轮询 enhance/progress（500ms），stage → 本地进度文案
+  // （hooks 必须位于条件提前 return 之前，保持每次渲染顺序稳定）
+  const s = sessionId !== undefined ? storeFor(sessionId) : null;
+  const phase = s ? s.phase : 'idle';
+  const [stage, setStage] = React.useState(null);
+  React.useEffect(() => {
+    if (sessionId === undefined) return undefined;
+    const st = storeFor(sessionId);
+    if (st.phase !== 'enhancing') { setStage(null); return undefined; }
+    let disposed = false;
+    const seq = st.seq;
+    setStage(null);
+    // v2.3.1：动态 client 无浏览器 timer 全局——经 ctx timer 服务（inject:['timer']）；
+    // 服务不可用时静默降级为默认「优化中…」文案（§7.3）
+    if (!timerSvc || typeof timerSvc.interval !== 'function') return undefined;
+    const disposer = timerSvc.interval(() => {
+      host.call('enhance/progress', { sessionId, seq }).then((r) => {
+        if (disposed || !r || r.ok !== true) return;
+        if (typeof r.stage === 'string') setStage(r.stage);
+      }).catch(() => { /* 轮询失败静默降级为默认「优化中…」文案（§7.3） */ });
+    }, 500);
+    return () => { disposed = true; disposer(); };
+  }, [phase, sessionId, s ? s.seq : 0]);
+
   if (!inputActions || sessionId === undefined) return null;
 
-  const s = storeFor(sessionId);
-  const phase = s.phase;
-
-  let label;
   let onClick;
   let disabled = false;
   let title;
   let cls = 'dsh-enh-btn';
 
   if (phase === 'enhancing') {
-    label = t('enhancing');
+    // 进度文案：stage → i18n 键（stage+Cap）；未知/缺键回退「优化中…」
+    let prog = t('enhancing');
+    if (stage) {
+      const key = 'stage' + stage.charAt(0).toUpperCase() + stage.slice(1);
+      const localized = t(key);
+      if (localized !== key) prog = localized;
+    }
     onClick = () => cancelEnhance(sessionId, inputActions);
     title = t('titleBusy');
     cls += ' dsh-enh-btn-busy dsh-enh-btn-text';
-  } else if (phase === 'result') {
-    label = t('result');
+    return React.createElement('button', {
+      type: 'button',
+      className: cls,
+      onClick,
+      title,
+      tabIndex: -1,
+      'aria-label': t('enhanceButton'),
+    },
+      React.createElement('span', { className: 'dsh-enh-spin', 'aria-hidden': true }),
+      React.createElement('span', { className: 'dsh-enh-progress', 'aria-hidden': true }, prog),
+      React.createElement('span', { className: 'dsh-enh-cancel', 'aria-hidden': true }, t('cancel')),
+    );
+  }
+  if (phase === 'result') {
     onClick = () => undo(sessionId, inputActions);
     title = t('titleResult');
     cls += ' dsh-enh-btn-result dsh-enh-btn-text';
   } else {
-    label = '✨';
+    // v2.3（§7.2）：idle = emoji ✨ + 模式短标签（emoji 系统彩色，不承担状态色）
     const ok = guardPasses(draft, input);
     disabled = !ok;
     onClick = () => {
@@ -716,7 +807,7 @@ function EnhanceButton(props) {
       : draft.trim() === '' ? t('titleEmpty')
       : draft.startsWith('/') ? t('titleCommand')
       : t('titleBusyInput');
-    cls += ' dsh-enh-btn-icon';
+    cls += ' dsh-enh-btn-text';
   }
 
   return React.createElement('button', {
@@ -729,11 +820,32 @@ function EnhanceButton(props) {
     tabIndex: -1,
     'aria-label': t('enhanceButton'),
   },
-    phase === 'enhancing'
-      ? React.createElement('span', { className: 'dsh-enh-spin', 'aria-hidden': true })
-      : null,
-    label,
+    phase === 'result' ? null
+      : React.createElement(React.Fragment, null,
+          React.createElement('span', { className: 'dsh-enh-icon', 'aria-hidden': true }, '✨'),
+          React.createElement('span', { className: 'dsh-enh-mode' }, modeShortLabel(t, configState.value.mode)),
+        ),
+    phase === 'result' ? t('result') : null,
   );
+}
+
+// v2.3（§7.2）：记忆开关——输入框工具行左端（conversation.input.left），用控件自身状态表达记忆：
+// 关=变暗置灰（不可选中视觉，仍可点击开启）/ 开=高饱和橙（点击关闭）；
+// 与设置面板记忆开关下拉同一 config.memory（saveConfig 双向即时同步）。
+function MemoryToggle(props) {
+  const t = makeT(props);
+  const [, force] = React.useState(0);
+  React.useEffect(() => subscribeConfig(() => force((v) => v + 1)), []);
+  const memoryOn = configState.value.memory === true;
+  const aria = memoryOn ? t('memoryToggleOn') : t('memoryToggleOff');
+  return React.createElement('button', {
+    type: 'button',
+    className: 'dsh-enh-mem' + (memoryOn ? ' dsh-enh-mem-on' : ' dsh-enh-mem-off'),
+    onClick: () => saveConfig({ memory: !memoryOn }),
+    title: aria,
+    tabIndex: -1,
+    'aria-label': aria,
+  }, t('memoryToggle'));
 }
 
 function EnhanceBar(props) {
@@ -787,6 +899,9 @@ function EnhanceBar(props) {
 }
 
 let dynFace = null;
+// v2.3.1：动态 client 半部无浏览器 timer 全局（setInterval 不可用）——
+// 轮询定时器改经 ctx timer 服务（inject:['timer']），apply 时赋值
+let timerSvc = null;
 
 function stateKey(state) {
   const map = {
@@ -1423,14 +1538,28 @@ function ModelPluginsSection(props) {
   );
 }
 
+function CordisBadgePlaceholder() {
+  return null;
+}
+
 const CSS = [
   '.dsh-enh-btn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease;white-space:nowrap}',
   '.dsh-enh-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
   '.dsh-enh-btn:disabled{opacity:.45;cursor:not-allowed}',
-  // v22（C6）：按钮不可选中——无焦点环（仅点击触发）
-  '.dsh-enh-btn-icon{width:30px;justify-content:center;font-size:14px;line-height:20px;padding:0}',
   '.dsh-enh-btn-text{padding:0 10px}',
+  // v2.3（§7.2）：idle 态 = emoji ✨ + 模式短标签（emoji 系统彩色，不承担状态色）
+  '.dsh-enh-icon{font-size:14px;line-height:20px}',
+  '.dsh-enh-mode{font-size:13px;line-height:20px}',
   '.dsh-enh-btn-busy{border-color:var(--dsw-alias-state-warn-primary);color:var(--dsw-alias-state-warn-primary)}',
+  // v2.3（§7.4）：enhancing hover 切「取消」——层叠 span（进度文案默认、取消 hover 显示，错误红）
+  '.dsh-enh-btn-busy .dsh-enh-cancel{display:none}',
+  '.dsh-enh-btn-busy:hover .dsh-enh-progress{display:none}',
+  '.dsh-enh-btn-busy:hover .dsh-enh-cancel{display:inline;color:var(--dsw-alias-state-error-primary)}',
+  // v2.3（§7.2）：记忆开关——关=变暗置灰（不可选中视觉）/ 开=高饱和橙；点击切换
+  '.dsh-enh-mem{display:inline-flex;align-items:center;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:transparent;font-size:13px;line-height:20px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease;white-space:nowrap}',
+  '.dsh-enh-mem:hover{background:var(--dsw-alias-bg-layer-2)}',
+  '.dsh-enh-mem-on{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary)}',
+  '.dsh-enh-mem-off{color:var(--dsw-alias-label-tertiary);opacity:.55}',
   '.dsh-enh-btn-result{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}',
   '.dsh-enh-spin{width:11px;height:11px;border-radius:50%;border:2px solid var(--dsw-alias-border-l2);border-top-color:var(--dsw-alias-state-warn-primary);display:inline-block;animation:dsh-enh-rotate .8s linear infinite}',
   '@keyframes dsh-enh-rotate{to{transform:rotate(360deg)}}',
@@ -1503,10 +1632,12 @@ const CSS = [
 ].join('\n');
 
 return {
+  inject: ['timer'],
   apply(ctx) {
     const slots = ctx.get('slots');
     if (slots === undefined) return;
     styles.insert(CSS);
+    timerSvc = ctx.get('timer') || null;
     const locale = ctx.get('locale');
     if (locale !== undefined && typeof locale.register === 'function') {
       ctx.effect(() => locale.register('enhance', 'zh', ZH));
@@ -1523,6 +1654,14 @@ return {
         locale: 'enhance',
       },
       ModelPluginsSection,
+    ));
+    slots.inject('sidebar.footer.action', () => slots.register(
+      { name: 'sidebar.footer.action', id: 'cordis-panel', order: 0 },
+      CordisBadgePlaceholder,
+    ));
+    slots.inject('conversation.input.left', () => slots.register(
+      { name: 'conversation.input.left', id: 'prompt-enhance-memory', order: 5, label: '记忆开关', locale: 'enhance' },
+      MemoryToggle,
     ));
     slots.inject('conversation.input.right', () => slots.register(
       { name: 'conversation.input.right', id: 'prompt-enhance', order: 10, label: '提示词优化', locale: 'enhance' },

@@ -26,7 +26,8 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, shouldIgnoreFile,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
-    buildMemoryBlock, MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE };
+    buildMemoryBlock, MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE,
+    STAGE_SEQUENCE, STAGE_LABELS };
 `);
 const {
   wrapUserText,
@@ -53,6 +54,8 @@ const {
   MODE_TABLE,
   BUDGET_OPTIONS,
   BUDGET_WORKSPACE_TABLE,
+  STAGE_SEQUENCE,
+  STAGE_LABELS,
 } = pureFn();
 
 test('wrapUserText 包装用户输入', () => {
@@ -355,6 +358,25 @@ test('U12 shouldInjectV2 分支判定（表驱动 §4.1）', () => {
   assert.equal(shouldInjectV2('standard', undefined), false);
   assert.equal(shouldInjectV2('turbo', 4000), false); // 非法 → 默认表行（base）
   assert.equal(shouldInjectV2('memory', 4000), false); // v2.2：memory 不再是模式 → 默认表行
+});
+
+test('U24 STAGE 常量/映射完整性（v2.3 §7.3）', () => {
+  // 阶段序列：prepare 为首、llm 为耗时主体、done 收尾；全部 8 阶段无重复
+  assert.equal(STAGE_SEQUENCE[0], 'prepare');
+  assert.equal(STAGE_SEQUENCE[6], 'llm');
+  assert.equal(STAGE_SEQUENCE[7], 'done');
+  assert.equal(new Set(STAGE_SEQUENCE).size, STAGE_SEQUENCE.length);
+  assert.equal(STAGE_SEQUENCE.length, 8);
+  // 映射键与序列一一对应、无缺键
+  const labelKeys = Object.keys(STAGE_LABELS).sort();
+  assert.deepEqual(labelKeys, [...STAGE_SEQUENCE].sort());
+  for (const stage of STAGE_SEQUENCE) {
+    assert.ok(STAGE_LABELS[stage], 'missing label for ' + stage);
+    assert.equal(typeof STAGE_LABELS[stage].zh, 'string');
+    assert.ok(STAGE_LABELS[stage].zh.length > 0, 'empty zh for ' + stage);
+    assert.equal(typeof STAGE_LABELS[stage].en, 'string');
+    assert.ok(STAGE_LABELS[stage].en.length > 0, 'empty en for ' + stage);
+  }
 });
 
 test('U6/U16 extractHistory 过滤与取尾', () => {

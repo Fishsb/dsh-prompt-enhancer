@@ -1,5 +1,9 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Host 半部（v2.2：4 模式体系 + 记忆独立开关）
+// DSH「提示词优化」插件 · Host 半部（v2.3：优化按钮交互升级——阶段进度 + 记忆开关可视化）
+// v2.3（方案「提示词优化方案.md」§7）：① STAGE_* 常量 + pending 记录 stage 标记
+// （prepare→history→analyze→files→events→context→llm），buildV2ContextBlock 注入 onStage 回调；
+// ② 新增 enhance/progress 轮询 RPC（client 500ms 轮询展示步骤进度，纯展示、失败静默降级）；
+// ③ 记忆状态改由 client 输入区记忆开关自身表达（关=变暗置灰 / 开=高饱和橙），host 无行为变化。
 // v2.2（方案「提示词优化方案.md」§0.2/§2/§6）：
 // ① 模式体系收敛 4 模式（base/lite/standard/smart），MODE_TABLE 表驱动（阶段 A/B/C 分发）；
 // ② 记忆功能改为所有模式可开/关的独立开关（config.memory，缺省 false）——记忆块作为
@@ -195,6 +199,27 @@ const MEMORY_PREV_OUTPUT_MAX = 800;
 const MEMORY_BLOCK_BUDGET_MAX = MEMORY_PREV_INPUT_MAX + MEMORY_PREV_OUTPUT_MAX;
 // 记忆块模板（§2.3）
 const MEMORY_BLOCK_TEMPLATE = '【上一轮优化】仅供参考，禁止回显\n原始输入：{prevInput}\n优化输出：{prevOutput}';
+// v2.3（§7.3）：优化阶段常量——enhance 请求生命周期 stage 标记（progress RPC 读取）
+const STAGE_PREPARE = 'prepare';
+const STAGE_HISTORY = 'history';
+const STAGE_ANALYZE = 'analyze';
+const STAGE_FILES = 'files';
+const STAGE_EVENTS = 'events';
+const STAGE_CONTEXT = 'context';
+const STAGE_LLM = 'llm';
+const STAGE_DONE = 'done';
+const STAGE_SEQUENCE = [STAGE_PREPARE, STAGE_HISTORY, STAGE_ANALYZE, STAGE_FILES, STAGE_EVENTS, STAGE_CONTEXT, STAGE_LLM, STAGE_DONE];
+// stage → 文案映射（单测 U24 断言键一致；client 侧 i18n 同键名独立维护）
+const STAGE_LABELS = {
+  prepare: { zh: '准备中…', en: 'Preparing…' },
+  history: { zh: '读取会话…', en: 'Reading history…' },
+  analyze: { zh: '分析任务…', en: 'Analyzing task…' },
+  files: { zh: '检索文件…', en: 'Searching files…' },
+  events: { zh: '检索会话…', en: 'Searching events…' },
+  context: { zh: '组装上下文…', en: 'Assembling context…' },
+  llm: { zh: 'LLM 优化中…', en: 'Optimizing…' },
+  done: { zh: '✓', en: '✓' },
+};
 
 // 模式解析（表驱动）：显式 mode 白名单（4 模式）；旧 engine/context.mode 迁移；缺省/非法 → base
 // v2.2：记忆模式已删除——'memory' 值由 validateConfig 迁移为 lite + memory:true（此处落到 base 兜底）
@@ -928,7 +953,10 @@ async function v2SearchEvents(services, sessionId, keywords, cfg) {
 // 阶段 A/B/C 汇总：返回 { block, log }（全部不可用 → { block: '', log: 'none' }）
 // v2.2（§6.5）：4 模式管道（base/lite 空块 / standard/smart 检索）+ 记忆块叠加模块——
 // 记忆开 + 有记忆 → block = 模式块 + 记忆块（记忆优先占用预算 ≤1200，模式块用剩余）。
-async function buildV2ContextBlock(services, sessionId, text, cfg) {
+// v2.3（§7.3）：onStage 回调（由 enhance handler 注入，写 pending 记录的 stage 字段；
+// 纯函数本体不接触模块状态，回调缺省为 no-op 保持 PURE 区段可切片）。
+async function buildV2ContextBlock(services, sessionId, text, cfg, onStage) {
+  const mark = typeof onStage === 'function' ? onStage : () => {};
   const row = MODE_TABLE[cfg.mode] || MODE_TABLE[DEFAULT_MODE];
   const budget = cfg.context.budgetChars || 0;
   // ===== 记忆块（叠加模块，所有模式适用）=====
@@ -948,6 +976,7 @@ async function buildV2ContextBlock(services, sessionId, text, cfg) {
     const sq = services.sessionQuery;
     if (sq && typeof sq.listEvents === 'function' && typeof sq.filterEvents === 'function') {
       try {
+        mark(STAGE_HISTORY);
         const records = await sq.listEvents(sessionId);
         // 尾部反向找最近的消息事件 seq（listEvents 升序，无文本；seq 用于 filterEvents 范围过滤）
         const msgSeqs = [];
@@ -974,17 +1003,21 @@ async function buildV2ContextBlock(services, sessionId, text, cfg) {
     const root = services.sandboxPolicy && services.sandboxPolicy.workspaceRoot;
     hlog('[enhance] v2 workspaceRoot=' + (root || '(none)') + ' fs=' + (services.fs ? 'yes' : 'no'));
     // 阶段 A（表驱动 phaseA：llm 智能 / rule 正则 / none 跳过）
+    mark(STAGE_ANALYZE);
     const { progress, mode } = await v2ResolveProgress(services, historyText, cfg);
     // 阶段 B（表驱动 phaseB：file+event 全量 / none 跳过）
     const focus = progress && Array.isArray(progress.focus) ? progress.focus : [];
     const keywords = extractKeywords(text, focus);
+    mark(STAGE_FILES);
     const files = await v2SearchWorkspace(services, keywords, cfg);
+    mark(STAGE_EVENTS);
     const eventsHits = await v2SearchEvents(services, sessionId, keywords, cfg);
     // 阶段 C（inject）：模式块使用剩余预算（记忆优先占用）
     modeBlock = buildContextBlock(progress, files, eventsHits, Math.max(0, budget - memoryUsed));
     modeLog = modeBlock === '' ? 'none' : (mode + ' files=' + files.length + ' events=' + eventsHits.length + ' chars=' + modeBlock.length);
   }
   // ===== 汇总：模式块 + 记忆块（叠加）=====
+  mark(STAGE_CONTEXT);
   const parts = [];
   if (modeBlock) parts.push(modeBlock);
   if (memoryBlock) parts.push(memoryBlock);
@@ -1260,6 +1293,15 @@ return {
 
     harness.handle('logs/last', async () => ({ ok: true, lines: LOG_RING.slice() }));
 
+    // v2.3（§7.3）：优化进度轮询 RPC——从 pending Map 读 stage（纯展示，失败静默降级）
+    harness.handle('enhance/progress', async (args) => {
+      const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : '';
+      const seq = args && typeof args.seq === 'number' ? args.seq : -1;
+      const rec = pending.get(requestKey(sessionId, seq));
+      if (!rec) return { ok: false, code: 'NO_RECORD' };
+      return { ok: true, stage: rec.stage || STAGE_PREPARE };
+    });
+
     harness.handle('enhance', async (args) => {
       const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : 'unknown';
       const seq = args && typeof args.seq === 'number' ? args.seq : -1;
@@ -1271,6 +1313,10 @@ return {
       if (llm === undefined) {
         return { ok: false, code: 'NO_LLM', message: friendlyMessage({ code: 'NO_LLM' }) };
       }
+
+      // v2.3（§7.3）：记录提前创建（入参校验后）——stage 从 prepare 起可被 progress RPC 轮询
+      const rec = { cancelled: false, timedOut: false, iterator: null, stage: STAGE_PREPARE };
+      pending.set(key, rec);
 
       const cfg = validateConfig(args && args.config);
       // v2.1（§2.2）：client 已判定实际模式（显式/auto/seed），请求 mode 覆盖解析值
@@ -1292,7 +1338,7 @@ return {
           timer: ctx.timer,
           chain,
           memory: args && args.memory && typeof args.memory === 'object' ? args.memory : null,
-        }, sessionId, text, cfg);
+        }, sessionId, text, cfg, (st) => { rec.stage = st; });
         v2Block = v2.block;
         v2Log = v2.log;
         if (v2Block !== '') system = system + '\n\n' + CONTEXT_GUARD;
@@ -1304,8 +1350,6 @@ return {
       const modeTag = args && args.seed === true ? cfg.mode + '(seed)' : cfg.mode;
       hlog('[enhance] cfg session=' + sessionId + ' mode=' + modeTag + ' ctx=' + v2Log + ' chain=' + (chain.length > 0 ? chain.map((f) => f.provider + '/' + f.model).join(',') : '-') + ' timeout=' + timeoutMs + ' maxTokens=' + maxTokens + ' outputLimit=' + outputLimit + ' template=' + (system === SYSTEM_PROMPT ? 'builtin' : (system.indexOf(CONTEXT_GUARD) !== -1 ? 'custom+v2guard' : 'custom')));
 
-      const rec = { cancelled: false, timedOut: false, iterator: null };
-      pending.set(key, rec);
       const timeoutDisposer = ctx.timer.timeout(() => {
         markAndAbort(key, 'timedOut');
       }, timeoutMs);
@@ -1318,6 +1362,7 @@ return {
             return { ok: false, code: rec.timedOut ? 'TIMEOUT' : 'ABORTED', message: friendlyMessage({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED' }) };
           }
           hlog('[enhance] try session=' + sessionId + ' provider=' + entry.provider + ' model=' + entry.model + (entry.reasoningEffort ? ' effort=' + entry.reasoningEffort : '') + ' seq=' + seq);
+          rec.stage = STAGE_LLM;
           const stream = llm.stream({
             provider: entry.provider,
             model: entry.model,
