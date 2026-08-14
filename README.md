@@ -23,7 +23,7 @@ DeepSeek Harness (DSH) 提示词增强插件：输入模糊提示词 → 一键�
 
 ## 截图
 
-![设置面板](docs/screenshots/settings-light.png)
+![设置面板](docs/screenshots/settings-v2.4.3.png)
 
 ## 安装
 

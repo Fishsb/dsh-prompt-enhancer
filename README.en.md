@@ -23,7 +23,7 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 
 ## Screenshots
 
-![Settings panel](docs/screenshots/settings-light.png)
+![Settings panel](docs/screenshots/settings-v2.4.3.png)
 
 ## Install
 
