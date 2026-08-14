@@ -17,6 +17,16 @@ DeepSeek Harness (DSH) 提示词增强插件：输入模糊提示词 → 一键�
 
 ## 安装
 
+### 方式一：bundle 一键安装（推荐）
+
+```sh
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer
+```
+
+安装后重启 DSH（`dsh web`），输入框工具行出现 **✨** 按钮即安装成功。更新用 `dsh plugin --profile web update dsh-prompt-enhancer`，卸载用 `dsh plugin --profile web remove dsh-prompt-enhancer`。
+
+### 方式二：动态 Cordis 安装
+
 动态 Cordis 插件（host + client 双半部），在 DSH 会话内通过 cordis 工具链安装：
 
 1. 在 DSH 会话中让 agent 读取本仓库的 `plugin-host.js`（host 半部）与 `plugin-client.js`（client 半部）
@@ -37,7 +47,7 @@ DeepSeek Harness (DSH) 提示词增强插件：输入模糊提示词 → 一键�
 4. 等待我在浏览器授权后完成
 ```
 
-> bundle 分发（`.dsh.plugin` / `cordis.patch.yml` 一键安装）规划中。
+> bundle 分发（`dsh plugin add` 一键安装）已支持，见上方「方式一」。
 
 ## 使用
 

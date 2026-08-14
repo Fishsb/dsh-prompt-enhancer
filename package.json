@@ -1,0 +1,49 @@
+{
+  "name": "dsh-prompt-enhancer",
+  "version": "2.2.0",
+  "description": "One-click prompt enhancement for DeepSeek Harness: fuzzy draft → independent LLM call → polished text in the composer, with undo.",
+  "main": "lib/index.cjs",
+  "type": "commonjs",
+  "files": [
+    "lib",
+    "plugin-host.js",
+    "plugin-client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./lib/index.cjs",
+    "./client": "./lib/client.cjs",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "node scripts/build-client.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "plugin",
+    "prompt-enhancer",
+    "dsh-plugin"
+  ],
+  "license": "MIT"
+}

@@ -1423,10 +1423,6 @@ function ModelPluginsSection(props) {
   );
 }
 
-function CordisBadgePlaceholder() {
-  return null;
-}
-
 const CSS = [
   '.dsh-enh-btn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease;white-space:nowrap}',
   '.dsh-enh-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
@@ -1527,10 +1523,6 @@ return {
         locale: 'enhance',
       },
       ModelPluginsSection,
-    ));
-    slots.inject('sidebar.footer.action', () => slots.register(
-      { name: 'sidebar.footer.action', id: 'cordis-panel', order: 0 },
-      CordisBadgePlaceholder,
     ));
     slots.inject('conversation.input.right', () => slots.register(
       { name: 'conversation.input.right', id: 'prompt-enhance', order: 10, label: '提示词优化', locale: 'enhance' },

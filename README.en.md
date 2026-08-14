@@ -17,6 +17,16 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 
 ## Install
 
+### Option 1: bundle one-click install (recommended)
+
+```sh
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer
+```
+
+Restart DSH (`dsh web`) after installing — the ✨ button appears in the composer toolbar. Update with `dsh plugin --profile web update dsh-prompt-enhancer`, remove with `dsh plugin --profile web remove dsh-prompt-enhancer`.
+
+### Option 2: dynamic Cordis install
+
 Dynamic Cordis plugin (host + client halves), installed inside a DSH session via the cordis toolchain:
 
 1. Ask the agent in a DSH session to read `plugin-host.js` (host half) and `plugin-client.js` (client half) from this repo
@@ -37,7 +47,7 @@ Install the dsh-prompt-enhancer plugin for me:
 4. Wait for me to approve in the browser
 ```
 
-> Bundle distribution (`.dsh.plugin` / `cordis.patch.yml` one-click install) is planned.
+> Bundle distribution (`dsh plugin add` one-click install) is supported — see Option 1 above.
 
 ## Usage
 
