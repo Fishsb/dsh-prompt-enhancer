@@ -46,7 +46,18 @@ dsh plugin --profile web update dsh-prompt-enhancer
 dsh plugin --profile web remove dsh-prompt-enhancer
 ```
 
-### 方式二：动态 Cordis 安装
+### 方式二：下载安装包离线安装
+
+从 [Releases 页面](https://github.com/Fishsb/dsh-prompt-enhancer/releases) 下载 `dsh-prompt-enhancer-<版本>.tgz`（如 `dsh-prompt-enhancer-2.4.4.tgz`），然后安装：
+
+```sh
+dsh plugin --profile web add ./dsh-prompt-enhancer-2.4.4.tgz
+```
+
+> 安装包为 pnpm 打包的完整产物（含预构建 `lib/`），无需联网、无需构建授权；装完同样重启 `dsh web` 生效。
+> 注：GitHub 自动生成的 `Source code (zip)` 源码包也可解压后以目录方式安装（`add <解压目录>`），但目录安装为 link 形式，删除解压目录会导致插件失效——正式使用请用 tgz 安装包。
+
+### 方式三：动态 Cordis 安装
 
 在 DSH 会话中让 agent 读取本仓库 `plugin-host.js`（host 半部）与 `plugin-client.js`（client 半部），用 `cordis_define` 定义（`plugin.kind: 'new'`）后 `cordis_run`（mode: `run`），首次运行 client 半部需浏览器授权。
 
