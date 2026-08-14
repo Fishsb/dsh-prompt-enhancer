@@ -1,5 +1,5 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v20：内置兜底链硬编码 DeepSeek 官方模型）
+// DSH「提示词优化」插件 · Client 半部（v22：设置页调整——兜底链并入主模型 + 按厂家配置 + 测试图标）
 // v16：整合「模型与插件」单入口（三区 tab + 折叠区块）+ 斜杠命令守卫修复
 // v17：思考开关/等级 + 连通性测试
 // v18：① config 升级 v2（键 dsh.enhance.config.v2；v1 自动迁移写回并清理）：
@@ -12,6 +12,11 @@
 // v20：内置兜底链（BUILTIN_CHAIN）硬编码指向 DeepSeek 官方模型（deepseek-official），
 //      供「恢复默认」与 autochain 失败兜底使用；host 侧 autochain 亦返回 DeepSeek 官方链。
 // v21：P1-3 修复 sessionStores 内存泄漏——组件卸载且状态空闲时 releaseStoreIfIdle 释放条目
+// v22：① 移除「自定义模型」「加载顺序」模块（config 字段保留兼容）；
+//      ② 兜底链并入主模型区块（子分区，不再独立折叠）；
+//      ③ FallbackRow 按厂家区分：provider/model 双联动下拉；
+//      ④ 每条兜底末尾加测试连通性小图标（行内结果）；
+//      ⑤ 优化按钮不可选中（tabIndex=-1，无焦点环），仅点击触发。
 // ============================================================================
 
 const CONFIG_KEY = 'dsh.enhance.config.v2';
@@ -581,6 +586,8 @@ function EnhanceButton(props) {
     onClick,
     disabled,
     title,
+    // v22（C6）：不可选中（不可 Tab 聚焦），仅支持点击触发
+    tabIndex: -1,
     'aria-label': t('enhanceButton'),
   },
     phase === 'enhancing'
@@ -873,6 +880,10 @@ function ModelMainSection(props) {
   const saveReasoning = props.saveReasoning;
   const onProvider = props.onProvider;
   const onModel = props.onModel;
+  // v22（C3）：并入兜底链子分区
+  const fallback = props.fallback;
+  const candidates = props.candidates;
+  const saveFallback = props.saveFallback;
   const [reasoning, setReasoning] = React.useState(null);   // {efforts, defaultEffort} | null
   const [resolveError, setResolveError] = React.useState(null);
   const [testing, setTesting] = React.useState(false);
@@ -920,7 +931,8 @@ function ModelMainSection(props) {
     }).then(() => setTesting(false));
   };
 
-  const summary = (cfg.main.provider || '—') + ' / ' + (cfg.main.model || '—') + (reasoningEffort !== '' ? ' · ' + reasoningEffort : '');
+  // v22（C3）：摘要追加兜底链数量
+  const summary = (cfg.main.provider || '—') + ' / ' + (cfg.main.model || '—') + (reasoningEffort !== '' ? ' · ' + reasoningEffort : '') + (fallback && fallback.length > 0 ? ' · 兜底 ' + fallback.length : ' · 兜底 0');
   let body;
   if (providers === null) {
     body = React.createElement('p', { className: 'dsh-plg-note' }, t('pluginsClientPending'));
@@ -979,22 +991,27 @@ function ModelMainSection(props) {
         }, testing ? t('cfgTesting') : t('cfgTest')),
         testLine,
       ),
+      // v22（C3）：兜底链子分区并入主模型区块
+      React.createElement(ModelFallbackSection, { t: t, fallback: fallback || [], candidates: candidates || [], providers: providers, saveFallback: saveFallback }),
     );
   }
   return React.createElement(CollapsibleSection, { title: t('secMain'), summary }, body);
 }
 
-// 兜底链条目行（v18：模型选择 + 独立思考开关/等级（懒加载 efforts）+ 上移/下移/删除）
+// 兜底链条目行（v22：按厂家区分——provider/model 双联动下拉 + 行尾测试连通性图标 + 思考开关/等级 + 上移/下移/删除）
 function FallbackRow(props) {
   const t = makeT(props);
   const entry = props.entry;
   const index = props.index;
   const count = props.count;
-  const candidates = props.candidates;
+  const providers = props.providers;       // [{provider, name, models:[{id,name}]}]
+  const candidates = props.candidates;     // 跨厂家候选（含自定义，兼容存量）
   const onChange = props.onChange;
   const onMove = props.onMove;
   const onRemove = props.onRemove;
   const [reasoning, setReasoning] = React.useState(null);
+  const [testing, setTesting] = React.useState(false);
+  const [testResult, setTestResult] = React.useState(null); // {ok,latencyMs} | {ok:false,message} | null
 
   React.useEffect(() => {
     setReasoning(null);
@@ -1008,23 +1025,54 @@ function FallbackRow(props) {
     return () => { cancelled = true; };
   }, [entry.provider, entry.model]);
 
+  // v22（C5）：行内连通性测试（复用 host models/test）
+  const runTest = () => {
+    if (testing || !entry.provider || !entry.model) return;
+    setTesting(true);
+    setTestResult(null);
+    host.call('models/test', { provider: entry.provider, model: entry.model }).then((res) => {
+      const r = res && typeof res === 'object' ? res : {};
+      setTestResult(r.ok ? { ok: true, latencyMs: r.latencyMs } : { ok: false, message: r.message || r.code || '' });
+    }).catch(() => {
+      setTestResult({ ok: false, message: t('errNETWORK') });
+    }).then(() => setTesting(false));
+  };
+
   const effortOn = !!(entry.reasoning && entry.reasoning.enabled);
   const levelOptions = reasoning ? reasoning.efforts.map((e) => React.createElement('option', { key: e.id, value: e.id }, e.name)) : [];
   const levelValue = effortOn ? entry.reasoning.effort : (reasoning ? (reasoning.defaultEffort || reasoning.efforts[0].id) : '');
-  const value = entry.provider + '/' + entry.model;
+
+  // v22（C4）：按厂家区分——厂家下拉选项 = providers；模型下拉 = 当前厂家模型 + 该厂家自定义候选
+  const currentProvider = providers && providers.find((p) => p.provider === entry.provider);
+  const modelOptions = (currentProvider ? currentProvider.models || [] : [])
+    .concat(candidates ? candidates.filter((c) => c.custom && c.provider === entry.provider).map((c) => ({ id: c.model, name: c.name })) : []);
+  const onProviderChange = (e) => {
+    const provider = e.target.value;
+    const p = providers && providers.find((x) => x.provider === provider);
+    const first = p && p.models && p.models[0] ? p.models[0].id : '';
+    onChange({ provider, model: first, reasoning: { enabled: false, effort: '' } });
+  };
+
+  let testLine = null;
+  if (testResult) {
+    testLine = testResult.ok
+      ? React.createElement('span', { className: 'dsh-plg-test-ok' }, t('cfgTestOk').replace('{ms}', String(testResult.latencyMs)))
+      : React.createElement('span', { className: 'dsh-plg-test-fail' }, t('cfgTestFail').replace('{msg}', testResult.message || ''));
+  }
 
   return React.createElement('div', { className: 'dsh-plg-row' },
     React.createElement('span', { className: 'dsh-plg-muted' }, String(index + 1)),
     React.createElement('select', {
+      className: 'dsh-plg-select dsh-plg-select-narrow',
+      value: entry.provider || '',
+      onChange: onProviderChange,
+      children: (providers || []).map((p) => React.createElement('option', { key: p.provider, value: p.provider }, p.name || p.provider)),
+    }),
+    React.createElement('select', {
       className: 'dsh-plg-select',
-      value,
-      onChange: (e) => {
-        const sep = e.target.value.indexOf('/');
-        const provider = e.target.value.slice(0, sep);
-        const model = e.target.value.slice(sep + 1);
-        onChange({ provider, model, reasoning: { enabled: false, effort: '' } });
-      },
-      children: candidates.map((c) => React.createElement('option', { key: c.provider + '/' + c.model, value: c.provider + '/' + c.model }, c.name + (c.custom ? '（自定义）' : ''))),
+      value: entry.model || '',
+      onChange: (e) => onChange({ provider: entry.provider, model: e.target.value, reasoning: { enabled: false, effort: '' } }),
+      children: modelOptions.map((m) => React.createElement('option', { key: m.id, value: m.id }, m.name || m.id)),
     }),
     reasoning
       ? React.createElement(React.Fragment, null,
@@ -1046,17 +1094,28 @@ function FallbackRow(props) {
           }),
         )
       : null,
+    // v22（C5）：测试连通性小图标（风格与整体一致：无背景 + token 边框/圆角 + hover 反馈）
+    React.createElement('button', {
+      type: 'button',
+      className: 'dsh-plg-btn dsh-plg-btn-icononly dsh-plg-testicon',
+      disabled: testing || !entry.provider || !entry.model,
+      onClick: runTest,
+      title: t('cfgTest'),
+      'aria-label': t('cfgTest'),
+    }, testing ? '…' : '⛓'),
+    testLine,
     React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', disabled: index === 0, onClick: () => onMove(-1), title: '↑' }, '↑'),
     React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', disabled: index === count - 1, onClick: () => onMove(1), title: '↓' }, '↓'),
     React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', onClick: onRemove, title: '✕' }, '✕'),
   );
 }
 
-// 兜底链区块（v18：独立配置项，可增删改序，每条单独设置 reasoning）
+// 兜底链子分区（v22：并入主模型区块，按厂家区分配置）
 function ModelFallbackSection(props) {
   const t = makeT(props);
   const fallback = props.fallback || [];
   const candidates = props.candidates || [];
+  const providers = props.providers || [];
   const saveFallback = props.saveFallback;
 
   const addFallback = () => {
@@ -1104,6 +1163,7 @@ function ModelFallbackSection(props) {
       entry: entry,
       index: index,
       count: fallback.length,
+      providers: providers,
       candidates: candidates,
       onChange: (e) => updateEntry(index, e),
       onMove: (d) => move(index, d),
@@ -1116,131 +1176,12 @@ function ModelFallbackSection(props) {
     ),
     React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgFallbackNote')),
   );
-  return React.createElement(CollapsibleSection, { title: t('secFallback'), summary }, body);
-}
-
-// 自定义模型区块（v18：表单添加即连通性测试；列表可删除）
-function ModelCustomSection(props) {
-  const t = makeT(props);
-  const providers = props.providers || [];
-  const customModels = props.customModels || [];
-  const saveCustom = props.saveCustom;
-  const [form, setForm] = React.useState({ provider: '', model: '', name: '' });
-  const [testingKey, setTestingKey] = React.useState(null);
-  const [tests, setTests] = React.useState({});
-
-  const addCustom = () => {
-    const provider = form.provider || (providers[0] && providers[0].provider) || '';
-    const model = form.model.trim();
-    if (!provider || !model) return;
-    if (model.indexOf('/') !== -1) return; // 模型 ID 不允许包含 /
-    if (customModels.some((c) => c.provider === provider && c.model === model)) return;
-    const next = customModels.slice();
-    next.push({ provider, model, name: form.name.trim() || model });
-    saveCustom(next);
-    setForm({ provider, model: '', name: '' });
-    setTestingKey(provider + '/' + model);
-    host.call('models/test', { provider, model }).then((res) => {
-      const r = res && typeof res === 'object' ? res : {};
-      setTests((prev) => ({ ...prev, [provider + '/' + model]: r.ok ? { ok: true, latencyMs: r.latencyMs } : { ok: false, message: r.message || r.code || '' } }));
-    }).catch(() => {
-      setTests((prev) => ({ ...prev, [provider + '/' + model]: { ok: false, message: t('errNETWORK') } }));
-    }).then(() => setTestingKey(null));
-  };
-
-  const summary = customModels.length > 0 ? String(customModels.length) + ' 个' : t('secCustomEmpty');
-  const body = React.createElement(React.Fragment, null,
-    React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('select', {
-        className: 'dsh-plg-select dsh-plg-select-narrow',
-        value: form.provider || (providers[0] && providers[0].provider) || '',
-        onChange: (e) => setForm({ ...form, provider: e.target.value }),
-        children: providers.map((p) => React.createElement('option', { key: p.provider, value: p.provider }, p.name || p.provider)),
-      }),
-      React.createElement('input', {
-        className: 'dsh-plg-input',
-        placeholder: '模型 ID',
-        value: form.model,
-        onChange: (e) => setForm({ ...form, model: e.target.value }),
-      }),
-      React.createElement('input', {
-        className: 'dsh-plg-input',
-        placeholder: t('cfgCustomName'),
-        value: form.name,
-        onChange: (e) => setForm({ ...form, name: e.target.value }),
-      }),
-      React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: addCustom }, t('cfgAddCustom')),
-    ),
-    customModels.map((c) => {
-      const key = c.provider + '/' + c.model;
-      const test = tests[key];
-      const testing = testingKey === key;
-      return React.createElement('div', { key: key, className: 'dsh-plg-row' },
-        React.createElement('span', { className: 'dsh-plg-muted' }, c.provider + '/' + c.model + (c.name && c.name !== c.model ? '（' + c.name + '）' : '')),
-        testing ? React.createElement('span', { className: 'dsh-plg-muted' }, t('cfgTesting'))
-          : test
-            ? test.ok
-              ? React.createElement('span', { className: 'dsh-plg-test-ok' }, t('cfgTestOk').replace('{ms}', String(test.latencyMs)))
-              : React.createElement('span', { className: 'dsh-plg-test-fail' }, t('cfgTestFail').replace('{msg}', test.message || ''))
-            : null,
-        React.createElement('button', {
-          type: 'button',
-          className: 'dsh-plg-btn dsh-plg-btn-icononly',
-          onClick: () => saveCustom(customModels.filter((x) => !(x.provider === c.provider && x.model === c.model))),
-        }, '✕'),
-      );
-    }),
-    React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgCustomNote')),
+  // v22（C3）：作为主模型区块内的子分区内容返回（不再独立折叠区块）
+  return React.createElement('div', { className: 'dsh-cfg-sec-body dsh-cfg-fallback-inner' },
+    React.createElement('div', { className: 'dsh-cfg-sec-subtitle' }, t('secFallback')),
+    body,
   );
-  return React.createElement(CollapsibleSection, { title: t('secCustom'), summary }, body);
 }
-
-// 加载顺序区块（v18：全量模型（目录+自定义）上移/下移，仅影响展示）
-function ModelOrderSection(props) {
-  const t = makeT(props);
-  const candidates = props.candidates || [];
-  const order = props.order || [];
-  const saveOrder = props.saveOrder;
-
-  const move = (key, delta) => {
-    const full = order.slice();
-    for (const c of candidates) {
-      const k = c.provider + '/' + c.model;
-      if (!full.includes(k)) full.push(k);
-    }
-    const i = full.indexOf(key);
-    const j = i + delta;
-    if (i === -1 || j < 0 || j >= full.length) return;
-    const tmp = full[i];
-    full[i] = full[j];
-    full[j] = tmp;
-    saveOrder(full);
-  };
-
-  const summary = candidates.length > 0 ? t('secFallbackCount').replace('{n}', String(candidates.length)) : t('secOrderEmpty');
-  const list = candidates.slice().sort((a, b) => {
-    const ka = a.provider + '/' + a.model;
-    const kb = b.provider + '/' + b.model;
-    const ia = order.indexOf(ka);
-    const ib = order.indexOf(kb);
-    return (ia === -1 ? 1e9 : ia) - (ib === -1 ? 1e9 : ib);
-  });
-  const body = React.createElement(React.Fragment, null,
-    list.map((c) => {
-      const key = c.provider + '/' + c.model;
-      const pos = list.indexOf(c);
-      return React.createElement('div', { key: key, className: 'dsh-plg-row' },
-        React.createElement('span', { className: 'dsh-plg-muted' }, c.name + (c.custom ? '（自定义）' : '')),
-        React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', disabled: pos === 0, onClick: () => move(key, -1) }, '↑'),
-        React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', disabled: pos === list.length - 1, onClick: () => move(key, 1) }, '↓'),
-      );
-    }),
-    candidates.length === 0 ? React.createElement('p', { className: 'dsh-plg-note' }, t('secOrderEmpty')) : null,
-    React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgOrderNote')),
-  );
-  return React.createElement(CollapsibleSection, { title: t('secOrder'), summary }, body);
-}
-
 // 模型配置 tab（v18：helpers + fresh install 继承 + 四区块）
 function buildCandidates(providers, customModels, order) {
   const list = [];
@@ -1326,8 +1267,6 @@ function ModelConfigTab(props) {
   const saveMain = (patch) => saveConfig({ main: { ...cfg.main, ...patch } });
   const saveReasoning = (r) => saveConfig({ main: { ...cfg.main, reasoning: { ...cfg.main.reasoning, ...r } } });
   const saveFallback = (fallback) => saveConfig({ fallback });
-  const saveCustom = (customModels) => saveConfig({ customModels });
-  const saveOrder = (order) => saveConfig({ order });
   const onProvider = (e) => {
     const provider = e.target.value;
     const p = providers.find((x) => x.provider === provider);
@@ -1339,10 +1278,8 @@ function ModelConfigTab(props) {
   return React.createElement(React.Fragment, null,
     error ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, error) : null,
     inherited ? React.createElement('p', { className: 'dsh-plg-note dsh-plg-inherit' }, t('cfgInherited')) : null,
-    React.createElement(ModelMainSection, { t: t, cfg: cfg, providers: providers, modelOptions: modelOptions, saveMain: saveMain, saveReasoning: saveReasoning, onProvider: onProvider, onModel: onModel }),
-    React.createElement(ModelFallbackSection, { t: t, fallback: cfg.fallback, candidates: candidates, saveFallback: saveFallback }),
-    React.createElement(ModelCustomSection, { t: t, providers: providers || [], customModels: cfg.customModels, saveCustom: saveCustom }),
-    React.createElement(ModelOrderSection, { t: t, candidates: candidates, order: cfg.order, saveOrder: saveOrder }),
+    // v22：兜底链并入主模型区块（C3）；自定义模型/加载顺序模块已移除（C1/C2）
+    React.createElement(ModelMainSection, { t: t, cfg: cfg, providers: providers, modelOptions: modelOptions, saveMain: saveMain, saveReasoning: saveReasoning, onProvider: onProvider, onModel: onModel, fallback: cfg.fallback, candidates: candidates, saveFallback: saveFallback }),
   );
 }
 
@@ -1433,7 +1370,7 @@ const CSS = [
   '.dsh-enh-btn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease;white-space:nowrap}',
   '.dsh-enh-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
   '.dsh-enh-btn:disabled{opacity:.45;cursor:not-allowed}',
-  '.dsh-enh-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
+  // v22（C6）：按钮不可选中——无焦点环（仅点击触发）
   '.dsh-enh-btn-icon{width:30px;justify-content:center;font-size:14px;line-height:20px;padding:0}',
   '.dsh-enh-btn-text{padding:0 10px}',
   '.dsh-enh-btn-busy{border-color:var(--dsw-alias-state-warn-primary);color:var(--dsw-alias-state-warn-primary)}',
@@ -1494,6 +1431,12 @@ const CSS = [
   '.dsh-plg-input{flex:1;min-width:0;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:4px 6px}',
   '.dsh-plg-btn-icononly{min-width:26px;padding:3px 4px}',
   '.dsh-plg-inherit{color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:16px}',
+  // v22（C5）：兜底行内测试连通性小图标（与整体一致：无背景 + token 边框/圆角 + hover 反馈）
+  '.dsh-plg-testicon{min-width:24px;padding:2px 3px;font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary)}',
+  '.dsh-plg-testicon:hover:not(:disabled){color:var(--dsw-alias-label-primary)}',
+  // v22（C3）：主模型区块内兜底链子分区（小标题 + 内边距层级）
+  '.dsh-cfg-fallback-inner{border-top:1px solid var(--dsw-alias-border-l1);margin-top:8px;padding-top:8px}',
+  '.dsh-cfg-sec-subtitle{font-size:12px;line-height:16px;font-weight:600;color:var(--dsw-alias-label-secondary);margin:0 0 6px}',
 ].join('\n');
 
 return {
