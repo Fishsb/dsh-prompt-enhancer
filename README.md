@@ -27,13 +27,19 @@ DeepSeek Harness (DSH) 提示词增强插件：输入模糊提示词 → 一键�
 
 ## 安装
 
-### 方式一：bundle 一键安装（推荐）
+### 方式一：一条命令（推荐）
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v2.4.4
 ```
 
-安装后重启 DSH（`dsh web`），输入框工具行出现 ✨ 按钮即安装成功。更新 / 卸载：
+安装后重启 DSH（`dsh web`），输入框工具行出现 ✨ 按钮即安装成功。
+
+> 前提：本机已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，且 `pnpm` 在 PATH 中（`npm i -g pnpm` 或 `corepack enable`）。
+> `#v2.4.4` 为版本锁定（可换成任意 [Release tag](https://github.com/Fishsb/dsh-prompt-enhancer/releases)），避免装到未发布的主分支。
+> 若 pnpm 提示需要授权构建（`allowBuilds`），把提示的包 key 加进 `~/.dsh/profiles/web/pnpm-workspace.yaml` 的 `allowBuilds` 后重跑即可。
+
+更新 / 卸载：
 
 ```sh
 dsh plugin --profile web update dsh-prompt-enhancer
