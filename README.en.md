@@ -13,11 +13,25 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 
 ## Install
 
-Dynamic Cordis plugin (host + client halves):
+Dynamic Cordis plugin (host + client halves), installed inside a DSH session via the cordis toolchain:
 
-1. Place `plugin-host.js` and `plugin-client.js` where the DSH session can reach them
-2. Define and run the plugin in a DSH session (both halves must be registered)
-3. After the first authorized run, the ✨ button appears in the composer tool row
+1. Ask the DSH agent to read `plugin-host.js` (host half) and `plugin-client.js` (client half) from this repository
+2. Define the plugin with `cordis_define`: `code.host` = full content of plugin-host.js, `code.client` = full content of plugin-client.js (`plugin.kind: 'new'`), which returns `pluginId` / `packageId`
+3. Run it with `cordis_run` (mode: `run`)
+4. The first client run requires browser approval
+5. After authorization, the ✨ button appears in the composer tool row
+
+> Note: the dynamic plugin's client half attaches to the page connection active at run time; it unloads on page refresh — re-run `cordis_run` to restore.
+
+### Quick install (copy into any DSH session)
+
+```
+Install the dsh-prompt-enhancer plugin:
+1. Read plugin-host.js and plugin-client.js from https://github.com/Fishsb/dsh-prompt-enhancer
+2. Define the plugin with cordis_define: code.host = full plugin-host.js, code.client = full plugin-client.js, plugin.kind = new
+3. cordis_run the returned pluginId/packageId (mode: run)
+4. Wait for my browser approval, then it is installed
+```
 
 > A bundle distribution (`dsh.plugin` / `cordis.patch.yml` one-command install) is planned.
 

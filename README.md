@@ -13,11 +13,25 @@ DeepSeek Harness (DSH) 提示词增强插件：输入模糊提示词 → 一键�
 
 ## 安装
 
-动态 Cordis 插件（host + client 双半部）：
+动态 Cordis 插件（host + client 双半部），在 DSH 会话内通过 cordis 工具链安装：
 
-1. 将 `plugin-host.js` 与 `plugin-client.js` 放到 DSH 会话可访问的目录
-2. 在 DSH 会话中定义并运行插件（host + client 双半部均需注册）
-3. 首次运行授权后，输入框工具行出现 ✨ 按钮即安装成功
+1. 在 DSH 会话中让 agent 读取本仓库的 `plugin-host.js`（host 半部）与 `plugin-client.js`（client 半部）
+2. 用 `cordis_define` 定义插件：`code.host` 填 plugin-host.js 全文，`code.client` 填 plugin-client.js 全文（新插件 `plugin.kind: 'new'`），返回 `pluginId` / `packageId`
+3. 用 `cordis_run` 运行（mode: `run`）
+4. 首次运行 client 半部需在浏览器批准授权
+5. 授权后输入框工具行出现 ✨ 按钮即安装成功
+
+> 提示：动态插件 client 半部附着于激活时的页面连接，页面刷新后会卸载，重新 `cordis_run` 即可恢复。
+
+### 快捷安装指令（复制给任意 DSH 会话）
+
+```
+帮我安装 dsh-prompt-enhancer 插件：
+1. 读取 https://github.com/Fishsb/dsh-prompt-enhancer 里的 plugin-host.js 和 plugin-client.js
+2. 用 cordis_define 定义插件：code.host 填 plugin-host.js 全文，code.client 填 plugin-client.js 全文，plugin.kind 用 new
+3. cordis_run 运行返回的 pluginId/packageId（mode: run）
+4. 等待我在浏览器授权后完成
+```
 
 > bundle 分发（`dsh.plugin` / `cordis.patch.yml` 一键安装）规划中。
 
