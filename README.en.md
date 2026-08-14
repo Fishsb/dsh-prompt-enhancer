@@ -2,20 +2,28 @@
 
 A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH): type a rough prompt, click ✨, and an independent LLM call rewrites it into a stronger prompt — directly in the composer, fully undoable.
 
+[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
+[![Release date](https://img.shields.io/github/release-date/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
+[![License](https://img.shields.io/github/license/Fishsb/dsh-prompt-enhancer)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer)
+
 ## Features
 
-- ✨ **One-click enhance** — independent LLM call replaces the draft in place
+- ✨ **One-click enhance** — an independent LLM call replaces the draft in place
 - ↩️ **Undo anytime** — restore the original with one click; manually editing the draft exits undo (undo also clears the previous memory pair)
-- ⏹️ **True cancel** — click during enhancement aborts and restores the draft (AbortSignal propagated)
+- ⏹️ **True cancel** — click during enhancement aborts and restores the draft
 - 🛡️ **Guards** — empty input / slash commands / submitting states are handled; `/cmd body` optimizes only the body, keeping the prefix
 - 🌐 **i18n** — follows the DSH interface language (中文 / English)
-- 🎛️ **4 modes (v2.2.0)** — Basic (direct, fastest) / Lite (local rule analysis) / Standard (rules + workspace & session retrieval injection) / Smart (LLM task-progress analysis + full retrieval)
-- 🧠 **Independent memory switch (v2.2.0)** — available in every mode; when on, the previous optimization pair is injected into the next round (first run falls back to Lite automatically); when off, memory is never read or written; memory is written while on and cleared on undo
-- 🔀 **Combined stacking** — mode context block + memory block can inject together (memory takes budget first, ≤1200 chars; the mode block uses the remainder)
-- 🔄 **Automatic config migration** — v2.1 `mode:'memory'` / `autoMemory` migrate to `mode:'lite'` + `memory:true`; an explicit `memory` field takes precedence (including `false`)
-- 🧪 **Unit-tested** — host pure-function tests (node:test, 38/38 passing) slice the PURE section, so tests run the very code that is shipped
-- 🚀 **Version check & one-click update (v2.4.0)** — a new card at the top of the plugin-management page checks any public GitHub repo (default: this one) against the local version (remote tags are the source of truth); when a newer version exists, pull the 6 release files into a target directory with one click (default `<workspace>/dsh-prompt-enhancer-<tag>/`, configurable & persisted), then apply via the on-screen instructions (bundle `dsh plugin update` / dynamic re-define / script copy). A running plugin cannot replace itself — pull ≠ apply
-- 🔤 **Composer font parity (v2.4.0)** — the ✨ button's idle / busy / undo text is explicitly anchored at 13px/500/20px, matching the composer model selector; the distribution copy has been upgraded (it previously lagged at v2.1.0)
+- 🎛️ **4 optimization modes** — Basic (direct, fastest) / Lite (local rules) / Standard (rules + workspace & session retrieval) / Smart (LLM task-progress analysis + full retrieval)
+- 🧠 **Independent memory switch** — when on, the previous optimization pair is injected into the next round; when off, nothing is read or written; cleared on undo
+- 📊 **Live progress** — the button shows the current stage while optimizing (Preparing… → Optimizing…), hover switches to a red "Cancel", constant width with no flicker
+- 📏 **Visual parity** — button font (DengXian) / weight / pill shape / gray label / darker hover ellipse match the DSH model selector
+- 🚀 **Version check & one-click update** — built-in updater detects new versions and pulls the release files ([Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases))
+- 🧪 **Unit-tested** — host pure-function tests (node:test) slice the PURE section, so tests run the shipped code
+
+## Screenshots
+
+![Settings panel](docs/screenshots/settings-light.png)
 
 ## Install
 
@@ -25,23 +33,18 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer
 ```
 
-Restart DSH (`dsh web`) after installing — the ✨ button appears in the composer toolbar. Update with `dsh plugin --profile web update dsh-prompt-enhancer`, remove with `dsh plugin --profile web remove dsh-prompt-enhancer`.
+Restart DSH (`dsh web`) after installing — the ✨ button appears in the composer toolbar. Update / remove:
+
+```sh
+dsh plugin --profile web update dsh-prompt-enhancer
+dsh plugin --profile web remove dsh-prompt-enhancer
+```
 
 ### Option 2: dynamic Cordis install
 
-Dynamic Cordis plugin (host + client halves), installed inside a DSH session via the cordis toolchain:
-
-1. Ask the agent in a DSH session to read `plugin-host.js` (host half) and `plugin-client.js` (client half) from this repo
-2. Define the plugin with `cordis_define`: fill `code.host` with plugin-host.js and `code.client` with plugin-client.js (new plugin: `plugin.kind: 'new'`); it returns `pluginId` / `packageId`
-3. Run it with `cordis_run` (mode: `run`)
-4. The first client-half run requires browser approval
-5. After approval, the ✨ button appears in the composer toolbar
+In a DSH session, ask the agent to read `plugin-host.js` (host half) and `plugin-client.js` (client half) from this repo, define the plugin with `cordis_define` (`plugin.kind: 'new'`), then `cordis_run` (mode: `run`). The first client-half run requires browser approval.
 
 > Note: the dynamic client half is attached to the page connection active at activation time; a page refresh unloads it — just `cordis_run` again to restore.
->
-> **v2.4.2+**: fixed the dynamic client sandbox restriction on the global `fetch` (version check & one-click update now use `window.fetch` to reach the GitHub API), and made the locale registration tolerant of stale instances left by previous activations (repeat activate/update no longer fails with `locale namespace "enhance" already has locale "zh"`).
->
-> **v2.4.3+**: the model settings section is expanded by default; the plugin manager supports version selection with a "current → target" confirmation row (packages missing the host/client half are disabled and marked "incomplete" to prevent switching to a broken UI); the optimize button matches the model selector styling (DengXian typeface, pill shape, gray label, darker ellipse on hover, 4/8 px padding).
 
 ### Quick-install snippet (paste into any DSH session)
 
@@ -52,8 +55,6 @@ Install the dsh-prompt-enhancer plugin for me:
 3. cordis_run the returned pluginId/packageId (mode: run)
 4. Wait for me to approve in the browser
 ```
-
-> Bundle distribution (`dsh plugin add` one-click install) is supported — see Option 1 above.
 
 ## Usage
 
@@ -70,25 +71,29 @@ Settings → "Models & plugins" → "Optimization" tab:
 |---|---|
 | Optimization mode | Basic (default, direct) / Lite / Standard / Smart; switching takes effect immediately and persists |
 | Memory | On / Off; when on, the next round receives the previous optimization pair (first run falls back to Lite); when off, nothing is read or written |
-| Context budget | 0 / 2000 / 4000 / 8000 chars; 0 = no context injection (equivalent to Basic); the memory block is budget-constrained too |
+| Context budget | 0 / 2000 / 4000 / 8000 chars; 0 = no context injection (memory block is budget-constrained too) |
 | Timeout / Max tokens / Output limit | Request parameters |
 | Template | Built-in / custom template text |
 
 The model chain lives in the "Models" tab: tried in order, reorderable, per-entry thinking toggle & level, inline connectivity test, restore defaults.
 
+## Changelog
+
+Per-version release notes live on [GitHub Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases); the full history is in [CHANGELOG.md](CHANGELOG.md).
+
 ## Privacy
 
 - **Mode context**: on demand, injects "recent session messages + relevant workspace file snippets + related session fragments", bounded by the budget; sensitive files (.env / keys / credentials / logs, etc.) are hard-filtered and never injected
-- **Memory**: only a boolean seen-marker lives in browser localStorage (`dsh.enhance.seen.*`, no content); the memory pair itself lives only in the current page's memory; turning the switch off stops all reads/writes
+- **Memory**: only a boolean seen-marker lives in browser localStorage (no content); the memory pair lives only in the current page's memory; turning the switch off stops all reads/writes
 - The plugin itself records or reports nothing; diagnostics logs contain only metadata (mode, latency, etc.)
 - Enhanced results come from an external LLM — verify before sending; after cancellation the underlying request may still run briefly on the provider side
 
 ## Compatibility
 
 - Depends on DSH runtime-injected APIs (`llm` / `slots` / `harness` / `inputActions` / `sessionQuery` / `fs`), which may change across DSH releases
-- Use a recent DeepSeek Harness
 - **Version check & one-click update**: the browser talks to `api.github.com` directly (CORS-enabled; the host needs no outbound network). Restricted networks must let the browser reach GitHub (proxy etc.)
-- **Built-in fallback model chain**: points at the official DeepSeek provider (`deepseek-official`, `deepseek-v4-flash` / `deepseek-v4-pro`); using it requires a DeepSeek API key in credentials. Without one, configure a model chain under "Models & plugins" — a fresh install inherits the current model automatically, so manual setup is usually unnecessary
+- **Built-in fallback model chain**: points at the official DeepSeek provider (`deepseek-official`); using it requires a DeepSeek API key. Without one, configure a model chain under "Models & plugins" — a fresh install inherits the current model automatically, so manual setup is usually unnecessary
+- Use a recent DeepSeek Harness
 
 ## License
 

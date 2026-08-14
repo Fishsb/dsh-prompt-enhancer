@@ -2,24 +2,28 @@
 
 DeepSeek Harness (DSH) 提示词增强插件：输入模糊提示词 → 一键增强（独立 LLM 调用）→ 直接替换输入框 → 不满意可撤回。
 
+[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
+[![Release date](https://img.shields.io/github/release-date/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
+[![License](https://img.shields.io/github/license/Fishsb/dsh-prompt-enhancer)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer)
+
 ## 功能
 
-- ✨ **一键增强**：输入框工具行 ✨ 按钮，独立 LLM 调用，完成后直接替换草稿
-- ↩️ **随时撤回**：不满意一键恢复原文；手动编辑草稿自动退出撤回（撤回同时清除上一轮记忆）
-- ⏹️ **真取消**：增强进行中点击即取消并恢复原文（AbortSignal 透传终止）
-- 🛡️ **守卫逻辑**：空输入 / 斜杠命令 / 提交中状态自动禁用；命令正文可优化（保留 `/cmd` 前缀）
-- 🌐 **语言跟随**：按钮与提示文案跟随 DSH 界面语言设置（中文 / English）
-- 🎛️ **4 模式（v2.2.0）**：基础（直发，最快最省）/ 轻量（本地规则分析）/ 标准（规则 + 工作区/会话检索注入）/ 智能（LLM 任务进度分析 + 全量检索）
-- 🧠 **记忆功能独立开关（v2.2.0）**：所有模式可开/关；开启后上一轮优化结果作为记忆注入下一轮（首次自动走轻量兜底）；关闭后完全不读取/写入记忆；开启期间写入记忆、撤回清除
-- 🔀 **组合叠加**：模式上下文块 + 记忆块可同时注入（记忆优先占用预算 ≤1200 字符，模式块用剩余预算）
-- 🔄 **配置自动迁移**：v2.1 的 `mode:'memory'`/`autoMemory` 自动迁移为 `mode:'lite'` + `memory:true`；显式 `memory` 字段最高优先（含 false 关闭）
-- 🧪 **单测保障**：host 纯函数单测（node:test，38/38 通过），PURE 区段切片求值保证测试即发布代码
-- 📊 **步骤进度（v2.3.0）**：增强进行中按钮实时显示当前阶段（准备中… / 读取会话… / 分析任务… / 检索文件… / 检索会话… / 组装上下文… / LLM 优化中…），避免长时间等待误判卡死；鼠标悬停切换为红色「取消」提醒
-- 🏷️ **模式短标签（v2.3.0）**：输入框 ✨ 按钮显示当前模式（基础/轻量/标准/智能），切换即时同步
-- 🧠 **记忆状态 → 图标饱和度（v2.3.2）**：优化按钮 ✨ 图标饱和度表达记忆开/关——开=正常彩色、关=低饱和（去色偏灰）；**仅影响图标，文字饱和度不变**；记忆开关位于设置面板「优化参数」页，**空输入时点击 ✨ 按钮也可直接切换记忆**（v2.3.3）
-- 📏 **字体对齐 + hover 零抖动（v2.3.3）**：按钮/短标签 font-weight:500 对齐 DSH 模型选择器；优化中 hover「取消」切换只变透明度，按钮宽度恒定无闪烁
-- 🚀 **版本检测与一键更新（v2.4.0）**：设置 →「模型与插件」→「插件管理」顶部新增版本检测卡片——检测任意公开 GitHub 仓库（默认本仓库）的版本状态（远端以 tags 取最大为准），发现新版本时一键拉取 6 个发布文件到本地目录（默认工作区下 `dsh-prompt-enhancer-<tag>/`，可配置并持久化）；拉取后按页面指引应用（bundle `dsh plugin update` / 动态重定义 / 脚本分发覆盖副本）——运行中的插件不可自替换，拉取 ≠ 应用
-- 🔤 **按钮字体对齐（v2.4.0）**：输入框 ✨ 按钮三态（空闲/执行中/撤回）文字显式 13px/500/20px 字体锚点，与模型选择器一致；分发副本已同步升级（此前副本为 v2.1.0 旧版）
+- ✨ **一键增强**：输入框工具行 ✨ 按钮触发独立 LLM 调用，完成后直接替换草稿
+- ↩️ **随时撤回**：不满意一键恢复原文；手动编辑草稿自动退出撤回（同时清除上一轮记忆）
+- ⏹️ **真取消**：增强进行中点击即取消并恢复原文
+- 🛡️ **守卫逻辑**：空输入 / 斜杠命令 / 提交中状态自动禁用；`/命令 正文` 只优化正文、保留前缀
+- 🌐 **语言跟随**：按钮与文案跟随 DSH 界面语言（中文 / English）
+- 🎛️ **4 种优化模式**：基础（直发，最快）/ 轻量（本地规则）/ 标准（规则 + 工作区/会话检索）/ 智能（LLM 任务进度分析 + 全量检索）
+- 🧠 **记忆独立开关**：开启后上一轮优化结果作为记忆注入下一轮；关闭后完全不读取/写入；撤回即清除
+- 📊 **实时进度**：优化中按钮显示当前阶段（准备中… → LLM 优化中…），悬停切换红色「取消」，宽度恒定无闪烁
+- 📏 **视觉对齐**：按钮字体（等线）/字重/胶囊/灰字/悬停深色椭圆背景与 DSH 模型选择器一致
+- 🚀 **版本检测与一键更新**：内置更新器检测新版本并一键拉取发布文件（[Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases)）
+- 🧪 **单测保障**：host 纯函数单测（node:test）切片 PURE 区段，测试即发布代码
+
+## 截图
+
+![设置面板](docs/screenshots/settings-light.png)
 
 ## 安装
 
@@ -29,23 +33,18 @@ DeepSeek Harness (DSH) 提示词增强插件：输入模糊提示词 → 一键�
 dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer
 ```
 
-安装后重启 DSH（`dsh web`），输入框工具行出现 **✨** 按钮即安装成功。更新用 `dsh plugin --profile web update dsh-prompt-enhancer`，卸载用 `dsh plugin --profile web remove dsh-prompt-enhancer`。
+安装后重启 DSH（`dsh web`），输入框工具行出现 ✨ 按钮即安装成功。更新 / 卸载：
+
+```sh
+dsh plugin --profile web update dsh-prompt-enhancer
+dsh plugin --profile web remove dsh-prompt-enhancer
+```
 
 ### 方式二：动态 Cordis 安装
 
-动态 Cordis 插件（host + client 双半部），在 DSH 会话内通过 cordis 工具链安装：
-
-1. 在 DSH 会话中让 agent 读取本仓库的 `plugin-host.js`（host 半部）与 `plugin-client.js`（client 半部）
-2. 用 `cordis_define` 定义插件：`code.host` 填 plugin-host.js 全文，`code.client` 填 plugin-client.js 全文（新插件 `plugin.kind: 'new'`），返回 `pluginId` / `packageId`
-3. 用 `cordis_run` 运行（mode: `run`）
-4. 首次运行 client 半部需在浏览器批准授权
-5. 授权后输入框工具行出现 ✨ 按钮即安装成功
+在 DSH 会话中让 agent 读取本仓库 `plugin-host.js`（host 半部）与 `plugin-client.js`（client 半部），用 `cordis_define` 定义（`plugin.kind: 'new'`）后 `cordis_run`（mode: `run`），首次运行 client 半部需浏览器授权。
 
 > 提示：动态插件 client 半部附着于激活时的页面连接，页面刷新后会卸载，重新 `cordis_run` 即可恢复。
->
-> **v2.4.2+**：修复了动态 client 沙箱对全局 `fetch` 的限制（「版本检测与一键更新」改用 `window.fetch` 直连 GitHub API），并兼容 update 时页面残留实例的 locale 命名空间冲突（重复激活/更新不再报 `locale namespace "enhance" already has locale "zh"`）。
->
-> **v2.4.3+**：模型配置栏默认展开；插件管理支持版本选择与「当前 → 目标」确认切换（缺 host/client 半部的历史包禁用并标注「不完整」，防误切导致界面消失）；优化按钮统一样式对齐模型选择器（等线字体、胶囊灰字、hover 深色椭圆背景、左 4 右 8 留白）。
 
 ### 快捷安装指令（复制给任意 DSH 会话）
 
@@ -56,8 +55,6 @@ dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer
 3. cordis_run 运行返回的 pluginId/packageId（mode: run）
 4. 等待我在浏览器授权后完成
 ```
-
-> bundle 分发（`dsh plugin add` 一键安装）已支持，见上方「方式一」。
 
 ## 使用
 
@@ -74,16 +71,20 @@ dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer
 |---|---|
 | 优化模式 | 基础（默认，直发）/ 轻量 / 标准 / 智能；切换即时生效并持久化 |
 | 记忆功能 | 开 / 关；开启后下一轮注入上一轮优化对（首次自动轻量兜底），关闭后不读取/写入 |
-| 上下文预算 | 0 / 2000 / 4000 / 8000 字符；0 = 不注入上下文（等价基础优化），记忆块同样受预算约束 |
+| 上下文预算 | 0 / 2000 / 4000 / 8000 字符；0 = 不注入上下文（记忆块同样受预算约束） |
 | 超时时间 / Token 上限 / 输出上限 | 优化请求参数 |
 | 模板 | 内置模板 / 自定义模板 |
 
 模型链在「模型配置」tab 配置：按序尝试、可增删改序、逐条思考开关与等级、行内连通性测试、恢复默认。
 
+## 更新日志
+
+各版本变更说明见 [GitHub Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases)，完整历史见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 隐私
 
 - **模式上下文**：按需注入「会话近期消息 + 工作区相关文件摘要 + 相关会话片段」，受预算上限约束；敏感文件（.env / 密钥 / 凭据 / 日志等）硬过滤，绝不注入
-- **记忆**：仅存于浏览器 localStorage（`dsh.enhance.seen.*` 布尔标记，无内容），记忆对仅存在于当前页面内存；关闭开关后不再读取/写入
+- **记忆**：仅存于浏览器 localStorage 布尔标记（无内容），记忆对仅存在于当前页面内存；关闭开关后不再读取/写入
 - 插件本身不记录、不上报任何数据；诊断日志仅含模式、耗时等元信息
 - 增强结果来自外部 LLM，发送前请自行核对；取消后底层请求可能在 provider 侧短暂运行
 
@@ -91,7 +92,7 @@ dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer
 
 - 依赖 DSH 运行时注入 API（`llm` / `slots` / `harness` / `inputActions` / `sessionQuery` / `fs`），随 DSH 版本升级可能调整
 - **版本检测与一键更新**：由浏览器直连 `api.github.com`（CORS 可用，host 无需出网）；网络受限环境请确保浏览器可访问 GitHub（代理等）
-- **内置兜底模型链**：指向 DeepSeek 官方（`deepseek-official`，`deepseek-v4-flash` / `deepseek-v4-pro`），使用该链需配置 DeepSeek API key（凭证）；未配置时请在「模型与插件」中配置模型链——首次安装会自动继承当前使用模型，通常无需手动配置
+- **内置兜底模型链**：指向 DeepSeek 官方（`deepseek-official`），使用该链需配置 DeepSeek API key；未配置时请在「模型与插件」中配置模型链——首次安装会自动继承当前使用模型，通常无需手动配置
 - 建议使用最新版 DeepSeek Harness
 
 ## License
