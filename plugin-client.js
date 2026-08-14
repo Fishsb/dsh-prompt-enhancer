@@ -1,5 +1,5 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v19：自适应默认兜底链，去 provider 硬编码）
+// DSH「提示词优化」插件 · Client 半部（v20：内置兜底链硬编码 DeepSeek 官方模型）
 // v16：整合「模型与插件」单入口（三区 tab + 折叠区块）+ 斜杠命令守卫修复
 // v17：思考开关/等级 + 连通性测试
 // v18：① config 升级 v2（键 dsh.enhance.config.v2；v1 自动迁移写回并清理）：
@@ -8,8 +8,9 @@
 //      ② 兜底链区块：增删改序 + 恢复默认 + 每行思考开关/等级（懒加载 efforts）
 //      ③ 自定义模型区块：表单添加即测试；加载顺序区块：全量模型上移/下移
 //      ④ fresh install：models/current 继承当前使用模型（含推理等级）初始化兜底链
-// v19：① fresh install / 恢复默认的链补足改经 host models/autochain（自适应，不再硬编码 opencode-go）
-//      ② models/current 取当前默认当首项（含推理等级），其后用自适应链去重补足
+// v19：fresh install / 恢复默认的链补足改经 host models/autochain（自适应解析）
+// v20：内置兜底链（BUILTIN_CHAIN）硬编码指向 DeepSeek 官方模型（deepseek-official），
+//      供「恢复默认」与 autochain 失败兜底使用；host 侧 autochain 亦返回 DeepSeek 官方链。
 // ============================================================================
 
 const CONFIG_KEY = 'dsh.enhance.config.v2';
@@ -23,11 +24,10 @@ const CONFIG_DEFAULTS = {
   params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
   template: { mode: 'builtin', text: '' },
 };
-// v18：内置兜底链（fresh install 补足与「恢复默认」）
+// v20：内置兜底链硬编码指向 DeepSeek 官方模型（fresh install 补足与「恢复默认」）
 const BUILTIN_CHAIN = [
-  { provider: 'opencode-go', model: 'deepseek-v4-flash' },
-  { provider: 'opencode-go', model: 'minimax-m3' },
-  { provider: 'opencode-go', model: 'kimi-k3' },
+  { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+  { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
 ];
 
 const configState = { value: { ...CONFIG_DEFAULTS }, listeners: new Set(), fresh: true };

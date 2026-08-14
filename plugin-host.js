@@ -1,5 +1,5 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Host 半部（v19：自适应默认兜底链，去 provider 硬编码）
+// DSH「提示词优化」插件 · Host 半部（v20：内置兜底链硬编码 DeepSeek 官方模型）
 // v14：新增日志环形缓冲 + logs/last 诊断 RPC（供客户端诊断日志查看器与故障排查）
 // v17：① models/resolve：逐模型解析 reasoning 元数据（efforts/defaultEffort，懒加载）
 //      ② models/test：连通性测试（resolveCallConfig 预校验失败不阻断 + 探测流计时，15s 超时）
@@ -8,9 +8,9 @@
 // v18：① validateConfig v2：main/fallback/customModels/order/params/template（兼容 v1 平铺）
 //      ② models/current：agentDefaultModel.currentSelection()（fresh install 兜底链继承）
 //      ③ enhance 尝试链 = main + fallback 按序（每条独立 reasoningEffort）；cfg 日志加 chain=
-// v19：① 默认兜底链不再绑定「opencode-go」——新增 resolveAdaptiveChain（60s TTL 缓存），
-//        优先 agentDefaultModel.currentSelection()，否则扫描 llm.listProviders/listModels 首个可用，
-//        仅全部失败才回落静态 LEGACY_FALLBACK；② enhance 空兜底链时用自适应链；③ 新增 models/autochain RPC。
+// v19：新增 resolveAdaptiveChain（60s TTL 缓存）与 models/autochain RPC
+// v20：内置兜底链硬编码指向 DeepSeek 官方模型（deepseek-official/deepseek-v4-flash、deepseek-v4-pro），
+//      不再扫描任意 provider——主模型优先 currentSelection，兜底补足固定 DeepSeek 官方。
 // ============================================================================
 
 // —— v14 诊断日志：环形缓冲（最近 300 行），供 logs/last RPC 读取 ——
@@ -35,18 +35,17 @@ function herr() {
   console.error(line);
 }
 
-// v19：默认兜底链不再硬编码 provider —— 改为启动/调用时按当前环境解析（自适应），
-// 优先 agentDefaultModel.currentSelection()，缺失则扫描 llm.listProviders() 首个可用，
-// 避免绑定「opencode-go」等部署特定名。仅当全部解析失败才回落静态最后手段。
-const LEGACY_FALLBACK = [
-  { provider: 'opencode-go', model: 'deepseek-v4-flash' },
-  { provider: 'opencode-go', model: 'minimax-m3' },
-  { provider: 'opencode-go', model: 'kimi-k3' },
+// v20：内置兜底链硬编码指向 DeepSeek 官方模型（provider=deepseek-official）。
+// 主模型优先取 agentDefaultModel.currentSelection()（当前使用模型），
+// 兜底补足固定为 DeepSeek 官方模型链，不再扫描任意 provider（保证确定性）。
+const DEEPSEEK_OFFICIAL_CHAIN = [
+  { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+  { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
 ];
 const DEFAULT_TIMEOUT_MS = 30000;
 const DEFAULT_MAX_TOKENS = 2000;
 const DEFAULT_OUTPUT_LIMIT = 8000;
-// 自适应兜底链 TTL 缓存（避免每次 enhance 都扫 provider 目录）
+// 兜底链 TTL 缓存（避免每次 enhance 都重新解析）
 const adaptiveChainCache = { value: null, at: 0 };
 const ADAPTIVE_CHAIN_TTL_MS = 60000;
 
@@ -67,28 +66,10 @@ async function resolveAdaptiveChain(llmSvc, adm) {
       }
     }
   } catch (e) { herr('[enhance] adaptive lead resolve failed', e); }
-  // 主链缺失或为空 → 扫描首个可用 provider + 其首模型（顺带补几个候选）
-  if (chain.length === 0 && llmSvc && typeof llmSvc.listProviders === 'function') {
-    try {
-      const providers = llmSvc.listProviders() || [];
-      for (let i = 0; i < providers.length && chain.length < 3; i++) {
-        const p = providers[i];
-        if (!p || typeof p.id !== 'string') continue;
-        let models = [];
-        try {
-          const list = await llmSvc.listModels(p.id);
-          models = list || [];
-        } catch (e) { models = []; }
-        for (const m of models) {
-          if (!m || typeof m.id !== 'string' || !m.id) continue;
-          if (!chain.some((e) => e.provider === p.id && e.model === m.id)) {
-            chain.push({ provider: p.id, model: m.id });
-          }
-        }
-      }
-    } catch (e) { herr('[enhance] adaptive chain scan failed', e); }
+  // 兜底补足固定为 DeepSeek 官方模型（硬编码，不扫描环境）
+  for (const d of DEEPSEEK_OFFICIAL_CHAIN) {
+    if (!chain.some((e) => e.provider === d.provider && e.model === d.model)) chain.push({ ...d });
   }
-  if (chain.length === 0) chain.push(...LEGACY_FALLBACK);
   adaptiveChainCache.value = chain;
   adaptiveChainCache.at = now;
   return chain;

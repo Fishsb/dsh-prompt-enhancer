@@ -55,9 +55,9 @@ Configuration is stored in browser `localStorage` (`dsh.enhance.config.v2`; v1 a
 
 ### Defaults
 
-- Main model: first available provider's first model (falls back to a built-in chain).
+- Main model: first available provider's first model (falls back to the built-in chain).
 - Timeout 30s · output 2000 tokens · 8000 chars (all adjustable in Settings).
-- Fallback: a small built-in chain as a last resort when none is configured.
+- Fallback: the built-in chain is **hardcoded to DeepSeek official models** (`deepseek-official/deepseek-v4-flash` → `deepseek-v4-pro`), used when no fallback is configured. The user-configurable fallback chain (Settings → Models & plugins) overrides it when set.
 
 ## Privacy & data flow
 
@@ -76,3 +76,15 @@ See [PRIVACY.md](PRIVACY.md) and [NOTICE](NOTICE). In short: the plugin sends on
 ## License
 
 MIT — see [LICENSE](LICENSE). The feature interaction pattern references a conventional prompt-engineering workflow (see NOTICE); all code and template text are original.
+
+## Versioning
+
+- **Release version** (this repository): `v1.0.0` — a standalone, user-facing version number for published releases. It is independent from the plugin's internal development version.
+- **Development version** (internal): `v20` — tracks feature iterations inside the source (`v20: built-in fallback chain hardcoded to DeepSeek official models`).
+- Mapping: release `v1.0.0` ⇄ development `v20`. Future releases increment the release number (`v1.1.0`, `v2.0.0`, …) regardless of internal dev versions.
+
+### Changelog
+
+| Release | Dev | Changes |
+|---|---|---|
+| v1.0.0 | v20 | Built-in fallback chain hardcoded to DeepSeek official models (`deepseek-official`); config v2 (main model / fallback chain / custom models / load order / params / template); reasoning on/off + native levels; connectivity test; slash-command guard; "Models & plugins" single settings entry; adaptive default chain removed in favor of fixed DeepSeek fallback.
