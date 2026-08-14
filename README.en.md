@@ -58,8 +58,8 @@ Install the dsh-prompt-enhancer plugin for me:
 
 ## Usage
 
-1. Type any non-empty, non-slash-command text
-2. Click the **✨** button (the button is not keyboard-focusable; click only)
+1. Type any non-empty text (slash commands keep their prefix; only the body is optimized)
+2. Click the **✨** button
 3. Wait for the independent LLM call; the draft is replaced with the enhanced version
 4. Not satisfied? Click **✓ Optimized · Undo** to restore the original
 
