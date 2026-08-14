@@ -1,5 +1,11 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v23：主模型/兜底整合为单一「模型配置」链 + 测试结果集中单点）
+// DSH「提示词优化」插件 · Client 半部（v2.1.0：模式体系表驱动 + 记忆模式）
+// v2.1（方案「提示词优化方案.md」§0/§2/§4）：
+// ① 模式体系 5 模式（base/lite/standard/smart/memory）——「优化模式」下拉取代引擎+上下文理解；
+// ② 配置迁移：旧 engine/context.mode → mode（v1→base、basic→standard、smart 保留，缺省 base）；
+// ③ autoMemory 开关（连续优化默认启用，默认开）；
+// ④ 记忆模式：s.memory 独立字段（结果已应用才写入，撤回清除）+ dirty 标志（下拉操作置位）+
+//    已优化标记（localStorage 区分首次与 reload）；实际模式由 resolveActualMode 判定后随请求传 host。
 // v16：整合「模型与插件」单入口（三区 tab + 折叠区块）+ 斜杠命令守卫修复
 // v17：思考开关/等级 + 连通性测试
 // v18：① config 升级 v2（键 dsh.enhance.config.v2；v1 自动迁移写回并清理）：
@@ -41,15 +47,27 @@ const CONFIG_DEFAULTS = {
   order: [],
   params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
   template: { mode: 'builtin', text: '' },
-  // v2.0.0（C1）：优化引擎（v1 默认，行为零变化）+ V2 上下文配置
-  engine: 'v1',
+  // v2.1（§0.2）：模式体系 5 模式（base 默认，行为零变化）+ autoMemory 开关
+  mode: 'base',
   context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
+  autoMemory: true,
 };
 // v20：内置兜底链硬编码指向 DeepSeek 官方模型（fresh install 补足与「恢复默认」）
 const BUILTIN_CHAIN = [
   { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
   { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
 ];
+// v2.1（§4.3）：模式选项单点（下拉/日志/校验共用）
+const MODE_OPTIONS = [
+  { value: 'base', label: '基础模式', hint: '直发优化，不读取任何上下文，全体系最快最省' },
+  { value: 'lite', label: '轻量模式', hint: '仅本地规则分析输入，不注入上下文，速度接近基础' },
+  { value: 'standard', label: '标准模式', hint: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本' },
+  { value: 'smart', label: '智能模式', hint: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准' },
+  { value: 'memory', label: '记忆模式', hint: '基于上一轮优化过程迭代，不检索历史与工作区' },
+];
+const MODE_VALUES = MODE_OPTIONS.map((m) => m.value);
+// 已优化标记键（§2.4）：localStorage 按会话布尔标记（区分首次与 reload）
+const SEEN_KEY_PREFIX = 'dsh.enhance.seen.';
 
 const configState = { value: { ...CONFIG_DEFAULTS }, listeners: new Set(), fresh: true };
 
@@ -62,8 +80,9 @@ function cloneDefaults() {
     order: [],
     params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
     template: { mode: 'builtin', text: '' },
-    engine: 'v1',
+    mode: 'base',
     context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
+    autoMemory: true,
   };
 }
 
@@ -110,15 +129,22 @@ function sanitizeV2(parsed) {
   const t = parsed.template && typeof parsed.template === 'object' ? parsed.template : {};
   if (t.mode === 'custom' || t.mode === 'builtin') v.template.mode = t.mode;
   if (typeof t.text === 'string' && t.text.length <= 4000) v.template.text = t.text;
-  // v2.0.0（C1）：engine 白名单 v1/v2；context 白名单校验（缺省默认，向后兼容）
-  if (parsed.engine === 'v2') v.engine = 'v2';
   const ctxCfg = parsed.context && typeof parsed.context === 'object' ? parsed.context : {};
-  if (ctxCfg.mode === 'basic' || ctxCfg.mode === 'smart') v.context.mode = ctxCfg.mode;
+  // v2.1（§0.2）：mode 解析（显式白名单 / 旧 engine+context.mode 迁移 / 缺省非法 → base）
+  if (typeof parsed.mode === 'string' && MODE_VALUES.includes(parsed.mode)) {
+    v.mode = parsed.mode;
+  } else if (parsed.engine === 'v2') {
+    const legacy = ctxCfg.mode;
+    if (legacy === 'basic') v.mode = 'standard';
+    else if (legacy === 'smart') v.mode = 'smart';
+  }
   if ([0, 2000, 4000, 8000].includes(ctxCfg.budgetChars)) v.context.budgetChars = ctxCfg.budgetChars;
   if (ctxCfg.workspace && typeof ctxCfg.workspace === 'object') {
     if (Number.isInteger(ctxCfg.workspace.maxFiles) && ctxCfg.workspace.maxFiles >= 1 && ctxCfg.workspace.maxFiles <= 10) v.context.workspace.maxFiles = ctxCfg.workspace.maxFiles;
     if (Number.isInteger(ctxCfg.workspace.depth) && ctxCfg.workspace.depth >= 1 && ctxCfg.workspace.depth <= 4) v.context.workspace.depth = ctxCfg.workspace.depth;
   }
+  // autoMemory（连续优化默认启用，缺省 true）
+  v.autoMemory = parsed.autoMemory !== false;
   return v;
 }
 
@@ -299,13 +325,15 @@ const ZH = {
   cfgCustomNote: '仅限已有 provider 路由下的模型 ID；添加后自动连通性测试',
   cfgOrderNote: '仅影响模型下拉与候选的展示顺序',
   cfgInherited: '已继承当前使用模型（含推理等级）',
-  // v2.0.0（C3）：引擎与上下文配置文案
-  cfgEngine: '优化引擎',
-  cfgEngineV1: 'V1 基础优化',
-  cfgEngineV2: 'V2 上下文感知',
-  cfgContextMode: '上下文理解',
-  cfgContextModeSmart: '智能',
-  cfgContextModeBasic: '基础',
+  // v2.1（§0.2）：模式体系文案（MODE_OPTIONS hint 由 cfgModeHint 提供）
+  cfgMode: '优化模式',
+  cfgAutoMemory: '连续优化自动记忆',
+  cfgAutoMemoryNote: '标准/智能模式下，上一轮优化完成后再次点击自动按记忆模式迭代（可关闭）',
+  cfgModeHintBase: '直发优化，不读取任何上下文，全体系最快最省',
+  cfgModeHintLite: '仅本地规则分析输入，不注入上下文，速度接近基础',
+  cfgModeHintStandard: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本',
+  cfgModeHintSmart: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准',
+  cfgModeHintMemory: '基于上一轮优化过程迭代，不检索历史与工作区',
   cfgContextBudget: '上下文预算',
   cfgContextBudget0: '0（关闭注入）',
   cfgContextNote: 'V2 按任务进度与提示词主题检索工作区相关文件后注入优化参考；预算 0 = 不注入（等价基础优化）',
@@ -409,11 +437,14 @@ const EN = {
   cfgInherited: 'Inherited from the current model (incl. reasoning level)',
   // v2.0.0（C3）：引擎与上下文配置文案
   cfgEngine: 'Engine',
-  cfgEngineV1: 'V1 Basic',
-  cfgEngineV2: 'V2 Context-aware',
-  cfgContextMode: 'Context understanding',
-  cfgContextModeSmart: 'Smart',
-  cfgContextModeBasic: 'Basic',
+  cfgMode: 'Mode',
+  cfgAutoMemory: 'Auto-memory on consecutive runs',
+  cfgAutoMemoryNote: 'Under Standard/Smart, clicking again after a completed run automatically iterates with memory (can be disabled)',
+  cfgModeHintBase: 'Direct optimization, no context, fastest',
+  cfgModeHintLite: 'Local rule analysis only, no injection',
+  cfgModeHintStandard: 'Rule understanding + file & session retrieval, no extra LLM call',
+  cfgModeHintSmart: 'LLM task analysis + full retrieval, best understanding',
+  cfgModeHintMemory: 'Iterates on the previous optimization round; no history/workspace retrieval',
   cfgContextBudget: 'Context budget',
   cfgContextBudget0: '0 (no injection)',
   cfgContextNote: 'V2 analyzes task progress and retrieves relevant workspace files before optimizing; budget 0 = no injection (equivalent to basic)',
@@ -448,10 +479,21 @@ const sessionStores = new Map();
 function storeFor(sessionId) {
   let s = sessionStores.get(sessionId);
   if (!s) {
-    s = { phase: 'idle', backup: '', enhanced: '', error: null, seq: 0, listeners: new Set() };
+    s = { phase: 'idle', backup: '', enhanced: '', error: null, seq: 0, listeners: new Set(), memory: null, dirty: false };
     sessionStores.set(sessionId, s);
   }
   return s;
+}
+
+// v2.1（§2.4）：已优化标记（localStorage 按会话布尔，区分首次与 reload；无内容、不涉隐私）
+function seenKey(sessionId) {
+  return SEEN_KEY_PREFIX + sessionId;
+}
+function readSeen(sessionId) {
+  try { return localStorage.getItem(seenKey(sessionId)) === '1'; } catch (e) { return false; }
+}
+function writeSeen(sessionId) {
+  try { localStorage.setItem(seenKey(sessionId), '1'); } catch (e) { /* 忽略 */ }
 }
 
 function subscribe(sessionId, fn) {
@@ -499,6 +541,27 @@ function splitCommand(draft) {
   return { prefix: '', body: draft };
 }
 
+// v2.1（§2.2/§2.6）：实际模式判定——下拉为最终意图；标准/智能下拉且 dirty 清除后、
+// s.memory 存在且 autoMemory 开 → 自动记忆（memory(auto)，dirty 标志清）。
+// 返回 { mode, seed, memory }：seed = 首次标准兜底标记；memory = 记忆对（供 host memory 分支）。
+function resolveActualMode(sessionId, cfg) {
+  const s = storeFor(sessionId);
+  const picked = cfg.mode;
+  if (picked === 'memory') {
+    // 显式记忆：有记忆走记忆；无记忆 → 标准（seed：从未优化；非 seed：reload 降级）
+    if (s.memory && s.memory.prevInput) return { mode: 'memory', seed: false, memory: s.memory };
+    return { mode: 'standard', seed: !readSeen(sessionId), memory: null };
+  }
+  if (s.dirty) {
+    s.dirty = false;
+    return { mode: picked, seed: false, memory: null };
+  }
+  if ((picked === 'standard' || picked === 'smart') && cfg.autoMemory !== false && s.memory && s.memory.prevInput) {
+    return { mode: 'memory', seed: false, memory: s.memory };
+  }
+  return { mode: picked, seed: false, memory: null };
+}
+
 function enhance(sessionId, draft, inputActions, draftRef) {
   const s = storeFor(sessionId);
   if (s.phase === 'enhancing') {
@@ -516,11 +579,17 @@ function enhance(sessionId, draft, inputActions, draftRef) {
 
   const parts = splitCommand(draft);
   const config = configState.value;
-  host.call('enhance', { sessionId, seq, text: parts.body, config }).then((res) => {
+  // v2.1（§2.2）：实际模式判定（显式/auto/seed）——实际 mode、seed 标记、记忆对随请求传给 host
+  const actual = resolveActualMode(sessionId, config);
+  const req = { sessionId, seq, text: parts.body, config, mode: actual.mode };
+  if (actual.seed) req.seed = true;
+  if (actual.memory) req.memory = { prevInput: actual.memory.prevInput, prevOutput: actual.memory.prevOutput };
+  host.call('enhance', req).then((res) => {
     if (seq !== s.seq) return;
     const r = res && typeof res === 'object' ? res : {};
     if (r.ok && typeof r.text === 'string' && r.text !== '') {
       if (draftRef.current !== s.backup) {
+        // 结果被丢弃（增强中用户编辑草稿）：不替换、不写记忆、不打标记（L1）
         s.phase = 'idle';
         s.enhanced = '';
         s.error = null;
@@ -530,6 +599,9 @@ function enhance(sessionId, draft, inputActions, draftRef) {
         s.phase = 'result';
         s.enhanced = finalText;
         s.error = null;
+        // v2.1（§2.4/L1）：仅结果已应用时写入记忆（斜杠命令存正文）并打标记
+        s.memory = { prevInput: parts.body, prevOutput: r.text };
+        writeSeen(sessionId);
       }
     } else {
       safeSetDraft(inputActions, s.backup);
@@ -555,6 +627,8 @@ function undo(sessionId, inputActions) {
   s.phase = 'idle';
   s.enhanced = '';
   s.error = null;
+  // v2.1（§2.4）：撤回 = 放弃上轮结果 = 清除其记忆（语义一致）
+  s.memory = null;
   notify(sessionId);
 }
 
@@ -1239,47 +1313,50 @@ function ParamsTab(props) {
   const save = (patch) => { saveConfig(patch); };
   const onNumber = (key) => (e) => save({ params: { ...cfg.params, [key]: Number(e.target.value) } });
   const selectProps = (key, options) => ({ className: 'dsh-plg-select', value: String(cfg.params[key]), onChange: onNumber(key), children: options });
+  // v2.1（§2.6）：下拉操作置 dirty——用户动过下拉后首次优化按下拉模式执行（不自动记忆）
+  const sessionId = props.useSessions ? props.useSessions((s) => s.current) : undefined;
+  const onModeChange = (e) => {
+    save({ mode: e.target.value });
+    const st = sessionId !== undefined ? storeFor(sessionId) : null;
+    if (st) st.dirty = true;
+  };
   return React.createElement(React.Fragment, null,
-    // v2.0.0（C2）：优化引擎切换（V1/V2 共存，切换入口在优化参数栏）
+    // v2.1（§0.2）：优化模式下拉（5 模式，取代引擎+上下文理解两下拉）
     React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('label', { className: 'dsh-plg-label' }, t('cfgEngine')),
+      React.createElement('label', { className: 'dsh-plg-label' }, t('cfgMode')),
       React.createElement('select', {
         className: 'dsh-plg-select',
-        value: cfg.engine,
-        onChange: (e) => save({ engine: e.target.value }),
+        value: cfg.mode,
+        onChange: onModeChange,
+        children: MODE_OPTIONS.map((m) => React.createElement('option', { key: m.value, value: m.value }, m.label)),
+      }),
+    ),
+    React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgModeHint' + cfg.mode.charAt(0).toUpperCase() + cfg.mode.slice(1))),
+    // v2.1（§2.2）：连续优化自动记忆开关（标准/智能下拉时生效）
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('label', { className: 'dsh-plg-label' }, t('cfgAutoMemory')),
+      React.createElement('select', {
+        className: 'dsh-plg-select dsh-plg-select-thinking',
+        value: cfg.autoMemory ? 'on' : 'off',
+        onChange: (e) => save({ autoMemory: e.target.value === 'on' }),
         children: [
-          React.createElement('option', { key: 'v1', value: 'v1' }, t('cfgEngineV1')),
-          React.createElement('option', { key: 'v2', value: 'v2' }, t('cfgEngineV2')),
+          React.createElement('option', { key: 'on', value: 'on' }, t('cfgReasoningOn')),
+          React.createElement('option', { key: 'off', value: 'off' }, t('cfgReasoningOff')),
         ],
       }),
     ),
-    // v2.0.0（C2）：V2 专属子配置（V1 时隐藏）
-    cfg.engine === 'v2'
-      ? React.createElement(React.Fragment, null,
-          React.createElement('div', { className: 'dsh-plg-row' },
-            React.createElement('label', { className: 'dsh-plg-label' }, t('cfgContextMode')),
-            React.createElement('select', {
-              className: 'dsh-plg-select',
-              value: cfg.context.mode,
-              onChange: (e) => save({ context: { ...cfg.context, mode: e.target.value } }),
-              children: [
-                React.createElement('option', { key: 'smart', value: 'smart' }, t('cfgContextModeSmart')),
-                React.createElement('option', { key: 'basic', value: 'basic' }, t('cfgContextModeBasic')),
-              ],
-            }),
-          ),
-          React.createElement('div', { className: 'dsh-plg-row' },
-            React.createElement('label', { className: 'dsh-plg-label' }, t('cfgContextBudget')),
-            React.createElement('select', {
-              className: 'dsh-plg-select',
-              value: String(cfg.context.budgetChars),
-              onChange: (e) => save({ context: { ...cfg.context, budgetChars: Number(e.target.value) } }),
-              children: [0, 2000, 4000, 8000].map((v) => React.createElement('option', { key: String(v), value: String(v) }, v === 0 ? t('cfgContextBudget0') : String(v))),
-            }),
-          ),
-          React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgContextNote')),
-        )
-      : null,
+    React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgAutoMemoryNote')),
+    // 预算下拉（全模式可见；0 = 不注入）
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('label', { className: 'dsh-plg-label' }, t('cfgContextBudget')),
+      React.createElement('select', {
+        className: 'dsh-plg-select',
+        value: String(cfg.context.budgetChars),
+        onChange: (e) => save({ context: { ...cfg.context, budgetChars: Number(e.target.value) } }),
+        children: [0, 2000, 4000, 8000].map((v) => React.createElement('option', { key: String(v), value: String(v) }, v === 0 ? t('cfgContextBudget0') : String(v))),
+      }),
+    ),
+    React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgContextNote')),
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label' }, t('cfgTimeout')),
       React.createElement('select', selectProps('timeoutMs', TIMEOUT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, (v / 1000) + 's')))),

@@ -1,5 +1,11 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Host 半部（v2.0.7：V2 工作区检索改用 FsTarget 契约）
+// DSH「提示词优化」插件 · Host 半部（v2.1.0：模式体系表驱动 + 记忆模式）
+// v2.1（方案「提示词优化方案.md」§0/§2/§4）：
+// ① 模式体系 5 模式（base/lite/standard/smart/memory），MODE_TABLE 表驱动（阶段 A/B/C 分发）；
+// ② 旧 engine/context.mode 配置自动迁移（v1→base、basic→standard、smart 保留，缺省 base）；
+// ③ 记忆模式：基于上一轮优化对迭代（跳过历史/工作区检索），记忆对由 client 传入；
+// ④ 常量层：预算档位/联动表/超时/截断全部命名化（BUDGET_OPTIONS/BUDGET_WORKSPACE_TABLE/V2_*）；
+// ⑤ 日志 mode=base|lite|standard|smart|memory（seed 场景标注 standard(seed)）。
 // v14：新增日志环形缓冲 + logs/last 诊断 RPC（供客户端诊断日志查看器与故障排查）
 // v17：① models/resolve：逐模型解析 reasoning 元数据（efforts/defaultEffort，懒加载）
 //      ② models/test：连通性测试（resolveCallConfig 预校验失败不阻断 + 探测流计时，15s 超时）
@@ -140,6 +146,89 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 // ==PURE-BEGIN==  (unit-testable pure functions; keep free of ctx/harness/pending/module-state)
+
+// ================= v2.1 模式体系 · 常量层与行为表（表驱动，单测切片求值） =================
+// 方案「提示词优化方案.md」§4：新增模式 = 加 MODE_TABLE 行 + MODE_OPTIONS 项 + 用例，管道零改动。
+const BUDGET_OPTIONS = [0, 2000, 4000, 8000];
+// 预算 → 扫描上限查表（仅 scanLimit:'by-budget' 模式消费；maxFiles = 注入 Top-N 上限）
+const BUDGET_WORKSPACE_TABLE = [
+  { budget: 0, maxFiles: 2, depth: 1 },
+  { budget: 2000, maxFiles: 2, depth: 1 },
+  { budget: 4000, maxFiles: 3, depth: 2 },
+  { budget: 8000, maxFiles: 6, depth: 3 },
+];
+// 阶段 A/B/C 与默认预算；budgetDefault 仅默认值，运行时以 config.budgetChars 为准
+const MODE_TABLE = {
+  base: { phaseA: 'none', phaseB: 'none', phaseC: 'none', budgetDefault: 0, scanLimit: 'fixed' },
+  lite: { phaseA: 'rule', phaseB: 'none', phaseC: 'none', budgetDefault: 0, scanLimit: 'fixed' },
+  standard: { phaseA: 'rule', phaseB: 'file+event', phaseC: 'inject', budgetDefault: 4000, scanLimit: 'fixed' },
+  smart: { phaseA: 'llm', phaseB: 'file+event', phaseC: 'inject', budgetDefault: 4000, scanLimit: 'by-budget' },
+  memory: { phaseA: 'memory', phaseB: 'none', phaseC: 'memory', budgetDefault: 4000, scanLimit: 'fixed' },
+};
+const MODE_KEYS = Object.keys(MODE_TABLE);
+const DEFAULT_MODE = 'base';
+const DEFAULT_BUDGET = 4000;
+// 模式 → 扫描上限（fixed 模式固定值）
+const FIXED_SCAN_LIMIT = { maxFiles: 3, depth: 2 };
+// V2 阶段超时/上限/截断
+const V2_PROGRESS_TIMEOUT_MS = 15000;
+const V2_PROGRESS_MAX_TOKENS = 400;
+const V2_PROGRESS_OUTPUT_LIMIT = 2000;
+const V2_HISTORY_MAX_CHARS = 8000;
+const V2_HISTORY_LIMIT = 12;
+const V2_MSG_SEQ_SCAN = 16;
+const V2_MSG_TEXT_MAX = 1200;
+const V2_WORKSPACE_TIMEOUT_MS = 2000;
+const SCAN_FILE_LIST_MAX = 2000;
+const INJECT_FILE_TOP_N = 3;
+const KEYWORD_LIMIT = 8;
+const SNIPPET_BUDGET = 800;
+const CONTEXT_PROGRESS_MAX = 800;
+const CONTEXT_EVENT_DIVISOR = 4;
+const CONTEXT_FILE_COUNT = 3;
+const MEMORY_PREV_INPUT_MAX = 400;
+const MEMORY_PREV_OUTPUT_MAX = 800;
+// 记忆块模板（§2.3）
+const MEMORY_BLOCK_TEMPLATE = '【上一轮优化】仅供参考，禁止回显\n原始输入：{prevInput}\n优化输出：{prevOutput}';
+
+// 模式解析（表驱动）：显式 mode 白名单；旧 engine/context.mode 迁移；缺省/非法 → base
+function parseMode(mode, engine, legacyMode) {
+  if (typeof mode === 'string' && MODE_KEYS.includes(mode)) return mode;
+  if (engine === 'v2') {
+    if (legacyMode === 'basic') return 'standard';
+    if (legacyMode === 'smart') return 'smart';
+  }
+  return DEFAULT_MODE; // engine v1 / 缺省 / 非法 → base（行为零变化）
+}
+
+// 预算白名单校验（缺省 → 默认值）
+function parseBudgetChars(value) {
+  return BUDGET_OPTIONS.includes(value) ? value : DEFAULT_BUDGET;
+}
+
+// 扫描上限解析：by-budget 查联动表（取不超过预算的最大档），fixed 用固定值
+function resolveScanLimit(mode, budgetChars) {
+  const row = MODE_TABLE[mode] || MODE_TABLE[DEFAULT_MODE];
+  if (row.scanLimit === 'by-budget') {
+    let pick = BUDGET_WORKSPACE_TABLE[0];
+    for (const entry of BUDGET_WORKSPACE_TABLE) {
+      if (entry.budget <= budgetChars) pick = entry;
+    }
+    return pick;
+  }
+  return FIXED_SCAN_LIMIT;
+}
+
+// 记忆块构建（预算分配：prevInput ≤ 400、prevOutput ≤ 800、合计 ≤ budget；预算 0 或无原文 → 空）
+function buildMemoryBlock(prevInput, prevOutput, budgetChars) {
+  const budget = typeof budgetChars === 'number' && budgetChars > 0 ? budgetChars : 0;
+  if (budget <= 0) return '';
+  const pi = String(prevInput || '').slice(0, Math.min(MEMORY_PREV_INPUT_MAX, budget));
+  if (!pi) return ''; // 无上一轮原文 → 记忆块无意义
+  const po = String(prevOutput || '').slice(0, Math.min(MEMORY_PREV_OUTPUT_MAX, Math.max(0, budget - pi.length)));
+  return MEMORY_BLOCK_TEMPLATE.replace('{prevInput}', pi).replace('{prevOutput}', po);
+}
+
 function wrapUserText(text) {
   return '请优化以下提示词：\n\n"""\n' + text + '\n"""';
 }
@@ -214,9 +303,10 @@ function validateConfig(raw) {
     outputLimit: DEFAULT_OUTPUT_LIMIT,
     templateMode: 'builtin',
     templateText: '',
-    // v2.0.0（H1）：引擎选择 + V2 上下文配置（默认 v1，行为零变化）
-    engine: 'v1',
-    context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
+    // v2.1（§0.2）：模式体系——显式 mode（表驱动白名单）；旧 engine/context.mode 迁移；缺省 base
+    mode: DEFAULT_MODE,
+    context: { mode: 'smart', budgetChars: DEFAULT_BUDGET, workspace: { maxFiles: 3, depth: 2 } },
+    autoMemory: true,
   };
   if (typeof main.provider === 'string' && main.provider.trim() !== '') out.provider = main.provider.trim();
   if (typeof main.model === 'string' && main.model.trim() !== '') out.model = main.model.trim();
@@ -266,15 +356,18 @@ function validateConfig(raw) {
   if (Number.isInteger(p.outputLimit) && p.outputLimit >= 500 && p.outputLimit <= 50000) out.outputLimit = p.outputLimit;
   if (t.templateMode === 'custom' || t.templateMode === 'builtin') out.templateMode = t.templateMode;
   if (typeof t.templateText === 'string' && t.templateText.length <= 4000) out.templateText = t.templateText;
-  // v2.0.0（H1）：engine 白名单 v1/v2（缺省/非法 → v1）；context 白名单校验
-  if (src.engine === 'v2') out.engine = 'v2';
+  // v2.1（§0.2）：mode 解析（显式白名单 / 旧 engine+context.mode 迁移 / 缺省非法 → base）
+  out.mode = parseMode(src.mode, src.engine, src.context && src.context.mode);
   const ctxCfg = src.context && typeof src.context === 'object' ? src.context : {};
-  if (ctxCfg.mode === 'basic' || ctxCfg.mode === 'smart') out.context.mode = ctxCfg.mode;
-  if ([0, 2000, 4000, 8000].includes(ctxCfg.budgetChars)) out.context.budgetChars = ctxCfg.budgetChars;
+  out.context.budgetChars = parseBudgetChars(ctxCfg.budgetChars);
+  // 旧 workspace 字段仅作上限兼容（不超联动值），不再单独生效（§0.2）
   if (ctxCfg.workspace && typeof ctxCfg.workspace === 'object') {
-    if (Number.isInteger(ctxCfg.workspace.maxFiles) && ctxCfg.workspace.maxFiles >= 1 && ctxCfg.workspace.maxFiles <= 10) out.context.workspace.maxFiles = ctxCfg.workspace.maxFiles;
-    if (Number.isInteger(ctxCfg.workspace.depth) && ctxCfg.workspace.depth >= 1 && ctxCfg.workspace.depth <= 4) out.context.workspace.depth = ctxCfg.workspace.depth;
+    const lim = resolveScanLimit(out.mode, out.context.budgetChars);
+    if (Number.isInteger(ctxCfg.workspace.maxFiles) && ctxCfg.workspace.maxFiles >= 1 && ctxCfg.workspace.maxFiles <= lim.maxFiles) out.context.workspace.maxFiles = ctxCfg.workspace.maxFiles;
+    if (Number.isInteger(ctxCfg.workspace.depth) && ctxCfg.workspace.depth >= 1 && ctxCfg.workspace.depth <= lim.depth) out.context.workspace.depth = ctxCfg.workspace.depth;
   }
+  // autoMemory（连续优化默认启用开关，缺省 true）
+  out.autoMemory = src.autoMemory !== false;
   return out;
 }
 
@@ -343,9 +436,10 @@ function buildTryChain(fallback, adaptive) {
 // ================= V2 上下文感知优化 · 纯函数族 =================
 // （v2.0.0 方案 §3：阶段 A 规则提取 / 阶段 B 检索排序与摘要 / 阶段 C 预算组装）
 
-// V2 分支判定：engine='v2' 且预算 > 0 才走注入路径（U12）
-function shouldInjectV2(engine, budgetChars) {
-  return engine === 'v2' && typeof budgetChars === 'number' && budgetChars > 0;
+// V2 分支判定（表驱动 §4.1）：phaseC 非 none 且预算 > 0 才走注入路径
+function shouldInjectV2(mode, budgetChars) {
+  const row = MODE_TABLE[mode] || MODE_TABLE[DEFAULT_MODE];
+  return row.phaseC !== 'none' && typeof budgetChars === 'number' && budgetChars > 0;
 }
 
 // 事件 → 文本消息列表（过滤噪音；**从尾部反向遍历**取最近 limit 条——DSH 日志可能达百万级）
@@ -383,7 +477,7 @@ function extractHistory(events, limit) {
     if (!text) continue;
     if (text.startsWith('/')) continue;
     if (/^(\[工具|tool|function call)/i.test(text)) continue;
-    out.push({ type: role, text: text.slice(0, 1200) });
+    out.push({ type: role, text: text.slice(0, V2_MSG_TEXT_MAX) });
   }
   return out.reverse();
 }
@@ -413,7 +507,7 @@ function inferFocusRules(historyText) {
   // 去除常见停用词
   const stop = new Set(['这个', '那个', '我们', '你们', '他们', '可以', '需要', '进行', '使用', '一个', '一些', '什么', '怎么', '如何', '如果', '因为', '所以', '但是', '然后', '并且', '或者', '以及', '还是', '没有', '就是', '不是', '对于', '关于', '通过', '根据', '按照', '项目', '文件', '功能', '实现', '添加', '修改', '删除', '创建', '优化', '提示', '词优', 'the', 'and', 'for', 'with', 'this', 'that', 'from', 'into']);
   const filtered = focus.filter((w) => !stop.has(w.toLowerCase()));
-  return filtered.slice(0, 8);
+  return filtered.slice(0, KEYWORD_LIMIT);
 }
 
 // 主题词提取：提示词关键词 ∪ focus（5–8 词）
@@ -428,7 +522,7 @@ function extractKeywords(text, focus) {
   };
   for (const w of kw) add(w);
   for (const w of (focus || [])) add(w);
-  return out.slice(0, 8);
+  return out.slice(0, KEYWORD_LIMIT);
 }
 
 // 敏感文件硬过滤（防密钥/凭据注入外发）：.env/密钥/凭据/日志 等
@@ -471,7 +565,7 @@ function rankFiles(files, keywords, topK) {
 // 行摘要：命中行 ±2 上下文；无命中取头部 40 行；≤预算字符
 function snippetFromLines(lines, keywords, budget) {
   const arr = Array.isArray(lines) ? lines : [];
-  const b = typeof budget === 'number' && budget > 0 ? budget : 800;
+  const b = typeof budget === 'number' && budget > 0 ? budget : SNIPPET_BUDGET;
   const kws = (keywords || []).filter((k) => typeof k === 'string' && k.length >= 2);
   const hits = [];
   if (kws.length > 0) {
@@ -503,9 +597,9 @@ function snippetFromLines(lines, keywords, budget) {
 function buildContextBlock(progress, files, events, budgetChars) {
   const budget = typeof budgetChars === 'number' && budgetChars > 0 ? budgetChars : 0;
   if (budget <= 0) return '';
-  const MAX_PROGRESS = Math.min(800, budget);
-  const MAX_EVENT = Math.min(800, Math.floor(budget / 4));
-  const MAX_FILE = budget > 800 ? Math.min(800, Math.floor((budget - Math.min(800, MAX_PROGRESS) - MAX_EVENT) / 3)) : 0;
+  const MAX_PROGRESS = Math.min(CONTEXT_PROGRESS_MAX, budget);
+  const MAX_EVENT = Math.min(CONTEXT_PROGRESS_MAX, Math.floor(budget / CONTEXT_EVENT_DIVISOR));
+  const MAX_FILE = budget > CONTEXT_PROGRESS_MAX ? Math.min(CONTEXT_PROGRESS_MAX, Math.floor((budget - Math.min(CONTEXT_PROGRESS_MAX, MAX_PROGRESS) - MAX_EVENT) / CONTEXT_FILE_COUNT)) : 0;
   const parts = [];
   let used = 0;
   // 1) 任务进度（最高优先级）
@@ -658,28 +752,30 @@ const CONTEXT_GUARD = '【参考上下文】仅供理解任务与项目背景，
 
 const V2_WORKSPACE_IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.venv', 'venv', '__pycache__', '.next', '.cache', 'coverage', 'target', '.idea', '.vscode']);
 
-// 阶段 A：任务进度理解（smart → basic 降级；失败返回 null 不抛错）
+// 阶段 A：任务进度理解（表驱动 phaseA：none 跳过 / rule 正则 / llm 智能（失败降级 rule）/ memory 读记忆对）
+// 返回值：{ progress, mode }；mode: 'smart'|'rule'|'memory'|'none'
 async function v2ResolveProgress(services, historyText, cfg) {
-  if (cfg.context.mode === 'smart' && services.llm && services.chain && services.chain.length > 0 && historyText.trim() !== '') {
+  const row = MODE_TABLE[cfg.mode] || MODE_TABLE[DEFAULT_MODE];
+  if (row.phaseA === 'llm' && services.llm && services.chain && services.chain.length > 0 && historyText.trim() !== '') {
     const entry = services.chain[0];
     let timedOut = false;
-    const timer = services.timer.timeout(() => { timedOut = true; }, 15000);
+    const timer = services.timer.timeout(() => { timedOut = true; }, V2_PROGRESS_TIMEOUT_MS);
     try {
       const stream = services.llm.stream({
         provider: entry.provider,
         model: entry.model,
         ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
-        maxTokens: 400,
+        maxTokens: V2_PROGRESS_MAX_TOKENS,
         system: TASK_ANALYSIS_PROMPT,
         messages: [{
           id: 'enhance-task-progress',
           role: 'user',
-          content: [{ type: 'text', text: historyText.slice(0, 8000) }],
+          content: [{ type: 'text', text: historyText.slice(0, V2_HISTORY_MAX_CHARS) }],
           source: { kind: 'user' },
         }],
       });
       const iterator = stream[Symbol.asyncIterator]();
-      const result = await collectStream(iterator, 2000);
+      const result = await collectStream(iterator, V2_PROGRESS_OUTPUT_LIMIT);
       if (!timedOut && result.kind === 'ok') {
         const parsed = parseTaskProgress(result.text);
         if (parsed) {
@@ -696,10 +792,10 @@ async function v2ResolveProgress(services, historyText, cfg) {
       timer();
     }
   }
-  // basic 规则提取（零成本；无历史时返回空 focus）
+  // rule 规则提取（零成本；无历史时返回空 focus）——phaseA: rule / llm 降级 / memory 无记忆时兜底
   const focus = inferFocusRules(historyText);
-  if (focus.length > 0) return { progress: { focus }, mode: 'basic' };
-  return { progress: null, mode: 'basic' };
+  if (focus.length > 0) return { progress: { focus }, mode: 'rule' };
+  return { progress: null, mode: 'rule' };
 }
 
 // 阶段 B：工作区文件检索（fs 扫描 + 名称/内容命中 → Top-3 摘要；2s 超时降级）
@@ -709,10 +805,14 @@ async function v2SearchWorkspace(services, keywords, cfg) {
   const fsSvc = services.fs;
   const root = services.sandboxPolicy && services.sandboxPolicy.workspaceRoot;
   if (!fsSvc || !root || typeof fsSvc.listDir !== 'function' || typeof fsSvc.readText !== 'function' || typeof fsSvc.resolve !== 'function') return [];
-  const depth = cfg.context.workspace.depth || 2;
-  const maxFiles = cfg.context.workspace.maxFiles || 3;
+  // 表驱动：phaseB 非 file+event 跳过；扫描上限按 scanLimit（by-budget 查联动表 / fixed 固定）
+  const row = MODE_TABLE[cfg.mode] || MODE_TABLE[DEFAULT_MODE];
+  if (row.phaseB !== 'file+event') return [];
+  const lim = resolveScanLimit(cfg.mode, cfg.context.budgetChars);
+  const depth = lim.depth;
+  const maxFiles = lim.maxFiles;
   let aborted = false;
-  const timer = services.timer.timeout(() => { aborted = true; }, 2000);
+  const timer = services.timer.timeout(() => { aborted = true; }, V2_WORKSPACE_TIMEOUT_MS);
   try {
     let rootTarget;
     try {
@@ -723,7 +823,7 @@ async function v2SearchWorkspace(services, keywords, cfg) {
     }
     const files = [];
     const walk = async (target, rel, level) => {
-      if (aborted || files.length >= 2000 || level > depth) return;
+      if (aborted || files.length >= SCAN_FILE_LIST_MAX || level > depth) return;
       let entries;
       try {
         entries = await fsSvc.listDir(target);
@@ -775,16 +875,19 @@ async function v2SearchWorkspace(services, keywords, cfg) {
     }
     scored.sort((a, b) => b.contentHits - a.contentHits);
     const top = scored.slice(0, maxFiles);
-    return top.map((f) => ({ path: f.path, snippet: snippetFromLines(f.lines, keywords, 800) }));
+    return top.map((f) => ({ path: f.path, snippet: snippetFromLines(f.lines, keywords, SNIPPET_BUDGET) }));
   } finally {
     timer();
   }
 }
 
 // 阶段 B3：会话事件检索（增强；searchEvents 契约：{sessionId,query,limit} → {items:[{snippet}]}；失败跳过）
-async function v2SearchEvents(services, sessionId, keywords) {
+async function v2SearchEvents(services, sessionId, keywords, cfg) {
   const sq = services.sessionQuery;
   const kws = (keywords || []).filter((k) => typeof k === 'string' && k.trim() !== '');
+  // 表驱动：phaseB 非 file+event 跳过
+  const row = MODE_TABLE[cfg.mode] || MODE_TABLE[DEFAULT_MODE];
+  if (row.phaseB !== 'file+event') return [];
   if (!sq || typeof sq.searchEvents !== 'function' || kws.length === 0) {
     hlog('[enhance] v2 searchEvents skipped kws=' + kws.length);
     return [];
@@ -805,8 +908,16 @@ async function v2SearchEvents(services, sessionId, keywords) {
 }
 
 // 阶段 A/B/C 汇总：返回 { block, log }（全部不可用 → { block: '', log: 'none' }）
-// v2.0.5：listEvents 仅返回元数据（无文本）——历史文本改用 filterEvents seq 范围取文档。
+// v2.1 表驱动：memory 模式走记忆块分支（跳过历史/工作区/事件检索）；其余按 MODE_TABLE phase 分发。
 async function buildV2ContextBlock(services, sessionId, text, cfg) {
+  const row = MODE_TABLE[cfg.mode] || MODE_TABLE[DEFAULT_MODE];
+  // ===== memory 分支（phaseC='memory'）：仅记忆对，跳过全部检索 =====
+  if (row.phaseC === 'memory') {
+    const mem = services.memory;
+    const block = mem && mem.prevInput ? buildMemoryBlock(mem.prevInput, mem.prevOutput, cfg.context.budgetChars) : '';
+    return { block, log: block === '' ? 'none' : 'memory chars=' + block.length };
+  }
+  // ===== 标准/智能：历史 + 阶段A + 阶段B + 阶段C =====
   let events = [];
   let historyText = '';
   const sq = services.sessionQuery;
@@ -815,7 +926,7 @@ async function buildV2ContextBlock(services, sessionId, text, cfg) {
       const records = await sq.listEvents(sessionId);
       // 尾部反向找最近的消息事件 seq（listEvents 升序，无文本；seq 用于 filterEvents 范围过滤）
       const msgSeqs = [];
-      for (let i = records.length - 1; i >= 0 && msgSeqs.length < 16; i--) {
+      for (let i = records.length - 1; i >= 0 && msgSeqs.length < V2_MSG_SEQ_SCAN; i--) {
         const r = records[i];
         const t = String(r && r.type || '');
         if (t === 'user/message' || t === 'assistant/message') msgSeqs.push(r && r.seq);
@@ -823,7 +934,7 @@ async function buildV2ContextBlock(services, sessionId, text, cfg) {
       if (msgSeqs.length > 0) {
         const minSeq = msgSeqs[msgSeqs.length - 1];
         const docs = await sq.filterEvents(sessionId, [{ kind: 'seq', from: minSeq }]);
-        events = extractHistory(docs, 12);
+        events = extractHistory(docs, V2_HISTORY_LIMIT);
         historyText = events.map((e) => (e.type === 'user' ? '[用户] ' : '[助手] ') + e.text).join('\n');
         hlog('[enhance] v2 history raw=' + records.length + ' msgSeqs=' + msgSeqs.length + ' minSeq=' + minSeq + ' docs=' + (docs ? docs.length : 'null') + ' events=' + events.length + ' chars=' + historyText.length + ' firstType=' + (events.length ? events[0].type : '-'));
       } else {
@@ -837,14 +948,14 @@ async function buildV2ContextBlock(services, sessionId, text, cfg) {
   }
   const root = services.sandboxPolicy && services.sandboxPolicy.workspaceRoot;
   hlog('[enhance] v2 workspaceRoot=' + (root || '(none)') + ' fs=' + (services.fs ? 'yes' : 'no'));
-  // 阶段 A
+  // 阶段 A（表驱动 phaseA：llm 智能 / rule 正则 / none 跳过——none 时 historyText 为空则直接空 focus）
   const { progress, mode } = await v2ResolveProgress(services, historyText, cfg);
-  // 阶段 B
+  // 阶段 B（表驱动 phaseB：file+event 全量 / none 跳过）
   const focus = progress && Array.isArray(progress.focus) ? progress.focus : [];
   const keywords = extractKeywords(text, focus);
   const files = await v2SearchWorkspace(services, keywords, cfg);
-  const eventsHits = await v2SearchEvents(services, sessionId, keywords);
-  // 阶段 C
+  const eventsHits = await v2SearchEvents(services, sessionId, keywords, cfg);
+  // 阶段 C（phaseC='inject'）
   const budget = cfg.context.budgetChars || 0;
   const block = buildContextBlock(progress, files, eventsHits, budget);
   const ctxLog = block === ''
@@ -1127,14 +1238,16 @@ return {
       }
 
       const cfg = validateConfig(args && args.config);
+      // v2.1（§2.2）：client 已判定实际模式（显式/auto/seed），请求 mode 覆盖解析值
+      if (args && typeof args.mode === 'string' && MODE_KEYS.includes(args.mode)) cfg.mode = args.mode;
       // v23（D6）：模型链 = cfg.fallback 按序（每条独立 reasoningEffort）；
       // 链为空 → 自适应解析当前环境默认链（不再区分 main/fallback）
       const chain = buildTryChain(cfg.fallback, await resolveAdaptiveChain(ctx.get('llm'), ctx.get('agentDefaultModel')));
-      // v2.0.0（H2）：引擎分支——V2 阶段 A/B/C 在优化超时计时器启动前执行（各自独立超时，不占 timeoutMs 预算）
+      // v2.1（§4.1）：模式分支（表驱动）——V2 阶段 A/B/C 在优化超时计时器启动前执行（各自独立超时，不占 timeoutMs 预算）
       let v2Block = '';
       let v2Log = 'none';
       let system = cfg.templateMode === 'custom' && cfg.templateText.trim() !== '' ? cfg.templateText.trim() : SYSTEM_PROMPT;
-      if (shouldInjectV2(cfg.engine, cfg.context.budgetChars)) {
+      if (shouldInjectV2(cfg.mode, cfg.context.budgetChars)) {
         const v2 = await buildV2ContextBlock({
           llm: ctx.get('llm'),
           sessionQuery: ctx.get('sessionQuery'),
@@ -1142,6 +1255,7 @@ return {
           fs: ctx.get('fs'),
           timer: ctx.timer,
           chain,
+          memory: args && args.memory && typeof args.memory === 'object' ? args.memory : null,
         }, sessionId, text, cfg);
         v2Block = v2.block;
         v2Log = v2.log;
@@ -1151,7 +1265,8 @@ return {
       const maxTokens = cfg.maxTokens;
       const outputLimit = cfg.outputLimit;
       const userText = v2Block !== '' ? v2Block + '\n\n' + wrapUserText(text) : wrapUserText(text);
-      hlog('[enhance] cfg session=' + sessionId + ' engine=' + cfg.engine + ' ctx=' + v2Log + ' chain=' + (chain.length > 0 ? chain.map((f) => f.provider + '/' + f.model).join(',') : '-') + ' timeout=' + timeoutMs + ' maxTokens=' + maxTokens + ' outputLimit=' + outputLimit + ' template=' + (system === SYSTEM_PROMPT ? 'builtin' : (system.indexOf(CONTEXT_GUARD) !== -1 ? 'custom+v2guard' : 'custom')));
+      const modeTag = args && args.seed === true ? cfg.mode + '(seed)' : cfg.mode;
+      hlog('[enhance] cfg session=' + sessionId + ' mode=' + modeTag + ' ctx=' + v2Log + ' chain=' + (chain.length > 0 ? chain.map((f) => f.provider + '/' + f.model).join(',') : '-') + ' timeout=' + timeoutMs + ' maxTokens=' + maxTokens + ' outputLimit=' + outputLimit + ' template=' + (system === SYSTEM_PROMPT ? 'builtin' : (system.indexOf(CONTEXT_GUARD) !== -1 ? 'custom+v2guard' : 'custom')));
 
       const rec = { cancelled: false, timedOut: false, iterator: null };
       pending.set(key, rec);
