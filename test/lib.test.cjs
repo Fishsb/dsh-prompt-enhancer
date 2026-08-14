@@ -23,7 +23,7 @@ const grabConst = (name) => {
 const defaultsBlock = [grabConst('DEFAULT_TIMEOUT_MS'), grabConst('DEFAULT_MAX_TOKENS'), grabConst('DEFAULT_OUTPUT_LIMIT')].join('\n');
 const pureFn = new Function(defaultsBlock + '\n' + pureText + `
   ;return { wrapUserText, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
-    shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, shouldIgnoreFile,
+    shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, shouldIgnoreFile, analyzeInputRules,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
     buildMemoryBlock, MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE,
@@ -42,6 +42,7 @@ const {
   extractHistory,
   inferFocusRules,
   extractKeywords,
+  analyzeInputRules,
   shouldIgnoreFile,
   rankFiles,
   snippetFromLines,
@@ -647,4 +648,59 @@ test('U37 parseTagsPayload / validateManifestFiles（v2.4.1 新契约）', () =>
   assert.equal(validateManifestFiles([{ name: 'plugin-host.js', content: 'x'.repeat(1000001) }]).ok, false, '超 1MB');
   assert.equal(validateManifestFiles(null).ok, false);
   assert.equal(validateManifestFiles([{ name: 'plugin-host.js' }]).ok, false, '缺 content');
+});
+
+test('U38 analyzeInputRules（v2.4.4 lite 规则引擎：目标/约束/格式/示例 要素检查）', () => {
+  // 全要素输入 → 无缺失、无建议
+  const full = analyzeInputRules('请生成一份 JSON 格式的月度报告，不超过 500 字，不要包含财务数据，例如输入输出对样例');
+  assert.equal(full.suggestions.length, 0, '全要素应无缺失');
+  // 目标缺失：无任务动词的模糊文本
+  const noGoal = analyzeInputRules('关于天气的说明文字');
+  assert.ok(noGoal.missing.some((m) => m.key === 'goal'), '应检出目标缺失');
+  // 约束缺失：有目标无限制
+  const noConstraint = analyzeInputRules('帮我写一个排序算法');
+  assert.ok(noConstraint.missing.some((m) => m.key === 'constraints'), '应检出约束缺失');
+  assert.ok(noConstraint.missing.some((m) => m.key === 'format'), '应检出格式缺失');
+  // 数字约束命中：长度上限
+  const withLen = analyzeInputRules('写一段话，不超过 50 字');
+  assert.ok(!withLen.missing.some((m) => m.key === 'constraints'), '长度约束应命中');
+  // 示例命中：示例词
+  const withExample = analyzeInputRules('翻译下面内容，示例：hello → 你好');
+  assert.ok(!withExample.missing.some((m) => m.key === 'example'), '示例应命中');
+  // 空输入 → 全部缺失
+  const empty = analyzeInputRules('');
+  assert.equal(empty.missing.length, 4, '空输入应四项全缺');
+  // 建议与缺失一一对应
+  const paired = analyzeInputRules('随便');
+  assert.equal(paired.suggestions.length, paired.missing.length, '建议数应等于缺失数');
+});
+
+// v2.4.5（语义保真修正）：SYSTEM_PROMPT 关键契约断言 + lite 规则保守化断言。
+// SYSTEM_PROMPT 定义在 PURE 区段之前，此处直接从源码文本求值（单一事实源）。
+test('U39 SYSTEM_PROMPT 语义保真契约 + lite 规则保守化（v2.4.5）', () => {
+  // —— 从源码提取 SYSTEM_PROMPT 数组并求值 ——
+  const m = src.match(/const SYSTEM_PROMPT = \[([\s\S]*?)\n\];/);
+  assert.ok(m, 'SYSTEM_PROMPT array not found');
+  const systemText = new Function('return [' + m[1] + '].join(\'\\n\');')();
+  // 语义保真核心契约
+  assert.ok(systemText.includes('理解原文（第一优先'), '应含「理解原文（第一优先）」阶段');
+  assert.ok(systemText.includes('语义等价是底线'), '应含「语义等价是底线」');
+  assert.ok(systemText.includes('不得歪曲、臆造、遗漏原文任何已明确的信息'), '硬性约束应含禁臆造');
+  assert.ok(systemText.includes('保持对外调用方式与原有功能不变'), '示例 3 语义保真示范应在');
+  assert.ok(systemText.includes('示例 4'), '应含 4 条示例');
+  // 删除旧版矛盾约束（曾诱导删细节/臆造）
+  assert.ok(!systemText.includes('只写"做什么"，不解释"怎么做"'), '应删除「只写做什么不解释怎么做」（与示例矛盾，诱导删细节）');
+  assert.ok(!systemText.includes('补充缺失的必要上下文'), '应删除「补充缺失的必要上下文」（诱导臆造）');
+  assert.ok(!systemText.includes('优化后的提示词不超过 800 字符'), '长度约束应改为服从语义保真');
+  // 长度新表述与主体语言规则
+  assert.ok(systemText.includes('长度服从语义保真'), '应含「长度服从语义保真」');
+  assert.ok(systemText.includes('输入以中文为主体则输出必须为中文'), '语言规则应为「主体语言」');
+  // —— lite 规则保守化：建议不再诱导添加新要求 ——
+  const cons = analyzeInputRules('帮我写一个排序算法');
+  const consHint = cons.suggestions.find((s) => s.includes('约束')) || '';
+  assert.ok(consHint.includes('仅当原文语义暗示需要限制'), '约束建议应保守（不诱导硬加约束）');
+  assert.ok(!consHint.includes('请在优化结果中补充合理约束'), '约束建议不应含旧版诱导措辞');
+  const goal = analyzeInputRules('关于天气的说明文字');
+  const goalHint = goal.suggestions.find((s) => s.includes('目标')) || '';
+  assert.ok(goalHint.includes('推断不出时保持原文表述，不得臆造'), '目标建议应保守（不臆造目标）');
 });

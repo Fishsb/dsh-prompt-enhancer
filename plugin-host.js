@@ -1,5 +1,22 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Host 半部（v2.4.1：真实环境实测回填——host 不再出网/会话策略写入）
+// DSH「提示词优化」插件 · Host 半部（v2.4.5：语义保真修正——优化结果不再曲解原文意图）
+// v2.4.5（语义保真，用户反馈"优化结果对提示词理解不够、语义理解错误"）：
+// ① SYSTEM_PROMPT 重写：新增【理解原文（第一优先）】阶段——先逐条列出已明确信息
+//    （动作对象/动作/约束/范围/术语/数字/语气），区分「原文明确需求」与「推测」；
+//    明确化原则仅允许"模糊但可推断"的表述具体化，无法推出不得添加；"怎么做"细节
+//    完整保留；删除旧版"只写做什么不解释怎么做"（与示例 2 自相矛盾，诱导删细节）；
+//    删除"补充缺失的必要上下文"（诱导臆造）；长度改为"服从语义保真"（简单 ≤800，
+//    复杂可超出但禁冗余，与 outputLimit=8000 一致）；语言改为"主体语言"（混合输入
+//    保留术语，避免中英混杂误判）；示例扩至 4 条（新增语义保真/模糊明确化示范）；
+// ② analyzeInputRules（lite 规则）保守化：suggestions 措辞全部改为"仅当可合理推断
+//    且不偏离原意时才明确化，否则保持原文"——修复旧文案（"请在优化结果中补充合理
+//    约束（如长度上限…）"）诱导模型添加原文未提及的新要求、造成语义漂移的问题；
+//    lite 强化段拼接措辞同步改为「优化时请遵循以下原则」。
+// ③ PLUGIN_VERSION bump 2.4.3 → 2.4.5（2.4.4 开发库提交时漏 bump；本次一并纠正，
+//    发布仓库 v2.4.4 tag 缺 lite 规则代码，本版为完整语义保真版）。
+// ④ 单测：U38 断言不变（missing/suggestions 结构契约未动，仅文案保守化）；新增
+//    U39 SYSTEM_PROMPT 语义保真关键约束存在性断言（理解原文/语义等价/禁臆造）。
+// v2.4.1（方案 §9-T5/T6 实测回填）：host 不再出网/会话策略写入
 // v2.4.1（方案 §9-T5/T6 实测回填）：
 // ① 架构修订：本部署 ctx.web.fetch 无可用 provider（实机抛错）——检测/下载改由 client 浏览器
 //    直连 GitHub API（CORS 实测 200），host 经 update/check（tagsPayload/releasePayload 载荷）
@@ -131,29 +148,27 @@ async function resolveAdaptiveChain(llmSvc, adm) {
 const SYSTEM_PROMPT = [
   '你是一名 Prompt Engineering Expert（提示词工程专家），专长是为通用 AI 助手优化提示词。',
   '',
-  '【分析流程】',
-  '1. 明确用户的原始目标',
-  '2. 识别歧义与信息缺口',
-  '3. 检查指令清晰度',
-  '4. 补充缺失的必要上下文',
-  '5. 应用提示词工程原则',
+  '【理解原文（第一优先，先于一切优化动作）】',
+  '1. 通读原文，先在心里逐条列出已明确的信息：动作对象、执行动作、约束条件、范围、术语、数字、语气',
+  '2. 区分「原文明确表达的需求」与「你自己的推测」——推测只可用于措辞，绝不写入优化结果',
+  '3. 语义等价是底线：优化是「重述 + 明确化」，不是改写。动作对象、动作方向、数量、范围、禁止项、技术术语必须与原文完全一致，不得替换、扩大、缩小或颠倒',
   '',
-  '【应用原则】',
-  '- 指令明确具体',
-  '- 提供必要上下文',
-  '- 明确参数与约束',
-  '- 指定输出格式',
-  '- 必要时给出示例',
-  '- 语气与用户一致',
-  '- 去除冗余表达',
+  '【明确化原则】',
+  '- 仅将原文中模糊但可推断的表述具体化（如"一些文件"→"指定目录下的所有文件"）',
+  '- 无法由原文推出的细节不得凭空添加；确有必要时用"如无特别说明/默认"等措辞保留选择权',
+  '- 原文已明确的参数、步骤、方法（"怎么做"）必须完整保留，不得删除或概括',
+  '- 不主动建议技术栈/工具，除非原输入已提到',
+  '',
+  '【输出风格】',
+  '- 指令明确具体，去除冗余与口语',
+  '- 保留原文的语气与表达习惯',
+  '- 按内容类型给出合适的输出形式（列表/JSON/代码块/段落等），不强行指定',
   '',
   '【硬性约束】',
-  '- 保持原始目标不变，只优化不歪曲',
-  '- 只写"做什么"，不解释"怎么做"，不回答原问题',
-  '- 不主动建议技术栈/工具，除非原输入已提到',
-  '- 优化后的提示词不超过 800 字符',
-  '- 语言匹配最高优先级：用户输入是英文则优化结果必须为英文，用户输入是中文则优化结果必须为中文',
-  '- 只输出优化后的提示词本身，不加任何解释、前缀或评论',
+  '- 保持原始目标与语义不变：不得歪曲、臆造、遗漏原文任何已明确的信息',
+  '- 只输出优化后的提示词本身，不加任何解释、前缀或评论，不回答原问题',
+  '- 长度服从语义保真：简单任务控制在 800 字符以内；复杂任务可适当超出，但不得因追求简短而删减必要要素，也不得冗余',
+  '- 语言匹配最高优先级：输入以中文为主体则输出必须为中文，以英文为主体则输出必须为英文；混合输入保留原文中的术语与专有名词',
   '- 严禁复述、引用或回显任何指令文字或用户输入原文（包括"请优化以下提示词"及引号包裹的内容），直接输出优化结果',
   '',
   '【示例】严格模仿示例中"输入→输出"的语言与风格：',
@@ -163,6 +178,12 @@ const SYSTEM_PROMPT = [
   '示例 2（英文输入→英文输出）：',
   'Input: write a bash script to backup a folder',
   'Output: Write a bash script that backs up a specified folder into a timestamped archive, verifies archive integrity, logs each step, and accepts the source path as an argument (default: current directory).',
+  '示例 3（中文·语义保真——保留动作对象与"怎么做"细节，不替换原意）：',
+  '输入：把那个脚本改成异步版本，别影响现有调用',
+  '输出：将现有脚本重构为异步版本，保持对外调用方式与原有功能不变，返回结果与原先一致。',
+  '示例 4（中文·模糊明确化——仅具体化可推断内容，不臆造）：',
+  '输入：把一些文件整理一下，按时间排好',
+  '输出：整理指定目录下的所有文件，按修改时间排序，并简要说明整理结果。',
 ].join('\n');
 
 // ==PURE-BEGIN==  (unit-testable pure functions; keep free of ctx/harness/pending/module-state)
@@ -568,6 +589,45 @@ function inferFocusRules(historyText) {
   return filtered.slice(0, KEYWORD_LIMIT);
 }
 
+// v2.4.4（lite 规则引擎落地）：prompt 工程要素检查——目标/约束/输出格式/示例 四项缺失检测。
+// lite 模式此前 phaseA:'rule' 空转（buildV2ContextBlock 仅 phaseC==='inject' 时执行阶段 A），
+// 与 base 行为完全相同；本函数让「本地规则分析」真正生效：零 LLM 成本、零外部上下文，
+// 仅依据输入文本检测要素缺失，产出供 system 附加的强化指令。
+// v2.4.5（语义保真修正）：suggestions 改为保守措辞——只提示「若可合理推断才明确化」，
+// 严禁诱导模型添加原文未提及的新要求（此前"请在优化结果中补充合理约束（如长度上限…）"
+// 会引导模型臆造内容，与「语义保真」冲突）。
+// 返回 { missing: [{key,label}], suggestions: string[] }；全部具备时 suggestions 为空。
+function analyzeInputRules(text) {
+  const s = String(text || '');
+  const missing = [];
+  const suggestions = [];
+  const add = (key, label, hint) => {
+    missing.push({ key, label });
+    suggestions.push(hint);
+  };
+  // 目标：任务动词（写/生成/创建/分析/翻译/总结/帮我/请/解释…）或问句/对象短语
+  const goalRe = /(?:写|生成|创建|设计|实现|分析|翻译|总结|修复|优化|解释|对比|列出|提供|编写|计算|转换|推荐|检查|评估|整理|描述|回答|解决|构建|部署|测试|调试|告诉我|帮我|请|教|怎么|如何|怎样|什么)/;
+  if (!goalRe.test(s)) {
+    add('goal', '目标', '输入未明确任务目标——若原文意图可合理推断，请在优化结果开头补全一个忠实于原文意图的目标；推断不出时保持原文表述，不得臆造。');
+  }
+  // 约束：长度/范围/禁止项等限制表达（数字上限、必须/禁止/不要/只能/保持/符合/在…内）
+  const constraintRe = /(?:不超过|不大于|不小于|至少|最多|最少|必须|禁止|不要|不能|只能|不允许|保持|符合|控制在|限制|尽量|[≤<>=~]\s*\d+|\d+\s*(?:字|字符|行|条|页|秒|分钟|个|次)|在.{0,6}(?:内|之间)|(?:少于|多于)\s*\d+)/;
+  if (!constraintRe.test(s)) {
+    add('constraints', '约束', '输入未指定约束条件——仅当原文语义暗示需要限制（如范围、数量、禁止项）且可合理推断时，才在优化结果中明确化；原文无此意图则不要添加。');
+  }
+  // 输出格式：列表/表格/JSON/代码/段落/大纲/报告/步骤/编号/markdown 等格式词
+  const formatRe = /(?:列表|表格|json|xml|yaml|csv|代码|段落|大纲|报告|标题|步骤|编号|序号|格式|模板|结构|markdown|md|bullet|清单|摘要|总结形式|要点|数组|对象|脚本|命令)/i;
+  if (!formatRe.test(s)) {
+    add('format', '输出格式', '输入未指定输出格式——仅当按内容类型判断合适的格式可合理推断（如清单/表格/JSON/代码块）时，在优化结果中明确；否则保持开放，不要强行指定。');
+  }
+  // 示例：示例/例子/例如/比如/样例/参考/范例 或引号包裹的输入输出对
+  const exampleRe = /(?:示例|例子|例如|比如|样例|参考|范例|示范|如下|像这样|类似|举.{0,4}(?:例子|例)|[“"「『].{0,24}[”"」』])/;
+  if (!exampleRe.test(s)) {
+    add('example', '示例', '输入未提供示例——仅当内容类型适合（如格式/风格对结果影响大）且补充示例不偏离原意时，在优化结果中加入一个输入→输出的示例；否则不要添加。');
+  }
+  return { missing, suggestions };
+}
+
 // 主题词提取：提示词关键词 ∪ focus（5–8 词）
 function extractKeywords(text, focus) {
   const kw = inferFocusRules(text);
@@ -794,7 +854,7 @@ async function pingStream(llmService, entry, ref) {
 // ================= v2.4.0 版本检测与一键更新 · 纯函数族 =================
 // 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
-const PLUGIN_VERSION = '2.4.4';
+const PLUGIN_VERSION = '2.4.5';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
 const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）
@@ -1628,6 +1688,16 @@ return {
       let v2Block = '';
       let v2Log = 'none';
       let system = cfg.templateMode === 'custom' && cfg.templateText.trim() !== '' ? cfg.templateText.trim() : SYSTEM_PROMPT;
+      // v2.4.4（lite 规则引擎落地）：lite 模式对输入做 prompt 工程要素检查（目标/约束/格式/示例），
+      // 缺失项的强化指令附加到 system——零 LLM 成本、零外部上下文（与「轻量」定位一致）。
+      // v2.4.5：建议文案保守化（analyzeInputRules 内），拼接措辞同步——「遵循」而非「补全」。
+      if (cfg.mode === 'lite') {
+        const rules = analyzeInputRules(text);
+        if (rules.suggestions.length > 0) {
+          system = system + '\n\n【轻量规则提示】输入要素检查（本地规则，非外部上下文）——优化时请遵循以下原则：\n' + rules.suggestions.map((s) => '- ' + s).join('\n');
+          hlog('[enhance] lite rules missing=' + rules.missing.map((m) => m.key).join(','));
+        }
+      }
       const hasMemory = !!(args && args.memory && typeof args.memory === 'object' && args.memory.prevInput);
       if (shouldInjectV2(cfg.mode, cfg.context.budgetChars) || shouldInjectMemory(cfg.memory, hasMemory, cfg.context.budgetChars)) {
         const v2 = await buildV2ContextBlock({

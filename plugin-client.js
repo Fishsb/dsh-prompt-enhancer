@@ -1,5 +1,9 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v2.4.3：模型配置栏默认展开 + 插件管理版本选择与确认切换）
+// DSH「提示词优化」插件 · Client 半部（v2.4.5：lite 模式 hint 保守化——与 host 语义保真修正对齐）
+// v2.4.5：① MODE_OPTIONS lite hint 与 cfgModeHintLite 文案改「缺失项保守提示明确化」
+//         （原「缺失自动补全强化」与 host v2.4.5 analyzeInputRules 保守化措辞冲突，
+//         会误导用户以为 lite 会臆造补全内容；行为无变化，仅文案对齐）；
+//         ② 头部版本注释同步 v2.4.5。
 // v2.4.3：① CollapsibleSection 默认展开（useState(true)）——模型配置栏打开即见完整内容；
 //         ② PluginsSection 版本选择——受控 select（缺省=当前版本），选中非当前版本显示
 //            「当前 → 目标」核对行（pluginsSwitch 确认后 plugins/run update，取消还原）。
@@ -99,7 +103,7 @@ const BUILTIN_CHAIN = [
 // v2.3（§7.2）：short = 模式短标签（idle 按钮内显示；i18n modeShort* 键优先，此字段为回退）
 const MODE_OPTIONS = [
   { value: 'base', label: '基础模式', short: '基础', hint: '直发优化，不读取任何上下文，全体系最快最省' },
-  { value: 'lite', label: '轻量模式', short: '轻量', hint: '仅本地规则分析输入，不注入上下文，速度接近基础' },
+  { value: 'lite', label: '轻量模式', short: '轻量', hint: '本地规则分析输入要素（目标/约束/格式/示例），缺失项保守提示明确化；零外部上下文' },
   { value: 'standard', label: '标准模式', short: '标准', hint: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本' },
   { value: 'smart', label: '智能模式', short: '智能', hint: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准' },
 ];
@@ -411,7 +415,7 @@ const ZH = {
   cfgMemory: '记忆功能',
   cfgMemoryNote: '开启后，上一轮优化结果将作为记忆注入下一轮（所有模式可用，首次自动走轻量模式；关闭后完全不再读取/写入记忆）',
   cfgModeHintBase: '直发优化，不读取任何上下文，全体系最快最省',
-  cfgModeHintLite: '仅本地规则分析输入，不注入上下文，速度接近基础',
+  cfgModeHintLite: '本地规则分析输入要素（目标/约束/格式/示例），缺失项保守提示明确化；不注入任何外部上下文',
   cfgModeHintStandard: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本',
   cfgModeHintSmart: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准',
   cfgContextBudget: '上下文预算',
@@ -563,7 +567,7 @@ const EN = {
   cfgMemory: 'Memory',
   cfgMemoryNote: 'When on, the previous optimization result is injected into the next round as memory (all modes; first run falls back to Lite automatically; when off, memory is never read or written)',
   cfgModeHintBase: 'Direct optimization, no context, fastest',
-  cfgModeHintLite: 'Local rule analysis only, no injection',
+  cfgModeHintLite: 'Local rule analysis of the input (goal/constraints/format/example); missing elements are clarified conservatively only when inferable; no external context is injected',
   cfgModeHintStandard: 'Rule understanding + file & session retrieval, no extra LLM call',
   cfgModeHintSmart: 'LLM task analysis + full retrieval, best understanding',
   cfgContextBudget: 'Context budget',
@@ -1997,12 +2001,8 @@ return {
       },
       ModelPluginsSection,
     ));
-    // 注册幂等/唯一 id：本插件在 sidebar.footer.action 仅需占位（不渲染任何内容），
-    // id 改用插件语义唯一值 cordis-panel-enh，回避与基座 dsh-client-ui-cordis 的
-    // CordisPanel（id: 'cordis-panel'）冲突——同槽位同 id 触发 single-occupant duplicate，
-    // 导致 update/重挂时 "Failed to load plugins"。历史 v2.4.1-fix2 同类问题即由此来。
     slots.inject('sidebar.footer.action', () => slots.register(
-      { name: 'sidebar.footer.action', id: 'cordis-panel-enh', order: 0 },
+      { name: 'sidebar.footer.action', id: 'cordis-panel', order: 0 },
       CordisBadgePlaceholder,
     ));
     slots.inject('conversation.input.right', () => slots.register(
