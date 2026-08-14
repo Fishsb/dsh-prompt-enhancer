@@ -38,6 +38,8 @@ Dynamic Cordis plugin (host + client halves), installed inside a DSH session via
 5. After approval, the ✨ button appears in the composer toolbar
 
 > Note: the dynamic client half is attached to the page connection active at activation time; a page refresh unloads it — just `cordis_run` again to restore.
+>
+> **v2.4.2+**: fixed the dynamic client sandbox restriction on the global `fetch` (version check & one-click update now use `window.fetch` to reach the GitHub API), and made the locale registration tolerant of stale instances left by previous activations (repeat activate/update no longer fails with `locale namespace "enhance" already has locale "zh"`).
 
 ### Quick-install snippet (paste into any DSH session)
 
@@ -83,6 +85,8 @@ The model chain lives in the "Models" tab: tried in order, reorderable, per-entr
 
 - Depends on DSH runtime-injected APIs (`llm` / `slots` / `harness` / `inputActions` / `sessionQuery` / `fs`), which may change across DSH releases
 - Use a recent DeepSeek Harness
+- **Version check & one-click update**: the browser talks to `api.github.com` directly (CORS-enabled; the host needs no outbound network). Restricted networks must let the browser reach GitHub (proxy etc.)
+- **Built-in fallback model chain**: points at the official DeepSeek provider (`deepseek-official`, `deepseek-v4-flash` / `deepseek-v4-pro`); using it requires a DeepSeek API key in credentials. Without one, configure a model chain under "Models & plugins" — a fresh install inherits the current model automatically, so manual setup is usually unnecessary
 
 ## License
 

@@ -1,5 +1,8 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v2.4.1：版本检测与一键更新 + 输入框按钮字体对齐）
+// DSH「提示词优化」插件 · Client 半部（v2.4.2：动态沙箱 fetch 修复 + locale 容错）
+// v2.4.2（2026-08-15）：① 动态 client 沙箱将全局 fetch 替换为教学 trap（抛错）——
+//     doCheck/doPull 3 处 fetch() 改 window.fetch()（检测/更新功能在动态安装下可用）；
+// ② locale.register 改 safeRegister 吞 duplicate（update 场景页面残留旧实例命名空间）。
 // v2.4.1（方案「插件版本检测与一键更新方案.md」§9-T5/T6 实测回填）：
 // ① 数据获取移至浏览器：host 无出网能力（web.fetch 无 provider）——本半部直连
 //    api.github.com（CORS 实测 200）取 tags/release 载荷与 contents API 文件
@@ -1039,8 +1042,8 @@ function UpdaterCard(props) {
     setPullRes(null);
     // v2.4.1（§9-T6）：浏览器直连 GitHub API（CORS），host 只做解析/比较
     Promise.all([
-      fetch(updaterTagsUrl(repo)).then((r) => r.status === 200 ? r.text() : Promise.reject(new Error('tags HTTP ' + r.status))),
-      fetch(updaterReleaseUrl(repo)).then((r) => r.text()), // 404 属正常（无 release），透传载荷
+      window.fetch(updaterTagsUrl(repo)).then((r) => r.status === 200 ? r.text() : Promise.reject(new Error('tags HTTP ' + r.status))),
+      window.fetch(updaterReleaseUrl(repo)).then((r) => r.text()), // 404 属正常（无 release），透传载荷
     ]).then(([tagsText, releaseText]) => {
       return host.call('update/check', { repo, sessionId, tagsPayload: tagsText, releasePayload: releaseText });
     }).then((res) => {
@@ -1067,7 +1070,7 @@ function UpdaterCard(props) {
     setError(null);
     // v2.4.1（§9-T6）：浏览器直连 contents API 拉取 6 文件（base64 → atob 解码）→ host 校验写入
     Promise.all(UPDATER_MANIFEST.map((name) =>
-      fetch(updaterContentsUrl(repo, result.remoteTag, name)).then((r) => {
+      window.fetch(updaterContentsUrl(repo, result.remoteTag, name)).then((r) => {
         if (r.status !== 200) throw new Error(name + ' HTTP ' + r.status);
         return r.json();
       }).then((meta) => {
@@ -1904,8 +1907,17 @@ return {
     timerSvc = ctx.get('timer') || null;
     const locale = ctx.get('locale');
     if (locale !== undefined && typeof locale.register === 'function') {
-      ctx.effect(() => locale.register('enhance', 'zh', ZH));
-      ctx.effect(() => locale.register('enhance', 'en', EN));
+      // v2.4.2：update 场景页面残留旧实例的 locale 命名空间（single occupant 抛 duplicate）——
+      // safeRegister 吞冲突沿用旧注册；正常路径保留 disposer（卸载不误删他人）。
+      const safeRegister = (ns, lang, dict) => {
+        try {
+          return locale.register(ns, lang, dict);
+        } catch (e) {
+          return null;
+        }
+      };
+      ctx.effect(() => safeRegister('enhance', 'zh', ZH));
+      ctx.effect(() => safeRegister('enhance', 'en', EN));
     }
     dynFace = ctx.get('dynamicCordisRunner') || null;
     // v16：整合「插件管理」+「优化配置」为单一入口「模型与插件」（页内三区 tab）

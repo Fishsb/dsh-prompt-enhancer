@@ -42,6 +42,8 @@ dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer
 5. 授权后输入框工具行出现 ✨ 按钮即安装成功
 
 > 提示：动态插件 client 半部附着于激活时的页面连接，页面刷新后会卸载，重新 `cordis_run` 即可恢复。
+>
+> **v2.4.2+**：修复了动态 client 沙箱对全局 `fetch` 的限制（「版本检测与一键更新」改用 `window.fetch` 直连 GitHub API），并兼容 update 时页面残留实例的 locale 命名空间冲突（重复激活/更新不再报 `locale namespace "enhance" already has locale "zh"`）。
 
 ### 快捷安装指令（复制给任意 DSH 会话）
 
@@ -86,6 +88,8 @@ dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer
 ## 兼容性
 
 - 依赖 DSH 运行时注入 API（`llm` / `slots` / `harness` / `inputActions` / `sessionQuery` / `fs`），随 DSH 版本升级可能调整
+- **版本检测与一键更新**：由浏览器直连 `api.github.com`（CORS 可用，host 无需出网）；网络受限环境请确保浏览器可访问 GitHub（代理等）
+- **内置兜底模型链**：指向 DeepSeek 官方（`deepseek-official`，`deepseek-v4-flash` / `deepseek-v4-pro`），使用该链需配置 DeepSeek API key（凭证）；未配置时请在「模型与插件」中配置模型链——首次安装会自动继承当前使用模型，通常无需手动配置
 - 建议使用最新版 DeepSeek Harness
 
 ## License
