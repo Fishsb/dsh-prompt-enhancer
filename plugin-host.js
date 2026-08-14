@@ -794,7 +794,7 @@ async function pingStream(llmService, entry, ref) {
 // ================= v2.4.0 版本检测与一键更新 · 纯函数族 =================
 // 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
-const PLUGIN_VERSION = '2.4.2';
+const PLUGIN_VERSION = '2.4.3';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
 const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）
@@ -899,17 +899,9 @@ function pickMaxTag(tags) {
   return best;
 }
 
-// raw 文件 URL（update/pull 下载）——已废弃：本机实测 raw.githubusercontent.com 被 DNS 屏蔽（0.0.0.0），
-// 统一改用 contents API（见 contentsApiUrl）。
 // 默认目标目录：<workspaceRoot>/dsh-prompt-enhancer-<tag>/；workspaceRoot 缺失 → ''
-function defaultDirFor(workspaceRoot, tag) {
-  if (typeof workspaceRoot !== 'string' || workspaceRoot.trim() === '') return '';
-  return workspaceRoot.replace(/[\\/]+$/, '') + '/' + 'dsh-prompt-enhancer-' + tag;
-}
-
-// GitHub contents API 下载 URL 契约（客户端构建；host 侧不再出网，见 §9-T6 实测回填）
-// 实机验证：raw.githubusercontent.com 本机 DNS 屏蔽（0.0.0.0）；api.github.com 浏览器 CORS 可直连。
-// 默认目标目录：<workspaceRoot>/dsh-prompt-enhancer-<tag>/；workspaceRoot 缺失 → ''
+// 下载统一走 GitHub contents API（§9-T6 实测回填：本机 raw.githubusercontent.com 被 DNS 屏蔽 0.0.0.0，
+// api.github.com 浏览器 CORS 可直连；host 不再出网，URL 由 client 构建）
 function defaultDirFor(workspaceRoot, tag) {
   if (typeof workspaceRoot !== 'string' || workspaceRoot.trim() === '') return '';
   return workspaceRoot.replace(/[\\/]+$/, '') + '/' + 'dsh-prompt-enhancer-' + tag;
@@ -1223,7 +1215,8 @@ function summarize(reference) {
     pluginId: String(reference.pluginId),
     name: reference.name,
     state,
-    ...(reference.packages ? { packages: reference.packages.map((p) => ({ packageId: String(p.packageId), name: p.name, purpose: p.purpose || '' })) } : { packages: [] }),
+    // v2.4.3-fix：透传每包半部完整性——client 版本下拉据此禁用残缺包（防误切致 UI 消失）
+    ...(reference.packages ? { packages: reference.packages.map((p) => ({ packageId: String(p.packageId), name: p.name, purpose: p.purpose || '', hasHostHalf: p.hasHostHalf === true, hasClientHalf: p.hasClientHalf === true })) } : { packages: [] }),
     ...(reference.currentPackageId === undefined ? {} : { currentPackageId: String(reference.currentPackageId) }),
     ...(reference.nextPackageId === undefined ? {} : { nextPackageId: String(reference.nextPackageId) }),
     ...(reference.activeRun === undefined ? {} : { activeRun: { pluginRunId: String(reference.activeRun.pluginRunId), packageId: String(reference.activeRun.packageId) } }),

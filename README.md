@@ -44,6 +44,8 @@ dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer
 > 提示：动态插件 client 半部附着于激活时的页面连接，页面刷新后会卸载，重新 `cordis_run` 即可恢复。
 >
 > **v2.4.2+**：修复了动态 client 沙箱对全局 `fetch` 的限制（「版本检测与一键更新」改用 `window.fetch` 直连 GitHub API），并兼容 update 时页面残留实例的 locale 命名空间冲突（重复激活/更新不再报 `locale namespace "enhance" already has locale "zh"`）。
+>
+> **v2.4.3+**：模型配置栏默认展开；插件管理支持版本选择与「当前 → 目标」确认切换（缺 host/client 半部的历史包禁用并标注「不完整」，防误切导致界面消失）；优化按钮统一样式对齐模型选择器（等线字体、胶囊灰字、hover 深色椭圆背景、左 4 右 8 留白）。
 
 ### 快捷安装指令（复制给任意 DSH 会话）
 

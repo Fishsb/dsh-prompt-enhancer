@@ -1,8 +1,13 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v2.4.2：动态沙箱 fetch 修复 + locale 容错）
-// v2.4.2（2026-08-15）：① 动态 client 沙箱将全局 fetch 替换为教学 trap（抛错）——
-//     doCheck/doPull 3 处 fetch() 改 window.fetch()（检测/更新功能在动态安装下可用）；
-// ② locale.register 改 safeRegister 吞 duplicate（update 场景页面残留旧实例命名空间）。
+// DSH「提示词优化」插件 · Client 半部（v2.4.3：模型配置栏默认展开 + 插件管理版本选择与确认切换）
+// v2.4.3：① CollapsibleSection 默认展开（useState(true)）——模型配置栏打开即见完整内容；
+//         ② PluginsSection 版本选择——受控 select（缺省=当前版本），选中非当前版本显示
+//            「当前 → 目标」核对行（pluginsSwitch 确认后 plugins/run update，取消还原）。
+// v2.4.1-fix（2026-08-14 实测修复）：动态 client 沙箱将全局 fetch 替换为教学 trap
+// （抛错重定向到 host.call）——doCheck/doPull 的 3 处 fetch() 改为 window.fetch()，
+// 绕过参数遮蔽直达页面主 realm（CORS 直连 GitHub API 实测 200）。
+// v2.4.1-fix2（2026-08-14）：locale.register 在 update 场景抛 duplicate（旧实例残留、
+// single occupant）导致 client-half-failed——safeRegister 吞冲突，字典未变沿用旧注册。
 // v2.4.1（方案「插件版本检测与一键更新方案.md」§9-T5/T6 实测回填）：
 // ① 数据获取移至浏览器：host 无出网能力（web.fetch 无 provider）——本半部直连
 //    api.github.com（CORS 实测 200）取 tags/release 载荷与 contents API 文件
@@ -318,6 +323,11 @@ const ZH = {
   pluginsWaiting: '等待服务',
   pluginsVersion: '版本',
   pluginsCurrent: '当前',
+  // v2.4.3：版本切换确认
+  pluginsTarget: '目标版本',
+  pluginsSwitch: '确认切换',
+  // v2.4.3-fix：残缺包标注（缺 host/client 半部的历史包不可切换）
+  pluginsIncomplete: '（不完整）',
   pluginsRun: '运行',
   pluginsStop: '停止',
   pluginsRemove: '删除',
@@ -464,6 +474,11 @@ const EN = {
   pluginsWaiting: 'Waiting for services',
   pluginsVersion: 'Version',
   pluginsCurrent: 'Current',
+  // v2.4.3：version switch confirmation
+  pluginsTarget: 'Target version',
+  pluginsSwitch: 'Confirm switch',
+  // v2.4.3-fix：incomplete package marker
+  pluginsIncomplete: ' (incomplete)',
   pluginsRun: 'Run',
   pluginsStop: 'Stop',
   pluginsRemove: 'Remove',
@@ -1179,6 +1194,8 @@ function PluginsSection(props) {
   const [approvals, setApprovals] = React.useState(null);
   const [logsOpen, setLogsOpen] = React.useState(false);
   const [logs, setLogs] = React.useState(null);
+  // v2.4.3：版本选择与确认切换——选中非当前版本时显示「当前 → 目标」核对行，确认后执行 update
+  const [selVersion, setSelVersion] = React.useState({});
 
   const sessionId = props.useSessions ? props.useSessions((s) => s.current) : undefined;
 
@@ -1257,10 +1274,21 @@ function PluginsSection(props) {
     const rows = plugins.map((p) => {
       const stateText = t(stateKey(p.state));
       const approval = approvals && approvals.get(p.pluginId);
-      const versions = (p.packages || []).map((pkg) =>
-        React.createElement('option', { key: pkg.packageId, value: pkg.packageId }, pkg.name + ' · ' + pkg.packageId),
-      );
+      const versions = (p.packages || []).map((pkg) => {
+        // v2.4.3-fix：残缺包（缺 host/client 半部）禁用并标注，防误切导致 UI 消失
+        const complete = pkg.hasHostHalf !== false && pkg.hasClientHalf !== false;
+        return React.createElement('option', {
+          key: pkg.packageId,
+          value: pkg.packageId,
+          disabled: !complete,
+        }, pkg.name + ' · ' + pkg.packageId + (complete ? '' : t('pluginsIncomplete')));
+      });
       const running = p.activeRun !== undefined;
+      // v2.4.3：受控版本选择（缺省=当前版本）；选中非当前版本 → 显示核对行
+      const curId = p.currentPackageId || (p.packages && p.packages[0] && p.packages[0].packageId) || '';
+      const sel = selVersion[p.pluginId] || curId;
+      const switching = sel !== '' && sel !== curId;
+      const switchMode = p.currentPackageId ? 'update' : 'run';
       return React.createElement('div', { key: p.pluginId, className: 'dsh-plg-card' },
         React.createElement('div', { className: 'dsh-plg-head' },
           React.createElement('span', { className: 'dsh-plg-name' }, p.pluginId + ' ' + p.name),
@@ -1270,13 +1298,37 @@ function PluginsSection(props) {
           React.createElement('label', { className: 'dsh-plg-label' }, t('pluginsVersion')),
           React.createElement('select', {
             className: 'dsh-plg-select',
-            defaultValue: p.currentPackageId || (p.packages && p.packages[0] && p.packages[0].packageId) || '',
+            value: sel,
+            onChange: (e) => setSelVersion({ ...selVersion, [p.pluginId]: e.target.value }),
           }, versions),
         ),
         p.currentPackageId
           ? React.createElement('div', { className: 'dsh-plg-row' },
               React.createElement('span', { className: 'dsh-plg-label' }, t('pluginsCurrent')),
               React.createElement('span', { className: 'dsh-plg-muted' }, p.currentPackageId),
+            )
+          : null,
+        // v2.4.3：切换确认行——展示当前版本与目标版本供核对，确认后 plugins/run（update）
+        switching
+          ? React.createElement('div', { className: 'dsh-plg-row dsh-plg-switch' },
+              React.createElement('span', { className: 'dsh-plg-muted' }, t('pluginsCurrent') + ' ' + (p.currentPackageId || '-')),
+              React.createElement('span', { className: 'dsh-plg-muted' }, '→'),
+              React.createElement('span', { className: 'dsh-plg-switch-target' }, t('pluginsTarget') + ' ' + sel),
+              React.createElement('button', {
+                type: 'button',
+                className: 'dsh-plg-btn dsh-plg-btn-primary',
+                disabled: busy !== null,
+                onClick: () => {
+                  act('run', p.pluginId, { packageId: sel, mode: switchMode });
+                  setSelVersion({ ...selVersion, [p.pluginId]: curId });
+                },
+              }, t('pluginsSwitch')),
+              React.createElement('button', {
+                type: 'button',
+                className: 'dsh-plg-btn',
+                disabled: busy !== null,
+                onClick: () => setSelVersion({ ...selVersion, [p.pluginId]: curId }),
+              }, t('cancel')),
             )
           : null,
         (approval || p.pendingApproval)
@@ -1365,7 +1417,8 @@ const OUTPUTLIMIT_OPTIONS = [2000, 4000, 8000, 16000];
 
 // v16：可折叠区块（点击标题展开/收起，默认收起；行尾摘要 + 行首 chevron）
 function CollapsibleSection(props) {
-  const [open, setOpen] = React.useState(false);
+  // v2.4.3：默认展开（需求：模型配置栏打开即见完整内容）
+  const [open, setOpen] = React.useState(true);
   return React.createElement('div', { className: 'dsh-cfg-sec' },
     React.createElement('button', {
       type: 'button',
@@ -1801,19 +1854,29 @@ function CordisBadgePlaceholder() {
 
 const CSS = [
   // v2.3.3（§7.10）：font-weight:500 对齐 DSH ModelSelect trigger 样式
-  '.dsh-enh-btn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:20px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease;white-space:nowrap}',
-  '.dsh-enh-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
+  // v2.4.3-c（统一样式）：容器对齐模型 trigger——无边框、24px 胶囊、label-secondary 灰字、
+  // hover 更深色椭圆背景 rgba(38,49,72,.06)（trigger 实测同值）、padding 0 8px 0 4px（左4右8，用户指定）；
+  // busy/result 保留状态色（追加淡色背景表达）；emoji ✨ 与字重 600 保留（用户确认项）
+  '.dsh-enh-btn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px 0 4px;border:none;border-radius:24px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:600;line-height:20px;cursor:pointer;transition:background-color .15s ease;white-space:nowrap}',
+  '.dsh-enh-btn:hover:not(:disabled){background:rgba(38,49,72,.06)}',
   // v2.3.2（§7.2）：空输入不再降低按钮饱和度——disabled 仅保留点击无效提示，无 opacity 变暗
   '.dsh-enh-btn:disabled{cursor:not-allowed}',
   // v2.4.0（方案 §10.2）：三态文字显式字体锚点——13px/500/20px 与模型 trigger 对齐（实机实测），
   // idle/busy/result 均携带 dsh-enh-btn-text 类；子文本继承，不再依赖隐式继承链
-  '.dsh-enh-btn-text{padding:0 10px;font-size:13px;font-weight:500;line-height:20px;font-family:inherit}',
+  // v2.4.3（等线）：font-family 从 inherit 改为显式系统栈，并在 Microsoft YaHei 前插入 DengXian
+  // （等线 = 微软官方屏显中文字体，笔画细、与 Segoe UI 视觉统一；中文不再回退到粗体雅黑）
+  // v2.4.3-b（等线加粗）：font-weight 500→600——等线笔画细，600 下视觉更清晰（用户要求）
+  // v2.4.3-c（统一样式）：文字锚点不再声明 padding（曾以 padding:0 覆盖容器 0 8px 0 4px，
+  // 导致 hover 椭圆背景零留白贴文字）——padding 由容器统一承载（左4右8，用户指定）
+  '.dsh-enh-btn-text{font-size:13px;font-weight:600;line-height:20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","DengXian","Microsoft YaHei","Helvetica Neue",Helvetica,Arial,sans-serif}',
   // v2.3（§7.2）：idle 态 = emoji ✨ + 模式短标签（emoji 系统彩色，不承担状态色）
   // v2.3.2（§7.2）：记忆状态 → 图标饱和度——开=正常（无 dim）/ 关=低饱和（saturate(.2)，文字不受影响）
   '.dsh-enh-icon{font-size:14px;line-height:20px}',
   '.dsh-enh-icon-dim{filter:saturate(.2)}',
   // v2.4.0（方案 §10.2）：模式短标签不再独立声明字号——继承 .dsh-enh-btn-text 锚点（13px/500/20px）
-  '.dsh-enh-btn-busy{border-color:var(--dsw-alias-state-warn-primary);color:var(--dsw-alias-state-warn-primary)}',
+  // v2.4.3-c（统一样式）：busy/result 去边框后以状态文字色 + 淡色背景表达（hover 时统一为深灰蓝椭圆反馈）
+  '.dsh-enh-btn-busy{color:var(--dsw-alias-state-warn-primary);background:rgba(245,158,11,.06)}',
+  '.dsh-enh-btn-result{color:var(--dsw-alias-state-success-primary);background:rgba(34,197,94,.06)}',
   // v2.3.3（§7.10）：busy hover 闪烁修复——progress 文档流占位（宽度恒定），
   // cancel absolute 覆盖其上，hover 只切 opacity（无尺寸抖动，hover 判定区不变）
   '.dsh-enh-btn-busy .dsh-enh-status{position:relative;display:inline-block;text-align:center}',
@@ -1821,7 +1884,6 @@ const CSS = [
   '.dsh-enh-btn-busy .dsh-enh-cancel{position:absolute;inset:0;display:block;white-space:nowrap;opacity:0;color:var(--dsw-alias-state-error-primary);transition:opacity .12s ease}',
   '.dsh-enh-btn-busy:hover .dsh-enh-progress{opacity:0}',
   '.dsh-enh-btn-busy:hover .dsh-enh-cancel{opacity:1}',
-  '.dsh-enh-btn-result{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}',
   '.dsh-enh-spin{width:11px;height:11px;border-radius:50%;border:2px solid var(--dsw-alias-border-l2);border-top-color:var(--dsw-alias-state-warn-primary);display:inline-block;animation:dsh-enh-rotate .8s linear infinite}',
   '@keyframes dsh-enh-rotate{to{transform:rotate(360deg)}}',
   '@media (prefers-reduced-motion: reduce){.dsh-enh-spin{animation:none}}',
@@ -1845,6 +1907,9 @@ const CSS = [
   '.dsh-plg-textarea{flex:1;min-width:0;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:6px 8px;resize:vertical;font-family:inherit}',
   '.dsh-plg-approval{color:var(--dsw-alias-state-warn-primary);font-size:12px;line-height:16px;flex-wrap:wrap}',
   '.dsh-plg-actions{display:flex;gap:8px;justify-content:flex-end}',
+  // v2.4.3：切换确认行——目标版本高亮便于核对
+  '.dsh-plg-switch{flex-wrap:wrap;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:4px 8px;background:var(--dsw-alias-bg-layer-1)}',
+  '.dsh-plg-switch-target{color:var(--dsw-alias-brand-primary);font-size:12px;line-height:16px;font-weight:600}',
   '.dsh-plg-btn{background:transparent;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:3px 10px;cursor:pointer}',
   '.dsh-plg-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
   '.dsh-plg-btn:disabled{opacity:.45;cursor:not-allowed}',
@@ -1907,8 +1972,9 @@ return {
     timerSvc = ctx.get('timer') || null;
     const locale = ctx.get('locale');
     if (locale !== undefined && typeof locale.register === 'function') {
-      // v2.4.2：update 场景页面残留旧实例的 locale 命名空间（single occupant 抛 duplicate）——
-      // safeRegister 吞冲突沿用旧注册；正常路径保留 disposer（卸载不误删他人）。
+      // v2.4.1-fix2（2026-08-14）：update 场景页面残留旧实例的 locale 命名空间
+      // （single occupant 硬约束抛 duplicate 导致 client-half-failed）——
+      // 字典未变时沿用旧注册即可：吞掉冲突、正常路径保留 disposer（卸载不误删他人）。
       const safeRegister = (ns, lang, dict) => {
         try {
           return locale.register(ns, lang, dict);

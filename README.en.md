@@ -40,6 +40,8 @@ Dynamic Cordis plugin (host + client halves), installed inside a DSH session via
 > Note: the dynamic client half is attached to the page connection active at activation time; a page refresh unloads it — just `cordis_run` again to restore.
 >
 > **v2.4.2+**: fixed the dynamic client sandbox restriction on the global `fetch` (version check & one-click update now use `window.fetch` to reach the GitHub API), and made the locale registration tolerant of stale instances left by previous activations (repeat activate/update no longer fails with `locale namespace "enhance" already has locale "zh"`).
+>
+> **v2.4.3+**: the model settings section is expanded by default; the plugin manager supports version selection with a "current → target" confirmation row (packages missing the host/client half are disabled and marked "incomplete" to prevent switching to a broken UI); the optimize button matches the model selector styling (DengXian typeface, pill shape, gray label, darker ellipse on hover, 4/8 px padding).
 
 ### Quick-install snippet (paste into any DSH session)
 
