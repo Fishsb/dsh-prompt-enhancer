@@ -413,10 +413,10 @@ const ZH = {
   envPort: '端口占用',
   envPortOccupied: '端口被其他进程占用——重启后服务可能起不来',
   envPortNoPort: '无法解析服务端口（AppParameters 无 --port）——端口检查失效',
-  // v2.7.0（执行器端口独立检查）
-  envExecPort: '执行器端口独立',
-  envExecPortSame: '执行器端口与服务端口相同——执行器无法监听，请修改 updater.executorPort',
-  envExecPortOccupied: '执行器端口被其他进程占用——执行器可能无法启动，请释放或修改 updater.executorPort',
+  // v2.7.0（更新端口独立检查——显示名用「更新」口径，避免内部术语「执行器」）
+  envExecPort: '更新端口独立',
+  envExecPortSame: '更新端口与服务端口相同——更新功能无法监听，请修改 updater.executorPort',
+  envExecPortOccupied: '更新端口被其他进程占用——更新功能可能不可用，请释放或修改 updater.executorPort',
   updApply: '⚡ 一键更新并重启',
   updApplyConfirm: '确认重启服务？',
   updApplying: '正在安装更新…（10–60 秒）',
@@ -600,10 +600,10 @@ const EN = {
   envPort: 'Port in use',
   envPortOccupied: 'Port is held by another process — the service may fail to start after restart',
   envPortNoPort: 'Cannot resolve service port (no --port) — port check skipped',
-  // v2.7.0（执行器端口独立检查）
-  envExecPort: 'Executor port independent',
-  envExecPortSame: 'Executor port equals the service port — the executor cannot listen; change updater.executorPort',
-  envExecPortOccupied: 'Executor port is held by another process — the executor may fail to start; free it or change updater.executorPort',
+  // v2.7.0（更新端口独立检查——显示名用「更新」口径，避免内部术语「执行器」）
+  envExecPort: 'Update port independent',
+  envExecPortSame: 'Update port equals the service port — the updater cannot listen; change updater.executorPort',
+  envExecPortOccupied: 'Update port is held by another process — the updater may be unavailable; free it or change updater.executorPort',
   updApply: '⚡ Update & restart',
   updApplyConfirm: 'Confirm service restart?',
   updApplying: 'Installing update… (10–60s)',
@@ -1144,7 +1144,7 @@ function updaterRepoOf(cfg) {
 
 // v2.5.0：环境检测渲染元数据——展示顺序/标签键/detail 状态码 → 文案键
 // （detail 由 host probeEnv 返回；文案键对应 i18n 字典；
-// v2.5.2 收敛为重启链 6 项；v2.7.0 收敛为执行器重启阶段 4 项 + 执行器端口独立）
+// v2.5.2 收敛为重启链 6 项；v2.7.0 收敛为执行器重启阶段 4 项 + 更新端口独立检查）
 const ENV_ITEMS = [
   { key: 'service', label: 'envService' },
   { key: 'svc-type', label: 'envSvcType' },
