@@ -33,5 +33,5 @@ jobs:
       - name: Build client bundle
         run: npm run build
 
-      - name: Verify generated client is committed
-        run: git diff --exit-code -- lib/client.cjs
+      - name: Verify generated artifacts are committed
+        run: git diff --exit-code -- lib/client.cjs plugin-client.js plugin-host.js

@@ -18,6 +18,12 @@
   - 新增 GitHub Actions CI（语法检查 / 单测 / client 构建 / 生成物一致性）
   - `package.json` 增加 `npm test`
   - 修正 `docs/map/flow/prompt-enhance.md` 模式数量 4 → 5 — 架构治理
+- **M1 源码模块化脚手架**：
+  - 建立 `src/host/` 与 `src/client/` 目标模块目录，放置 legacy 源与模块骨架
+  - 新增 `scripts/build-host.mjs`，根 `plugin-host.js` 改为生成物
+  - `scripts/build-client.mjs` 改为读取 `src/client/legacy/plugin-client.js`，并同时生成根 `plugin-client.js` 与 `lib/client.cjs`
+  - `package.json` 增加 `build:host` / `build:client`，`build` 同时构建 host/client
+  - CI 增加对 `plugin-client.js` / `plugin-host.js` 生成物一致性校验 — 架构治理
 
 ## [2.8.3] - 2026-08-16
 
