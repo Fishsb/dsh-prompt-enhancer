@@ -59,6 +59,10 @@
   - 新增 `src/host/logger.js`：结构化 JSON 日志 + 环形 tail
   - 新增 `src/host/integrity.js`：SHA-256 文件校验
   - 新增 `test/observability.test.cjs`（91 tests）— 架构治理
+- **M6 工程化收尾**：
+  - 新增 `CONTRIBUTING.md`：开发环境 / 命令 / 修改流程 / 发布边界
+  - CI 已覆盖语法检查、测试、构建、生成物一致性
+  - 测试数 91，文档与地图同步 — 架构治理
 
 ## [2.8.3] - 2026-08-16
 
