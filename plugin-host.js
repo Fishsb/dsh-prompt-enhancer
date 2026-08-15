@@ -1,5 +1,9 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Host 半部（v2.4.7：自定义模板每模式独立 + 默认预填）
+// DSH「提示词优化」插件 · Host 半部（v2.4.8：恢复 v2.4.4 槽位占位 id 修复）
+// v2.4.8（发布断链修复）：v2.4.5 曾无记录把 sidebar.footer.action 占位 id 从
+// cordis-panel-enh 回退为 cordis-panel（与基座同槽位同 id 冲突，update/重挂时
+// single-occupant duplicate / "Failed to load plugins"）——本版在 client 半部恢复
+// cordis-panel-enh（见 plugin-client.js 注册处注释），并重建 lib/client.cjs。
 // v2.4.7（用户需求：自定义提示词给默认内容、每模式独立对应）：
 // ① validateConfig 新增 template.texts（4 模式键白名单，各 ≤4000）——每模式独立
 //    自定义模板；无 texts 时旧全局 templateText 迁移到全部 4 模式（保持"全局一份"
@@ -908,7 +912,7 @@ async function pingStream(llmService, entry, ref) {
 // ================= v2.4.0 版本检测与一键更新 · 纯函数族 =================
 // 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
-const PLUGIN_VERSION = '2.4.7';
+const PLUGIN_VERSION = '2.4.8';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
 const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）

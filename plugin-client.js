@@ -2067,8 +2067,13 @@ return {
       },
       ModelPluginsSection,
     ));
+    // 注册幂等/唯一 id：本插件在 sidebar.footer.action 仅需占位（不渲染任何内容），
+    // id 改用插件语义唯一值 cordis-panel-enh，回避与基座 dsh-client-ui-cordis 的
+    // CordisPanel（id: 'cordis-panel'）冲突——同槽位同 id 触发 single-occupant duplicate，
+    // 导致 update/重挂时 "Failed to load plugins"。历史 v2.4.1-fix2 同类问题即由此来。
+    // （v2.4.5 曾无记录回退为 cordis-panel；v2.4.8 恢复本修复，见 CHANGELOG。）
     slots.inject('sidebar.footer.action', () => slots.register(
-      { name: 'sidebar.footer.action', id: 'cordis-panel', order: 0 },
+      { name: 'sidebar.footer.action', id: 'cordis-panel-enh', order: 0 },
       CordisBadgePlaceholder,
     ));
     slots.inject('conversation.input.right', () => slots.register(

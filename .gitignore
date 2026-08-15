@@ -10,6 +10,9 @@ docs/map/
 # ---- agent 协作治理文档（本地管理用，不推 GitHub）----
 AGENTS.md
 
+# ---- 开发参考文档（本地管理用，不推 GitHub）----
+docs/devref/
+
 # ---- 临时与系统文件 ----
 *.log
 *.tmp
