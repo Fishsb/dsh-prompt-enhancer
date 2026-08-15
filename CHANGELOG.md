@@ -36,6 +36,11 @@
   - **client 配置/状态逻辑提取**：从 `src/client/legacy/plugin-client.js` 抽出到 `src/client/state.js`（configState / cloneDefaults / sanitize / load/save/subscribe / saveStatus 等），`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-state.mjs` 维护工具 — 架构治理
   - **client helper/会话逻辑提取**：从 `src/client/legacy/plugin-client.js` 抽出到 `src/client/helpers.js`（errorKey / makeT / sessionStores / enhance / undo / guardPasses 等），`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-helpers.mjs` 维护工具 — 架构治理
   - **client 模型 helper 提取**：从 `src/client/legacy/plugin-client.js` 抽出 `buildCandidates` 到 `src/client/model-helpers.js`，`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-model-helpers.mjs` 维护工具 — 架构治理
+- **M2 服务化/事件化脚手架**：
+  - 新增 `src/host/services.js`：Cordis-style 服务注册表（`ctx.provide` 目标）
+  - 新增 `src/host/pipeline.js`：增强管道注册/执行/错误隔离
+  - `src/host/index.js` 接入 services/pipeline 并提供 `enhance.pipeline` 等服务
+  - 新增 `test/pipeline.test.cjs`（73 tests）— 架构治理
 
 ## [2.8.3] - 2026-08-16
 
