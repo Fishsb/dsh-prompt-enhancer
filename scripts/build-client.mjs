@@ -13,6 +13,7 @@ const i18nChunk = require('../src/client/i18n.js');
 const constantsChunk = require('../src/client/constants.js');
 const updaterChunk = require('../src/client/updater.js');
 const stateChunk = require('../src/client/state.js');
+const helpersChunk = require('../src/client/helpers.js');
 if (body.includes('// @dsh-client-i18n-inject')) {
   body = body.replace('// @dsh-client-i18n-inject', i18nChunk);
 }
@@ -24,6 +25,9 @@ if (body.includes('// @dsh-client-updater-inject')) {
 }
 if (body.includes('// @dsh-client-state-inject')) {
   body = body.replace('// @dsh-client-state-inject', stateChunk);
+}
+if (body.includes('// @dsh-client-helpers-inject')) {
+  body = body.replace('// @dsh-client-helpers-inject', helpersChunk);
 }
 
 // Embed the body as a JSON string literal: safe against backticks, ${}, and
