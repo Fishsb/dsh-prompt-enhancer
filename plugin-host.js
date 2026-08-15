@@ -495,6 +495,12 @@ function wrapUserText(text) {
   return '请优化以下提示词：\n\n"""\n' + text + '\n"""';
 }
 
+// v2.8.0（一键发布 · 实测修正）：publish 专用用户输入包装——中性框架（不沿用
+// 优化模式的「请优化以下提示词」措辞，避免模型把输入误读为提示词优化任务）。
+function wrapPublishText(text) {
+  return '【用户输入】\n"""\n' + text + '\n"""';
+}
+
 function cleanOutput(raw) {
   let s = raw.trim();
   let strippedWrapper = false;
@@ -2166,7 +2172,7 @@ return {
           publishScenarioCache.set(sessionId, scenario);
         }
         if (scenario !== 'generic') {
-          system = system + '\n\n【场景判定】本次场景判定：' + scenario + '（依据用户输入自动判定；章节适配要求见「场景适配」段）';
+          system = system + '\n\n【场景判定】本次场景判定：' + scenario + '（依据用户输入自动判定；章节适配要求见「场景适配」段；请勿复述本判定行）';
         }
         hlog('[enhance] scenario=' + scenario + (cached ? ' cached' : ' judged src=' + (memRounds.length > 0 ? 'rounds[0]' : 'text')));
       }
@@ -2196,7 +2202,10 @@ return {
       // v2.6.1：消息组装——记忆链经 buildChatMessages 成为真多轮 user/assistant 消息，
       // 最终 user 消息 = 本轮修改摘要 + 模式块 + 原文包裹；无记忆 → 单 user 消息（旧行为）。
       let memoryLog = '';
-      let finalText = v2Block !== '' ? v2Block + '\n\n' + wrapUserText(text) : wrapUserText(text);
+      // v2.8.0（一键发布 · 实测修正）：publish 用中性用户包装（wrapPublishText），
+      // 其余模式沿用「请优化以下提示词」包装（行为不变）
+      const wrappedText = isPublish ? wrapPublishText(text) : wrapUserText(text);
+      let finalText = v2Block !== '' ? v2Block + '\n\n' + wrappedText : wrappedText;
       let messages;
       if (memoryActive) {
         const hint = buildMemoryDeltaHint(memDelta);

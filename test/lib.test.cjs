@@ -24,7 +24,7 @@ const defaultsBlock = [grabConst('DEFAULT_TIMEOUT_MS'), grabConst('DEFAULT_MAX_T
 const pureFn = new Function(defaultsBlock + '\n' + pureText + `
   ;return { wrapUserText, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
     shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile, analyzeInputRules,
-    rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
+    rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario, wrapPublishText,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
     buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages,
     MEMORY_ROUNDS_MAX, MEMORY_CHAIN_BUDGET_MAX, MEMORY_DELTA_MAX,
@@ -54,6 +54,7 @@ const {
   parseTaskProgress,
   buildWebQuery,
   detectScenario,
+  wrapPublishText,
   parseMode,
   parseMemory,
   shouldInjectMemory,
@@ -92,6 +93,14 @@ test('wrapUserText 包装用户输入', () => {
   const out = wrapUserText('hi');
   assert.match(out, /^请优化以下提示词：/);
   assert.match(out, /"""\nhi\n"""/);
+});
+
+test('U54 wrapPublishText publish 中性包装（v2.8.0 实测修正）', () => {
+  // publish 不沿用「请优化以下提示词」措辞（避免模型误读为提示词优化任务）
+  const out = wrapPublishText('我想开发一个纸牌游戏');
+  assert.ok(!out.includes('优化以下提示词'), 'publish 包装不得含优化措辞');
+  assert.match(out, /^【用户输入】/);
+  assert.match(out, /"""\n我想开发一个纸牌游戏\n"""/);
 });
 
 test('cleanOutput 剥离包装与成对引号', () => {
