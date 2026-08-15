@@ -5,6 +5,11 @@
 
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
+## [Unreleased]
+
+### Changed
+- **设置「已保存」判定优化**：改动后 1s（防抖，连续改动只校验最后一次）执行真实检查（localStorage 读回逐字对比），检查伴随转圈动效（保底 0.5s）——已落实 → 「✓ 已保存」（3s 后消失）/ 未落实 → 「✗ 保存失败，请重试」；无 timer 服务降级为旧常驻提示 — [PEN-002]
+
 ## [2.7.0] - 2026-08-15
 
 ### Added

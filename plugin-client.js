@@ -305,10 +305,73 @@ function loadConfigFromStorage() {
   }
 }
 
+// v2.7.0：保存状态机——设置改动后 1s（防抖）执行真实校验（localStorage 读回对比），
+// 校验过程伴随转圈动效（保底 0.5s），已落实 → 「已保存」/ 未落实 → 「保存失败」。
+const saveStatus = { phase: 'idle', seq: 0, listeners: new Set() };
+function subscribeSaveStatus(fn) {
+  saveStatus.listeners.add(fn);
+  return () => { saveStatus.listeners.delete(fn); };
+}
+function notifySaveStatus() {
+  for (const fn of [...saveStatus.listeners]) fn();
+}
+// timer 服务化延迟（动态 client 无全局 setTimeout——经 ctx timer 服务；无服务 → 立即 resolve）
+function timerDelay(ms) {
+  return new Promise((resolve) => {
+    if (timerSvc && typeof timerSvc.timeout === 'function') { timerSvc.timeout(resolve, ms); return; }
+    if (timerSvc && typeof timerSvc.interval === 'function') {
+      const d = timerSvc.interval(() => { try { d(); } catch (e) { /* ignore */ } resolve(); }, ms);
+      return;
+    }
+    resolve();
+  });
+}
+// 真实校验：localStorage 中的配置与当前 configState 逐字一致（写入即 JSON.stringify）
+function verifyConfigSaved() {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    const raw = localStorage.getItem(CONFIG_KEY);
+    return raw !== null && raw === JSON.stringify(configState.value);
+  } catch (e) { return false; }
+}
+function finishSaveCheck(seq, ok) {
+  if (seq !== saveStatus.seq) return;
+  saveStatus.phase = ok ? 'saved' : 'failed';
+  notifySaveStatus();
+  // 3s 后回到 idle（提示消失）
+  timerDelay(3000).then(() => {
+    if (seq === saveStatus.seq && saveStatus.phase !== 'saving') {
+      saveStatus.phase = 'idle';
+      notifySaveStatus();
+    }
+  });
+}
+async function runSaveCheck(seq) {
+  if (seq !== saveStatus.seq) return;
+  const started = Date.now();
+  const ok = verifyConfigSaved();
+  const remain = Math.max(0, 500 - (Date.now() - started)); // 转圈保底 0.5s
+  if (remain > 0) await timerDelay(remain);
+  finishSaveCheck(seq, ok);
+}
+function scheduleSaveCheck(seq) {
+  if (!timerSvc) return; // 无 timer 服务 → 不启动状态机（保持即时行为）
+  timerDelay(1000).then(() => { // 改动 1s 后执行真实检查（防抖：过期检查由 seq 丢弃）
+    if (seq === saveStatus.seq) runSaveCheck(seq);
+  });
+}
+
 function saveConfig(patch) {
   configState.value = { ...configState.value, ...patch };
   if (typeof localStorage !== 'undefined') {
     try { localStorage.setItem(CONFIG_KEY, JSON.stringify(configState.value)); } catch (e) { /* 忽略 */ }
+  }
+  // v2.7.0：保存校验状态机——saving（转圈）→ 1s 后真实校验 → saved/failed
+  if (timerSvc) {
+    const seq = ++saveStatus.seq;
+    saveStatus.phase = 'saving';
+    notifySaveStatus();
+    scheduleSaveCheck(seq);
   }
   for (const fn of [...configState.listeners]) fn();
 }
@@ -447,6 +510,9 @@ const ZH = {
   cfgTemplateTextFor: '自定义模板内容（当前模式：{mode}）',
   cfgTemplateNote: '每个模式独立保存一份；当前模式未填内容时自动使用内置模板。',
   cfgSaved: '✓ 已保存',
+  // v2.7.0：保存校验状态（转圈/失败）
+  cfgSaving: '保存中…',
+  cfgSaveFailed: '✗ 保存失败，请重试',
   cfgLoadFailed: '加载模型列表失败',
   cfgEmptyModels: '该提供方暂无可用模型',
   cfgNoProvider: '未配置 LLM 提供方',
@@ -638,6 +704,9 @@ const EN = {
   cfgTemplateTextFor: 'Custom template text (current mode: {mode})',
   cfgTemplateNote: 'Each mode keeps its own copy; when the current mode has no custom text, the built-in template is used.',
   cfgSaved: '✓ Saved',
+  // v2.7.0：保存校验状态（转圈/失败）
+  cfgSaving: 'Saving…',
+  cfgSaveFailed: '✗ Save failed, please retry',
   cfgLoadFailed: 'Failed to load models',
   cfgEmptyModels: 'No models available for this provider',
   cfgNoProvider: 'No LLM provider configured',
@@ -2233,6 +2302,8 @@ function ModelPluginsSection(props) {
   const [tab, setTab] = React.useState('models');
   const [, force] = React.useState(0);
   React.useEffect(() => subscribeConfig(() => force((v) => v + 1)), []);
+  // v2.7.0：保存状态订阅（saving 转圈 / saved ✓ / failed ✗）
+  React.useEffect(() => subscribeSaveStatus(() => force((v) => v + 1)), []);
 
   const tabs = [
     ['models', t('tabModels')],
@@ -2255,7 +2326,19 @@ function ModelPluginsSection(props) {
       }, entry[1])),
     ),
     body,
-    React.createElement('div', { className: 'dsh-plg-saved', role: 'status' }, t('cfgSaved')),
+    // v2.7.0：保存状态——saving 转圈 / saved ✓ / failed ✗ / idle 隐藏；
+    // 无 timer 服务（降级）→ 保持旧常驻「已保存」提示
+    !timerSvc
+      ? React.createElement('div', { className: 'dsh-plg-saved', role: 'status' }, t('cfgSaved'))
+      : saveStatus.phase === 'saving'
+        ? React.createElement('div', { className: 'dsh-plg-save dsh-plg-save-busy', role: 'status' },
+            React.createElement('span', { className: 'dsh-enh-spin', 'aria-hidden': true }),
+            React.createElement('span', null, t('cfgSaving')))
+        : saveStatus.phase === 'failed'
+          ? React.createElement('div', { className: 'dsh-plg-save dsh-plg-save-fail', role: 'status' }, t('cfgSaveFailed'))
+          : saveStatus.phase === 'saved'
+            ? React.createElement('div', { className: 'dsh-plg-save dsh-plg-save-ok', role: 'status' }, t('cfgSaved'))
+            : null,
   );
 }
 
@@ -2332,6 +2415,10 @@ const CSS = [
   '.dsh-plg-btn-primary{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}',
   '.dsh-plg-hint{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px;margin:0}',
   '.dsh-plg-saved{color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:16px}',
+  // v2.7.0：保存状态机样式（转圈复用 dsh-enh-spin；saved/failed 状态色）
+  '.dsh-plg-save{display:flex;align-items:center;gap:6px;font-size:12px;line-height:16px;margin-top:8px}',
+  '.dsh-plg-save-ok{color:var(--dsw-alias-state-success-primary)}',
+  '.dsh-plg-save-fail{color:var(--dsw-alias-state-error-primary)}',
   '.dsh-plg-logs{display:flex;flex-direction:column;gap:6px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:8px 10px;background:var(--dsw-alias-bg-layer-1)}',
   '.dsh-plg-logs-head{display:flex;align-items:center;gap:8px;justify-content:space-between}',
   '.dsh-plg-logs-pre{margin:0;max-height:220px;overflow:auto;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-all}',
