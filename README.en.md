@@ -20,7 +20,7 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 ### ⚡ Update & maintenance
 
 - ⚡ **Update & restart** — with a new version detected, one button runs the official install command and restarts the service (restart only after a successful install; never on failure; the standalone executor auto-retries up to 5 times); refresh to finish
-- 🧪 **Environment check** — an inline button probes the restart-chain environment read-only (service / account / start type / executable / port…), each with ✓/⚠/✗ and guidance; one-click update is blocked when not ready
+- 🧪 **Environment check** — an inline button probes the update-restart environment read-only (service / start type / executable / port…), each with ✓/⚠/✗ and guidance; one-click update is blocked when not ready
 - 🚀 **Version check & one-click pull** — built-in updater detects new versions and pulls the release files ([Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases))
 - 🧪 **Unit-tested** — host pure-function tests (node:test) slice the PURE section, so tests run the shipped code
 

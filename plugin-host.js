@@ -1164,14 +1164,14 @@ function validateManifestFiles(files) {
 
 // 环境探测计划（key 与 lib/index.cjs probeEnv 返回的 key 一一对应；
 // level 供 client 渲染与一键更新前置校验：block=硬阻断 / warn=风险提示。
-// v2.5.2 收敛：仅保留重启链直接依赖（service/account/svc-type/svc-bin/restart/port），
-// 安装链与形态类检查（net/mode/pnpmInfo）按用户决策移除。）
+// v2.5.2 收敛：移除安装链与形态类检查（net/mode/pnpmInfo）。
+// v2.7.0 再收敛：仅保留执行器（v2.6.0 独立 detached 进程）重启阶段直接依赖——
+// account（启动账号与 sc start 无关）与 restart（KillProcessTree 不影响独立执行器）
+// 按用户决策移除。）
 const ENV_PROBE_KEYS = [
   { key: 'service', level: 'block' },  // 服务名存在（sc query）
-  { key: 'account', level: 'block' },  // 服务账号 LocalSystem（sc qc）
   { key: 'svc-type', level: 'block' }, // 服务启用状态（START_TYPE != DISABLED）
   { key: 'svc-bin', level: 'block' },  // nssm Application 可执行文件存在
-  { key: 'restart', level: 'warn' },   // 服务可停止/启动（KillProcessTree 未启用）
   { key: 'port', level: 'warn' },      // 端口占用者 = 服务自身进程（解析失败 → warn）
 ];
 

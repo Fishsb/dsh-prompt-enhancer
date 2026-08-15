@@ -406,14 +406,10 @@ const ZH = {
   envOk: '正常',
   envService: '服务状态',
   envServiceMissing: '服务不存在——请在插件配置中设置 updater.serviceName',
-  envAccount: '服务账号',
-  envAccountNotSystem: '非 LocalSystem——停止/启动服务可能无权限',
   envSvcType: '服务启用状态',
   envSvcTypeDisabled: '服务已禁用——请先启用（sc config <svc> start= auto）',
   envSvcBin: '服务可执行文件',
   envSvcBinMissing: 'nssm Application 指向的文件不存在——请检查服务配置',
-  envRestart: '服务可重启',
-  envRestartKilltree: 'nssm 配置了 AppKillProcessTree——自动重启可能中断，建议关闭',
   envPort: '端口占用',
   envPortOccupied: '端口被其他进程占用——重启后服务可能起不来',
   envPortNoPort: '无法解析服务端口（AppParameters 无 --port）——端口检查失效',
@@ -593,14 +589,10 @@ const EN = {
   envOk: 'OK',
   envService: 'Service',
   envServiceMissing: 'Service not found — set updater.serviceName in the plugin config',
-  envAccount: 'Service account',
-  envAccountNotSystem: 'Not LocalSystem — stopping/starting the service may lack permission',
   envSvcType: 'Service start type',
   envSvcTypeDisabled: 'Service disabled — enable it first (sc config <svc> start= auto)',
   envSvcBin: 'Service executable',
   envSvcBinMissing: 'nssm Application file missing — check the service configuration',
-  envRestart: 'Service restartable',
-  envRestartKilltree: 'nssm AppKillProcessTree is enabled — automatic restart may be interrupted; consider disabling it',
   envPort: 'Port in use',
   envPortOccupied: 'Port is held by another process — the service may fail to start after restart',
   envPortNoPort: 'Cannot resolve service port (no --port) — port check skipped',
@@ -1143,22 +1135,19 @@ function updaterRepoOf(cfg) {
 }
 
 // v2.5.0：环境检测渲染元数据——展示顺序/标签键/detail 状态码 → 文案键
-// （detail 由 host probeEnv 返回；文案键对应 i18n 字典；v2.5.2 收敛为重启链 6 项）
+// （detail 由 host probeEnv 返回；文案键对应 i18n 字典；
+// v2.5.2 收敛为重启链 6 项；v2.7.0 再收敛为执行器重启阶段 4 项）
 const ENV_ITEMS = [
   { key: 'service', label: 'envService' },
-  { key: 'account', label: 'envAccount' },
   { key: 'svc-type', label: 'envSvcType' },
   { key: 'svc-bin', label: 'envSvcBin' },
-  { key: 'restart', label: 'envRestart' },
   { key: 'port', label: 'envPort' },
 ];
 const ENV_DETAIL_TEXT = {
   ok: 'envOk',
   missing: 'envServiceMissing',
-  'not-system': 'envAccountNotSystem',
   disabled: 'envSvcTypeDisabled',
   'bin-missing': 'envSvcBinMissing',
-  killtree: 'envRestartKilltree',
   occupied: 'envPortOccupied',
   'no-port': 'envPortNoPort',
 };

@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Changed
+- **环境检测收敛为执行器重启阶段 4 项**：envcheck 仅保留 service / svc-type / svc-bin / port（`sc stop/start` 前提、禁用拦截、可执行文件存在、端口占用防健康检查误判）；清理 account（启动账号与 `sc start` 无关）与 restart（KillProcessTree 不影响 v2.6.0 独立 detached 执行器）— [VU-001]
 - **AGENTS.md 发布 SOP 修订**（v2.7.0 实战教训固化）：发布前新增「先跑项目地图 sync」（release-notes 新文件会触发 pre-commit 漂移拦截，未 sync 即 commit 曾致 tag 错位断链）；新增「tag 错位修复」流程与打 tag 前 HEAD 核对约定 — 治理规则
 
 ## [2.7.0] - 2026-08-15
