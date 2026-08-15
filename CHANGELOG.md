@@ -5,7 +5,7 @@
 
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
-## [Unreleased]
+## [2.7.1] - 2026-08-15
 
 ### Changed
 - **继续优化遗留修正（发送/清空复位）**：点击发送（composer 清空）或手动清空输入框 → 按钮恢复初始「优化」形态（`optimized` 重置，不再显示「继续优化」）；**后台记忆链不清除**——用户删除内容可能表示方向调整或反馈方向不正确（持续记忆）— [PEN-001]/[PEN-003]
@@ -154,6 +154,7 @@
 - 版本检测与一键更新（update/check + update/pull，contents API 下载）— [VU-001]
 - 插件管理页版本检测卡片；按钮三态字体锚点对齐模型选择器（13px/500/20px）— [VU-001]
 
+[2.7.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.7.1
 [2.7.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.7.0
 [2.6.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.6.0
 [2.5.5]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.5.5
