@@ -6,6 +6,9 @@
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
 ## [Unreleased]
+
+## [2.8.2] - 2026-08-16
+
 ### Changed
 - **一键发布模式记忆强制开启且不可关闭**：切换到 `publish` 模式时自动将记忆置为开启，设置页记忆开关在发布模式下禁用并显示说明；host 侧 `validateConfig` 与 `enhance` 入口双重兜底，即使客户端配置被改为关闭也强制生效 — [PEN-003]
 - **自定义模板编辑区增大**：设置页自定义模板 `textarea` 行数由 6 增至 12，并增加 `min-height: 180px`，改善长模板/长规格的编辑体验 — [PEN-002]
@@ -182,6 +185,7 @@
 - 版本检测与一键更新（update/check + update/pull，contents API 下载）— [VU-001]
 - 插件管理页版本检测卡片；按钮三态字体锚点对齐模型选择器（13px/500/20px）— [VU-001]
 
+[2.8.2]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.2
 [2.8.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.1
 [2.8.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.0
 [2.7.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.7.1
