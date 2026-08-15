@@ -652,7 +652,8 @@ async function collectStream(iterator, outputLimit) {
       if (next.done) break;
       const chunk = next.value;
       if (chunk.type === 'text-delta') {
-        if (text.length + chunk.text.length > outputLimit) return { kind: 'toolong' };
+        // v2.7.0（publish 一键发布）：outputLimit <= 0 表示不限制（规格长文不截断）
+        if (outputLimit > 0 && text.length + chunk.text.length > outputLimit) return { kind: 'toolong' };
         sawDelta = true;
         text += chunk.text;
       } else if (chunk.type === 'block-end' && chunk.block.type === 'text') {
@@ -2110,9 +2111,12 @@ return {
       }
       // v2.6.1：记忆链注入同样需要防回显护栏（base/lite + 记忆时 v2Block 为空）
       if (v2Block !== '' || memoryActive) system = system + '\n\n' + CONTEXT_GUARD;
-      const timeoutMs = cfg.timeoutMs;
-      const maxTokens = cfg.maxTokens;
-      const outputLimit = cfg.outputLimit;
+      // v2.7.0（publish 一键发布）：规格长文生成不设限制——maxTokens 省略（provider 默认上限）、
+      // outputLimit=0（collectStream 不截断）、超时放宽至 ≥120s（长文生成耗时）
+      const isPublish = cfg.mode === 'publish';
+      const timeoutMs = isPublish ? Math.max(cfg.timeoutMs, 120000) : cfg.timeoutMs;
+      const maxTokens = isPublish ? 0 : cfg.maxTokens;
+      const outputLimit = isPublish ? 0 : cfg.outputLimit;
       // v2.6.1：消息组装——记忆链经 buildChatMessages 成为真多轮 user/assistant 消息，
       // 最终 user 消息 = 本轮修改摘要 + 模式块 + 原文包裹；无记忆 → 单 user 消息（旧行为）。
       let memoryLog = '';
@@ -2149,7 +2153,8 @@ return {
             model: entry.model,
             ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
             system,
-            maxTokens,
+            // v2.7.0（publish）：maxTokens<=0 省略字段 → provider 默认上限（不设限制）
+            ...(maxTokens > 0 ? { maxTokens } : {}),
             messages,
           });
           const iterator = stream[Symbol.asyncIterator]();

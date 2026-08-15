@@ -162,6 +162,17 @@ test('collectStream 输出超限 → toolong', async () => {
   assert.equal(r.kind, 'toolong');
 });
 
+test('collectStream outputLimit=0 不截断（v2.7.0 publish 不设限制）', async () => {
+  async function* gen() {
+    yield { type: 'text-delta', text: 'a'.repeat(6000) };
+    yield { type: 'text-delta', text: 'b'.repeat(6000) };
+    yield { type: 'finish', reason: { kind: 'stop' } };
+  }
+  const r = await collectStream(gen(), 0);
+  assert.equal(r.kind, 'ok', 'outputLimit=0 不应 toolong');
+  assert.equal(r.text.length, 12000, '12000 字符完整保留');
+});
+
 test('collectStream 无 finish → cancelled', async () => {
   async function* gen() {
     yield { type: 'text-delta', text: 'x' };
