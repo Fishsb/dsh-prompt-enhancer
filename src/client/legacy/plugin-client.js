@@ -94,53 +94,7 @@
 //      恢复默认只重置模型链，不动 engine/context。
 // ============================================================================
 
-const CONFIG_KEY = 'dsh.enhance.config.v2';
-const CONFIG_KEY_V1 = 'dsh.enhance.config.v1';
-const CONFIG_DEFAULTS = {
-  version: 2,
-  main: { provider: '', model: '', reasoning: { enabled: false, effort: '' } },
-  fallback: [],
-  customModels: [],
-  order: [],
-  params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
-  // v2.4.7（每模式独立自定义模板）：texts 各模式一份（v2.7.0 起含 publish，键 = MODE_VALUES 动态）；
-  // text 保留兼容（读旧迁移）
-  template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '', publish: '' } },
-  // v2.2（§6.2/§6.4）：4 模式（base 默认）+ 记忆独立开关（缺省 false，行为零变化）
-  mode: 'base',
-  context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
-  memory: false,
-  // v2.4.0（方案 §4）：版本检测与更新配置（repo 空 = 默认仓库；targetDir 空 = 使用 defaultDir）
-  updater: { repo: '', targetDir: '' },
-};
-// v20：内置兜底链硬编码指向 DeepSeek 官方模型（fresh install 补足与「恢复默认」）
-const BUILTIN_CHAIN = [
-  { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-  { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
-];
-// v2.2（§4.3/§6.6）：模式选项单点（4 模式，记忆模式已删除——记忆为独立开关）
-// v2.3（§7.2）：short = 模式短标签（idle 按钮内显示；i18n modeShort* 键优先，此字段为回退）
-const MODE_OPTIONS = [
-  { value: 'base', label: '基础模式', short: '基础', hint: '直发优化，不读取任何上下文，全体系最快最省' },
-  { value: 'lite', label: '轻量模式', short: '轻量', hint: '本地规则分析输入要素（目标/约束/格式/示例），缺失项保守提示明确化；零外部上下文' },
-  { value: 'standard', label: '标准模式', short: '标准', hint: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本' },
-  { value: 'smart', label: '智能模式', short: '智能', hint: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准' },
-  // v2.7.0（一键发布）：项目/游戏开发规格生成——网络检索 + 工作区检索 + 九章规格
-  { value: 'publish', label: '一键发布', short: '发布', hint: '输入粗略想法（如"想开发一个纸牌游戏"）→ 网络检索同类项目结构 + 工作区参考，一键生成完整可实施的开发规格（九章：目标/核心循环/数值/数据结构/机制/交互/技术方案/实施路线/验收清单）；多轮补充可逐步细化（记忆强制开启；上下文预算需 > 0 才启用检索）' },
-];
-const MODE_VALUES = MODE_OPTIONS.map((m) => m.value);
-// v2.3（§7.2）：模式短标签解析——i18n 键（modeShort+Cap）优先（EN 正确），MODE_OPTIONS.short 回退
-function modeShortLabel(t, mode) {
-  const key = 'modeShort' + (mode ? mode.charAt(0).toUpperCase() + mode.slice(1) : '');
-  const localized = t(key);
-  if (localized !== key) return localized;
-  const row = MODE_OPTIONS.find((m) => m.value === mode);
-  return row && row.short ? row.short : '';
-}
-// 已优化标记键（§2.4）：localStorage 按会话布尔标记（区分首次与 reload；仅记忆开启期打标）
-const SEEN_KEY_PREFIX = 'dsh.enhance.seen.';
-// v2.6.1（记忆链）：发送前迭代记忆最多保留轮数（与 host MEMORY_ROUNDS_MAX 一致）
-const MEMORY_ROUNDS_MAX = 4;
+// @dsh-client-constants-inject
 
 const configState = { value: { ...CONFIG_DEFAULTS }, listeners: new Set(), fresh: true };
 
