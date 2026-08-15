@@ -23,7 +23,7 @@ const grabConst = (name) => {
 const defaultsBlock = [grabConst('DEFAULT_TIMEOUT_MS'), grabConst('DEFAULT_MAX_TOKENS'), grabConst('DEFAULT_OUTPUT_LIMIT')].join('\n');
 const pureFn = new Function(defaultsBlock + '\n' + pureText + `
   ;return { wrapUserText, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
-    shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, shouldIgnoreFile, analyzeInputRules,
+    shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile, analyzeInputRules,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
     buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages,
@@ -45,6 +45,7 @@ const {
   extractHistory,
   inferFocusRules,
   extractKeywords,
+  splitCnSegments,
   analyzeInputRules,
   shouldIgnoreFile,
   rankFiles,
@@ -485,6 +486,28 @@ test('U7 extractKeywords 数量上限与合并', () => {
   assert.ok(kw.includes('cache') || kw.includes('redis'), 'focus 应并入');
   assert.deepEqual(extractKeywords('', []), []);
   assert.deepEqual(extractKeywords('啊', null), []);
+});
+
+test('U49 splitCnSegments 中文分词（v2.7.0 检索质量修复）', () => {
+  // 连接虚词切分：实词保留、虚词吃掉
+  assert.deepEqual(splitCnSegments('项目的构建与发布流程'), ['项目', '构建', '发布流程']);
+  // 中英混合：中文段独立处理
+  const t2 = splitCnSegments('分析DSH项目的构建与发布流程');
+  assert.ok(t2.includes('构建') && t2.includes('发布流程'), '中文段实词提取');
+  // 无连接词整段保留
+  assert.deepEqual(splitCnSegments('缓存失效'), ['缓存失效']);
+  // 空/纯英文/数字 → []
+  assert.deepEqual(splitCnSegments(''), []);
+  assert.deepEqual(splitCnSegments('hello world 123'), []);
+});
+
+test('U50 inferFocusRules 中文分词无碎片（v2.7.0）', () => {
+  const focus = inferFocusRules('分析DSH项目的构建与发布流程，输出一份结构化的项目说明文档');
+  assert.ok(!focus.some((w) => w.includes('的') || w.includes('与')), '无连接虚词残留');
+  assert.ok(focus.includes('构建'), '关键实词提取');
+  assert.ok(focus.some((w) => w.includes('发布')), '发布相关实词');
+  assert.ok(focus.includes('结构化'), '内容实词保留');
+  assert.ok(focus.includes('项目说明文档') || focus.includes('说明文档'), '复合实词整段保留');
 });
 
 test('U14 shouldIgnoreFile 敏感过滤', () => {

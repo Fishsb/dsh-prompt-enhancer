@@ -279,6 +279,8 @@ const V2_MSG_TEXT_MAX = 1200;
 const V2_WORKSPACE_TIMEOUT_MS = 2000;
 const SCAN_FILE_LIST_MAX = 2000;
 const INJECT_FILE_TOP_N = 3;
+// v2.7.0（检索质量修复）：名称匹配 0 命中时的内容兜底扫描文件数上限
+const CONTENT_FALLBACK_SCAN = 5;
 const KEYWORD_LIMIT = 8;
 const SNIPPET_BUDGET = 800;
 const CONTEXT_PROGRESS_MAX = 800;
@@ -717,6 +719,20 @@ function extractHistory(events, limit) {
   return out.reverse();
 }
 
+// 中文主题词切分（v2.7.0 检索质量修复）：连续中文按连接/虚词切段——
+// 旧实现 [\u4e00-\u9fa5]{2,8} 按 8 字窗口截断，产生「项目的构建与发布」式碎片，
+// 无法命中文件名/内容（V2 文档「遗留观察」中文检索噪音的根因）。
+function splitCnSegments(s) {
+  const out = [];
+  for (const m of String(s || '').matchAll(/[\u4e00-\u9fa5]+/g)) {
+    const seg = m[0];
+    // 非捕获组切分，分隔符不进入结果
+    const tokens = seg.split(/(?:以及|或者|并且|然后|因为|所以|如果|但是|没有|就是|不是|对于|关于|通过|根据|按照|一个|一份|一种|一些|输出|提供|包含|包括|进行|使用|需要|希望|想要|可以|能够|和|与|并|或|及|为|了|在|中|请|对|把|将|等|它|其|这|那|个|是|有|要|让|帮|我|你|他|她|的)/).filter(Boolean);
+    for (const t of tokens) out.push(t);
+  }
+  return out;
+}
+
 // 规则版任务焦点提取（basic 模式）：代码/路径/扩展名 token + 中文主题词
 function inferFocusRules(historyText) {
   const focus = [];
@@ -735,12 +751,13 @@ function inferFocusRules(historyText) {
     add(base);
     add(base.replace(/\.[^.]+$/, ''));
   }
-  // 中英文主题词（2-8 字中文词组 / 驼峰与下划线英文词）
-  for (const m of s.matchAll(/[\u4e00-\u9fa5]{2,8}/g)) add(m[0]);
+  // 中文主题词（v2.7.0：连接虚词切分，避免 8 字窗口碎片化）
+  for (const w of splitCnSegments(s)) add(w);
+  // 英文主题词（驼峰与下划线词）
   for (const m of s.matchAll(/[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+/g)) add(m[0]);
   for (const m of s.matchAll(/\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b/g)) add(m[0]);
-  // 去除常见停用词
-  const stop = new Set(['这个', '那个', '我们', '你们', '他们', '可以', '需要', '进行', '使用', '一个', '一些', '什么', '怎么', '如何', '如果', '因为', '所以', '但是', '然后', '并且', '或者', '以及', '还是', '没有', '就是', '不是', '对于', '关于', '通过', '根据', '按照', '项目', '文件', '功能', '实现', '添加', '修改', '删除', '创建', '优化', '提示', '词优', 'the', 'and', 'for', 'with', 'this', 'that', 'from', 'into']);
+  // 去除常见停用词（含连接虚词切分残留与动作词）
+  const stop = new Set(['这个', '那个', '我们', '你们', '他们', '可以', '能够', '需要', '希望', '想要', '进行', '使用', '一个', '一份', '一种', '一些', '什么', '怎么', '如何', '如果', '因为', '所以', '但是', '然后', '并且', '或者', '以及', '还是', '没有', '就是', '不是', '对于', '关于', '通过', '根据', '按照', '项目', '文件', '功能', '实现', '添加', '修改', '删除', '创建', '优化', '提示', '词优', '分析', '检查', '输出', '提供', '包含', '包括', '写', '生成', '编写', '设计', '帮助', '我的', '一种', '的', '与', '和', '并', '或', '及', '为', '了', '在', '中', '请', '对', '把', '将', '等', '它', '其', '这', '那', '个', '是', '有', '要', '让', '帮', '我', '你', '他', '她', 'the', 'and', 'for', 'with', 'this', 'that', 'from', 'into']);
   const filtered = focus.filter((w) => !stop.has(w.toLowerCase()));
   return filtered.slice(0, KEYWORD_LIMIT);
 }
@@ -1305,11 +1322,46 @@ async function v2SearchWorkspace(services, keywords, cfg) {
     await walk(rootTarget, '', 1);
     if (aborted) { hlog('[enhance] v2 workspace scan timeout'); return []; }
     hlog('[enhance] v2 workspace scanned files=' + files.length);
-    // 名称匹配 → 候选
+    // 名称匹配 → 候选；v2.7.0：名称 0 命中时内容兜底（中文场景名称匹配几乎必然落空——
+    // 中文关键词 vs 英文文件名；降级取前 N 个文本文件按内容关键词命中，救活
+    // 「文件内容相关但文件名无关」场景；读取受 V2_WORKSPACE_TIMEOUT_MS 总超时保护）
     const candidates = rankFiles(files, keywords, 10).map((c) => c.path);
     if (candidates.length === 0) {
-      hlog('[enhance] v2 workspace no-name-match files=' + files.length + ' kws=' + JSON.stringify(keywords));
-      return [];
+      const textRe = /\.(?:md|txt|py|ts|js|tsx|jsx|json|yaml|yml|toml|css|html|go|rs|java|cpp|c|h|sh|sql|vue)$/i;
+      // 文档类（md/txt）优先——描述性内容最可能命中主题词
+      const docFirst = files.slice().sort((a, b) => {
+        const da = /\.(?:md|txt)$/i.test(a) ? 0 : 1;
+        const db = /\.(?:md|txt)$/i.test(b) ? 0 : 1;
+        return da - db;
+      });
+      const kws = (keywords || []).filter((k) => typeof k === 'string' && k.length >= 2);
+      const contentScored = [];
+      let scanned = 0;
+      for (const rel of docFirst) {
+        if (aborted || scanned >= CONTENT_FALLBACK_SCAN) break;
+        if (!textRe.test(rel) || shouldIgnoreFile(rel)) continue;
+        scanned++;
+        let text = '';
+        try {
+          const target = await fsSvc.resolve(rel, { cwd: root });
+          text = await fsSvc.readText(target);
+        } catch (e) { continue; } // 只读权限/读取失败 → 跳过该文件
+        const lines = text.split('\n');
+        let contentHits = 0;
+        for (const ln of lines) {
+          if (kws.some((k) => ln.toLowerCase().includes(k.toLowerCase()))) contentHits++;
+          if (contentHits >= 8) break;
+        }
+        if (contentHits > 0) contentScored.push({ path: rel, lines, contentHits });
+      }
+      hlog('[enhance] v2 workspace content-fallback scanned=' + scanned + ' hits=' + contentScored.length + ' kws=' + JSON.stringify(keywords));
+      if (contentScored.length === 0) {
+        hlog('[enhance] v2 workspace no-name-match files=' + files.length + ' kws=' + JSON.stringify(keywords));
+        return [];
+      }
+      contentScored.sort((a, b) => b.contentHits - a.contentHits);
+      const top = contentScored.slice(0, maxFiles);
+      return top.map((f) => ({ path: f.path, snippet: snippetFromLines(f.lines, keywords, SNIPPET_BUDGET) }));
     }
     // 内容命中加分 → 排序 Top-maxFiles
     const scored = [];
