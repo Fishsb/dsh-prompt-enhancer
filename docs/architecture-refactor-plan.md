@@ -1,8 +1,22 @@
 # dsh-prompt-enhancer 架构重构完整调整方案
 
-> 状态：已确认
+> 状态：已确认 / 执行中
 > 日期：2026-08-16
 > 范围：基于已完成架构审查与 DSH 官方设计特征对照，面向后期维护与功能模块扩展的根本性调整方案。
+
+## 当前执行状态（2026-08-16）
+
+| 阶段 | 状态 | 说明 |
+|---|---|---|
+| M0 基线固化 | ✅ | 兼容矩阵、测试 70、CI、文档对齐 |
+| M1 源码模块化 | 🟡 大部分 | Host/Client 多模块已提取；enhance/React 组件仍部分在 legacy |
+| M2 服务化/事件化 | ✅ 主体 | service registry、pipeline、各域服务接口 |
+| M3 配置/RPC 契约化 | ✅ 主体 | protocol、rpc-schema、config-schema、RPC 边界校验 |
+| M4 更新链路平台化 | ✅ 主体 | Reloader、UpdatePlatform、ExecutorReloader、update 服务接入 |
+| M5 可观测/安全 | ✅ 主体 | logger、integrity、diagnostics 接入 logger |
+| M6 工程化收尾 | ✅ | CONTRIBUTING、CI、全量验证 |
+
+> 剩余：M1 中 enhance 大模块与 React 组件从 legacy 完全迁出；M5 完整性校验接入实际 staging 流程。
 
 ---
 
