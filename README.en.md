@@ -14,7 +14,7 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 - ✨ **One-click enhance** — an independent LLM call replaces the draft in place; edit the result and the button becomes a plain **Continue** for further refinement; **undo anytime** (also drops the last memory round), **true cancel** while enhancing
 - 🛡️ **Guards** — empty input / slash commands / submitting states are handled; `/cmd body` optimizes only the body, keeping the prefix
 - 🎛️ **4 optimization modes** — Basic (direct, fastest) / Lite (local rules) / Standard (rules + workspace & session retrieval) / Smart (LLM task-progress analysis + full retrieval)
-- 🧠 **Independent memory switch** — when on, pre-send iterative rounds (optimize → edit → re-optimize) accumulate into a memory chain (up to the latest 4 pairs); each re-optimization replays the whole chain as a multi-turn conversation and senses your edit direction; when off, nothing is read or written; undo drops the last round
+- 🧠 **Independent memory switch** — when on, iterative rounds (optimize → edit → re-optimize) accumulate into a memory chain (**persistent memory**: fixed window of the latest 4 pairs, rolling; sending or clearing the composer does not clear it, Undo drops only the last round); each re-optimization replays the chain as a multi-turn conversation and senses your edit direction; when off, nothing is read or written
 - 📊 **Live progress** — the button shows the current stage while optimizing (Preparing… → Optimizing…), hover switches to a red "Cancel", constant width with no flicker
 
 ### ⚡ Update & maintenance

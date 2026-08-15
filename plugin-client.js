@@ -554,7 +554,7 @@ const ZH = {
   // v2.2（§0.2/§6.6）：模式体系文案（MODE_OPTIONS hint 由 cfgModeHint 提供）
   cfgMode: '优化模式',
   cfgMemory: '记忆功能',
-  cfgMemoryNote: '开启后，发送前多轮「优化→修改→再优化」会累积为记忆链（最多最近 4 轮输入与输出），每轮再优化以多轮对话形式代入全部轮次，并感知你对上一轮结果的修改方向（新增/删除）；首次自动走轻量模式；关闭后完全不再读取/写入',
+  cfgMemoryNote: '开启后，多轮「优化→修改→再优化」累积为记忆链（持续记忆：固定保留最近 4 轮输入与输出，滚动更新；发送或清空输入框均不清除——内容删除可能表示方向调整；仅撤回弹出最后一轮），每轮再优化以多轮对话形式代入全部轮次，并感知你对上一轮结果的修改方向（新增/删除）；首次自动走轻量模式；关闭后完全不再读取/写入',
   cfgModeHintBase: '直发优化，不读取任何上下文，全体系最快最省',
   cfgModeHintLite: '本地规则分析输入要素（目标/约束/格式/示例），缺失项保守提示明确化；不注入任何外部上下文',
   cfgModeHintStandard: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本',
@@ -749,7 +749,7 @@ const EN = {
   cfgEngine: 'Engine',
   cfgMode: 'Mode',
   cfgMemory: 'Memory',
-  cfgMemoryNote: 'When on, pre-send iterative rounds (optimize → edit → re-optimize) accumulate into a memory chain (up to the latest 4 input/output pairs). Each re-optimization replays the whole chain as a multi-turn conversation and senses your edits (added/removed) since the last result; first run falls back to Lite automatically; when off, memory is never read or written',
+  cfgMemoryNote: 'When on, iterative rounds (optimize → edit → re-optimize) accumulate into a memory chain (persistent memory: fixed window of the latest 4 input/output pairs, rolling; sending or clearing the composer does NOT clear it — deleting content may signal a direction change; only Undo drops the last round). Each re-optimization replays the chain as a multi-turn conversation and senses your edit direction (added/removed); first run falls back to Lite automatically; when off, memory is never read or written',
   cfgModeHintBase: 'Direct optimization, no context, fastest',
   cfgModeHintLite: 'Local rule analysis of the input (goal/constraints/format/example); missing elements are clarified conservatively only when inferable; no external context is injected',
   cfgModeHintStandard: 'Rule understanding + file & session retrieval, no extra LLM call',
@@ -999,6 +999,18 @@ function EnhanceButton(props) {
       s.phase = 'idle';
       s.enhanced = '';
       s.error = null;
+      notify(sessionId);
+    }
+  }, [draft, sessionId]);
+
+  // v2.7.0：发送（提交后 composer 清空）/ 手动清空输入框 → 恢复初始优化形态
+  // （optimized 重置 → 按钮回「优化」而非「继续优化」）；后台记忆链（memoryRounds）
+  // 保留——用户删除内容可能表示方向调整或反馈方向不正确，不清除（持续记忆）。
+  React.useEffect(() => {
+    if (typeof draft !== 'string' || draft.trim() !== '') return;
+    const s = storeFor(sessionId);
+    if (s.optimized === true) {
+      s.optimized = false;
       notify(sessionId);
     }
   }, [draft, sessionId]);
