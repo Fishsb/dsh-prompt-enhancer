@@ -1190,6 +1190,7 @@ const ENV_PROBE_KEYS = [
   { key: 'svc-type', level: 'block' }, // 服务启用状态（START_TYPE != DISABLED）
   { key: 'svc-bin', level: 'block' },  // 服务可执行文件存在（nssm Application / 原生 ImagePath）
   { key: 'tools', level: 'block' },    // 重启链系统工具可用（sc/netstat/reg）
+  { key: 'net', level: 'warn' },       // GitHub 可达性（安装依赖，v2.7.1 恢复）
   { key: 'exec-port', level: 'warn' }, // 更新端口独立（≠ 服务端口且未被占用；解析失败 → warn）
 ];
 
@@ -1913,7 +1914,8 @@ return {
           ok: it.ok === true,
           warn: it.warn === true,
           detail: typeof it.detail === 'string' ? it.detail : '',
-          level: meta.has(it.key) ? meta.get(it.key).level : 'warn',
+          // v2.7.1：probeEnv 可携带 item 级 level 覆盖（工具不可达降级 warn / svc-bin no-service）
+          level: it.level || (meta.has(it.key) ? meta.get(it.key).level : 'warn'),
         }));
         const blockMissing = out.filter((it) => it.level === 'block' && !it.ok).map((it) => it.key);
         hlog('[enhance] update/envcheck ok svc=' + serviceName + ' items=' + out.length + ' blockMissing=' + (blockMissing.join(',') || '-'));

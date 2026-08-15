@@ -476,9 +476,14 @@ const ZH = {
   envSvcBin: '服务可执行文件',
   envSvcBinMissing: '服务程序文件不存在（nssm Application）——请检查服务配置',
   envSvcImageMissing: '服务程序文件不存在（ImagePath）——请检查服务配置',
+  envSvcNoService: '服务不存在——无法检查服务程序',
   // v2.7.0（重启工具可用性检查）
   envTools: '重启工具',
   envToolsMissing: '缺少重启命令工具（sc/netstat/reg）——请检查系统目录',
+  // v2.7.1（网络预检 + 工具不可达降级）
+  envNet: '网络可达（GitHub）',
+  envNetUnreachable: 'GitHub 不可达——一键更新安装可能失败（检查网络/代理）',
+  envToolUnreachable: '系统工具不可达（PATH 异常）——检查结果不可信，请检查系统环境',
   // v2.7.0（更新端口独立检查——显示名用「更新」口径，避免内部术语「执行器」）
   envExecPort: '更新端口独立',
   envExecPortSame: '更新端口与服务端口相同——更新功能无法监听，请修改 updater.executorPort',
@@ -670,9 +675,14 @@ const EN = {
   envSvcBin: 'Service executable',
   envSvcBinMissing: 'Service program file missing (nssm Application) — check the service configuration',
   envSvcImageMissing: 'Service program file missing (ImagePath) — check the service configuration',
+  envSvcNoService: 'Service not found — cannot check the service program',
   // v2.7.0（重启工具可用性检查）
   envTools: 'Restart tools',
   envToolsMissing: 'Missing restart commands (sc/netstat/reg) — check the system directory',
+  // v2.7.1（网络预检 + 工具不可达降级）
+  envNet: 'Network (GitHub)',
+  envNetUnreachable: 'GitHub unreachable — one-click update install may fail (check network/proxy)',
+  envToolUnreachable: 'System tools unreachable (PATH broken) — results unreliable, check the system environment',
   // v2.7.0（更新端口独立检查——显示名用「更新」口径，避免内部术语「执行器」）
   envExecPort: 'Update port independent',
   envExecPortSame: 'Update port equals the service port — the updater cannot listen; change updater.executorPort',
@@ -1240,6 +1250,7 @@ const ENV_ITEMS = [
   { key: 'svc-type', label: 'envSvcType' },
   { key: 'svc-bin', label: 'envSvcBin' },
   { key: 'tools', label: 'envTools' },
+  { key: 'net', label: 'envNet' },
   { key: 'exec-port', label: 'envExecPort' },
 ];
 const ENV_DETAIL_TEXT = {
@@ -1248,7 +1259,10 @@ const ENV_DETAIL_TEXT = {
   disabled: 'envSvcTypeDisabled',
   'bin-missing': 'envSvcBinMissing',
   'image-missing': 'envSvcImageMissing',
+  'no-service': 'envSvcNoService',
   'tools-missing': 'envToolsMissing',
+  unreachable: 'envNetUnreachable',
+  'tool-unreachable': 'envToolUnreachable',
   'same-as-service': 'envExecPortSame',
   'exec-occupied': 'envExecPortOccupied',
   'no-port': 'envExecPortNoPort',
