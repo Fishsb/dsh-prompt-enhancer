@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-08-16
+
 ### Changed
 - **设置联动性修复（配置审查驱动）**：自定义模板 texts 白名单动态化——client 三处硬编码 `['base','lite','standard','smart']` 改为 `MODE_VALUES`（含 publish）+ 默认 texts 补 publish 键：修复「publish 模式自定义模板被 sanitize 丢弃」（与 v2.5.3 同类问题的 publish 复发——host 侧 MODE_KEYS 动态本已兼容）；publish 提示补「上下文预算需 > 0 才启用检索」联动说明 — [PEN-002]
 - **重启循环修复（每轮 stop+start 组合）**：执行器重启循环由「stop 一次 + 循环 start」改为「每轮 = 完整 stop→start」——失败轮先重新 stop 幂等清理（等 STOPPED/端口释放）再 start，消除「进程残留/端口未释放时裸 start 无效」的拉起失败风险（手动需 stop+start 两次才成功的根因）；正常首轮成功路径与旧行为等价；EXECUTOR_VERSION 0.1.2→0.1.3 触发执行器版本对齐重建 — [VU-001]
@@ -172,6 +174,7 @@
 - 版本检测与一键更新（update/check + update/pull，contents API 下载）— [VU-001]
 - 插件管理页版本检测卡片；按钮三态字体锚点对齐模型选择器（13px/500/20px）— [VU-001]
 
+[2.8.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.0
 [2.7.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.7.1
 [2.7.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.7.0
 [2.6.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.6.0
