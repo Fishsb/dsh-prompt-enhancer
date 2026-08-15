@@ -49,6 +49,10 @@
   - 新增 `test/protocol.test.cjs`（79 tests）— 架构治理
   - **配置 Schema/迁移器**：新增 `src/host/config-schema.js`（默认值/校验/v1→v2 迁移），`config-service.js` 接入；新增 `test/config-schema.test.cjs`（83 tests）— 架构治理
   - **RPC 边界接入参数校验**：新增 `lib/rpc-schema.cjs`（bundle-safe CommonJS），`lib/index.cjs` RPC 路由在分发前统一执行 `validateRpcArgs`，非法参数返回 400 — 架构治理
+- **M4 更新链路平台化脚手架**：
+  - 新增 `src/host/reloader.js`：Reloader 接口 + UnsupportedReloader
+  - 新增 `src/host/update-platform.js`：`createUpdatePlatform`（热更新优先，executor fallback）
+  - 新增 `test/update-platform.test.cjs`（85 tests）— 架构治理
 
 ## [2.8.3] - 2026-08-16
 
