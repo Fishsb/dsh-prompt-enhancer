@@ -574,6 +574,7 @@ const ZH = {
   cfgContextBudget: '上下文预算',
   cfgContextBudget0: '0（关闭注入）',
   cfgContextNote: 'V2 按任务进度与提示词主题检索工作区相关文件后注入优化参考；预算 0 = 不注入（等价基础优化）',
+  cfgPublishNoLimit: '发布模式不设输出限制：输出 Token 上限/字符上限自动放开（provider 默认上限），超时自动 ≥240s——以上三项对本模式不生效（仅影响其他模式）；上下文预算仍生效（> 0 才启用检索）',
   // v2.3（§7.2/§7.3）：模式短标签 + 步骤进度文案 + 记忆开关
   modeShortBase: '基础',
   modeShortLite: '轻量',
@@ -777,6 +778,7 @@ const EN = {
   cfgContextBudget: 'Context budget',
   cfgContextBudget0: '0 (no injection)',
   cfgContextNote: 'V2 analyzes task progress and retrieves relevant workspace files before optimizing; budget 0 = no injection (equivalent to basic)',
+  cfgPublishNoLimit: 'Publish mode has no output limits: token/character caps are released (provider default) and timeout is auto ≥240s — these three options do not apply to publish mode (they only affect other modes); context budget still applies (> 0 enables retrieval)',
   // v2.3（§7.2/§7.3）：模式短标签 + 步骤进度文案 + 记忆开关
   modeShortBase: 'Basic',
   modeShortLite: 'Lite',
@@ -2249,6 +2251,8 @@ function ParamsTab(props) {
   }, [cfg.template.mode, cfg.mode, prefillBusy]);
   const curText = (cfg.template.texts && cfg.template.texts[cfg.mode]) || '';
   const curLabel = t('cfgTemplateTextFor').replace('{mode}', modeShortLabel(t, cfg.mode));
+  // v2.8.0（实测修正）：发布模式不设输出限制（host 硬覆盖）——三项参数置灰的依据
+  const isPublishMode = cfg.mode === 'publish';
   return React.createElement(React.Fragment, null,
     // v2.2（§6.6）：优化模式下拉（4 模式，记忆模式已删除）
     // v2.4.6（布局）：优化模式与模板合并为同一行双字段（两控件均属「优化行为」配置、
@@ -2302,18 +2306,24 @@ function ParamsTab(props) {
       }),
     ),
     React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgContextNote')),
+    // v2.8.0（实测修正）：发布模式「不设输出限制」为 host 硬覆盖（超时 ≥240s、maxTokens 省略、
+    // outputLimit=0）——超时/输出 Token 上限/输出字符上限三项对本模式不生效；置灰 + 说明，
+    // 避免「调整后状态没有更新」的误导（此前可编辑但实际无效）
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label' }, t('cfgTimeout')),
-      React.createElement('select', selectProps('timeoutMs', TIMEOUT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, (v / 1000) + 's')))),
+      React.createElement('select', Object.assign({ className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('timeoutMs', TIMEOUT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, (v / 1000) + 's'))))),
     ),
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label' }, t('cfgMaxTokens')),
-      React.createElement('select', selectProps('maxTokens', MAXTOKENS_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v))))),
+      React.createElement('select', Object.assign({ className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('maxTokens', MAXTOKENS_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v)))))),
     ),
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label' }, t('cfgOutputLimit')),
-      React.createElement('select', selectProps('outputLimit', OUTPUTLIMIT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v))))),
+      React.createElement('select', Object.assign({ className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('outputLimit', OUTPUTLIMIT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v)))))),
     ),
+    isPublishMode
+      ? React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgPublishNoLimit'))
+      : null,
     // v2.4.6（布局）：模板模式下拉已并入上方与优化模式同一行；此处仅保留自定义模板内容区
     // v2.4.7（每模式独立）：textarea 显示当前模式文本；编辑只写当前模式；切模式跟随
     cfg.template.mode === 'custom'

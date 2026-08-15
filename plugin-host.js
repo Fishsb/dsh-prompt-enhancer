@@ -1925,10 +1925,12 @@ return {
 
     harness.handle('logs/last', async () => ({ ok: true, lines: LOG_RING.slice() }));
 
-    // v2.4.7（每模式独立自定义模板）：返回 4 模式默认提示词——client 首次切换
+    // v2.4.7（每模式独立自定义模板）：返回各模式默认提示词——client 首次切换
     // 「自定义模板」且当前模式无内容时预填用（client 侧无内置模板文本，须 host 提供）。
-    // 当前 4 模式同值 = SYSTEM_PROMPT；若未来内置按模式拆分（prompts/system-<mode>.md），
-    // 此 RPC 返回随生成区自动变化，client 无需改动。
+    // v2.8.0（实测修正）：补 publish 键 = SYSTEM_PUBLISH_PROMPT——此前只返回 4 模式，
+    // publish 切自定义模板预填拿到 undefined → 内容为空（用户实测反馈）。
+    // 当前 5 模式 base/lite/standard/smart 同值 = SYSTEM_PROMPT；若未来内置按模式拆分
+    // （prompts/system-<mode>.md），此 RPC 返回随生成区自动变化，client 无需改动。
     harness.handle('template/default', async () => ({
       ok: true,
       defaults: {
@@ -1936,6 +1938,7 @@ return {
         lite: SYSTEM_PROMPT,
         standard: SYSTEM_PROMPT,
         smart: SYSTEM_PROMPT,
+        publish: SYSTEM_PUBLISH_PROMPT,
       },
     }));
 
