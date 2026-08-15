@@ -408,9 +408,11 @@ const ZH = {
   updApply: '⚡ 一键更新并重启',
   updApplyConfirm: '确认重启服务？',
   updApplying: '正在安装更新…（10–60 秒）',
-  updApplyRestarting: '正在重启服务…',
-  updApplyRestartFailed: '服务未自动恢复——请手动执行 net start dsh-web 后刷新',
-  updApplyDone: '正在重启服务（约 5–10 秒），请刷新页面',
+  updApplyRestarting: '正在重启服务…（{sec} 秒）',
+  updApplyRestartingRetry: '正在重启服务（第 {round} 次）…（{sec} 秒）',
+  updApplyRetry: '第 1 次重启未恢复，正在自动重试…',
+  updApplyRestartFailed: '第 2 次重启仍未恢复——请手动执行 net start dsh-web 后刷新',
+  updApplyDone: '✓ 重启成功，请刷新页面',
   updApplyReload: '刷新页面',
   updApplyInstalledManual: '已安装，请手动重启服务',
   updApplyUnsupported: '动态安装不支持一键更新，请用 bundle 安装',
@@ -590,9 +592,11 @@ const EN = {
   updApply: '⚡ Update & restart',
   updApplyConfirm: 'Confirm service restart?',
   updApplying: 'Installing update… (10–60s)',
-  updApplyRestarting: 'Restarting service…',
-  updApplyRestartFailed: 'Service did not come back — run `net start dsh-web` manually, then refresh',
-  updApplyDone: 'Restarting service (≈5–10s), refresh the page',
+  updApplyRestarting: 'Restarting service… ({sec}s)',
+  updApplyRestartingRetry: 'Restarting service (attempt {round})… ({sec}s)',
+  updApplyRetry: 'First restart did not recover — auto-retrying…',
+  updApplyRestartFailed: 'Still down after retry — run `net start dsh-web` manually, then refresh',
+  updApplyDone: '✓ Restarted — refresh the page',
   updApplyReload: 'Refresh',
   updApplyInstalledManual: 'Installed — restart the service manually',
   updApplyUnsupported: 'Dynamic install does not support one-click update; use bundle install',
@@ -1143,9 +1147,12 @@ function UpdaterCard(props) {
   const [envItems, setEnvItems] = React.useState(null);
   const [envChecking, setEnvChecking] = React.useState(false);
   const [envError, setEnvError] = React.useState(null);
-  // v2.5.0：一键更新（idle|confirm|applying|done）
+  // v2.5.0：一键更新（idle|confirm|applying|restarting|done）
   const [applyPhase, setApplyPhase] = React.useState('idle');
   const [applyErr, setApplyErr] = React.useState(null);
+  // v2.5.5：重启自检倒计时（秒）与重试轮次（首次 1 / 自动重试 2）
+  const [restartLeft, setRestartLeft] = React.useState(0);
+  const [restartRound, setRestartRound] = React.useState(1);
 
   // v2.4.1（§9-T5）：RPC 携带 sessionId——host 需经会话解析 sandboxPolicy（写入边界=会话工作区）
   const sessionId = props.useSessions ? props.useSessions((s) => s.current) : undefined;
@@ -1291,27 +1298,42 @@ function UpdaterCard(props) {
           setApplyErr(t('updApplyInstalledManual'));
           return;
         }
-        // v2.5.4：重启后端口自检——服务重启期间 fetch 失败属预期，轮询直到恢复
-        // （最长 30s；恢复 → 成功提示 + 刷新按钮；超时 → 明确提示手动 net start）
+        // v2.5.4/2.5.5：重启自检——服务重启期间 fetch 失败属预期，每 2s 轮询；
+        // 自检 10s 未恢复 → 自动再调 update/restart 重试一次（实证第二次重启必正常）；
+        // 第二轮仍失败 → 明确提示手动 net start。restartLeft/restartRound 驱动倒计时展示。
         setApplyPhase('restarting');
         setApplyErr(null);
-        const probeRestart = (tries) => {
+        const probeRestart = (tries, round) => {
+          setRestartLeft(tries * 2);
+          setRestartRound(round);
           if (tries <= 0) {
+            // 每轮倒计时结束反馈结果：第一轮未恢复 → 提示并自动重试；第二轮 → 最终失败提示
+            if (round < 2) {
+              setApplyErr(t('updApplyRetry'));
+              host.call('update/restart', { serviceName }).then(() => {
+                probeRestart(5, round + 1);
+              }).catch(() => {
+                setApplyErr(t('updApplyRestartFailed'));
+                setApplyPhase('idle');
+              });
+              return;
+            }
             setApplyErr(t('updApplyRestartFailed'));
             setApplyPhase('idle');
             return;
           }
           window.fetch('/', { cache: 'no-store', method: 'GET' }).then((resp) => {
             if (resp.status === 200) {
+              setApplyErr(null);
               setApplyPhase('done');
             } else {
-              setTimeout(() => probeRestart(tries - 1), 2000);
+              setTimeout(() => probeRestart(tries - 1, round), 2000);
             }
           }).catch(() => {
-            setTimeout(() => probeRestart(tries - 1), 2000);
+            setTimeout(() => probeRestart(tries - 1, round), 2000);
           });
         };
-        probeRestart(15);
+        probeRestart(5, 1);
       }
     }).catch(() => {
       setApplyErr(t('updError'));
@@ -1434,7 +1456,7 @@ function UpdaterCard(props) {
             onClick: applyPhase === 'confirm' ? runApply : startApply,
           }, applyPhase === 'confirm' ? t('updApplyConfirm')
             : applyPhase === 'applying' ? t('updApplying')
-            : applyPhase === 'restarting' ? t('updApplyRestarting')
+            : applyPhase === 'restarting' ? t(restartRound > 1 ? 'updApplyRestartingRetry' : 'updApplyRestarting').replace('{sec}', String(restartLeft)).replace('{round}', String(restartRound))
             : applyPhase === 'done' ? t('updApplyDone')
             : t('updApply')),
           applyPhase === 'confirm'

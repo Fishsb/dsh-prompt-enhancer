@@ -923,7 +923,7 @@ async function pingStream(llmService, entry, ref) {
 // ================= v2.4.0 版本检测与一键更新 · 纯函数族 =================
 // 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
-const PLUGIN_VERSION = '2.5.4';
+const PLUGIN_VERSION = '2.5.5';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
 const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）
@@ -1850,6 +1850,33 @@ return {
           version: tag,
           message: detachedOk ? '' : '已安装，请手动重启服务',
         };
+      } finally {
+        applyInFlight = false;
+      }
+    });
+
+    // v2.5.5（一键更新重启自动重试）：仅执行重启链（无安装）——client 自检超时后自动调用；
+    // 实证规律：安装后首次启动偶发 DSH 加载崩溃（官方 7.2 同族），第二次重启必正常。
+    harness.handle('update/restart', async (args) => {
+      const serviceName = args && typeof args.serviceName === 'string' && /^[A-Za-z0-9_-]+$/.test(args.serviceName)
+        ? args.serviceName : 'dsh-web';
+      if (!harness.execDetached || typeof harness.execDetached !== 'function') {
+        return { ok: false, code: 'UNSUPPORTED', message: '动态安装不支持自动重启' };
+      }
+      if (applyInFlight) {
+        return { ok: false, code: 'APPLY_BUSY', message: 'an apply/restart is already in progress' };
+      }
+      applyInFlight = true;
+      try {
+        let detachedOk = true;
+        try {
+          harness.execDetached(buildRestartChain(serviceName));
+        } catch (e) {
+          detachedOk = false;
+          herr('[enhance] update/restart execDetached failed', e);
+        }
+        hlog('[enhance] update/restart ok svc=' + serviceName + ' detached=' + detachedOk);
+        return { ok: true, restarted: detachedOk, message: detachedOk ? '' : '请手动重启服务' };
       } finally {
         applyInFlight = false;
       }
