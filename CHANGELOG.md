@@ -24,6 +24,7 @@
   - `scripts/build-client.mjs` 改为读取 `src/client/legacy/plugin-client.js`，并同时生成根 `plugin-client.js` 与 `lib/client.cjs`
   - `package.json` 增加 `build:host` / `build:client`，`build` 同时构建 host/client
   - CI 增加对 `plugin-client.js` / `plugin-host.js` 生成物一致性校验 — 架构治理
+  - **PURE 纯函数区段提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/pure.js`（单一事实源），`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-pure.mjs` 维护工具 — 架构治理
 
 ## [2.8.3] - 2026-08-16
 
