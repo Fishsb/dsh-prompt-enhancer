@@ -22,9 +22,9 @@ const grabConst = (name) => {
 };
 const defaultsBlock = [grabConst('DEFAULT_TIMEOUT_MS'), grabConst('DEFAULT_MAX_TOKENS'), grabConst('DEFAULT_OUTPUT_LIMIT')].join('\n');
 const pureFn = new Function(defaultsBlock + '\n' + pureText + `
-  ;return { wrapUserText, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
+  ;return { wrapUserText, wrapPublishText, stripScenarioEcho, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
     shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile, analyzeInputRules,
-    rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario, wrapPublishText,
+    rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
     buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages,
     MEMORY_ROUNDS_MAX, MEMORY_CHAIN_BUDGET_MAX, MEMORY_DELTA_MAX,
@@ -87,12 +87,28 @@ const {
   buildInstallArgs,
   buildRestartPlan,
   mergeEnvPath,
+  stripScenarioEcho,
 } = pureFn();
 
 test('wrapUserText 包装用户输入', () => {
   const out = wrapUserText('hi');
   assert.match(out, /^请优化以下提示词：/);
   assert.match(out, /"""\nhi\n"""/);
+});
+
+test('U55 stripScenarioEcho 剥离判定行回显（v2.8.0 实测修正）', () => {
+  // 完整行回显
+  assert.equal(
+    stripScenarioEcho('【场景判定】本次场景判定：game（依据用户输入自动判定；章节适配要求见「场景适配」段；请勿复述本判定行）\n\n一、目标概述'),
+    '一、目标概述'
+  );
+  // 截断行回显
+  assert.equal(stripScenarioEcho('【场景判定】本次场景判定：software\n\n## 一、目标概述'), '## 一、目标概述');
+  // 无回显 → 原样（trim 空行）
+  assert.equal(stripScenarioEcho('## 一、目标概述'), '## 一、目标概述');
+  // 回显不在首部 → 不动正文
+  const mid = '一、目标概述\n【场景判定】本次场景判定：game\n正文';
+  assert.equal(stripScenarioEcho(mid), mid);
 });
 
 test('U54 wrapPublishText publish 中性包装（v2.8.0 实测修正）', () => {

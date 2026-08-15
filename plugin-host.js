@@ -992,6 +992,15 @@ function detectScenario(text, keywords) {
   return game > software ? 'game' : 'software';
 }
 
+// v2.8.0（一键发布 · 实测修正）：剥离输出首部的【场景判定】回显行——模型常复述
+// system 注入的判定行（完整行或截断行两种形态）；指令式「请勿复述」约束不可靠，
+// 改用确定性剥离（仅剥离首部一行 + 跟随空行，正文不受影响）。
+function stripScenarioEcho(text) {
+  const s = String(text || '');
+  const re = /^【场景判定】本次场景判定：(?:game|software)[^\n]*\n?/;
+  return s.replace(re, '').replace(/^\n+/, '');
+}
+
 // 上下文块组装：任务进度(≤800) + 文件(≤3×800) + 事件(≤800)；
 // 截断优先级：进度 > 文件 > 事件 > 原文完整（原文由调用方保证不截断）
 function buildContextBlock(progress, files, events, budgetChars) {
@@ -2195,8 +2204,10 @@ return {
       if (v2Block !== '' || memoryActive) system = system + '\n\n' + CONTEXT_GUARD;
       // v2.7.0（publish 一键发布）：规格长文生成不设限制——maxTokens 省略（provider 默认上限）、
       // outputLimit=0（collectStream 不截断）、超时放宽至 ≥120s（长文生成耗时）
+      // v2.8.0（实测修正）：120s → 240s——带记忆链 rounds 的多轮规格生成（重负载路径）
+      // 实测 120s 超时（round-2 完整九章 + 融入补充 + 自评），240s 覆盖 4 轮链最坏情况
       const isPublish = cfg.mode === 'publish';
-      const timeoutMs = isPublish ? Math.max(cfg.timeoutMs, 120000) : cfg.timeoutMs;
+      const timeoutMs = isPublish ? Math.max(cfg.timeoutMs, 240000) : cfg.timeoutMs;
       const maxTokens = isPublish ? 0 : cfg.maxTokens;
       const outputLimit = isPublish ? 0 : cfg.outputLimit;
       // v2.6.1：消息组装——记忆链经 buildChatMessages 成为真多轮 user/assistant 消息，
@@ -2251,7 +2262,8 @@ return {
             rec.iterator = null;
           }
           if (result.kind === 'ok') {
-            const cleaned = cleanOutput(result.text);
+            // v2.8.0（实测修正）：publish 剥离输出首部【场景判定】回显行（确定性，不依赖模型遵从）
+            const cleaned = isPublish ? stripScenarioEcho(cleanOutput(result.text)) : cleanOutput(result.text);
             if (cleaned === '') {
               lastFailure = { code: 'EMPTY_RESPONSE', message: 'model returned empty text' };
               continue;
