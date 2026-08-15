@@ -5,6 +5,11 @@
 
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
+## [Unreleased]
+
+### Added
+- **更新未重启提醒**：`dsh plugin add/update` 安装新版本后若服务未重启，插件管理页自动检测（host 对比模块加载时刻与关键文件 mtime）并显示横幅提醒 + 重启命令（`net stop <svc> && net start <svc>`，服务名随 `updater.serviceName` 配置）— [VU-001]
+
 ## [2.7.0] - 2026-08-15
 
 ### Changed

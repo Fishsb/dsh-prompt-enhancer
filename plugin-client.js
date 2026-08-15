@@ -380,6 +380,8 @@ const ZH = {
   pluginsRefresh: '刷新',
   // v2.4.0（方案 §4）：版本检测与更新卡片
   updTitle: '版本检测与更新',
+  // v2.7.0：更新未重启提醒
+  updRestartNeeded: '⚠️ 检测到插件文件已更新，但服务尚未重启——重启后新版本生效，重启命令：',
   updRepo: 'GitHub 仓库',
   updCheck: '检测版本',
   updChecking: '检测中…',
@@ -569,6 +571,8 @@ const EN = {
   pluginsRefresh: 'Refresh',
   // v2.4.0（方案 §4）：版本检测与更新卡片
   updTitle: 'Version check & update',
+  // v2.7.0：更新未重启提醒
+  updRestartNeeded: '⚠️ Plugin files were updated but the service has not restarted — restart to activate the new version. Restart command: ',
   updRepo: 'GitHub repo',
   updCheck: 'Check version',
   updChecking: 'Checking…',
@@ -1188,9 +1192,21 @@ function UpdaterCard(props) {
   // v2.5.5：重启自检倒计时（秒）与重试轮次（首次 1 / 自动重试 2）
   const [restartLeft, setRestartLeft] = React.useState(0);
   const [restartRound, setRestartRound] = React.useState(1);
+  // v2.7.0：更新未重启提醒（null=无提醒；命中显示横幅 + 重启命令）
+  const [restartNotice, setRestartNotice] = React.useState(null);
 
   // v2.4.1（§9-T5）：RPC 携带 sessionId——host 需经会话解析 sandboxPolicy（写入边界=会话工作区）
   const sessionId = props.useSessions ? props.useSessions((s) => s.current) : undefined;
+
+  // v2.7.0：更新未重启提醒——挂载时检测磁盘插件文件是否晚于本进程加载
+  // （dsh plugin add/update 装了新版本但服务没重启 → 提醒重启 + 给出命令）
+  React.useEffect(() => {
+    let disposed = false;
+    host.call('update/restartNeeded', { serviceName }).then((r) => {
+      if (!disposed && r && r.needed === true) setRestartNotice(r);
+    }).catch(() => { /* 旧 host/动态形态无此 RPC → 静默 */ });
+    return () => { disposed = true; };
+  }, []);
 
   const repo = updaterRepoOf({ updater: { repo: repoInput, targetDir: '' } });
   // v2.5.0：可配置服务名/profile（config.updater，缺省 dsh-web / web）
@@ -1416,6 +1432,13 @@ function UpdaterCard(props) {
     React.createElement('div', { className: 'dsh-plg-head' },
       React.createElement('span', { className: 'dsh-plg-name' }, t('updTitle')),
     ),
+    // v2.7.0：更新未重启提醒横幅（装新版本未重启时显示，含重启命令）
+    restartNotice
+      ? React.createElement('div', { className: 'dsh-plg-restart-notice', role: 'status' },
+          React.createElement('span', { className: 'dsh-plg-restart-text' }, t('updRestartNeeded')),
+          React.createElement('code', { className: 'dsh-plg-restart-cmd' }, restartNotice.command || ''),
+        )
+      : null,
     // 行 1：repo 输入 + 检测按钮 + 环境检测按钮（v2.5.0，样式同检测按钮）
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label' }, t('updRepo')),
@@ -2350,6 +2373,9 @@ const CSS = [
   '.dsh-plg-testarea{display:flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:4px 8px;background:var(--dsw-alias-bg-layer-1)}',
   // v2.4.0（方案 §4）：版本检测与更新卡片样式
   '.dsh-plg-upd-outdated{color:var(--dsw-alias-state-warn-primary);font-size:12px;line-height:16px;font-weight:600}',
+  // v2.7.0：更新未重启提醒横幅（警告黄底 + 命令 code）
+  '.dsh-plg-restart-notice{display:flex;flex-direction:column;gap:4px;margin:8px 0;border:1px solid var(--dsw-alias-state-warn-primary);border-radius:8px;padding:8px 10px;background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 10%,transparent);font-size:12px;line-height:16px;color:var(--dsw-alias-label-primary)}',
+  '.dsh-plg-restart-cmd{font-family:Consolas,Menlo,monospace;font-size:12px;line-height:16px;color:var(--dsw-alias-state-warn-primary);word-break:break-all}',
   '.dsh-plg-upd-ok{color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:16px;font-weight:600}',
   '.dsh-plg-upd-body{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:16px;max-height:64px;overflow:auto;white-space:pre-wrap;word-break:break-all}',
   '.dsh-plg-upd-done{display:flex;flex-direction:column;gap:6px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:8px 10px;background:var(--dsw-alias-bg-layer-1);font-size:12px;line-height:16px;color:var(--dsw-alias-label-primary)}',
