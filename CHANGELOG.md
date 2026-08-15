@@ -26,6 +26,7 @@
   - CI 增加对 `plugin-client.js` / `plugin-host.js` 生成物一致性校验 — 架构治理
   - **PURE 纯函数区段提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/pure.js`（单一事实源），`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-pure.mjs` 维护工具 — 架构治理
   - **diagnostics 日志块提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/diagnostics.js`，`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-diagnostics.mjs` 维护工具 — 架构治理
+  - **models/config 缓存块提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/models.js`（DeepSeek 兜底链、默认参数、模型能力缓存、自适应链），`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-models.mjs` 维护工具 — 架构治理
 
 ## [2.8.3] - 2026-08-16
 
