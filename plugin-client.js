@@ -409,14 +409,16 @@ const ZH = {
   envSvcType: '服务启用状态',
   envSvcTypeDisabled: '服务已禁用——请先启用（sc config <svc> start= auto）',
   envSvcBin: '服务可执行文件',
-  envSvcBinMissing: 'nssm Application 指向的文件不存在——请检查服务配置',
-  envPort: '端口占用',
-  envPortOccupied: '端口被其他进程占用——重启后服务可能起不来',
-  envPortNoPort: '无法解析服务端口（AppParameters 无 --port）——端口检查失效',
+  envSvcBinMissing: '服务程序文件不存在（nssm Application）——请检查服务配置',
+  envSvcImageMissing: '服务程序文件不存在（ImagePath）——请检查服务配置',
+  // v2.7.0（重启工具可用性检查）
+  envTools: '重启工具',
+  envToolsMissing: '缺少重启命令工具（sc/netstat/reg）——请检查系统目录',
   // v2.7.0（更新端口独立检查——显示名用「更新」口径，避免内部术语「执行器」）
   envExecPort: '更新端口独立',
   envExecPortSame: '更新端口与服务端口相同——更新功能无法监听，请修改 updater.executorPort',
   envExecPortOccupied: '更新端口被其他进程占用——更新功能可能不可用，请释放或修改 updater.executorPort',
+  envExecPortNoPort: '无法解析服务端口——无法确认更新端口独立',
   updApply: '⚡ 一键更新并重启',
   updApplyConfirm: '确认重启服务？',
   updApplying: '正在安装更新…（10–60 秒）',
@@ -596,14 +598,16 @@ const EN = {
   envSvcType: 'Service start type',
   envSvcTypeDisabled: 'Service disabled — enable it first (sc config <svc> start= auto)',
   envSvcBin: 'Service executable',
-  envSvcBinMissing: 'nssm Application file missing — check the service configuration',
-  envPort: 'Port in use',
-  envPortOccupied: 'Port is held by another process — the service may fail to start after restart',
-  envPortNoPort: 'Cannot resolve service port (no --port) — port check skipped',
+  envSvcBinMissing: 'Service program file missing (nssm Application) — check the service configuration',
+  envSvcImageMissing: 'Service program file missing (ImagePath) — check the service configuration',
+  // v2.7.0（重启工具可用性检查）
+  envTools: 'Restart tools',
+  envToolsMissing: 'Missing restart commands (sc/netstat/reg) — check the system directory',
   // v2.7.0（更新端口独立检查——显示名用「更新」口径，避免内部术语「执行器」）
   envExecPort: 'Update port independent',
   envExecPortSame: 'Update port equals the service port — the updater cannot listen; change updater.executorPort',
   envExecPortOccupied: 'Update port is held by another process — the updater may be unavailable; free it or change updater.executorPort',
+  envExecPortNoPort: 'Cannot resolve the service port — cannot confirm update-port independence',
   updApply: '⚡ Update & restart',
   updApplyConfirm: 'Confirm service restart?',
   updApplying: 'Installing update… (10–60s)',
@@ -1144,12 +1148,13 @@ function updaterRepoOf(cfg) {
 
 // v2.5.0：环境检测渲染元数据——展示顺序/标签键/detail 状态码 → 文案键
 // （detail 由 host probeEnv 返回；文案键对应 i18n 字典；
-// v2.5.2 收敛为重启链 6 项；v2.7.0 收敛为执行器重启阶段 4 项 + 更新端口独立检查）
+// v2.5.2 收敛为重启链 6 项；v2.7.0 收敛为重启阶段真实依赖 5 项：
+// 删 port 占用（标准场景不可达），加 tools 重启工具，exec-port 承接 no-port）
 const ENV_ITEMS = [
   { key: 'service', label: 'envService' },
   { key: 'svc-type', label: 'envSvcType' },
   { key: 'svc-bin', label: 'envSvcBin' },
-  { key: 'port', label: 'envPort' },
+  { key: 'tools', label: 'envTools' },
   { key: 'exec-port', label: 'envExecPort' },
 ];
 const ENV_DETAIL_TEXT = {
@@ -1157,10 +1162,11 @@ const ENV_DETAIL_TEXT = {
   missing: 'envServiceMissing',
   disabled: 'envSvcTypeDisabled',
   'bin-missing': 'envSvcBinMissing',
-  occupied: 'envPortOccupied',
-  'no-port': 'envPortNoPort',
+  'image-missing': 'envSvcImageMissing',
+  'tools-missing': 'envToolsMissing',
   'same-as-service': 'envExecPortSame',
   'exec-occupied': 'envExecPortOccupied',
+  'no-port': 'envExecPortNoPort',
 };
 
 function UpdaterCard(props) {

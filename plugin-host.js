@@ -1165,15 +1165,15 @@ function validateManifestFiles(files) {
 // 环境探测计划（key 与 lib/index.cjs probeEnv 返回的 key 一一对应；
 // level 供 client 渲染与一键更新前置校验：block=硬阻断 / warn=风险提示。
 // v2.5.2 收敛：移除安装链与形态类检查（net/mode/pnpmInfo）。
-// v2.7.0 再收敛：仅保留执行器（v2.6.0 独立 detached 进程）重启阶段直接依赖——
-// account（启动账号与 sc start 无关）与 restart（KillProcessTree 不影响独立执行器）
-// 按用户决策移除。）
+// v2.7.0 收敛：仅保留执行器重启阶段真实依赖——account（与 sc start 无关）、
+// restart（KillProcessTree 不影响独立执行器）与 port 占用（标准场景不可达，
+// no-port 并入 exec-port）已删；新增 tools（重启命令工具）与 svc-bin 降级链。）
 const ENV_PROBE_KEYS = [
   { key: 'service', level: 'block' },  // 服务名存在（sc query）
   { key: 'svc-type', level: 'block' }, // 服务启用状态（START_TYPE != DISABLED）
-  { key: 'svc-bin', level: 'block' },  // nssm Application 可执行文件存在
-  { key: 'port', level: 'warn' },      // 端口占用者 = 服务自身进程（解析失败 → warn）
-  { key: 'exec-port', level: 'warn' }, // 执行器端口独立（≠ 服务端口且未被占用；冲突 → warn）
+  { key: 'svc-bin', level: 'block' },  // 服务可执行文件存在（nssm Application / 原生 ImagePath）
+  { key: 'tools', level: 'block' },    // 重启链系统工具可用（sc/netstat/reg）
+  { key: 'exec-port', level: 'warn' }, // 更新端口独立（≠ 服务端口且未被占用；解析失败 → warn）
 ];
 
 // 安装命令构造：node <dshBin> plugin --profile <profile> add github:Fishsb/dsh-prompt-enhancer#<tag>

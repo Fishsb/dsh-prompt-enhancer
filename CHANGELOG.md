@@ -8,7 +8,7 @@
 ## [Unreleased]
 
 ### Changed
-- **环境检测收敛为执行器重启阶段检查**：envcheck 保留 service / svc-type / svc-bin / port（`sc stop/start` 前提、禁用拦截、可执行文件存在、端口占用防健康检查误判），**新增 exec-port 更新端口独立检查**（≠ 服务端口且未被占用，冲突 warn 提示并指引修改 `updater.executorPort`；显示名用「更新端口」用户口径）；清理 account（启动账号与 `sc start` 无关）与 restart（KillProcessTree 不影响 v2.6.0 独立 detached 执行器）— [VU-001]
+- **环境检测收敛为执行器重启阶段真实依赖**：保留 service / svc-type / svc-bin / exec-port（更新端口独立，承接 no-port 语义）；**svc-bin 升级为降级链**（nssm `Parameters\Application` → 未装 nssm 的原生服务读 SCM `ImagePath` 首段 → 均无则跳过，覆盖两种安装形态）；**新增 tools 重启工具检查**（sc/netstat/reg 存在于 SystemRoot\System32，block——重启命令缺失必失败）；删除 port 占用检查（标准场景不可达）、account、restart — [VU-001]
 - **AGENTS.md 发布 SOP 修订**（v2.7.0 实战教训固化）：发布前新增「先跑项目地图 sync」（release-notes 新文件会触发 pre-commit 漂移拦截，未 sync 即 commit 曾致 tag 错位断链）；新增「tag 错位修复」流程与打 tag 前 HEAD 核对约定 — 治理规则
 
 ## [2.7.0] - 2026-08-15
