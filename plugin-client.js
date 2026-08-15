@@ -499,6 +499,11 @@ const ZH = {
   updApply: '⚡ 一键更新并重启',
   updApplyConfirm: '确认重启服务？',
   updApplying: '正在安装更新…（10–60 秒）',
+  updApplyStaging: '正在下载更新资源…',
+  updApplyEnvcheck: '正在检查环境…',
+  updApplyPreparing: '正在准备安装…',
+  updApplyRollingBack: '重启失败，正在回滚旧版本…',
+  updApplyRolledBack: '✓ 已回滚到旧版本，请刷新页面',
   updApplyRestarting: '正在重启服务…（第 {round} 次 · 剩余 {sec} 秒）',
   updApplyRetry: '第 {n} 次重启未恢复，执行器自动重试中…',
   updApplyRestartFailed: '5 次重启均未恢复——请手动执行 net start dsh-web 后刷新',
@@ -703,6 +708,11 @@ const EN = {
   updApply: '⚡ Update & restart',
   updApplyConfirm: 'Confirm service restart?',
   updApplying: 'Installing update… (10–60s)',
+  updApplyStaging: 'Downloading update resources…',
+  updApplyEnvcheck: 'Checking environment…',
+  updApplyPreparing: 'Preparing install…',
+  updApplyRollingBack: 'Restart failed — rolling back to previous version…',
+  updApplyRolledBack: '✓ Rolled back to the previous version — refresh the page',
   updApplyRestarting: 'Restarting service… (attempt {round} · {sec}s left)',
   updApplyRetry: 'Attempt {n} did not recover — executor auto-retrying…',
   updApplyRestartFailed: 'Still down after 5 attempts — run `net start dsh-web` manually, then refresh',
@@ -1298,9 +1308,10 @@ function UpdaterCard(props) {
   const [envItems, setEnvItems] = React.useState(null);
   const [envChecking, setEnvChecking] = React.useState(false);
   const [envError, setEnvError] = React.useState(null);
-  // v2.5.0：一键更新（idle|confirm|applying|restarting|done）
+  // v2.5.0：一键更新（idle|confirm|applying|restarting|done|rolledback）
   const [applyPhase, setApplyPhase] = React.useState('idle');
   const [applyErr, setApplyErr] = React.useState(null);
+  const [applyStatus, setApplyStatus] = React.useState(null);
   // v2.5.5：重启自检倒计时（秒）与重试轮次（首次 1 / 自动重试 2）
   const [restartLeft, setRestartLeft] = React.useState(0);
   const [restartRound, setRestartRound] = React.useState(1);
@@ -1448,20 +1459,39 @@ function UpdaterCard(props) {
         const s = st && typeof st === 'object' ? st : {};
         if (s.phase === 'healthy') {
           setApplyErr(null);
-          setApplyPhase('done');
+          if (/rolled back/i.test(s.message || '')) {
+            setApplyStatus(t('updApplyRolledBack'));
+            setApplyPhase('rolledback');
+          } else {
+            setApplyStatus(null);
+            setApplyPhase('done');
+          }
           return;
         }
         if (s.phase === 'failed') {
-          setApplyErr(t('updApplyRestartFailed'));
+          setApplyErr(s.message || t('updApplyRestartFailed'));
+          setApplyStatus(null);
           setApplyPhase('idle');
           return;
         }
-        if (s.phase === 'installing') {
+        const phaseStatus = {
+          validating: t('updApplyStaging'),
+          staging: t('updApplyStaging'),
+          envcheck: t('updApplyEnvcheck'),
+          preparing: t('updApplyPreparing'),
+          installing: t('updApplying'),
+          rollback: t('updApplyRollingBack'),
+        };
+        if (phaseStatus[s.phase]) {
+          setApplyErr(null);
+          setApplyStatus(phaseStatus[s.phase]);
           setApplyPhase('applying');
           setTimeout(tick, 2000);
           return;
         }
         // restarting
+        setApplyErr(null);
+        setApplyStatus(null);
         setApplyPhase('restarting');
         setRestartRound(s.attempt || 1);
         localLeft -= 2;
@@ -1489,6 +1519,7 @@ function UpdaterCard(props) {
     if (applyPhase !== 'confirm') return;
     setApplyPhase('applying');
     setApplyErr(null);
+    setApplyStatus(null);
     // 前置校验：先环境检测（host 60s 缓存），block 级失败 → 阻止并列出缺失项
     host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
       const er = envRes && typeof envRes === 'object' ? envRes : {};
@@ -1523,6 +1554,7 @@ function UpdaterCard(props) {
         return;
       }
       // 轮询执行器状态（倒计时 + 每轮反馈；执行器独立存活，服务重启不断连）
+      setApplyStatus(t('updApplying'));
       pollExecutorStatus(executorPort());
     }).catch(() => {
       setApplyErr(t('updApplyExecutorDown'));
@@ -1654,6 +1686,7 @@ function UpdaterCard(props) {
             : applyPhase === 'applying' ? t('updApplying')
             : applyPhase === 'restarting' ? t('updApplyRestarting').replace('{sec}', String(restartLeft)).replace('{round}', String(restartRound))
             : applyPhase === 'done' ? t('updApplyDone')
+            : applyPhase === 'rolledback' ? t('updApplyRolledBack')
             : t('updApply')),
           applyPhase === 'confirm'
             ? React.createElement('button', {
@@ -1670,6 +1703,9 @@ function UpdaterCard(props) {
               }, t('updApplyReload'))
             : null,
         )
+      : null,
+    applyStatus
+      ? React.createElement('div', { className: 'dsh-plg-status', role: 'status' }, applyStatus)
       : null,
     applyErr
       ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, applyErr)
