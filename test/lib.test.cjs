@@ -32,7 +32,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     STAGE_SEQUENCE, STAGE_LABELS,
     PLUGIN_VERSION, UPDATE_MANIFEST, parseVersion, compareVersions, versionStatus,
     normalizeRepo, isValidTag, pickMaxTag, parseTagsPayload, validateManifestFiles, defaultDirFor,
-    ENV_PROBE_KEYS, buildInstallArgs, buildRestartPlan, mergeEnvPath };
+    ENV_PROBE_KEYS, buildInstallArgs, buildRestartPlan, mergeEnvPath, buildTarballUrl, buildLocalInstallArgs };
 `);
 const {
   wrapUserText,
@@ -88,6 +88,8 @@ const {
   buildInstallArgs,
   buildRestartPlan,
   mergeEnvPath,
+  buildTarballUrl,
+  buildLocalInstallArgs,
   stripScenarioEcho,
 } = pureFn();
 
@@ -1006,6 +1008,23 @@ test('U42 buildInstallArgs 命令构造（v2.5.0）', () => {
   assert.equal(p[3], 'custom-profile', 'profile 透传');
   // 固定 repo：任何 tag 都只能拼到 Fishsb/dsh-prompt-enhancer
   assert.match(args[5], /^github:Fishsb\/dsh-prompt-enhancer#/, 'repo 固定');
+});
+
+// v2.9.0（执行器外挂 + staging 预拉取）：tarball 下载地址与本地安装命令契约。
+test('U57 buildTarballUrl 构造 codeload 下载地址', () => {
+  assert.equal(
+    buildTarballUrl('Fishsb/dsh-prompt-enhancer', 'v2.8.3'),
+    'https://codeload.github.com/Fishsb/dsh-prompt-enhancer/tar.gz/refs/tags/v2.8.3',
+    'tag 拼入 refs/tags'
+  );
+});
+
+test('U58 buildLocalInstallArgs 本地 staging 安装命令构造', () => {
+  const args = buildLocalInstallArgs('D:\\dsh\\bin.js', 'web', 'C:\\staging\\dsh-prompt-enhancer-2.8.3.tgz');
+  assert.deepEqual(args, [
+    'D:\\dsh\\bin.js', 'plugin', '--profile', 'web', 'add', 'C:\\staging\\dsh-prompt-enhancer-2.8.3.tgz',
+  ], '本地 tarball 安装命令数组形态');
+  assert.equal(args[5], 'C:\\staging\\dsh-prompt-enhancer-2.8.3.tgz', 'tarball 路径透传');
 });
 
 // v2.6.0：重启计划契约（独立执行器使用——参数对象，不再拼接 cmd 链；

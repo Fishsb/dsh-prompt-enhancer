@@ -1330,6 +1330,17 @@ function buildInstallArgs(dshBin, tag, profile) {
   return [dshBin, 'plugin', '--profile', profile, 'add', 'github:Fishsb/dsh-prompt-enhancer#' + tag];
 }
 
+// GitHub codeload tarball 下载地址（staging 阶段在线拉取，服务不中断）。
+function buildTarballUrl(repo, tag) {
+  return 'https://codeload.github.com/' + repo + '/tar.gz/refs/tags/' + tag;
+}
+
+// 本地 staging tarball 安装命令：node <dshBin> plugin --profile <profile> add <local.tgz>
+// lib 层 isLocalTarballInstallArgs 会二次校验 tarball 必须在 staging 目录内。
+function buildLocalInstallArgs(dshBin, profile, tarball) {
+  return [dshBin, 'plugin', '--profile', profile, 'add', tarball];
+}
+
 // 重启计划构造（v2.6.0：独立执行器使用——不再拼接 cmd 链，改参数对象；
 // 执行器内以 node setTimeout 可靠等待 + 端口健康检查 + 自动重试。
 // v2.5.4 教训：cmd 链的 timeout 在非交互环境（stdio ignore）立即返回，缓冲从未生效。）
