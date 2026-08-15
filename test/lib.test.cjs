@@ -510,6 +510,13 @@ test('U50 inferFocusRules 中文分词无碎片（v2.7.0）', () => {
   assert.ok(focus.includes('项目说明文档') || focus.includes('说明文档'), '复合实词整段保留');
 });
 
+test('U51 inferFocusRules 历史前缀噪音过滤（v2.7.0）', () => {
+  // extractHistory 生成的 [用户]/[助手] 前缀不应成为检索关键词
+  const focus = inferFocusRules('[用户] 分析DSH项目的构建与发布流程\n[助手] 好的，构建命令是 pnpm build');
+  assert.ok(!focus.includes('用户') && !focus.includes('助手'), '用户/助手 前缀被过滤');
+  assert.ok(focus.includes('构建'), '实词仍保留');
+});
+
 test('U14 shouldIgnoreFile 敏感过滤', () => {
   assert.equal(shouldIgnoreFile('.env'), true);
   assert.equal(shouldIgnoreFile('.env.local'), true);
