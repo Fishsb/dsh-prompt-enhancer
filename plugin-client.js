@@ -103,8 +103,9 @@ const CONFIG_DEFAULTS = {
   customModels: [],
   order: [],
   params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
-  // v2.4.7（每模式独立自定义模板）：texts 4 模式各一份；text 保留兼容（读旧迁移）
-  template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '' } },
+  // v2.4.7（每模式独立自定义模板）：texts 各模式一份（v2.7.0 起含 publish，键 = MODE_VALUES 动态）；
+  // text 保留兼容（读旧迁移）
+  template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '', publish: '' } },
   // v2.2（§6.2/§6.4）：4 模式（base 默认）+ 记忆独立开关（缺省 false，行为零变化）
   mode: 'base',
   context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
@@ -125,7 +126,7 @@ const MODE_OPTIONS = [
   { value: 'standard', label: '标准模式', short: '标准', hint: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本' },
   { value: 'smart', label: '智能模式', short: '智能', hint: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准' },
   // v2.7.0（一键发布）：项目/游戏开发规格生成——网络检索 + 工作区检索 + 九章规格
-  { value: 'publish', label: '一键发布', short: '发布', hint: '输入粗略想法（如"想开发一个纸牌游戏"）→ 网络检索同类项目结构 + 工作区参考，一键生成完整可实施的开发规格（九章：目标/核心循环/数值/数据结构/机制/交互/技术方案/实施路线/验收清单）；多轮补充可逐步细化（建议开启记忆）' },
+  { value: 'publish', label: '一键发布', short: '发布', hint: '输入粗略想法（如"想开发一个纸牌游戏"）→ 网络检索同类项目结构 + 工作区参考，一键生成完整可实施的开发规格（九章：目标/核心循环/数值/数据结构/机制/交互/技术方案/实施路线/验收清单）；多轮补充可逐步细化（建议开启记忆；上下文预算需 > 0 才启用检索）' },
 ];
 const MODE_VALUES = MODE_OPTIONS.map((m) => m.value);
 // v2.3（§7.2）：模式短标签解析——i18n 键（modeShort+Cap）优先（EN 正确），MODE_OPTIONS.short 回退
@@ -151,7 +152,7 @@ function cloneDefaults() {
     customModels: [],
     order: [],
     params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
-    template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '' } },
+    template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '', publish: '' } },
     mode: 'base',
     context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
     memory: false,
@@ -207,11 +208,13 @@ function sanitizeV2(parsed) {
   // ③ text 字段保留兼容（host validateConfig 双兼容，读旧值也 OK）
   if (typeof t.text === 'string' && t.text.length <= 4000) v.template.text = t.text;
   if (t.texts && typeof t.texts === 'object') {
-    for (const key of ['base', 'lite', 'standard', 'smart']) {
+    // v2.7.0：白名单动态化（MODE_VALUES 含 publish——修复 publish 自定义模板被丢弃，
+    // 与 v2.5.3 同类问题的 publish 复发）
+    for (const key of MODE_VALUES) {
       if (typeof t.texts[key] === 'string' && t.texts[key].length <= 4000) v.template.texts[key] = t.texts[key];
     }
   } else if (typeof v.template.text === 'string' && v.template.text !== '') {
-    for (const key of ['base', 'lite', 'standard', 'smart']) v.template.texts[key] = v.template.text;
+    for (const key of MODE_VALUES) v.template.texts[key] = v.template.text;
   }
   const ctxCfg = parsed.context && typeof parsed.context === 'object' ? parsed.context : {};
   // v2.2（§6.4）：mode 解析（4 模式白名单；'memory' 历史值 → lite + memory:true）
@@ -264,10 +267,10 @@ function migrateFromV1(parsed) {
   if (Number.isInteger(parsed.maxTokens) && parsed.maxTokens >= 100 && parsed.maxTokens <= 16000) v.params.maxTokens = parsed.maxTokens;
   if (Number.isInteger(parsed.outputLimit) && parsed.outputLimit >= 500 && parsed.outputLimit <= 50000) v.params.outputLimit = parsed.outputLimit;
   if (parsed.templateMode === 'custom' || parsed.templateMode === 'builtin') v.template.mode = parsed.templateMode;
-  // v2.4.7：v1 平铺 templateText → 迁移到全部 4 模式 texts（与 sanitizeV2 语义一致）
+  // v2.4.7：v1 平铺 templateText → 迁移到全部模式 texts（v2.7.0：键 = MODE_VALUES，含 publish）
   if (typeof parsed.templateText === 'string' && parsed.templateText.length <= 4000) {
     v.template.text = parsed.templateText;
-    for (const key of ['base', 'lite', 'standard', 'smart']) v.template.texts[key] = parsed.templateText;
+    for (const key of MODE_VALUES) v.template.texts[key] = parsed.templateText;
   }
   return v;
 }
@@ -567,7 +570,7 @@ const ZH = {
   cfgModeHintStandard: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本',
   cfgModeHintSmart: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准',
   // v2.7.0（一键发布）：网络检索 + 工作区检索 + 九章规格生成
-  cfgModeHintPublish: '输入粗略想法（如"想开发一个纸牌游戏"）→ 网络检索同类项目结构 + 工作区参考，一键生成完整可实施的开发规格（九章：目标/核心循环/数值/数据结构/机制/交互/技术方案/实施路线/验收清单）；多轮补充可逐步细化（建议开启记忆）',
+  cfgModeHintPublish: '输入粗略想法（如"想开发一个纸牌游戏"）→ 网络检索同类项目结构 + 工作区参考，一键生成完整可实施的开发规格（九章：目标/核心循环/数值/数据结构/机制/交互/技术方案/实施路线/验收清单）；多轮补充可逐步细化（建议开启记忆；上下文预算需 > 0 才启用检索）',
   cfgContextBudget: '上下文预算',
   cfgContextBudget0: '0（关闭注入）',
   cfgContextNote: 'V2 按任务进度与提示词主题检索工作区相关文件后注入优化参考；预算 0 = 不注入（等价基础优化）',
@@ -770,7 +773,7 @@ const EN = {
   cfgModeHintStandard: 'Rule understanding + file & session retrieval, no extra LLM call',
   cfgModeHintSmart: 'LLM task analysis + full retrieval, best understanding',
   // v2.7.0（一键发布）：网络检索 + 工作区检索 + 九章规格生成
-  cfgModeHintPublish: 'Feed a rough idea (e.g. "I want to make a card game") → web-search similar project structures + workspace references, generate a complete implementable dev spec in one click (9 chapters: goal/core loop/numbers/data/mechanics/UI/tech/roadmap/acceptance); iterative refinements keep improving it (memory recommended)',
+  cfgModeHintPublish: 'Feed a rough idea (e.g. "I want to make a card game") → web-search similar project structures + workspace references, generate a complete implementable dev spec in one click (9 chapters: goal/core loop/numbers/data/mechanics/UI/tech/roadmap/acceptance); iterative refinements keep improving it (memory recommended; context budget must be > 0 to enable retrieval)',
   cfgContextBudget: 'Context budget',
   cfgContextBudget0: '0 (no injection)',
   cfgContextNote: 'V2 analyzes task progress and retrieves relevant workspace files before optimizing; budget 0 = no injection (equivalent to basic)',
