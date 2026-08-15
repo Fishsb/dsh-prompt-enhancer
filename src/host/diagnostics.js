@@ -1,8 +1,4 @@
 'use strict';
-// Target module: diagnostics ring buffer / structured logging.
-// Current implementation lives in src/host/legacy/plugin-host.js.
-function register(ctx) {
-  // TODO(M2): provide diagnostics.service and register logs RPC.
-}
-
-module.exports = { register };
+// Extracted diagnostics block from legacy host source.
+// build-host.mjs injects this chunk back into the generated root plugin-host.js.
+module.exports = "// —— v14 诊断日志：环形缓冲（最近 300 行），供 logs/last RPC 读取 ——\r\nconst LOG_RING = [];\r\nconst LOG_RING_MAX = 300;\r\nfunction hlog() {\r\n  const line = Array.prototype.map.call(arguments, (a) => {\r\n    if (typeof a === 'string') return a;\r\n    try { return JSON.stringify(a); } catch (e) { return String(a); }\r\n  }).join(' ');\r\n  LOG_RING.push(line);\r\n  if (LOG_RING.length > LOG_RING_MAX) LOG_RING.shift();\r\n  console.log(line);\r\n}\r\nfunction herr() {\r\n  const line = Array.prototype.map.call(arguments, (a) => {\r\n    if (typeof a === 'string') return a;\r\n    try { return JSON.stringify(a); } catch (e) { return String(a); }\r\n  }).join(' ');\r\n  LOG_RING.push(line);\r\n  if (LOG_RING.length > LOG_RING_MAX) LOG_RING.shift();\r\n  console.error(line);\r\n}";

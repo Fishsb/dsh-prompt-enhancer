@@ -104,27 +104,7 @@
 //      敏感文件硬过滤（shouldIgnoreFile）。
 // ============================================================================
 
-// —— v14 诊断日志：环形缓冲（最近 300 行），供 logs/last RPC 读取 ——
-const LOG_RING = [];
-const LOG_RING_MAX = 300;
-function hlog() {
-  const line = Array.prototype.map.call(arguments, (a) => {
-    if (typeof a === 'string') return a;
-    try { return JSON.stringify(a); } catch (e) { return String(a); }
-  }).join(' ');
-  LOG_RING.push(line);
-  if (LOG_RING.length > LOG_RING_MAX) LOG_RING.shift();
-  console.log(line);
-}
-function herr() {
-  const line = Array.prototype.map.call(arguments, (a) => {
-    if (typeof a === 'string') return a;
-    try { return JSON.stringify(a); } catch (e) { return String(a); }
-  }).join(' ');
-  LOG_RING.push(line);
-  if (LOG_RING.length > LOG_RING_MAX) LOG_RING.shift();
-  console.error(line);
-}
+// @dsh-diagnostics-inject
 
 // v20：内置兜底链硬编码指向 DeepSeek 官方模型（provider=deepseek-official）。
 // 主模型优先取 agentDefaultModel.currentSelection()（当前使用模型），
