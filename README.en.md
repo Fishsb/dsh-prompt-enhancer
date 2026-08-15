@@ -9,19 +9,25 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 
 ## Features
 
-- ✨ **One-click enhance** — an independent LLM call replaces the draft in place
-- ↩️ **Undo anytime** — restore the original with one click; manually editing the draft exits undo (undo also clears the previous memory pair)
-- ⏹️ **True cancel** — click during enhancement aborts and restores the draft
+### ✨ Core
+
+- ✨ **One-click enhance** — an independent LLM call replaces the draft in place; **undo anytime** (also clears the previous memory pair), **true cancel** while enhancing
 - 🛡️ **Guards** — empty input / slash commands / submitting states are handled; `/cmd body` optimizes only the body, keeping the prefix
-- 🌐 **i18n** — follows the DSH interface language (中文 / English)
 - 🎛️ **4 optimization modes** — Basic (direct, fastest) / Lite (local rules) / Standard (rules + workspace & session retrieval) / Smart (LLM task-progress analysis + full retrieval)
 - 🧠 **Independent memory switch** — when on, the previous optimization pair is injected into the next round; when off, nothing is read or written; cleared on undo
 - 📊 **Live progress** — the button shows the current stage while optimizing (Preparing… → Optimizing…), hover switches to a red "Cancel", constant width with no flicker
-- 📏 **Visual parity** — button font (DengXian) / weight / pill shape / gray label / darker hover ellipse match the DSH model selector
-- 🚀 **Version check & one-click update** — built-in updater detects new versions and pulls the release files ([Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases))
-- ⚡ **Update & restart** — with a new version detected, one button runs the official install command and restarts the service (restart only after a successful install; never on failure); refresh to finish. No shell commands needed
-- 🧪 **Environment check** — an inline button probes 7 environment items read-only (network / service / account / port / install form…), each with ✓/⚠/✗ and guidance; one-click update is blocked with the missing items listed when the environment is not ready
+
+### ⚡ Update & maintenance
+
+- ⚡ **Update & restart** — with a new version detected, one button runs the official install command and restarts the service (restart only after a successful install; never on failure; the standalone executor auto-retries up to 5 times); refresh to finish
+- 🧪 **Environment check** — an inline button probes the restart-chain environment read-only (service / account / start type / executable / port…), each with ✓/⚠/✗ and guidance; one-click update is blocked when not ready
+- 🚀 **Version check & one-click pull** — built-in updater detects new versions and pulls the release files ([Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases))
 - 🧪 **Unit-tested** — host pure-function tests (node:test) slice the PURE section, so tests run the shipped code
+
+### 🎨 Other
+
+- 🌐 **i18n** — follows the DSH interface language (中文 / English)
+- 📏 **Visual parity** — button style matches the DSH model selector (DengXian / pill / hover feedback)
 
 ## Screenshots
 
