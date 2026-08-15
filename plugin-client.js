@@ -1,5 +1,8 @@
 // ============================================================================
 // DSH「提示词优化」插件 · Client 半部（v2.4.7：自定义模板每模式独立 + 默认预填）
+// v2.6.2（继续优化·未发布迭代）：新增 s.optimized 标记（成功应用 ≥1 轮置 true、撤回重置
+// false）——空闲态非空且已优化过 → 按钮纯文字「继续优化」（无 ✨ 图标，hover titleContinue）；
+// 首次优化 → ✨ + 模式短标签；优化中 / 完成撤回 / 空输入记忆开关 / 守卫禁用等状态不变。
 // v2.6.1（记忆链·未发布迭代）：记忆由单轮对升级为 rounds 链（s.memoryRounds，最多
 // MEMORY_ROUNDS_MAX 轮）——每次结果应用后追加 {input, output} 并截断；req.memory 传
 // { rounds }，host 以真多轮消息注入并感知本轮修改方向；撤回只弹出最后一轮（更早轮次
@@ -322,6 +325,9 @@ const ZH = {
   enhancing: '优化中',
   result: '✓ 已优化，可撤回',
   titleIdle: '一键优化提示词（独立 LLM 调用）',
+  // v2.6.2（继续优化）：已优化过一轮后修改草稿的按钮文字与提示
+  btnContinue: '继续优化',
+  titleContinue: '继续优化：已优化过一轮，基于当前修改继续完善（独立 LLM 调用）',
   titleBusy: '点击取消优化并恢复原文',
   titleResult: '恢复优化前的原文',
   titleEmpty: '请输入内容后再优化',
@@ -506,6 +512,9 @@ const EN = {
   enhancing: 'Optimizing',
   result: '✓ Optimized · Undo',
   titleIdle: 'Optimize the prompt with an independent LLM call',
+  // v2.6.2（继续优化）：已优化过一轮后修改草稿的按钮文字与提示
+  btnContinue: 'Continue',
+  titleContinue: 'Continue optimizing: a previous round exists; refine based on your edits (independent LLM call)',
   titleBusy: 'Click to cancel optimization and restore the original text',
   titleResult: 'Restore the original text',
   titleEmpty: 'Type something first to optimize',
@@ -715,7 +724,7 @@ const sessionStores = new Map();
 function storeFor(sessionId) {
   let s = sessionStores.get(sessionId);
   if (!s) {
-    s = { phase: 'idle', backup: '', enhanced: '', error: null, seq: 0, listeners: new Set(), memoryRounds: [] };
+    s = { phase: 'idle', backup: '', enhanced: '', error: null, seq: 0, listeners: new Set(), memoryRounds: [], optimized: false };
     sessionStores.set(sessionId, s);
   }
   return s;
@@ -836,6 +845,8 @@ function enhance(sessionId, draft, inputActions, draftRef) {
         s.phase = 'result';
         s.enhanced = finalText;
         s.error = null;
+        // v2.6.2（继续优化标记）：成功应用过结果 → 后续修改草稿时按钮显示「继续优化」
+        s.optimized = true;
         // v2.2（§6.5/R1）：仅结果已应用且记忆开关开启时写入记忆（斜杠命令存正文）并打标；
         // v2.6.1（记忆链）：追加本轮 {input, output} 并截断到最近 MEMORY_ROUNDS_MAX 轮
         if (config.memory) {
@@ -871,6 +882,8 @@ function undo(sessionId, inputActions) {
   // v2.1（§2.4）：撤回 = 放弃上轮结果 = 清除其记忆（语义一致）；
   // v2.6.1（记忆链）：只弹出最后一轮——更早轮次仍属本轮迭代历史，继续有效
   s.memoryRounds.pop();
+  // v2.6.2（继续优化标记）：撤回 = 回到起点，重新开始算「首次优化」
+  s.optimized = false;
   notify(sessionId);
 }
 
@@ -1006,7 +1019,9 @@ function EnhanceButton(props) {
         if (!guardPasses(draft, input)) return;
         enhance(sessionId, draft, inputActions, draftRef);
       };
-      title = ok ? t('titleIdle')
+      // v2.6.2（继续优化）：已成功应用过 ≥1 轮 → hover 提示区分（首次/继续）
+      const isContinue = !!s && s.optimized === true;
+      title = ok ? (isContinue ? t('titleContinue') : t('titleIdle'))
         : draft.startsWith('/') ? t('titleCommand')
         : t('titleBusyInput');
     }
@@ -1023,16 +1038,20 @@ function EnhanceButton(props) {
     tabIndex: -1,
     'aria-label': t('enhanceButton'),
   },
+    // v2.6.2（继续优化）：已优化过一轮且草稿已修改 → 纯文字「继续优化」（无 ✨ 图标）；
+    // 首次 → ✨ + 模式短标签（记忆饱和度仅作用于 ✨，continue 态无图标故不受影响）
     phase === 'result' ? null
-      : React.createElement(React.Fragment, null,
-          // v2.3.2（§7.2）：记忆状态 → 图标饱和度（仅影响 ✨，文字饱和度不变）：
-          // 记忆开=正常彩色（无 dim 类）/ 记忆关=低饱和（dsh-enh-icon-dim，filter:saturate(.2)）
-          React.createElement('span', {
-            className: 'dsh-enh-icon' + (configState.value.memory === true ? '' : ' dsh-enh-icon-dim'),
-            'aria-hidden': true,
-          }, '✨'),
-          React.createElement('span', { className: 'dsh-enh-mode' }, modeShortLabel(t, configState.value.mode)),
-        ),
+      : (s && s.optimized === true)
+        ? React.createElement('span', { className: 'dsh-enh-mode' }, t('btnContinue'))
+        : React.createElement(React.Fragment, null,
+            // v2.3.2（§7.2）：记忆状态 → 图标饱和度（仅影响 ✨，文字饱和度不变）：
+            // 记忆开=正常彩色（无 dim 类）/ 记忆关=低饱和（dsh-enh-icon-dim，filter:saturate(.2)）
+            React.createElement('span', {
+              className: 'dsh-enh-icon' + (configState.value.memory === true ? '' : ' dsh-enh-icon-dim'),
+              'aria-hidden': true,
+            }, '✨'),
+            React.createElement('span', { className: 'dsh-enh-mode' }, modeShortLabel(t, configState.value.mode)),
+          ),
     phase === 'result' ? t('result') : null,
   );
 }
