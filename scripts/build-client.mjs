@@ -3,10 +3,16 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
+const require = createRequire(import.meta.url);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const source = join(root, 'src', 'client', 'legacy', 'plugin-client.js');
-const body = readFileSync(source, 'utf8');
+let body = readFileSync(source, 'utf8');
+const i18nChunk = require('../src/client/i18n.js');
+if (body.includes('// @dsh-client-i18n-inject')) {
+  body = body.replace('// @dsh-client-i18n-inject', i18nChunk);
+}
 
 // Embed the body as a JSON string literal: safe against backticks, ${}, and
 // every other JS metacharacter inside the plugin code.
