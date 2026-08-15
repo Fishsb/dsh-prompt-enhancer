@@ -1,18 +1,20 @@
 'use strict';
 /**
- * M2: ConfigService interface.
- *
- * Legacy config validation lives in PURE (src/host/pure.js) and the composed
- * plugin-host.js. This service is the target boundary for M3 schema work.
+ * M2/M3: ConfigService backed by config-schema.
  */
+const { cloneDefaults, validateConfig, migrateLegacyConfig } = require('./config-schema.js');
+
 function createConfigService() {
   function validate(raw) {
-    throw new Error('config.validate not wired yet');
+    return validateConfig(raw);
   }
   function defaults() {
-    throw new Error('config.defaults not wired yet');
+    return cloneDefaults();
   }
-  return { validate, defaults };
+  function migrate(raw) {
+    return migrateLegacyConfig(raw);
+  }
+  return { validate, defaults, migrate };
 }
 
 module.exports = { createConfigService };

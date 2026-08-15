@@ -47,6 +47,7 @@
   - 新增 `src/host/protocol.js`：`PROTOCOL_VERSION` / RPC 方法注册表
   - 新增 `src/host/rpc-schema.js`：轻量参数校验
   - 新增 `test/protocol.test.cjs`（79 tests）— 架构治理
+  - **配置 Schema/迁移器**：新增 `src/host/config-schema.js`（默认值/校验/v1→v2 迁移），`config-service.js` 接入；新增 `test/config-schema.test.cjs`（83 tests）— 架构治理
 
 ## [2.8.3] - 2026-08-16
 
