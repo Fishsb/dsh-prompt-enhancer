@@ -789,11 +789,11 @@ test('U42 buildInstallArgs 命令构造（v2.5.0）', () => {
   assert.match(args[5], /^github:Fishsb\/dsh-prompt-enhancer#/, 'repo 固定');
 });
 
-// v2.5.0：重启链模板契约。
+// v2.5.0：重启链模板契约（v2.5.4：缓冲 2s → 5s）。
 test('U43 buildRestartChain 重启链（v2.5.0）', () => {
   const chain = buildRestartChain('dsh-web');
-  assert.equal(chain, 'net stop dsh-web & timeout /t 2 /nobreak >nul & net start dsh-web',
-    '链 = stop + 2s 缓冲 + start（& 无条件串联）');
+  assert.equal(chain, 'net stop dsh-web & timeout /t 5 /nobreak >nul & net start dsh-web',
+    '链 = stop + 5s 缓冲 + start（& 无条件串联）');
   const other = buildRestartChain('dsh-web-alt');
   assert.ok(other.startsWith('net stop dsh-web-alt & '), 'serviceName 注入位置固定');
   assert.ok(other.endsWith('& net start dsh-web-alt'), 'start 与 stop 同服务名');

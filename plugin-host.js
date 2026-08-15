@@ -923,7 +923,7 @@ async function pingStream(llmService, entry, ref) {
 // ================= v2.4.0 版本检测与一键更新 · 纯函数族 =================
 // 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
-const PLUGIN_VERSION = '2.5.3';
+const PLUGIN_VERSION = '2.5.4';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
 const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）
@@ -1095,10 +1095,12 @@ function buildInstallArgs(dshBin, tag, profile) {
   return [dshBin, 'plugin', '--profile', profile, 'add', 'github:Fishsb/dsh-prompt-enhancer#' + tag];
 }
 
-// 重启链：net stop → 2s 缓冲 → net start（& 无条件串联，保证 stop 返回后必然继续；
-// 分离进程由 lib 层 execDetached 以 cmd /c 脱离进程树执行）
+// 重启链：net stop → 缓冲 → net start（& 无条件串联，保证 stop 返回后必然继续；
+// 分离进程由 lib 层 execDetached 以 cmd /c 脱离进程树执行。
+// v2.5.4：缓冲 2s → 5s——安装命令（pnpm add）触发的 DSH 配置/包落盘需稳定时间，
+// 实测 2s 时新进程偶发读到中间态崩溃（session-query-sqlite path missing，AppExit 即停）。
 function buildRestartChain(serviceName) {
-  return 'net stop ' + serviceName + ' & timeout /t 2 /nobreak >nul & net start ' + serviceName;
+  return 'net stop ' + serviceName + ' & timeout /t 5 /nobreak >nul & net start ' + serviceName;
 }
 
 // PATH 合并（系统 PATH + 用户 PATH，大小写不敏感去重，保留顺序）；空段忽略

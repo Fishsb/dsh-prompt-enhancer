@@ -408,6 +408,8 @@ const ZH = {
   updApply: '⚡ 一键更新并重启',
   updApplyConfirm: '确认重启服务？',
   updApplying: '正在安装更新…（10–60 秒）',
+  updApplyRestarting: '正在重启服务…',
+  updApplyRestartFailed: '服务未自动恢复——请手动执行 net start dsh-web 后刷新',
   updApplyDone: '正在重启服务（约 5–10 秒），请刷新页面',
   updApplyReload: '刷新页面',
   updApplyInstalledManual: '已安装，请手动重启服务',
@@ -588,6 +590,8 @@ const EN = {
   updApply: '⚡ Update & restart',
   updApplyConfirm: 'Confirm service restart?',
   updApplying: 'Installing update… (10–60s)',
+  updApplyRestarting: 'Restarting service…',
+  updApplyRestartFailed: 'Service did not come back — run `net start dsh-web` manually, then refresh',
   updApplyDone: 'Restarting service (≈5–10s), refresh the page',
   updApplyReload: 'Refresh',
   updApplyInstalledManual: 'Installed — restart the service manually',
@@ -1282,8 +1286,32 @@ function UpdaterCard(props) {
         setApplyErr((r.message ? r.message + ' ' : '') + t('updError'));
         setApplyPhase('idle');
       } else {
-        setApplyPhase('done');
-        setApplyErr(r.code === 'RESTART_SPAWN_FAILED' ? t('updApplyInstalledManual') : null);
+        if (r.code === 'RESTART_SPAWN_FAILED') {
+          setApplyPhase('done');
+          setApplyErr(t('updApplyInstalledManual'));
+          return;
+        }
+        // v2.5.4：重启后端口自检——服务重启期间 fetch 失败属预期，轮询直到恢复
+        // （最长 30s；恢复 → 成功提示 + 刷新按钮；超时 → 明确提示手动 net start）
+        setApplyPhase('restarting');
+        setApplyErr(null);
+        const probeRestart = (tries) => {
+          if (tries <= 0) {
+            setApplyErr(t('updApplyRestartFailed'));
+            setApplyPhase('idle');
+            return;
+          }
+          window.fetch('/', { cache: 'no-store', method: 'GET' }).then((resp) => {
+            if (resp.status === 200) {
+              setApplyPhase('done');
+            } else {
+              setTimeout(() => probeRestart(tries - 1), 2000);
+            }
+          }).catch(() => {
+            setTimeout(() => probeRestart(tries - 1), 2000);
+          });
+        };
+        probeRestart(15);
       }
     }).catch(() => {
       setApplyErr(t('updError'));
@@ -1402,10 +1430,11 @@ function UpdaterCard(props) {
           React.createElement('button', {
             type: 'button',
             className: 'dsh-plg-btn ' + (applyPhase === 'confirm' ? 'dsh-plg-btn-danger' : 'dsh-plg-btn-primary'),
-            disabled: applyPhase === 'applying' || checking || pulling || envChecking,
+            disabled: applyPhase === 'applying' || applyPhase === 'restarting' || checking || pulling || envChecking,
             onClick: applyPhase === 'confirm' ? runApply : startApply,
           }, applyPhase === 'confirm' ? t('updApplyConfirm')
             : applyPhase === 'applying' ? t('updApplying')
+            : applyPhase === 'restarting' ? t('updApplyRestarting')
             : applyPhase === 'done' ? t('updApplyDone')
             : t('updApply')),
           applyPhase === 'confirm'
