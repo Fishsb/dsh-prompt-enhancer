@@ -1,5 +1,9 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v2.4.5：lite 模式 hint 保守化——与 host 语义保真修正对齐）
+// DSH「提示词优化」插件 · Client 半部（v2.4.6：设置页布局——优化模式与模板合并同行）
+// v2.4.6：① ParamsTab 顶部「优化模式」与「模板」两个下拉合并为同一行双字段
+//         （.dsh-plg-row-duo + .dsh-plg-field，各占一半、窄屏自动换行；
+//          label 不再强制 96px 以免挤占 select）；自定义模板内容区仍独占一行；
+//         ② 模式 hint 文案位置不变（紧随同行行下方）。
 // v2.4.5：① MODE_OPTIONS lite hint 与 cfgModeHintLite 文案改「缺失项保守提示明确化」
 //         （原「缺失自动补全强化」与 host v2.4.5 analyzeInputRules 保守化措辞冲突，
 //         会误导用户以为 lite 会臆造补全内容；行为无变化，仅文案对齐）；
@@ -1745,14 +1749,30 @@ function ParamsTab(props) {
   const selectProps = (key, options) => ({ className: 'dsh-plg-select', value: String(cfg.params[key]), onChange: onNumber(key), children: options });
   return React.createElement(React.Fragment, null,
     // v2.2（§6.6）：优化模式下拉（4 模式，记忆模式已删除）
-    React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('label', { className: 'dsh-plg-label' }, t('cfgMode')),
-      React.createElement('select', {
-        className: 'dsh-plg-select',
-        value: cfg.mode,
-        onChange: (e) => save({ mode: e.target.value }),
-        children: MODE_OPTIONS.map((m) => React.createElement('option', { key: m.value, value: m.value }, m.label)),
-      }),
+    // v2.4.6（布局）：优化模式与模板合并为同一行双字段（两控件均属「优化行为」配置、
+    // 宽度不大，并排省一行纵向空间；窄屏自动换行，见 .dsh-plg-field flex-wrap）
+    React.createElement('div', { className: 'dsh-plg-row dsh-plg-row-duo' },
+      React.createElement('div', { className: 'dsh-plg-field' },
+        React.createElement('label', { className: 'dsh-plg-label' }, t('cfgMode')),
+        React.createElement('select', {
+          className: 'dsh-plg-select',
+          value: cfg.mode,
+          onChange: (e) => save({ mode: e.target.value }),
+          children: MODE_OPTIONS.map((m) => React.createElement('option', { key: m.value, value: m.value }, m.label)),
+        }),
+      ),
+      React.createElement('div', { className: 'dsh-plg-field' },
+        React.createElement('label', { className: 'dsh-plg-label' }, t('cfgTemplateMode')),
+        React.createElement('select', {
+          className: 'dsh-plg-select',
+          value: cfg.template.mode,
+          onChange: (e) => save({ template: { ...cfg.template, mode: e.target.value } }),
+          children: [
+            React.createElement('option', { key: 'builtin', value: 'builtin' }, t('cfgTemplateBuiltin')),
+            React.createElement('option', { key: 'custom', value: 'custom' }, t('cfgTemplateCustom')),
+          ],
+        }),
+      ),
     ),
     React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgModeHint' + cfg.mode.charAt(0).toUpperCase() + cfg.mode.slice(1))),
     // v2.2（§6.2/§6.6）：记忆功能独立开关（所有模式可开/关，即时准确切换）
@@ -1792,18 +1812,7 @@ function ParamsTab(props) {
       React.createElement('label', { className: 'dsh-plg-label' }, t('cfgOutputLimit')),
       React.createElement('select', selectProps('outputLimit', OUTPUTLIMIT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v))))),
     ),
-    React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('label', { className: 'dsh-plg-label' }, t('cfgTemplateMode')),
-      React.createElement('select', {
-        className: 'dsh-plg-select',
-        value: cfg.template.mode,
-        onChange: (e) => save({ template: { ...cfg.template, mode: e.target.value } }),
-        children: [
-          React.createElement('option', { key: 'builtin', value: 'builtin' }, t('cfgTemplateBuiltin')),
-          React.createElement('option', { key: 'custom', value: 'custom' }, t('cfgTemplateCustom')),
-        ],
-      }),
-    ),
+    // v2.4.6（布局）：模板模式下拉已并入上方与优化模式同一行；此处仅保留自定义模板内容区
     cfg.template.mode === 'custom'
       ? React.createElement('div', { className: 'dsh-plg-col' },
           React.createElement('label', { className: 'dsh-plg-label' }, t('cfgTemplateText')),
@@ -1904,6 +1913,11 @@ const CSS = [
   '.dsh-plg-name{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
   '.dsh-plg-state{font-size:12px;line-height:16px;color:var(--dsw-alias-state-success-primary);flex:none}',
   '.dsh-plg-row{display:flex;align-items:center;gap:6px}',
+  // v2.4.6（布局）：同行双字段——优化模式 + 模板合并一行；field 各占一半，
+  // 窄屏自动换行（flex-wrap）；label 不再强制 96px 以免挤占 select 空间
+  '.dsh-plg-row-duo{display:flex;align-items:center;gap:12px;flex-wrap:wrap}',
+  '.dsh-plg-field{display:flex;align-items:center;gap:6px;flex:1 1 200px;min-width:0}',
+  '.dsh-plg-field .dsh-plg-label{min-width:0;flex:none}',
   '.dsh-plg-col{display:flex;flex-direction:column;gap:6px}',
   '.dsh-plg-label{font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary);flex:none;min-width:96px}',
   '.dsh-plg-muted{font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}',

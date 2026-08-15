@@ -704,3 +704,29 @@ test('U39 SYSTEM_PROMPT 语义保真契约 + lite 规则保守化（v2.4.5）', 
   const goalHint = goal.suggestions.find((s) => s.includes('目标')) || '';
   assert.ok(goalHint.includes('推断不出时保持原文表述，不得臆造'), '目标建议应保守（不臆造目标）');
 });
+
+// v2.4.6（提示词外置）：prompts/*.md 为事实源，plugin-host.js 生成区由
+// scripts/sync-prompts.mjs 生成。U40 断言三者一致（生成区 = md 逐行求值），
+// 防「改了 md 忘同步 / 手改生成区」两类漂移。
+test('U40 prompts 外置一致性（v2.4.6）：生成区 = prompts/*.md 逐行求值', () => {
+  const { readFileSync } = require('node:fs');
+  const { join } = require('node:path');
+  // 生成区三常量的提取（与脚本 SOURCES 顺序一致）
+  const extractConst = (name) => {
+    const m = src.match(new RegExp('const\\s+' + name + '\\s*=\\s*\\[([\\s\\S]*?)\\n\\];'));
+    assert.ok(m, name + ' array not found in generated block');
+    return new Function('return [' + m[1] + '].join(\'\\n\');')();
+  };
+  const mdOf = (file) => {
+    const lines = readFileSync(join(__dirname, '..', 'prompts', file), 'utf8').split('\n');
+    while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+    return lines.join('\n');
+  };
+  // 生成区必须处于 ==PROMPTS-BEGIN== / ==PROMPTS-END== 标记内
+  assert.ok(src.includes('// ==PROMPTS-BEGIN=='), '应含生成区起始标记');
+  assert.ok(src.includes('// ==PROMPTS-END=='), '应含生成区结束标记');
+  // 逐文件核对：生成常量 === md 内容
+  assert.equal(extractConst('SYSTEM_PROMPT'), mdOf('system.md'), 'SYSTEM_PROMPT 应与 prompts/system.md 一致');
+  assert.equal(extractConst('TASK_ANALYSIS_PROMPT'), mdOf('task-analysis.md'), 'TASK_ANALYSIS_PROMPT 应与 prompts/task-analysis.md 一致');
+  assert.equal(extractConst('CONTEXT_GUARD'), mdOf('context-guard.md'), 'CONTEXT_GUARD 应与 prompts/context-guard.md 一致');
+});
