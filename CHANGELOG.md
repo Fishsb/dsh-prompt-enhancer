@@ -55,6 +55,10 @@
   - 新增 `test/update-platform.test.cjs`（85 tests）— 架构治理
   - **ExecutorReloader fallback**：新增 `src/host/executor-reloader.js`，通过外部执行器 RPC `apply` 实现 Reloader；新增 `test/executor-reloader.test.cjs`（88 tests）— 架构治理
   - **update 服务接入 UpdatePlatform**：`src/host/update-service.js` 新增 `apply`/`canHotReload`，`src/host/index.js` 支持 `options.update`；新增 `test/services.test.cjs` SVC-03（89 tests）— 架构治理
+- **M5 可观测性与安全加固**：
+  - 新增 `src/host/logger.js`：结构化 JSON 日志 + 环形 tail
+  - 新增 `src/host/integrity.js`：SHA-256 文件校验
+  - 新增 `test/observability.test.cjs`（91 tests）— 架构治理
 
 ## [2.8.3] - 2026-08-16
 
