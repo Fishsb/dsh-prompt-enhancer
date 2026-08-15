@@ -1173,6 +1173,7 @@ const ENV_PROBE_KEYS = [
   { key: 'svc-type', level: 'block' }, // 服务启用状态（START_TYPE != DISABLED）
   { key: 'svc-bin', level: 'block' },  // nssm Application 可执行文件存在
   { key: 'port', level: 'warn' },      // 端口占用者 = 服务自身进程（解析失败 → warn）
+  { key: 'exec-port', level: 'warn' }, // 执行器端口独立（≠ 服务端口且未被占用；冲突 → warn）
 ];
 
 // 安装命令构造：node <dshBin> plugin --profile <profile> add github:Fishsb/dsh-prompt-enhancer#<tag>
@@ -1851,7 +1852,9 @@ return {
       try {
         const serviceName = args && typeof args.serviceName === 'string' && /^[A-Za-z0-9_-]+$/.test(args.serviceName)
           ? args.serviceName : 'dsh-web';
-        const items = await harness.probeEnv(serviceName);
+        // v2.7.0：透传执行器端口（client updater.executorPort，缺省 3081）供 exec-port 检查
+        const executorPort = args && Number.isInteger(args.executorPort) ? args.executorPort : undefined;
+        const items = await harness.probeEnv(serviceName, executorPort);
         const meta = new Map(ENV_PROBE_KEYS.map((e) => [e.key, e]));
         const out = items.map((it) => ({
           key: it.key,

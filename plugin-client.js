@@ -413,6 +413,10 @@ const ZH = {
   envPort: '端口占用',
   envPortOccupied: '端口被其他进程占用——重启后服务可能起不来',
   envPortNoPort: '无法解析服务端口（AppParameters 无 --port）——端口检查失效',
+  // v2.7.0（执行器端口独立检查）
+  envExecPort: '执行器端口独立',
+  envExecPortSame: '执行器端口与服务端口相同——执行器无法监听，请修改 updater.executorPort',
+  envExecPortOccupied: '执行器端口被其他进程占用——执行器可能无法启动，请释放或修改 updater.executorPort',
   updApply: '⚡ 一键更新并重启',
   updApplyConfirm: '确认重启服务？',
   updApplying: '正在安装更新…（10–60 秒）',
@@ -596,6 +600,10 @@ const EN = {
   envPort: 'Port in use',
   envPortOccupied: 'Port is held by another process — the service may fail to start after restart',
   envPortNoPort: 'Cannot resolve service port (no --port) — port check skipped',
+  // v2.7.0（执行器端口独立检查）
+  envExecPort: 'Executor port independent',
+  envExecPortSame: 'Executor port equals the service port — the executor cannot listen; change updater.executorPort',
+  envExecPortOccupied: 'Executor port is held by another process — the executor may fail to start; free it or change updater.executorPort',
   updApply: '⚡ Update & restart',
   updApplyConfirm: 'Confirm service restart?',
   updApplying: 'Installing update… (10–60s)',
@@ -1136,12 +1144,13 @@ function updaterRepoOf(cfg) {
 
 // v2.5.0：环境检测渲染元数据——展示顺序/标签键/detail 状态码 → 文案键
 // （detail 由 host probeEnv 返回；文案键对应 i18n 字典；
-// v2.5.2 收敛为重启链 6 项；v2.7.0 再收敛为执行器重启阶段 4 项）
+// v2.5.2 收敛为重启链 6 项；v2.7.0 收敛为执行器重启阶段 4 项 + 执行器端口独立）
 const ENV_ITEMS = [
   { key: 'service', label: 'envService' },
   { key: 'svc-type', label: 'envSvcType' },
   { key: 'svc-bin', label: 'envSvcBin' },
   { key: 'port', label: 'envPort' },
+  { key: 'exec-port', label: 'envExecPort' },
 ];
 const ENV_DETAIL_TEXT = {
   ok: 'envOk',
@@ -1150,6 +1159,8 @@ const ENV_DETAIL_TEXT = {
   'bin-missing': 'envSvcBinMissing',
   occupied: 'envPortOccupied',
   'no-port': 'envPortNoPort',
+  'same-as-service': 'envExecPortSame',
+  'exec-occupied': 'envExecPortOccupied',
 };
 
 function UpdaterCard(props) {
@@ -1258,12 +1269,12 @@ function UpdaterCard(props) {
     });
   };
 
-  // v2.5.0：环境检测（只读；host 60s 缓存）
+  // v2.5.0：环境检测（只读；host 60s 缓存）；v2.7.0：带执行器端口供 exec-port 检查
   const doEnvCheck = () => {
     if (envChecking) return;
     setEnvChecking(true);
     setEnvError(null);
-    host.call('update/envcheck', { serviceName }).then((res) => {
+    host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((res) => {
       const r = res && typeof res === 'object' ? res : {};
       if (r.ok !== true) {
         setEnvItems(null);
@@ -1345,7 +1356,7 @@ function UpdaterCard(props) {
     setApplyPhase('applying');
     setApplyErr(null);
     // 前置校验：先环境检测（host 60s 缓存），block 级失败 → 阻止并列出缺失项
-    host.call('update/envcheck', { serviceName }).then((envRes) => {
+    host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
       const er = envRes && typeof envRes === 'object' ? envRes : {};
       if (er.ok === true && Array.isArray(er.blockMissing) && er.blockMissing.length > 0) {
         const names = er.blockMissing

@@ -908,17 +908,18 @@ test('U44 mergeEnvPath PATH 合并去重（v2.5.0）', () => {
 });
 
 // v2.5.0：环境探测计划契约（与 lib/index.cjs probeEnv 的 key 一一对应）。
-// v2.7.0：收敛为执行器（独立 detached 进程）重启阶段直接依赖 4 项。
+// v2.7.0：收敛为执行器重启阶段依赖 4 项 + 执行器端口独立检查。
 test('U45 ENV_PROBE_KEYS 探测计划（v2.7.0 收敛）', () => {
-  assert.ok(Array.isArray(ENV_PROBE_KEYS) && ENV_PROBE_KEYS.length === 4, '探测项 4 个（v2.7.0 收敛为执行器重启阶段依赖）');
+  assert.ok(Array.isArray(ENV_PROBE_KEYS) && ENV_PROBE_KEYS.length === 5, '探测项 5 个（重启阶段 4 项 + exec-port）');
   const keys = ENV_PROBE_KEYS.map((e) => e.key);
-  assert.equal(new Set(keys).size, 4, 'key 唯一');
+  assert.equal(new Set(keys).size, 5, 'key 唯一');
   for (const e of ENV_PROBE_KEYS) {
     assert.ok(['block', 'warn'].includes(e.level), 'level 合法: ' + e.key);
   }
   assert.ok(keys.includes('service') && keys.includes('svc-type')
-    && keys.includes('svc-bin') && keys.includes('port'),
-    '4 项 key 与 probeEnv 一致');
+    && keys.includes('svc-bin') && keys.includes('port')
+    && keys.includes('exec-port'),
+    '5 项 key 与 probeEnv 一致');
   assert.equal(keys.includes('account'), false, 'account 已清理（启动账号与 sc start 无关）');
   assert.equal(keys.includes('restart'), false, 'restart 已清理（KillProcessTree 不影响独立执行器）');
   const json = JSON.stringify(ENV_PROBE_KEYS);
