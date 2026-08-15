@@ -1330,9 +1330,11 @@ function buildInstallArgs(dshBin, tag, profile) {
   return [dshBin, 'plugin', '--profile', profile, 'add', 'github:Fishsb/dsh-prompt-enhancer#' + tag];
 }
 
-// GitHub codeload tarball 下载地址（staging 阶段在线拉取，服务不中断）。
+// GitHub Release 资产下载地址（npm pack 产物，staging 阶段在线拉取，服务不中断）。
+// 注意：不能用 codeload 源码 tar.gz——pnpm add 本地包需要 npm pack 格式（顶层 package/）。
 function buildTarballUrl(repo, tag) {
-  return 'https://codeload.github.com/' + repo + '/tar.gz/refs/tags/' + tag;
+  const ver = String(tag).replace(/^v/i, '');
+  return 'https://github.com/' + repo + '/releases/download/' + tag + '/dsh-prompt-enhancer-' + ver + '.tgz';
 }
 
 // 本地 staging tarball 安装命令：node <dshBin> plugin --profile <profile> add <local.tgz>

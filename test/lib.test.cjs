@@ -1011,11 +1011,16 @@ test('U42 buildInstallArgs 命令构造（v2.5.0）', () => {
 });
 
 // v2.9.0（执行器外挂 + staging 预拉取）：tarball 下载地址与本地安装命令契约。
-test('U57 buildTarballUrl 构造 codeload 下载地址', () => {
+test('U57 buildTarballUrl 构造 Release 资产下载地址', () => {
   assert.equal(
     buildTarballUrl('Fishsb/dsh-prompt-enhancer', 'v2.8.3'),
-    'https://codeload.github.com/Fishsb/dsh-prompt-enhancer/tar.gz/refs/tags/v2.8.3',
-    'tag 拼入 refs/tags'
+    'https://github.com/Fishsb/dsh-prompt-enhancer/releases/download/v2.8.3/dsh-prompt-enhancer-2.8.3.tgz',
+    'tag 拼入 releases/download，资产名去掉 v 前缀'
+  );
+  assert.equal(
+    buildTarballUrl('Fishsb/dsh-prompt-enhancer', '2.8.3'),
+    'https://github.com/Fishsb/dsh-prompt-enhancer/releases/download/2.8.3/dsh-prompt-enhancer-2.8.3.tgz',
+    '无 v 前缀 tag 资产名一致'
   );
 });
 
