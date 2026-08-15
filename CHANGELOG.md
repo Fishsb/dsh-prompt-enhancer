@@ -30,6 +30,7 @@
   - **plugins 管理 RPC 块提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/plugins.js`（inventory/run/stop/undefine 四个 handler），`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-plugins.mjs` 维护工具 — 架构治理
   - **update RPC 块提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/update.js`（check/pull/envcheck 三个 handler），`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-update.mjs` 维护工具 — 架构治理
   - **client i18n 字典提取**：从 `src/client/legacy/plugin-client.js` 抽出到 `src/client/i18n.js`（ZH/EN 字典），`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-i18n.mjs` 维护工具 — 架构治理
+  - **fix(M1)：修正 client i18n 提取范围**——此前只提取了 ZH，EN 仍残留在 legacy；修正为完整提取 ZH+EN 到 `src/client/i18n.js`，生成物内容不变 — 架构治理
   - **client 常量/配置默认值提取**：从 `src/client/legacy/plugin-client.js` 抽出到 `src/client/constants.js`（CONFIG_DEFAULTS / BUILTIN_CHAIN / MODE_OPTIONS / modeShortLabel 等），`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-constants.mjs` 维护工具 — 架构治理
   - **client updater/env 元数据提取**：从 `src/client/legacy/plugin-client.js` 抽出到 `src/client/updater.js`（UPDATER_DEFAULT_REPO / UPDATER_MANIFEST / URL 构造 / ENV_ITEMS / ENV_DETAIL_TEXT / updaterRepoOf），`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-updater.mjs` 维护工具 — 架构治理
 
