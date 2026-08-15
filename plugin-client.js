@@ -1,5 +1,9 @@
 // ============================================================================
 // DSH「提示词优化」插件 · Client 半部（v2.4.7：自定义模板每模式独立 + 默认预填）
+// v2.6.1（记忆链·未发布迭代）：记忆由单轮对升级为 rounds 链（s.memoryRounds，最多
+// MEMORY_ROUNDS_MAX 轮）——每次结果应用后追加 {input, output} 并截断；req.memory 传
+// { rounds }，host 以真多轮消息注入并感知本轮修改方向；撤回只弹出最后一轮（更早轮次
+// 仍有效）；首次 seed / reload 标记 / R1 写入条件语义不变。
 // v2.4.7：① config.template 新增 texts（base/lite/standard/smart 各一份）；旧 text
 //         （v2）与 templateText（v1）迁移到全部 4 模式；text 字段保留兼容；
 //         ② ParamsTab 自定义模板区：切「自定义」且当前模式无内容 → host
@@ -129,6 +133,8 @@ function modeShortLabel(t, mode) {
 }
 // 已优化标记键（§2.4）：localStorage 按会话布尔标记（区分首次与 reload；仅记忆开启期打标）
 const SEEN_KEY_PREFIX = 'dsh.enhance.seen.';
+// v2.6.1（记忆链）：发送前迭代记忆最多保留轮数（与 host MEMORY_ROUNDS_MAX 一致）
+const MEMORY_ROUNDS_MAX = 4;
 
 const configState = { value: { ...CONFIG_DEFAULTS }, listeners: new Set(), fresh: true };
 
@@ -472,7 +478,7 @@ const ZH = {
   // v2.2（§0.2/§6.6）：模式体系文案（MODE_OPTIONS hint 由 cfgModeHint 提供）
   cfgMode: '优化模式',
   cfgMemory: '记忆功能',
-  cfgMemoryNote: '开启后，上一轮优化结果将作为记忆注入下一轮（所有模式可用，首次自动走轻量模式；关闭后完全不再读取/写入记忆）',
+  cfgMemoryNote: '开启后，发送前多轮「优化→修改→再优化」会累积为记忆链（最多最近 4 轮输入与输出），每轮再优化以多轮对话形式代入全部轮次，并感知你对上一轮结果的修改方向（新增/删除）；首次自动走轻量模式；关闭后完全不再读取/写入',
   cfgModeHintBase: '直发优化，不读取任何上下文，全体系最快最省',
   cfgModeHintLite: '本地规则分析输入要素（目标/约束/格式/示例），缺失项保守提示明确化；不注入任何外部上下文',
   cfgModeHintStandard: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本',
@@ -657,7 +663,7 @@ const EN = {
   cfgEngine: 'Engine',
   cfgMode: 'Mode',
   cfgMemory: 'Memory',
-  cfgMemoryNote: 'When on, the previous optimization result is injected into the next round as memory (all modes; first run falls back to Lite automatically; when off, memory is never read or written)',
+  cfgMemoryNote: 'When on, pre-send iterative rounds (optimize → edit → re-optimize) accumulate into a memory chain (up to the latest 4 input/output pairs). Each re-optimization replays the whole chain as a multi-turn conversation and senses your edits (added/removed) since the last result; first run falls back to Lite automatically; when off, memory is never read or written',
   cfgModeHintBase: 'Direct optimization, no context, fastest',
   cfgModeHintLite: 'Local rule analysis of the input (goal/constraints/format/example); missing elements are clarified conservatively only when inferable; no external context is injected',
   cfgModeHintStandard: 'Rule understanding + file & session retrieval, no extra LLM call',
@@ -709,7 +715,7 @@ const sessionStores = new Map();
 function storeFor(sessionId) {
   let s = sessionStores.get(sessionId);
   if (!s) {
-    s = { phase: 'idle', backup: '', enhanced: '', error: null, seq: 0, listeners: new Set(), memory: null };
+    s = { phase: 'idle', backup: '', enhanced: '', error: null, seq: 0, listeners: new Set(), memoryRounds: [] };
     sessionStores.set(sessionId, s);
   }
   return s;
@@ -772,16 +778,17 @@ function splitCommand(draft) {
 }
 
 // v2.2（§6.3/§6.5）：实际模式判定——纯模式选择 + 记忆开关/首次兜底（dirty/auto 已删除）。
-// 返回 { mode, seed, memory }：seed = 首次轻量兜底标记；memory = 记忆对（供 host 叠加注入）。
+// v2.6.1（记忆链）：返回 { mode, seed, memory }；memory = { rounds: s.memoryRounds }（供 host
+// 以真多轮消息注入）；记忆开 + 无链 + 无标记（真正首次）→ 轻量兜底。
 function resolveActualMode(sessionId, cfg) {
   const s = storeFor(sessionId);
   let mode = cfg.mode;
   let seed = false;
   let memory = null;
   if (cfg.memory) {
-    if (s.memory && s.memory.prevInput) {
-      // 记忆开 + 有记忆 → 当前模式 + 记忆对（host 叠加）
-      memory = s.memory;
+    if (s.memoryRounds && s.memoryRounds.length > 0) {
+      // 记忆开 + 有记忆链 → 当前模式 + rounds 链（host 真多轮注入）
+      memory = { rounds: s.memoryRounds };
     } else if (!readSeen(sessionId)) {
       // 记忆开 + 无记忆 + 无标记（真正首次）→ 轻量兜底（任何模式），完成后建记忆
       mode = 'lite';
@@ -809,11 +816,11 @@ function enhance(sessionId, draft, inputActions, draftRef) {
 
   const parts = splitCommand(draft);
   const config = configState.value;
-  // v2.2（§6.3）：实际模式判定（纯模式 + 记忆开关/首次兜底）——实际 mode、seed、记忆对随请求传给 host
+  // v2.2（§6.3）：实际模式判定（纯模式 + 记忆开关/首次兜底）——实际 mode、seed、记忆链随请求传给 host
   const actual = resolveActualMode(sessionId, config);
   const req = { sessionId, seq, text: parts.body, config, mode: actual.mode };
   if (actual.seed) req.seed = true;
-  if (actual.memory) req.memory = { prevInput: actual.memory.prevInput, prevOutput: actual.memory.prevOutput };
+  if (actual.memory) req.memory = actual.memory;
   host.call('enhance', req).then((res) => {
     if (seq !== s.seq) return;
     const r = res && typeof res === 'object' ? res : {};
@@ -829,9 +836,11 @@ function enhance(sessionId, draft, inputActions, draftRef) {
         s.phase = 'result';
         s.enhanced = finalText;
         s.error = null;
-        // v2.2（§6.5/R1）：仅结果已应用且记忆开关开启时写入记忆（斜杠命令存正文）并打标
+        // v2.2（§6.5/R1）：仅结果已应用且记忆开关开启时写入记忆（斜杠命令存正文）并打标；
+        // v2.6.1（记忆链）：追加本轮 {input, output} 并截断到最近 MEMORY_ROUNDS_MAX 轮
         if (config.memory) {
-          s.memory = { prevInput: parts.body, prevOutput: r.text };
+          s.memoryRounds.push({ input: parts.body, output: r.text });
+          if (s.memoryRounds.length > MEMORY_ROUNDS_MAX) s.memoryRounds.shift();
           writeSeen(sessionId);
         }
       }
@@ -859,8 +868,9 @@ function undo(sessionId, inputActions) {
   s.phase = 'idle';
   s.enhanced = '';
   s.error = null;
-  // v2.1（§2.4）：撤回 = 放弃上轮结果 = 清除其记忆（语义一致）
-  s.memory = null;
+  // v2.1（§2.4）：撤回 = 放弃上轮结果 = 清除其记忆（语义一致）；
+  // v2.6.1（记忆链）：只弹出最后一轮——更早轮次仍属本轮迭代历史，继续有效
+  s.memoryRounds.pop();
   notify(sessionId);
 }
 

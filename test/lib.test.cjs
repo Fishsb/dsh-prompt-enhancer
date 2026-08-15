@@ -26,7 +26,9 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, shouldIgnoreFile, analyzeInputRules,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
-    buildMemoryBlock, MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE,
+    buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages,
+    MEMORY_ROUNDS_MAX, MEMORY_CHAIN_BUDGET_MAX, MEMORY_DELTA_MAX,
+    MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE,
     STAGE_SEQUENCE, STAGE_LABELS,
     PLUGIN_VERSION, UPDATE_MANIFEST, parseVersion, compareVersions, versionStatus,
     normalizeRepo, isValidTag, pickMaxTag, parseTagsPayload, validateManifestFiles, defaultDirFor,
@@ -54,7 +56,13 @@ const {
   shouldInjectMemory,
   parseBudgetChars,
   resolveScanLimit,
-  buildMemoryBlock,
+  buildMemoryChainBlock,
+  computeEditDelta,
+  buildMemoryDeltaHint,
+  buildChatMessages,
+  MEMORY_ROUNDS_MAX,
+  MEMORY_CHAIN_BUDGET_MAX,
+  MEMORY_DELTA_MAX,
   MODE_TABLE,
   BUDGET_OPTIONS,
   BUDGET_WORKSPACE_TABLE,
@@ -292,31 +300,41 @@ test('U20 resolveScanLimit 联动查表（§0.2/§4.1）', () => {
   for (const e of BUDGET_WORKSPACE_TABLE) assert.ok(BUDGET_OPTIONS.includes(e.budget));
 });
 
-test('U21 buildMemoryBlock 预算分配与防回显（§2.3/§6.5）', () => {
-  // 正常：模板含两段 + 禁止回显
-  const b = buildMemoryBlock('原文内容', '优化输出', 4000);
+test('U21 buildMemoryChainBlock 记忆链预算分配与防回显（v2.6.1）', () => {
+  // 单轮：模板含两段 + 禁止回显 + 轮次编号
+  const b = buildMemoryChainBlock([{ input: '原文内容', output: '优化输出' }], 4000);
   assert.ok(b.includes('原文内容') && b.includes('优化输出'));
   assert.ok(b.includes('禁止回显'));
-  // 预算分配：prevInput ≤ 400、prevOutput ≤ 800（默认预算充足时）
-  const longInput = 'x'.repeat(600);
-  const longOutput = 'y'.repeat(1200);
-  const bl = buildMemoryBlock(longInput, longOutput, 4000);
-  assert.equal(bl.includes('x'.repeat(401)), false, 'prevInput 应截断到 400');
-  assert.ok(bl.includes('x'.repeat(400)), 'prevInput 保留 400');
-  assert.equal(bl.includes('y'.repeat(801)), false, 'prevOutput 应截断到 800');
-  assert.ok(bl.includes('y'.repeat(800)), 'prevOutput 保留 800');
-  // v2.2 叠加预算（§6.5）：prevInput+prevOutput 合计 ≤ MEMORY_BLOCK_BUDGET_MAX(1200)
-  assert.ok(bl.length < 400 + 800 + 64, '模板骨架外记忆内容合计 ≤ 1200（骨架开销上限 64）');
-  // 记忆块优先占用：budget 600 → prevInput 400 + prevOutput 200
-  const b600 = buildMemoryBlock(longInput, longOutput, 600);
-  assert.ok(b600.includes('x'.repeat(400)), 'budget 600 时 prevInput 仍保留 400');
-  assert.ok(b600.includes('y'.repeat(200)), 'budget 600 时 prevOutput 截到 200');
-  assert.equal(b600.includes('y'.repeat(201)), false);
-  // 预算 0 → 空（等价轻量）
-  assert.equal(buildMemoryBlock('a', 'b', 0), '');
-  assert.equal(buildMemoryBlock('a', 'b', undefined), '');
-  // 缺省输入容错
-  assert.equal(buildMemoryBlock('', '', 4000), '');
+  assert.ok(b.includes('第1轮'));
+  // 预算等分：rounds=1 → 输入 1/3、输出 2/3（总预算 min(4000, 2400)=2400）
+  const longInput = 'x'.repeat(1000);
+  const longOutput = 'y'.repeat(2000);
+  const bl = buildMemoryChainBlock([{ input: longInput, output: longOutput }], 4000);
+  assert.ok(bl.includes('x'.repeat(800)), '单轮输入保留 800（2400/3）');
+  assert.equal(bl.includes('x'.repeat(801)), false);
+  assert.ok(bl.includes('y'.repeat(1600)), '单轮输出保留 1600（2400*2/3）');
+  assert.equal(bl.includes('y'.repeat(1601)), false);
+  // 多轮编号：时间序 第1轮 → 第2轮，内容完整
+  const multi = buildMemoryChainBlock([
+    { input: 'a1', output: 'o1' },
+    { input: 'a2', output: 'o2' },
+  ], 4000);
+  assert.ok(multi.indexOf('第1轮') < multi.indexOf('第2轮'));
+  assert.ok(multi.includes('a1') && multi.includes('o2'));
+  // 轮数上限：>4 只保留最近 4 轮
+  const five = [];
+  for (let i = 1; i <= 5; i++) five.push({ input: 'in' + i, output: 'out' + i });
+  const capped = buildMemoryChainBlock(five, 4000);
+  assert.equal(capped.includes('in1'), false, '最旧轮应被丢弃');
+  assert.ok(capped.includes('in5'), '最新轮保留');
+  assert.equal((capped.match(/第\d轮/g) || []).length, MEMORY_ROUNDS_MAX);
+  // 预算 0 / undefined → 空（等价不注入）
+  assert.equal(buildMemoryChainBlock([{ input: 'a', output: 'b' }], 0), '');
+  assert.equal(buildMemoryChainBlock([{ input: 'a', output: 'b' }], undefined), '');
+  // 空链/缺省输入容错
+  assert.equal(buildMemoryChainBlock([], 4000), '');
+  assert.equal(buildMemoryChainBlock(null, 4000), '');
+  assert.equal(buildMemoryChainBlock([{ input: '', output: '' }], 4000), '');
 });
 
 test('U22 validateConfig mode/记忆开关解析（v2.2）', () => {
@@ -554,6 +572,86 @@ test('U15 parseTaskProgress JSON 容错', () => {
   assert.equal(parseTaskProgress(''), null);
   assert.equal(parseTaskProgress(null), null);
   assert.equal(parseTaskProgress('{}'), null); // 缺必需字段
+});
+
+test('U46 computeEditDelta 行级修改摘要（v2.6.1）', () => {
+  // 相同 → 空差异
+  assert.deepEqual(computeEditDelta('相同内容', '相同内容'), { added: [], removed: [] });
+  // 上一轮输出为空/缺失 → 空差异（无对比基线）
+  assert.deepEqual(computeEditDelta('', '新内容'), { added: [], removed: [] });
+  assert.deepEqual(computeEditDelta(null, '新内容'), { added: [], removed: [] });
+  // 纯追加：尾部新增行
+  const append = computeEditDelta('第一行\n第二行', '第一行\n第二行\n新增第三行');
+  assert.deepEqual(append.removed, []);
+  assert.deepEqual(append.added, ['新增第三行']);
+  // 纯删除：移除中间行
+  const del = computeEditDelta('第一行\n要删的行\n第三行', '第一行\n第三行');
+  assert.deepEqual(del.removed, ['要删的行']);
+  assert.deepEqual(del.added, []);
+  // 中段修改（公共前缀/后缀剥离）：删除旧 + 新增新
+  const mix = computeEditDelta('头\n旧A\n旧B\n尾', '头\n新A\n尾');
+  assert.deepEqual(mix.removed, ['旧A', '旧B']);
+  assert.deepEqual(mix.added, ['新A']);
+  // 行数上限：增/删各 ≤ MEMORY_DELTA_LINES_MAX(6)
+  const manyOld = Array.from({ length: 9 }, (_, i) => 'old' + i).join('\n');
+  const manyNew = Array.from({ length: 9 }, (_, i) => 'new' + i).join('\n');
+  const capped = computeEditDelta(manyOld, manyNew);
+  assert.ok(capped.removed.length <= 6 && capped.added.length <= 6);
+});
+
+test('U47 buildMemoryDeltaHint 修改摘要格式化（v2.6.1）', () => {
+  // 空差异 → 空串
+  assert.equal(buildMemoryDeltaHint({ added: [], removed: [] }), '');
+  assert.equal(buildMemoryDeltaHint(null), '');
+  assert.equal(buildMemoryDeltaHint({ added: ['a'], removed: undefined }), '');
+  // 仅新增
+  const addOnly = buildMemoryDeltaHint({ added: ['加了约束'], removed: [] });
+  assert.ok(addOnly.includes('+新增：加了约束'));
+  assert.equal(addOnly.includes('-删除：'), false);
+  // 仅删除
+  const delOnly = buildMemoryDeltaHint({ added: [], removed: ['删了示例'] });
+  assert.ok(delOnly.includes('-删除：删了示例'));
+  assert.equal(delOnly.includes('+新增：'), false);
+  // 双侧 + 多行以「；」连接
+  const both = buildMemoryDeltaHint({ added: ['a', 'b'], removed: ['c'] });
+  assert.ok(both.includes('+新增：a；b') && both.includes('-删除：c'));
+  // 字符上限 ≤ MEMORY_DELTA_MAX(300)
+  const huge = buildMemoryDeltaHint({ added: ['x'.repeat(200)], removed: ['y'.repeat(200)] });
+  assert.ok(huge.length <= MEMORY_DELTA_MAX);
+});
+
+test('U48 buildChatMessages 记忆链真多轮消息（v2.6.1）', () => {
+  // 无记忆链 → 仅最终 user 消息（与旧单消息一致）
+  const single = buildChatMessages([], '请优化：abc', 'id', 4000);
+  assert.equal(single.messages.length, 1);
+  assert.equal(single.messages[0].role, 'user');
+  assert.equal(single.messages[0].content[0].text, '请优化：abc');
+  assert.equal(single.memChars, 0);
+  // 两轮 → user/assistant 交替 + 最终 user；时间序
+  const two = buildChatMessages([
+    { input: 'i1', output: 'o1' },
+    { input: 'i2', output: 'o2' },
+  ], 'final', 'enh', 4000);
+  assert.deepEqual(two.messages.map((m) => m.role), ['user', 'assistant', 'user', 'assistant', 'user']);
+  assert.deepEqual(two.messages.map((m) => m.content[0].text), ['i1', 'o1', 'i2', 'o2', 'final']);
+  assert.equal(new Set(two.messages.map((m) => m.id)).size, 5, 'id 唯一');
+  assert.equal(two.messages[1].source.kind, 'assistant');
+  // 预算 0 → 无历史消息（仅最终）
+  const zero = buildChatMessages([{ input: 'i1', output: 'o1' }], 'final', 'enh', 0);
+  assert.equal(zero.messages.length, 1);
+  assert.equal(zero.memChars, 0);
+  // 预算截断：历史文本合计 ≤ min(budget, MEMORY_CHAIN_BUDGET_MAX)
+  const big = buildChatMessages([{ input: 'x'.repeat(5000), output: 'y'.repeat(5000) }], 'final', 'enh', 4000);
+  assert.equal(big.messages[0].content[0].text.length, 800, '输入截到 2400/3');
+  assert.equal(big.messages[1].content[0].text.length, 1600, '输出截到 2400*2/3');
+  assert.equal(big.memChars, MEMORY_CHAIN_BUDGET_MAX);
+  // 轮数上限：>4 轮只取最近 4 轮
+  const five = [];
+  for (let i = 1; i <= 5; i++) five.push({ input: 'in' + i, output: 'out' + i });
+  const capped = buildChatMessages(five, 'final', 'enh', 4000);
+  assert.equal(capped.messages.length, 9, '4 轮 ×2 + 最终');
+  assert.equal(capped.messages[0].content[0].text, 'in2');
+  assert.equal(capped.messages[7].content[0].text, 'out5');
 });
 
 test('U13 既有用例回归计数', () => {

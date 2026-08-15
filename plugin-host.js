@@ -1,5 +1,10 @@
 // ============================================================================
 // DSH「提示词优化」插件 · Host 半部（v2.5.0：一键更新并重启 + 环境检测）
+// v2.6.1（记忆链·未发布迭代）：发送前多轮迭代记忆升级——client 记忆由单轮对升级为
+// rounds 链（≤4 轮）；host 经 buildChatMessages 以真多轮 user/assistant 消息注入，
+// computeEditDelta/buildMemoryDeltaHint 感知本轮相对上一轮输出的修改方向（+新增/-删除）；
+// 预算规则：链 ≤2400 字符按轮等分（输入 1/3、输出 2/3），摘要 ≤300；shouldInjectMemory
+// 语义不变（hasMemory = rounds 非空）；记忆注入同样触发 CONTEXT_GUARD。
 // v2.5.0（方案「一键更新并重启方案.md」）：
 // ① 新 RPC update/apply：官方路径安装（dsh plugin add github:...#<tag>，120s 超时，
 //    失败绝不重启）→ 成功后才 spawn 分离重启链（net stop <svc> & timeout 2 & net start <svc>，
@@ -279,12 +284,16 @@ const SNIPPET_BUDGET = 800;
 const CONTEXT_PROGRESS_MAX = 800;
 const CONTEXT_EVENT_DIVISOR = 4;
 const CONTEXT_FILE_COUNT = 3;
-const MEMORY_PREV_INPUT_MAX = 400;
-const MEMORY_PREV_OUTPUT_MAX = 800;
-// 记忆块预算上限（§6.5：记忆优先占用，合计 ≤1200）
-const MEMORY_BLOCK_BUDGET_MAX = MEMORY_PREV_INPUT_MAX + MEMORY_PREV_OUTPUT_MAX;
-// 记忆块模板（§2.3）
-const MEMORY_BLOCK_TEMPLATE = '【上一轮优化】仅供参考，禁止回显\n原始输入：{prevInput}\n优化输出：{prevOutput}';
+// v2.6.1（记忆链）：发送前多轮迭代记忆——rounds 链（≤MEMORY_ROUNDS_MAX 轮）经
+// buildChatMessages 作为真多轮消息注入（user/assistant 交替），每轮输入/输出按预算
+// 等分截断；本轮修改摘要（computeEditDelta → buildMemoryDeltaHint）附加到最终 user 消息；
+// buildMemoryChainBlock 为文本块构建（回退/日志口径），两者共用预算规则。
+const MEMORY_ROUNDS_MAX = 4;            // 记忆链最多保留轮数（client 写入侧同样截断）
+const MEMORY_CHAIN_BUDGET_MAX = 2400;   // 记忆链总预算上限（记忆优先占用，模式块用剩余）
+const MEMORY_DELTA_MAX = 300;           // 本轮修改摘要字符上限
+const MEMORY_DELTA_LINES_MAX = 6;       // 修改摘要增/删各最多展示行数
+const MEMORY_CHAIN_HEADER = '【记忆】发送前的多轮优化记录，仅供参考，禁止回显';
+const MEMORY_ROUND_TEMPLATE = '【第{n}轮】原始输入：{prevInput}\n优化输出：{prevOutput}';
 // v2.3（§7.3）：优化阶段常量——enhance 请求生命周期 stage 标记（progress RPC 读取）
 const STAGE_PREPARE = 'prepare';
 const STAGE_HISTORY = 'history';
@@ -346,14 +355,92 @@ function resolveScanLimit(mode, budgetChars) {
   return FIXED_SCAN_LIMIT;
 }
 
-// 记忆块构建（预算分配：prevInput ≤ 400、prevOutput ≤ 800、合计 ≤ budget；预算 0 或无原文 → 空）
-function buildMemoryBlock(prevInput, prevOutput, budgetChars) {
+// ================= v2.6.1 记忆链 · 纯函数族（PURE，单测切片求值） =================
+
+// 记忆链文本块构建（回退方案/日志口径；主路径为真多轮消息 buildChatMessages）：
+// rounds 按时间序 [{input, output}]，最多取最近 MEMORY_ROUNDS_MAX 轮；总预算 =
+// min(budget, MEMORY_CHAIN_BUDGET_MAX) 按轮等分，每轮输入 1/3、输出 2/3 截断
+// （slice 字符级，不撕裂）；无轮次 / 预算 0 / 轮预算为 0 → 空串。
+function buildMemoryChainBlock(rounds, budgetChars) {
   const budget = typeof budgetChars === 'number' && budgetChars > 0 ? budgetChars : 0;
   if (budget <= 0) return '';
-  const pi = String(prevInput || '').slice(0, Math.min(MEMORY_PREV_INPUT_MAX, budget));
-  if (!pi) return ''; // 无上一轮原文 → 记忆块无意义
-  const po = String(prevOutput || '').slice(0, Math.min(MEMORY_PREV_OUTPUT_MAX, Math.max(0, budget - pi.length)));
-  return MEMORY_BLOCK_TEMPLATE.replace('{prevInput}', pi).replace('{prevOutput}', po);
+  const list = Array.isArray(rounds) ? rounds.filter((r) => r && (r.input || r.output)) : [];
+  if (list.length === 0) return '';
+  const used = list.slice(-MEMORY_ROUNDS_MAX);
+  const total = Math.min(budget, MEMORY_CHAIN_BUDGET_MAX);
+  const perRound = Math.floor(total / used.length);
+  if (perRound <= 0) return '';
+  const inputBudget = Math.floor(perRound / 3);
+  const outputBudget = perRound - inputBudget;
+  const lines = [MEMORY_CHAIN_HEADER];
+  used.forEach((r, i) => {
+    const pi = String(r.input || '').slice(0, inputBudget);
+    const po = String(r.output || '').slice(0, outputBudget);
+    lines.push(MEMORY_ROUND_TEMPLATE.replace('{n}', String(i + 1)).replace('{prevInput}', pi).replace('{prevOutput}', po));
+  });
+  return lines.join('\n');
+}
+
+// 本轮修改摘要（行级 diff）：剥离公共前缀/后缀行后取中段差异，返回 { added, removed }
+// （各 ≤ MEMORY_DELTA_LINES_MAX 行）。上一轮输出为空或与当前原文相同 → 空差异。
+function computeEditDelta(prevOutput, text) {
+  const prev = String(prevOutput || '');
+  const cur = String(text || '');
+  if (!prev || prev === cur) return { added: [], removed: [] };
+  const prevLines = prev.split('\n');
+  const curLines = cur.split('\n');
+  let start = 0;
+  while (start < prevLines.length && start < curLines.length && prevLines[start] === curLines[start]) start++;
+  let endPrev = prevLines.length;
+  let endCur = curLines.length;
+  while (endPrev > start && endCur > start && prevLines[endPrev - 1] === curLines[endCur - 1]) { endPrev--; endCur--; }
+  return {
+    added: curLines.slice(start, endCur).slice(0, MEMORY_DELTA_LINES_MAX),
+    removed: prevLines.slice(start, endPrev).slice(0, MEMORY_DELTA_LINES_MAX),
+  };
+}
+
+// 修改摘要格式化：`【本轮修改】相对上一轮优化结果：\n+新增：…\n-删除：…`；
+// 单侧为空只列一侧；合计 ≤ MEMORY_DELTA_MAX 字符（字符级截断）；无差异 → 空串。
+function buildMemoryDeltaHint(delta) {
+  if (!delta || !delta.added || !delta.removed) return '';
+  if (delta.added.length === 0 && delta.removed.length === 0) return '';
+  const parts = [];
+  if (delta.added.length > 0) parts.push('+新增：' + delta.added.join('；'));
+  if (delta.removed.length > 0) parts.push('-删除：' + delta.removed.join('；'));
+  let hint = '【本轮修改】相对上一轮优化结果：\n' + parts.join('\n');
+  if (hint.length > MEMORY_DELTA_MAX) hint = hint.slice(0, MEMORY_DELTA_MAX);
+  return hint;
+}
+
+// 记忆链 → 真多轮 messages（llm.stream 消息数组）：
+// 历史轮次按 role 交替（user 输入 → assistant 输出，时间序），文本按预算等分截断
+// （规则同 buildMemoryChainBlock）；finalText 为已组装的最终 user 消息文本（含 delta
+// 提示 + 模式块 + 原文包裹）。rounds 空 / 预算 0 → 仅最终 user 消息（与旧单消息一致）。
+// 返回 { messages, memChars }（memChars = 注入的历史文本总字符数，供日志）。
+function buildChatMessages(rounds, finalText, idPrefix, budgetChars) {
+  const prefix = typeof idPrefix === 'string' && idPrefix !== '' ? idPrefix : 'enhance';
+  const messages = [];
+  const list = Array.isArray(rounds) ? rounds.filter((r) => r && (r.input || r.output)) : [];
+  const used = list.slice(-MEMORY_ROUNDS_MAX);
+  let memChars = 0;
+  if (used.length > 0 && typeof budgetChars === 'number' && budgetChars > 0) {
+    const total = Math.min(budgetChars, MEMORY_CHAIN_BUDGET_MAX);
+    const perRound = Math.floor(total / used.length);
+    if (perRound > 0) {
+      const inputBudget = Math.floor(perRound / 3);
+      const outputBudget = perRound - inputBudget;
+      used.forEach((r, i) => {
+        const uText = String(r.input || '').slice(0, inputBudget);
+        const aText = String(r.output || '').slice(0, outputBudget);
+        memChars += uText.length + aText.length;
+        messages.push({ id: prefix + '-m' + (i * 2), role: 'user', content: [{ type: 'text', text: uText }], source: { kind: 'user' } });
+        messages.push({ id: prefix + '-m' + (i * 2 + 1), role: 'assistant', content: [{ type: 'text', text: aText }], source: { kind: 'assistant' } });
+      });
+    }
+  }
+  messages.push({ id: prefix + '-final', role: 'user', content: [{ type: 'text', text: String(finalText || '') }], source: { kind: 'user' } });
+  return { messages, memChars };
 }
 
 function wrapUserText(text) {
@@ -1281,21 +1368,15 @@ async function v2SearchEvents(services, sessionId, keywords, cfg) {
 }
 
 // 阶段 A/B/C 汇总：返回 { block, log }（全部不可用 → { block: '', log: 'none' }）
-// v2.2（§6.5）：4 模式管道（base/lite 空块 / standard/smart 检索）+ 记忆块叠加模块——
-// 记忆开 + 有记忆 → block = 模式块 + 记忆块（记忆优先占用预算 ≤1200，模式块用剩余）。
+// v2.2（§6.5）：4 模式管道（base/lite 空块 / standard/smart 检索）。
+// v2.6.1（记忆链）：记忆不再作为文本块叠加（改由 enhance 入口以真多轮消息注入，
+// 见 buildChatMessages），模式块独享预算；log 仅含模式块口径（记忆见入口 memory 日志）。
 // v2.3（§7.3）：onStage 回调（由 enhance handler 注入，写 pending 记录的 stage 字段；
 // 纯函数本体不接触模块状态，回调缺省为 no-op 保持 PURE 区段可切片）。
 async function buildV2ContextBlock(services, sessionId, text, cfg, onStage) {
   const mark = typeof onStage === 'function' ? onStage : () => {};
   const row = MODE_TABLE[cfg.mode] || MODE_TABLE[DEFAULT_MODE];
   const budget = cfg.context.budgetChars || 0;
-  // ===== 记忆块（叠加模块，所有模式适用）=====
-  let memoryBlock = '';
-  const mem = services.memory;
-  if (mem && mem.prevInput && budget > 0) {
-    memoryBlock = buildMemoryBlock(mem.prevInput, mem.prevOutput, Math.min(budget, MEMORY_BLOCK_BUDGET_MAX));
-  }
-  const memoryUsed = memoryBlock.length;
   // ===== 模式管道（base/lite：phaseB='none' 无检索 → 空模式块）=====
   let modeBlock = '';
   let modeLog = 'none';
@@ -1342,24 +1423,13 @@ async function buildV2ContextBlock(services, sessionId, text, cfg, onStage) {
     const files = await v2SearchWorkspace(services, keywords, cfg);
     mark(STAGE_EVENTS);
     const eventsHits = await v2SearchEvents(services, sessionId, keywords, cfg);
-    // 阶段 C（inject）：模式块使用剩余预算（记忆优先占用）
-    modeBlock = buildContextBlock(progress, files, eventsHits, Math.max(0, budget - memoryUsed));
+    // 阶段 C（inject）：模式块独享预算（记忆链不占文本块）
+    modeBlock = buildContextBlock(progress, files, eventsHits, budget);
     modeLog = modeBlock === '' ? 'none' : (mode + ' files=' + files.length + ' events=' + eventsHits.length + ' chars=' + modeBlock.length);
   }
-  // ===== 汇总：模式块 + 记忆块（叠加）=====
+  // ===== 汇总（记忆链由 enhance 入口以多轮消息注入，不占文本块）=====
   mark(STAGE_CONTEXT);
-  const parts = [];
-  if (modeBlock) parts.push(modeBlock);
-  if (memoryBlock) parts.push(memoryBlock);
-  const block = parts.join('\n\n');
-  let ctxLog = 'none';
-  if (block !== '') {
-    const tags = [];
-    if (modeBlock) tags.push(modeLog);
-    if (memoryBlock) tags.push('memory chars=' + memoryBlock.length);
-    ctxLog = tags.join('+');
-  }
-  return { block, log: ctxLog };
+  return { block: modeBlock, log: modeBlock === '' ? 'none' : modeLog };
 }
 
 function selfState(reference) {
@@ -1856,8 +1926,14 @@ return {
           hlog('[enhance] lite rules missing=' + rules.missing.map((m) => m.key).join(','));
         }
       }
-      const hasMemory = !!(args && args.memory && typeof args.memory === 'object' && args.memory.prevInput);
-      if (shouldInjectV2(cfg.mode, cfg.context.budgetChars) || shouldInjectMemory(cfg.memory, hasMemory, cfg.context.budgetChars)) {
+      // v2.6.1（记忆链）：rounds 数组（时间序 [{input,output}]，≤MEMORY_ROUNDS_MAX 轮）→
+      // 真多轮消息注入；hasMemory = rounds 非空；开关关 / 预算 0 → 不注入（行为不变）。
+      const memRounds = args && args.memory && Array.isArray(args.memory.rounds)
+        ? args.memory.rounds.filter((r) => r && (r.input || r.output)).slice(-MEMORY_ROUNDS_MAX)
+        : [];
+      const hasMemory = memRounds.length > 0;
+      const memoryActive = shouldInjectMemory(cfg.memory, hasMemory, cfg.context.budgetChars);
+      if (shouldInjectV2(cfg.mode, cfg.context.budgetChars) || memoryActive) {
         const v2 = await buildV2ContextBlock({
           llm: ctx.get('llm'),
           sessionQuery: ctx.get('sessionQuery'),
@@ -1865,18 +1941,33 @@ return {
           fs: ctx.get('fs'),
           timer: ctx.timer,
           chain,
-          memory: args && args.memory && typeof args.memory === 'object' ? args.memory : null,
         }, sessionId, text, cfg, (st) => { rec.stage = st; });
         v2Block = v2.block;
         v2Log = v2.log;
-        if (v2Block !== '') system = system + '\n\n' + CONTEXT_GUARD;
       }
+      // v2.6.1：记忆链注入同样需要防回显护栏（base/lite + 记忆时 v2Block 为空）
+      if (v2Block !== '' || memoryActive) system = system + '\n\n' + CONTEXT_GUARD;
       const timeoutMs = cfg.timeoutMs;
       const maxTokens = cfg.maxTokens;
       const outputLimit = cfg.outputLimit;
-      const userText = v2Block !== '' ? v2Block + '\n\n' + wrapUserText(text) : wrapUserText(text);
+      // v2.6.1：消息组装——记忆链经 buildChatMessages 成为真多轮 user/assistant 消息，
+      // 最终 user 消息 = 本轮修改摘要 + 模式块 + 原文包裹；无记忆 → 单 user 消息（旧行为）。
+      let memoryLog = '';
+      let finalText = v2Block !== '' ? v2Block + '\n\n' + wrapUserText(text) : wrapUserText(text);
+      let messages;
+      if (memoryActive) {
+        const lastOutput = memRounds[memRounds.length - 1].output;
+        const hint = buildMemoryDeltaHint(computeEditDelta(lastOutput, text));
+        if (hint !== '') finalText = hint + '\n\n' + finalText;
+        const built = buildChatMessages(memRounds, finalText, 'enhance-' + sessionId + '-' + seq, cfg.context.budgetChars);
+        messages = built.messages;
+        memoryLog = 'memory rounds=' + memRounds.length + ' chars=' + built.memChars + ' delta=' + (hint !== '' ? 'yes' : 'none');
+      } else {
+        messages = [{ id: 'enhance-' + sessionId + '-' + seq, role: 'user', content: [{ type: 'text', text: finalText }], source: { kind: 'user' } }];
+      }
       const modeTag = args && args.seed === true ? cfg.mode + '(seed)' : cfg.mode;
-      hlog('[enhance] cfg session=' + sessionId + ' mode=' + modeTag + ' ctx=' + v2Log + ' chain=' + (chain.length > 0 ? chain.map((f) => f.provider + '/' + f.model).join(',') : '-') + ' timeout=' + timeoutMs + ' maxTokens=' + maxTokens + ' outputLimit=' + outputLimit + ' template=' + (system === SYSTEM_PROMPT ? 'builtin' : (system.indexOf(CONTEXT_GUARD) !== -1 ? 'custom+v2guard' : 'custom')));
+      const ctxLog = [v2Log === 'none' ? '' : v2Log, memoryLog].filter((s) => s !== '').join('+') || 'none';
+      hlog('[enhance] cfg session=' + sessionId + ' mode=' + modeTag + ' ctx=' + ctxLog + ' chain=' + (chain.length > 0 ? chain.map((f) => f.provider + '/' + f.model).join(',') : '-') + ' timeout=' + timeoutMs + ' maxTokens=' + maxTokens + ' outputLimit=' + outputLimit + ' template=' + (system === SYSTEM_PROMPT ? 'builtin' : (system.indexOf(CONTEXT_GUARD) !== -1 ? 'custom+v2guard' : 'custom')));
 
       const timeoutDisposer = ctx.timer.timeout(() => {
         markAndAbort(key, 'timedOut');
@@ -1897,12 +1988,7 @@ return {
             ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
             system,
             maxTokens,
-            messages: [{
-              id: 'enhance-' + sessionId + '-' + seq,
-              role: 'user',
-              content: [{ type: 'text', text: userText }],
-              source: { kind: 'user' },
-            }],
+            messages,
           });
           const iterator = stream[Symbol.asyncIterator]();
           rec.iterator = iterator;

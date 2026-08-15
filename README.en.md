@@ -11,10 +11,10 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 
 ### ✨ Core
 
-- ✨ **One-click enhance** — an independent LLM call replaces the draft in place; **undo anytime** (also clears the previous memory pair), **true cancel** while enhancing
+- ✨ **One-click enhance** — an independent LLM call replaces the draft in place; **undo anytime** (also drops the last memory round), **true cancel** while enhancing
 - 🛡️ **Guards** — empty input / slash commands / submitting states are handled; `/cmd body` optimizes only the body, keeping the prefix
 - 🎛️ **4 optimization modes** — Basic (direct, fastest) / Lite (local rules) / Standard (rules + workspace & session retrieval) / Smart (LLM task-progress analysis + full retrieval)
-- 🧠 **Independent memory switch** — when on, the previous optimization pair is injected into the next round; when off, nothing is read or written; cleared on undo
+- 🧠 **Independent memory switch** — when on, pre-send iterative rounds (optimize → edit → re-optimize) accumulate into a memory chain (up to the latest 4 pairs); each re-optimization replays the whole chain as a multi-turn conversation and senses your edit direction; when off, nothing is read or written; undo drops the last round
 - 📊 **Live progress** — the button shows the current stage while optimizing (Preparing… → Optimizing…), hover switches to a red "Cancel", constant width with no flicker
 
 ### ⚡ Update & maintenance
@@ -78,8 +78,8 @@ Settings → "Models & plugins" → "Optimization" tab:
 | Setting | Description |
 |---|---|
 | Optimization mode | Basic (default, direct) / Lite / Standard / Smart; switching takes effect immediately and persists |
-| Memory | On / Off; when on, the next round receives the previous optimization pair (first run falls back to Lite); when off, nothing is read or written |
-| Context budget | 0 / 2000 / 4000 / 8000 chars; 0 = no context injection (memory block is budget-constrained too) |
+| Memory | On / Off; when on, pre-send iterations accumulate into a memory chain (up to the latest 4 input/output pairs, injected as a multi-turn conversation with edit-direction sensing; first run falls back to Lite); when off, nothing is read or written |
+| Context budget | 0 / 2000 / 4000 / 8000 chars; 0 = no context injection (the memory chain is budget-constrained too, chain cap 2400 chars) |
 | Timeout / Max tokens / Output limit | Request parameters |
 | Template | Built-in / custom template text |
 
@@ -92,7 +92,7 @@ Per-version release notes live on [GitHub Releases](https://github.com/Fishsb/ds
 ## Privacy
 
 - **Mode context**: on demand, injects "recent session messages + relevant workspace file snippets + related session fragments", bounded by the budget; sensitive files (.env / keys / credentials / logs, etc.) are hard-filtered and never injected
-- **Memory**: only a boolean seen-marker lives in browser localStorage (no content); the memory pair lives only in the current page's memory; turning the switch off stops all reads/writes
+- **Memory**: only a boolean seen-marker lives in browser localStorage (no content); the memory chain (round inputs/outputs and edit deltas) lives only in the current page's memory and is sent to the chosen model provider with the optimization request; turning the switch off stops all reads/writes
 - The plugin itself records or reports nothing; diagnostics logs contain only metadata (mode, latency, etc.)
 - Enhanced results come from an external LLM — verify before sending; after cancellation the underlying request may still run briefly on the provider side
 
