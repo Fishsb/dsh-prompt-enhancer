@@ -246,13 +246,18 @@ const SYSTEM_PUBLISH_PROMPT = [
   '【输出结构】（严格按以下九章，用用户主体语言输出）',
   '一、目标概述：一句话定位 + 核心体验/玩法闭环（玩家或用户反复进行的核心循环）',
   '二、核心玩法循环：主循环与子循环的流程拆解（开始→操作→反馈→推进→结束）',
-  '三、数值与经济：核心数值表、成长/经济公式、平衡约束（游戏类必需；软件类改为性能指标与容量约束）',
+  '三、数值与经济：核心数值表、成长/经济公式、平衡约束',
   '四、数据结构与核心模型：实体、字段、关系（给出可落地的数据结构定义或类/表设计）',
   '五、核心机制与算法：主要系统逐一展开（含关键公式、判定规则、边界条件、优先级顺序）',
   '六、交互与界面：操作方式、界面布局、反馈动效、可访问性',
   '七、技术实现建议：推荐技术栈与模块划分（含单文件/嵌入形态等约束的对应方案）',
   '八、分阶段实施路线：MVP（最小可玩/可用）→ 迭代增强 的里程碑拆解，每阶段给出可交付物',
   '九、交付验收清单：逐条可验证的完成标准（可测试、可勾选，不写空话）',
+  '',
+  '【场景适配】',
+  '- 系统按用户输入自动判定场景，并注入「【场景判定】本次场景判定：game/software」行；未注入判定行时按默认九章输出，不追加场景侧重',
+  '- 【场景判定】为 game 时：三、数值与经济按数值表/成长/经济公式/平衡约束展开（游戏类必需）；五、核心机制含玩法系统展开',
+  '- 【场景判定】为 software 时：三、数值与经济改为性能指标与容量约束；五、核心机制改为核心功能与业务规则；补充数据流与 API 设计',
   '',
   '【设计红线】',
   '- 未明确处给出**合理默认设计**并标注「默认」；不反问用户、不抛问题回去、不要求澄清',
@@ -264,6 +269,14 @@ const SYSTEM_PUBLISH_PROMPT = [
   '【多轮扩充规则】',
   '- 第一轮：输出完整九章框架 + 关键实现细节（宁可详尽，不可缺章）',
   '- 后续轮次（用户补充/修改后继续优化）：**每一轮都必须输出完整九章规格**（不得输出精简版、摘要或仅回应补充），在保持已确认设计不变的前提下，将补充内容融入对应章节并细化展开（如新增机制 → 展开其数据结构与算法）；不推翻已确认决策，除非用户明确要求改变',
+  '',
+  '【方案自评判定】（输出九章规格后必须追加以下自评块，不改变九章框架；以【方案自评】开头，按一~四逐项输出）',
+  '一、一致性核对：用户已明确需求逐条是否都有章节覆盖？缺项列出。',
+  '二、完整性核对：九章是否全部展开？缺章列出。',
+  '三、可实施性核对：是否存在未标注「默认」的设计空白？列出。',
+  '四、判定结论：【保留】（全部通过，可开工）或【调整】（列出差距项 + 调整方向，并在「调整建议」小节给出 ≤5 条修订要点）。',
+  '锚点规则（防自嗨）：任一「用户明确需求未覆盖」或「九章缺章」→ 必须判【调整】。',
+  '【自评段豁免条款】：自评段不受「不加解释/严禁回显」红线约束——允许概括引用用户需求点以核对覆盖，禁止逐字回显输入原文；其余正文仍严守红线。',
 ].join('\n');
 // ==PROMPTS-END==
 
@@ -938,6 +951,41 @@ function buildWebQuery(text, keywords, delta) {
   return parts.slice(0, 8).join(' ');
 }
 
+// v2.8.0（一键发布 · 场景路由）：场景判定词表（分级加权：强特征 ×2 / 泛词 ×1 / 英文强 ×1）。
+// 中英文词表互不重叠（同一 token 只计一次，避免双计）；英文词匹配前统一小写。
+const SCENARIO_WORDS = {
+  gameStrong: ['卡牌', '塔防', '肉鸽', '副本', '抽卡', '回合', '射击', '放置', '解谜', '成就', '装备', '技能', '关卡', '战斗'],
+  gameWeak: ['游戏', '玩法', '角色', '剧情', '地图', '等级'],
+  gameEn: ['game', 'card', 'roguelike', 'level', 'battle', 'boss'],
+  softwareStrong: ['数据库', '微服务', '后端', '前端', '权限', '登录', '部署', '中间件', '缓存', '并发'],
+  softwareWeak: ['软件', '应用', '系统', '平台', 'saas', '网站', '工具', '管理', '协作', '自动化', '脚本', '插件', '客户端', '移动端', '桌面'],
+  softwareEn: ['app', 'website', 'web', 'api', 'database', 'dashboard', 'crm'],
+};
+
+// v2.8.0（一键发布 · 场景路由）：依据输入判定项目场景（game/software/generic）。
+// 计分制：加权求和、多者胜；平局/双零 → generic。keywords 可选（缺省等价空数组）。
+function detectScenario(text, keywords) {
+  const joined = String(text || '').toLowerCase() + ' ' +
+    String(Array.isArray(keywords) ? keywords.join(' ') : '').toLowerCase();
+  let game = 0;
+  let software = 0;
+  const count = (list, weight, side) => {
+    for (const w of list) {
+      if (joined.indexOf(w) !== -1) {
+        if (side === 'g') game += weight; else software += weight;
+      }
+    }
+  };
+  count(SCENARIO_WORDS.gameStrong, 2, 'g');
+  count(SCENARIO_WORDS.gameWeak, 1, 'g');
+  count(SCENARIO_WORDS.gameEn, 1, 'g');
+  count(SCENARIO_WORDS.softwareStrong, 2, 's');
+  count(SCENARIO_WORDS.softwareWeak, 1, 's');
+  count(SCENARIO_WORDS.softwareEn, 1, 's');
+  if (game === software) return 'generic';
+  return game > software ? 'game' : 'software';
+}
+
 // 上下文块组装：任务进度(≤800) + 文件(≤3×800) + 事件(≤800)；
 // 截断优先级：进度 > 文件 > 事件 > 原文完整（原文由调用方保证不截断）
 function buildContextBlock(progress, files, events, budgetChars) {
@@ -1543,6 +1591,10 @@ async function buildV2ContextBlock(services, sessionId, text, cfg, onStage) {
       mark(STAGE_FILES); // 复用 files 阶段标记（检索类）
       // 检索词先构造（不依赖 web 可用性；delta 为记忆链改动方向）
       query = buildWebQuery(text, keywords, services.delta || null);
+      // v2.8.0（一键发布 · 场景路由）：检索词场景化——按会话缓存判定的场景追加方向词
+      // （game → 游戏实现；software → 软件架构；generic 不追加）
+      if (services.scenario === 'game') query = (query ? query + ' 游戏实现' : '游戏实现');
+      else if (services.scenario === 'software') query = (query ? query + ' 软件架构' : '软件架构');
       const web = services.web;
       if (web && typeof web.search === 'function') {
         let timedOut = false;
@@ -1615,6 +1667,10 @@ return {
   apply(ctx) {
     const llm = ctx.get('llm');
     const pending = new Map();
+    // v2.8.0（一键发布 · 场景路由）：会话级场景缓存（sessionId → game/software/generic）。
+    // 首轮判定写入、后续轮读取不重判（场景决定九章骨架，翻转会推翻已确认设计）；
+    // 生命周期 = 插件进程，进程重启后缓存 miss → 用记忆链最早轮输入兜底判定（enhance 内判定源规则）
+    const publishScenarioCache = new Map();
 
     function requestKey(sessionId, seq) {
       return String(sessionId) + ':' + String(seq);
@@ -2095,6 +2151,25 @@ return {
         const lastOutput = memRounds[memRounds.length - 1].output;
         memDelta = computeEditDelta(lastOutput, text);
       }
+      // v2.8.0（一键发布 · 场景路由）：publish 场景判定——会话级缓存固定（首轮判定写入、
+      // 后续轮读取不重判）。判定源：缓存 miss 且记忆链非空 → 最早轮输入（进程重启续作兜底，
+      // 判定源与注入轮次同源，避免增量文本导致场景翻转）；无记忆链 → 当轮 text。
+      // 判定+写入在 system 注入前完成，与 LLM 调用成败无关（scenario 仅依赖判定源）。
+      let scenario = 'generic';
+      if (cfg.mode === 'publish') {
+        const cached = publishScenarioCache.get(sessionId);
+        if (cached) {
+          scenario = cached;
+        } else {
+          const src = memRounds.length > 0 ? memRounds[0].input : text;
+          scenario = detectScenario(src);
+          publishScenarioCache.set(sessionId, scenario);
+        }
+        if (scenario !== 'generic') {
+          system = system + '\n\n【场景判定】本次场景判定：' + scenario + '（依据用户输入自动判定；章节适配要求见「场景适配」段）';
+        }
+        hlog('[enhance] scenario=' + scenario + (cached ? ' cached' : ' judged src=' + (memRounds.length > 0 ? 'rounds[0]' : 'text')));
+      }
       if (shouldInjectV2(cfg.mode, cfg.context.budgetChars) || memoryActive) {
         const v2 = await buildV2ContextBlock({
           llm: ctx.get('llm'),
@@ -2105,6 +2180,7 @@ return {
           chain,
           web: ctx.get('web'),
           delta: memDelta,
+          scenario,
         }, sessionId, text, cfg, (st) => { rec.stage = st; });
         v2Block = v2.block;
         v2Log = v2.log;

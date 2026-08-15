@@ -24,7 +24,7 @@ const defaultsBlock = [grabConst('DEFAULT_TIMEOUT_MS'), grabConst('DEFAULT_MAX_T
 const pureFn = new Function(defaultsBlock + '\n' + pureText + `
   ;return { wrapUserText, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
     shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile, analyzeInputRules,
-    rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery,
+    rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
     buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages,
     MEMORY_ROUNDS_MAX, MEMORY_CHAIN_BUDGET_MAX, MEMORY_DELTA_MAX,
@@ -53,6 +53,7 @@ const {
   buildContextBlock,
   parseTaskProgress,
   buildWebQuery,
+  detectScenario,
   parseMode,
   parseMemory,
   shouldInjectMemory,
@@ -545,6 +546,29 @@ test('U52 buildWebQuery 网络检索词构造（v2.7.0 一键发布）', () => {
   assert.ok(q4.split(' ').length <= 8, '检索词上限 8');
   // 空输入兜底
   assert.equal(buildWebQuery('', [], null), '');
+});
+
+test('U53 detectScenario 场景路由（v2.8.0 一键发布）', () => {
+  // 强特征词加权（×2）
+  assert.equal(detectScenario('我想开发一个塔防游戏'), 'game');
+  // 泛词单命中（×1）
+  assert.equal(detectScenario('我想开发一个纸牌游戏'), 'game');
+  // 软件泛词（saas/管理/系统）
+  assert.equal(detectScenario('开发一个 SaaS 项目管理系统'), 'software');
+  // 英文强词（crm/管理/系统）
+  assert.equal(detectScenario('开发一个 CRM 客户管理系统'), 'software');
+  assert.equal(detectScenario('I want to build a card game'), 'game');
+  // 混合加权：游戏泛词 ×1 vs 软件泛词 ×3 → software
+  assert.equal(detectScenario('游戏平台管理系统'), 'software');
+  // 平局 → generic（游戏 ×1 vs 平台 ×1）
+  assert.equal(detectScenario('游戏平台'), 'generic');
+  // 空 / 纯符号 → generic
+  assert.equal(detectScenario(''), 'generic');
+  assert.equal(detectScenario('!!!'), 'generic');
+  // keywords 缺省等价断言（v2.2：D5）：undefined ≡ []
+  assert.equal(detectScenario('开发一个游戏', undefined), detectScenario('开发一个游戏', []));
+  // keywords 并入判定
+  assert.equal(detectScenario('做一个项目', ['卡牌']), 'game');
 });
 
 test('U14 shouldIgnoreFile 敏感过滤', () => {
