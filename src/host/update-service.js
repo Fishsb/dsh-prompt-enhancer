@@ -1,11 +1,20 @@
 'use strict';
 /**
- * M2: UpdateService interface.
+ * M2/M4: UpdateService interface + platform-backed apply.
  *
- * Legacy update RPCs live in src/host/legacy/plugin-host.js and the extracted
- * chunk src/host/update.js. This service is the target boundary.
+ * Legacy update RPCs (check/pull/envcheck) still live in the composed
+ * plugin-host.js; this service adds the M4 `apply` path through UpdatePlatform.
  */
-function createUpdateService() {
+const { createUpdatePlatform } = require('./update-platform.js');
+const { createExecutorReloader } = require('./executor-reloader.js');
+
+function createUpdateService(options) {
+  const opts = options || {};
+  const platform = opts.platform || createUpdatePlatform({
+    reloader: opts.reloader,
+    executor: opts.executor || createExecutorReloader({ port: opts.executorPort || 3081 }),
+  });
+
   async function check() {
     throw new Error('update.check not wired yet');
   }
@@ -15,7 +24,14 @@ function createUpdateService() {
   async function envcheck() {
     throw new Error('update.envcheck not wired yet');
   }
-  return { check, pull, envcheck };
+  async function apply(tag, profile, serviceName) {
+    return platform.apply(tag, profile, serviceName);
+  }
+  async function canHotReload() {
+    return platform.canHotReload();
+  }
+
+  return { check, pull, envcheck, apply, canHotReload };
 }
 
 module.exports = { createUpdateService };

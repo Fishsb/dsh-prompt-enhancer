@@ -15,14 +15,15 @@ const { createDiagnosticsService } = require('./diagnostics-service');
 const { createPluginsService } = require('./plugins-service');
 const { createConfigService } = require('./config-service');
 
-function register(ctx) {
+function register(ctx, options) {
+  const opts = options || {};
   const services = createServiceRegistry(ctx);
   const pipeline = new Pipeline();
 
   services.provide('enhance.pipeline', pipeline);
   services.provide('enhance.service', enhance.createService(services));
   services.provide('models.service', createModelService());
-  services.provide('update.service', createUpdateService());
+  services.provide('update.service', createUpdateService(opts.update || {}));
   services.provide('diagnostics.service', createDiagnosticsService());
   services.provide('plugins.service', createPluginsService());
   services.provide('config.service', createConfigService());
