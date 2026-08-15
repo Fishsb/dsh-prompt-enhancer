@@ -1,6 +1,6 @@
 {
   "name": "dsh-prompt-enhancer",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "One-click prompt enhancement for DeepSeek Harness: fuzzy draft -> independent LLM call -> polished text in the composer, with undo.",
   "main": "lib/index.cjs",
   "type": "commonjs",
