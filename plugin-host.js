@@ -923,7 +923,7 @@ async function pingStream(llmService, entry, ref) {
 // ================= v2.4.0 版本检测与一键更新 · 纯函数族 =================
 // 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
-const PLUGIN_VERSION = '2.5.5';
+const PLUGIN_VERSION = '2.6.0';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
 const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）
@@ -1095,12 +1095,11 @@ function buildInstallArgs(dshBin, tag, profile) {
   return [dshBin, 'plugin', '--profile', profile, 'add', 'github:Fishsb/dsh-prompt-enhancer#' + tag];
 }
 
-// 重启链：net stop → 缓冲 → net start（& 无条件串联，保证 stop 返回后必然继续；
-// 分离进程由 lib 层 execDetached 以 cmd /c 脱离进程树执行。
-// v2.5.4：缓冲 2s → 5s——安装命令（pnpm add）触发的 DSH 配置/包落盘需稳定时间，
-// 实测 2s 时新进程偶发读到中间态崩溃（session-query-sqlite path missing，AppExit 即停）。
-function buildRestartChain(serviceName) {
-  return 'net stop ' + serviceName + ' & timeout /t 5 /nobreak >nul & net start ' + serviceName;
+// 重启计划构造（v2.6.0：独立执行器使用——不再拼接 cmd 链，改参数对象；
+// 执行器内以 node setTimeout 可靠等待 + 端口健康检查 + 自动重试。
+// v2.5.4 教训：cmd 链的 timeout 在非交互环境（stdio ignore）立即返回，缓冲从未生效。）
+function buildRestartPlan(serviceName, port, maxAttempts) {
+  return { serviceName, port, maxAttempts };
 }
 
 // PATH 合并（系统 PATH + 用户 PATH，大小写不敏感去重，保留顺序）；空段忽略
@@ -1646,7 +1645,6 @@ return {
     // host 只做解析/校验/比较/写入（能力均已实机验证可用）。
     const updateCache = new Map();      // repo → { at, value }（TTL UPDATE_CACHE_TTL_MS）
     const pullInFlight = new Set();     // repo → 拉取中（防重入 PULL_BUSY）
-    let applyInFlight = false;          // v2.5.0 一键更新中（防重入 APPLY_BUSY）
 
     // v2.4.1（实测回填 §9-T5）：策略必须**带会话解析**——无会话时 workspaceRoot 回退到 DSH
     // 安装目录且写工作区返回 FS_SANDBOX_DENIED（实机验证）；带 session 后 mode=会话预设
@@ -1801,86 +1799,10 @@ return {
       }
     });
 
-    // v2.5.0（方案「一键更新并重启方案.md」）：一键更新——官方路径安装（等完成）→
-    // 成功后才执行分离重启链（失败绝不重启）。仅 bundle 形态可用（harness.execCommand 判空）。
-    harness.handle('update/apply', async (args) => {
-      const repo = normalizeRepo(args && args.repo);
-      const tag = args && typeof args.tag === 'string' ? args.tag.trim() : '';
-      const profile = args && typeof args.profile === 'string' && /^[A-Za-z0-9_-]+$/.test(args.profile) ? args.profile : 'web';
-      const serviceName = args && typeof args.serviceName === 'string' && /^[A-Za-z0-9_-]+$/.test(args.serviceName)
-        ? args.serviceName : 'dsh-web';
-      if (!repo || repo !== 'Fishsb/dsh-prompt-enhancer') {
-        return { ok: false, code: 'BAD_REPO', message: 'repo must be Fishsb/dsh-prompt-enhancer' };
-      }
-      if (!isValidTag(tag)) return { ok: false, code: 'BAD_TAG', message: 'invalid tag' };
-      if (!harness.execCommand || typeof harness.execCommand !== 'function') {
-        return { ok: false, code: 'UNSUPPORTED', message: '动态安装不支持一键更新，请用 bundle 安装（dsh plugin add）' };
-      }
-      if (applyInFlight) {
-        return { ok: false, code: 'APPLY_BUSY', message: 'an apply is already in progress' };
-      }
-      const dshBin = harness.sysInfo && typeof harness.sysInfo.dshBin === 'string' ? harness.sysInfo.dshBin : '';
-      if (dshBin === '') {
-        return { ok: false, code: 'ENV_READ_FAIL', message: 'dsh 命令行入口不可用（非标准启动），请手动安装' };
-      }
-      applyInFlight = true;
-      try {
-        hlog('[enhance] update/apply start tag=' + tag + ' profile=' + profile + ' svc=' + serviceName);
-        const installArgs = buildInstallArgs(dshBin, tag, profile);
-        const r = await harness.execCommand(installArgs, { timeoutMs: 120000 });
-        if (!r.ok) {
-          herr('[enhance] update/apply install failed', r.code);
-          const code = r.code === 'TIMEOUT' ? 'TIMEOUT' : 'INSTALL_FAILED';
-          const snippet = String((r.stderr || r.stdout || '').trim()).slice(0, 500);
-          return { ok: false, code, message: snippet !== '' ? snippet : 'install failed (code ' + r.code + ')' };
-        }
-        // 安装成功 → 分离重启链（host 随后会被 net stop 终止——预期；execDetached 仅把链交出去）
-        let detachedOk = true;
-        try {
-          harness.execDetached(buildRestartChain(serviceName));
-        } catch (e) {
-          detachedOk = false;
-          herr('[enhance] update/apply execDetached failed', e);
-        }
-        hlog('[enhance] update/apply ok tag=' + tag + ' detached=' + detachedOk);
-        return {
-          ok: true,
-          code: detachedOk ? 'OK' : 'RESTART_SPAWN_FAILED',
-          restarted: detachedOk,
-          version: tag,
-          message: detachedOk ? '' : '已安装，请手动重启服务',
-        };
-      } finally {
-        applyInFlight = false;
-      }
-    });
-
-    // v2.5.5（一键更新重启自动重试）：仅执行重启链（无安装）——client 自检超时后自动调用；
-    // 实证规律：安装后首次启动偶发 DSH 加载崩溃（官方 7.2 同族），第二次重启必正常。
-    harness.handle('update/restart', async (args) => {
-      const serviceName = args && typeof args.serviceName === 'string' && /^[A-Za-z0-9_-]+$/.test(args.serviceName)
-        ? args.serviceName : 'dsh-web';
-      if (!harness.execDetached || typeof harness.execDetached !== 'function') {
-        return { ok: false, code: 'UNSUPPORTED', message: '动态安装不支持自动重启' };
-      }
-      if (applyInFlight) {
-        return { ok: false, code: 'APPLY_BUSY', message: 'an apply/restart is already in progress' };
-      }
-      applyInFlight = true;
-      try {
-        let detachedOk = true;
-        try {
-          harness.execDetached(buildRestartChain(serviceName));
-        } catch (e) {
-          detachedOk = false;
-          herr('[enhance] update/restart execDetached failed', e);
-        }
-        hlog('[enhance] update/restart ok svc=' + serviceName + ' detached=' + detachedOk);
-        return { ok: true, restarted: detachedOk, message: detachedOk ? '' : '请手动重启服务' };
-      } finally {
-        applyInFlight = false;
-      }
-    });
+    // v2.6.0：update/apply 与 update/restart 已移除——更新执行迁至独立执行器
+    // （lib/updater-host.cjs，127.0.0.1:EXECUTOR_PORT；client 经 update/executorEnsure
+    // 获取执行器地址后直连）。原因：重启/重试必须脱离 dsh-web 进程（服务停 = host 死，
+    // 依赖 host 的重试必然无法送达——v2.5.5 out.log 无 update/restart 日志为证）。
 
     // v2.3（§7.3）：优化进度轮询 RPC——从 pending Map 读 stage（纯展示，失败静默降级）
     harness.handle('enhance/progress', async (args) => {

@@ -30,7 +30,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     STAGE_SEQUENCE, STAGE_LABELS,
     PLUGIN_VERSION, UPDATE_MANIFEST, parseVersion, compareVersions, versionStatus,
     normalizeRepo, isValidTag, pickMaxTag, parseTagsPayload, validateManifestFiles, defaultDirFor,
-    ENV_PROBE_KEYS, buildInstallArgs, buildRestartChain, mergeEnvPath };
+    ENV_PROBE_KEYS, buildInstallArgs, buildRestartPlan, mergeEnvPath };
 `);
 const {
   wrapUserText,
@@ -73,7 +73,7 @@ const {
   defaultDirFor,
   ENV_PROBE_KEYS,
   buildInstallArgs,
-  buildRestartChain,
+  buildRestartPlan,
   mergeEnvPath,
 } = pureFn();
 
@@ -789,14 +789,15 @@ test('U42 buildInstallArgs 命令构造（v2.5.0）', () => {
   assert.match(args[5], /^github:Fishsb\/dsh-prompt-enhancer#/, 'repo 固定');
 });
 
-// v2.5.0：重启链模板契约（v2.5.4：缓冲 2s → 5s）。
-test('U43 buildRestartChain 重启链（v2.5.0）', () => {
-  const chain = buildRestartChain('dsh-web');
-  assert.equal(chain, 'net stop dsh-web & timeout /t 5 /nobreak >nul & net start dsh-web',
-    '链 = stop + 5s 缓冲 + start（& 无条件串联）');
-  const other = buildRestartChain('dsh-web-alt');
-  assert.ok(other.startsWith('net stop dsh-web-alt & '), 'serviceName 注入位置固定');
-  assert.ok(other.endsWith('& net start dsh-web-alt'), 'start 与 stop 同服务名');
+// v2.6.0：重启计划契约（独立执行器使用——参数对象，不再拼接 cmd 链；
+// timeout 在非交互环境立即返回的教训：缓冲由执行器 node setTimeout 保证）。
+test('U43 buildRestartPlan 重启计划（v2.6.0）', () => {
+  const plan = buildRestartPlan('dsh-web', 3080, 5);
+  assert.deepEqual(plan, { serviceName: 'dsh-web', port: 3080, maxAttempts: 5 }, '参数对象：svc/port/attempts');
+  const p2 = buildRestartPlan('dsh-web-alt', 3090, 3);
+  assert.equal(p2.serviceName, 'dsh-web-alt', 'serviceName 透传');
+  assert.equal(p2.port, 3090, 'port 透传');
+  assert.equal(p2.maxAttempts, 3, 'maxAttempts 透传');
 });
 
 // v2.5.0：PATH 合并契约（系统 PATH + 用户 PATH）。

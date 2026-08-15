@@ -33,6 +33,18 @@ window.__ModuleLoader__.load({
       },
     };
 
+    // v2.6.0: bridge to the standalone update executor (lib/updater-host.cjs)
+    // on its own port — survives dsh-web restarts; CORS allowed by the executor.
+    const executor = {
+      call(method, args, port) {
+        return fetch('http://127.0.0.1:' + port + '/rpc', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ method, args: args || {} }),
+        }).then((response) => response.json());
+      },
+    };
+
     // styles facade: inject CSS into a dedicated <style> tag.
     const styles = {
       insert(css) {
@@ -47,7 +59,7 @@ window.__ModuleLoader__.load({
 
     // Evaluate the dynamic client body (a top-level-return plugin object)
     // with the static environment's symbols closed over.
-    const plugin = new Function('React', 'host', 'styles', ${embedded})(React, host, styles);
+    const plugin = new Function('React', 'host', 'styles', 'executor', ${embedded})(React, host, styles, executor);
 
     module.exports = { ...plugin, inject: ['slots', 'locale', 'timer'] };
     return module.exports;

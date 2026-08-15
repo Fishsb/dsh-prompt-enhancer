@@ -408,10 +408,10 @@ const ZH = {
   updApply: '⚡ 一键更新并重启',
   updApplyConfirm: '确认重启服务？',
   updApplying: '正在安装更新…（10–60 秒）',
-  updApplyRestarting: '正在重启服务…（{sec} 秒）',
-  updApplyRestartingRetry: '正在重启服务（第 {round} 次）…（{sec} 秒）',
-  updApplyRetry: '第 1 次重启未恢复，正在自动重试…',
-  updApplyRestartFailed: '第 2 次重启仍未恢复——请手动执行 net start dsh-web 后刷新',
+  updApplyRestarting: '正在重启服务…（第 {round} 次 · 剩余 {sec} 秒）',
+  updApplyRetry: '第 {n} 次重启未恢复，执行器自动重试中…',
+  updApplyRestartFailed: '5 次重启均未恢复——请手动执行 net start dsh-web 后刷新',
+  updApplyExecutorDown: '更新执行器不可用——请确认插件为 bundle 安装（端口 3081）',
   updApplyDone: '✓ 重启成功，请刷新页面',
   updApplyReload: '刷新页面',
   updApplyInstalledManual: '已安装，请手动重启服务',
@@ -592,10 +592,10 @@ const EN = {
   updApply: '⚡ Update & restart',
   updApplyConfirm: 'Confirm service restart?',
   updApplying: 'Installing update… (10–60s)',
-  updApplyRestarting: 'Restarting service… ({sec}s)',
-  updApplyRestartingRetry: 'Restarting service (attempt {round})… ({sec}s)',
-  updApplyRetry: 'First restart did not recover — auto-retrying…',
-  updApplyRestartFailed: 'Still down after retry — run `net start dsh-web` manually, then refresh',
+  updApplyRestarting: 'Restarting service… (attempt {round} · {sec}s left)',
+  updApplyRetry: 'Attempt {n} did not recover — executor auto-retrying…',
+  updApplyRestartFailed: 'Still down after 5 attempts — run `net start dsh-web` manually, then refresh',
+  updApplyExecutorDown: 'Update executor unavailable — ensure bundle install (port 3081)',
   updApplyDone: '✓ Restarted — refresh the page',
   updApplyReload: 'Refresh',
   updApplyInstalledManual: 'Installed — restart the service manually',
@@ -1260,13 +1260,67 @@ function UpdaterCard(props) {
     });
   };
 
-  // v2.5.0：一键更新——确认态 → 前置环境校验（block 级失败阻止）→ update/apply
+  // v2.6.0：一键更新——确认态 → 前置环境校验 → executorEnsure（拉起独立执行器）→
+  // 执行器 apply（安装 + 后台重启循环，3s 缓冲 / 5 次健康检查重试）→ 轮询 status。
+  // 执行器独立于 dsh-web 进程：服务重启期间它存活，client 全程可查询进度/倒计时。
   const startApply = () => {
     if (applyPhase !== 'idle') return;
     setApplyPhase('confirm');
   };
   const cancelApply = () => {
     if (applyPhase === 'confirm') setApplyPhase('idle');
+  };
+  const executorPort = () => {
+    const p = configState.value && configState.value.updater && Number.isInteger(configState.value.updater.executorPort)
+      ? configState.value.updater.executorPort : 3081;
+    return p;
+  };
+  // status 轮询（每 2s；倒计时每轮 10s；每轮结束反馈「第 N 次未恢复，自动重试中」）
+  const pollExecutorStatus = (port) => {
+    let localLeft = 10;
+    setRestartLeft(localLeft);
+    setRestartRound(1);
+    const tick = () => {
+      executor.call('status', {}, port).then((st) => {
+        const s = st && typeof st === 'object' ? st : {};
+        if (s.phase === 'healthy') {
+          setApplyErr(null);
+          setApplyPhase('done');
+          return;
+        }
+        if (s.phase === 'failed') {
+          setApplyErr(t('updApplyRestartFailed'));
+          setApplyPhase('idle');
+          return;
+        }
+        if (s.phase === 'installing') {
+          setApplyPhase('applying');
+          setTimeout(tick, 2000);
+          return;
+        }
+        // restarting
+        setApplyPhase('restarting');
+        setRestartRound(s.attempt || 1);
+        localLeft -= 2;
+        if (localLeft <= 0) {
+          // 每轮倒计时结束反馈（执行器内部自动重试，这里仅展示进度）
+          setApplyErr(t('updApplyRetry').replace('{n}', String(s.attempt || 1)));
+          localLeft = 10;
+        }
+        setRestartLeft(localLeft);
+        setTimeout(tick, 2000);
+      }).catch(() => {
+        // 执行器暂时不可达（服务重启窗口或执行器重启中）——继续轮询
+        localLeft -= 2;
+        if (localLeft <= 0) {
+          setApplyErr(t('updApplyRetry').replace('{n}', String('?')));
+          localLeft = 10;
+        }
+        setRestartLeft(localLeft);
+        setTimeout(tick, 2000);
+      });
+    };
+    tick();
   };
   const runApply = () => {
     if (applyPhase !== 'confirm') return;
@@ -1285,58 +1339,30 @@ function UpdaterCard(props) {
         return null;
       }
       if (er.ok === true && Array.isArray(er.items)) setEnvItems(er.items);
-      return host.call('update/apply', { repo, tag: result.remoteTag, profile, serviceName });
-    }).then((res) => {
-      if (!res) return; // 被前置校验阻止
-      const r = res && typeof res === 'object' ? res : {};
-      if (r.ok !== true) {
-        setApplyErr((r.message ? r.message + ' ' : '') + t('updError'));
+      // v2.6.0：确保独立执行器运行（拉起/版本对齐），返回其端口
+      return host.call('update/executorEnsure', { port: executorPort() });
+    }).then((ensureRes) => {
+      if (!ensureRes) return; // 被前置校验阻止
+      const en = ensureRes && typeof ensureRes === 'object' ? ensureRes : {};
+      if (en.ok !== true) {
+        setApplyErr((en.message ? en.message + ' ' : '') + t('updError'));
         setApplyPhase('idle');
-      } else {
-        if (r.code === 'RESTART_SPAWN_FAILED') {
-          setApplyPhase('done');
-          setApplyErr(t('updApplyInstalledManual'));
-          return;
-        }
-        // v2.5.4/2.5.5：重启自检——服务重启期间 fetch 失败属预期，每 2s 轮询；
-        // 自检 10s 未恢复 → 自动再调 update/restart 重试一次（实证第二次重启必正常）；
-        // 第二轮仍失败 → 明确提示手动 net start。restartLeft/restartRound 驱动倒计时展示。
-        setApplyPhase('restarting');
-        setApplyErr(null);
-        const probeRestart = (tries, round) => {
-          setRestartLeft(tries * 2);
-          setRestartRound(round);
-          if (tries <= 0) {
-            // 每轮倒计时结束反馈结果：第一轮未恢复 → 提示并自动重试；第二轮 → 最终失败提示
-            if (round < 2) {
-              setApplyErr(t('updApplyRetry'));
-              host.call('update/restart', { serviceName }).then(() => {
-                probeRestart(5, round + 1);
-              }).catch(() => {
-                setApplyErr(t('updApplyRestartFailed'));
-                setApplyPhase('idle');
-              });
-              return;
-            }
-            setApplyErr(t('updApplyRestartFailed'));
-            setApplyPhase('idle');
-            return;
-          }
-          window.fetch('/', { cache: 'no-store', method: 'GET' }).then((resp) => {
-            if (resp.status === 200) {
-              setApplyErr(null);
-              setApplyPhase('done');
-            } else {
-              setTimeout(() => probeRestart(tries - 1, round), 2000);
-            }
-          }).catch(() => {
-            setTimeout(() => probeRestart(tries - 1, round), 2000);
-          });
-        };
-        probeRestart(5, 1);
+        return null;
       }
+      // 执行器 apply：安装 + 后台重启（accepted 立即返回）
+      return executor.call('apply', { repo, tag: result.remoteTag, profile, serviceName, port: en.port }, en.port);
+    }).then((applyRes) => {
+      if (!applyRes) return;
+      const ar = applyRes && typeof applyRes === 'object' ? applyRes : {};
+      if (ar.ok !== true) {
+        setApplyErr((ar.message ? ar.message + ' ' : '') + t('updError'));
+        setApplyPhase('idle');
+        return;
+      }
+      // 轮询执行器状态（倒计时 + 每轮反馈；执行器独立存活，服务重启不断连）
+      pollExecutorStatus(executorPort());
     }).catch(() => {
-      setApplyErr(t('updError'));
+      setApplyErr(t('updApplyExecutorDown'));
       setApplyPhase('idle');
     });
   };
@@ -1456,7 +1482,7 @@ function UpdaterCard(props) {
             onClick: applyPhase === 'confirm' ? runApply : startApply,
           }, applyPhase === 'confirm' ? t('updApplyConfirm')
             : applyPhase === 'applying' ? t('updApplying')
-            : applyPhase === 'restarting' ? t(restartRound > 1 ? 'updApplyRestartingRetry' : 'updApplyRestarting').replace('{sec}', String(restartLeft)).replace('{round}', String(restartRound))
+            : applyPhase === 'restarting' ? t('updApplyRestarting').replace('{sec}', String(restartLeft)).replace('{round}', String(restartRound))
             : applyPhase === 'done' ? t('updApplyDone')
             : t('updApply')),
           applyPhase === 'confirm'
