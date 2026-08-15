@@ -1,35 +1,24 @@
 'use strict';
 /**
- * M2: DiagnosticsService interface.
- *
- * The legacy ring buffer lives in src/host/legacy/plugin-host.js and the
- * extracted chunk src/host/diagnostics.js. This service is the target boundary.
+ * M2/M5: DiagnosticsService backed by structured logger.
  */
-function createDiagnosticsService() {
-  const ring = [];
-  const max = 300;
+const { createLogger } = require('./logger.js');
 
-  function push(line) {
-    ring.push(line);
-    if (ring.length > max) ring.shift();
-  }
+function createDiagnosticsService(options) {
+  const logger = createLogger(options && options.logger ? options.logger : {});
 
   function log(...args) {
-    const line = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-    push(line);
-    console.log(line);
-    return line;
+    const text = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+    return logger.info('diagnostics.log', { text });
   }
 
   function error(...args) {
-    const line = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-    push(line);
-    console.error(line);
-    return line;
+    const text = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+    return logger.error('diagnostics.error', { text });
   }
 
   function tail(n) {
-    return ring.slice(-(n || ring.length));
+    return logger.tail(n);
   }
 
   return { log, error, tail };

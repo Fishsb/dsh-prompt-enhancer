@@ -12,7 +12,10 @@ test('SVC-01 diagnostics service rings and tails', () => {
   const d = createDiagnosticsService();
   d.log('a');
   d.error('b');
-  assert.deepEqual(d.tail(), ['a', 'b']);
+  const tail = d.tail();
+  assert.equal(tail.length, 2);
+  assert.match(tail[0], /"event":"diagnostics\.log"/);
+  assert.match(tail[1], /"event":"diagnostics\.error"/);
   assert.equal(d.tail(1).length, 1);
 });
 
