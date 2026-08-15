@@ -14,9 +14,9 @@ test('UPD-01 初始状态与版本常量', () => {
   assert.ok(updater.STAGING_DIR.includes('dsh-prompt-enhancer'));
 });
 
-test('UPD-02 verifyTarball 对缺失文件返回明确错误', () => {
+test('UPD-02 verifyTarball 对缺失文件返回明确错误', async () => {
   const missing = path.join(updater.STAGING_DIR, 'no-such-file.tgz');
-  const r = updater.verifyTarball(missing);
+  const r = await updater.verifyTarball(missing);
   assert.equal(r.ok, false);
   assert.equal(r.code, 'STAGE_MISSING');
 });
