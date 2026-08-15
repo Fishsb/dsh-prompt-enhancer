@@ -182,6 +182,8 @@ publish.md 追加【方案自评判定】段（第十部分附录，不改变九
 | F2 | 模型回显 system 注入的【场景判定】行（完整/截断两形态）；指令式「请勿复述」实测无效 | `stripScenarioEcho` 输出后处理确定性剥离 |
 | F3 | 带 rounds 的多轮规格生成实测 120s 超时 | publish 超时 120s → 240s（覆盖 4 轮链最坏情况） |
 | F4 | 补充式轮次行级 diff 的 removed 侧 = 上一轮完整规格（恰为章节标题）——实测模型把 hint「-删除：一、目标概述」幻觉为用户要求删除该章 | `filterDeltaForPublish`：publish 的 removed 清零（改动方向由 added 侧承载），hint 与检索词同步受益 |
+| F5 | 设置界面：发布模式切「自定义模板」内容完全为空——host `template/default` 只返回 4 模式默认提示词，publish 预填拿到 undefined（发布模式内置九章提示词实际存在但未暴露） | `template/default` defaults 补 `publish: SYSTEM_PUBLISH_PROMPT`；浏览器实测预填 1377 字符正常 |
+| F6 | 设置界面：发布模式「超时时间/输出 Token 上限/输出字符上限」可编辑但实际无效（host 硬覆盖：≥240s / maxTokens 省略 / outputLimit=0），调整后状态无反馈 | 三项在发布模式置灰（disabled）+ cfgPublishNoLimit 说明文案（中/英）；上下文预算保持可编辑（>0 启用检索）；浏览器实测三项 disabled=true、预算可编辑 |
 
 ### 遗留观察（记录不修复）
 
