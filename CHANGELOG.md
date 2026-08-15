@@ -8,7 +8,8 @@
 ## [Unreleased]
 
 ### Changed
-- **执行器三处修复（v2.6.0 一键更新链路闭环）**：① `DSH_DSH_BIN` 注入（spawnExecutor 从 `process.argv[1]` 注入 dsh CLI 路径——此前从未注入，apply 安装必然 BAD_ARGS 失败）；② **健康检查端口自解析**（updater-host 改由 `readServicePort` 读服务配置端口，兜底 3080——旧版误用执行器端口 3081 导致健康检查恒通过、服务未恢复也报「重启成功」、5 次重试形同虚设）；③ 执行器版本 bump `0.1.0 → 0.1.1` 触发 executorEnsure 版本对齐重建（否则修复代码不上线）— [VU-001]
+- **执行器三处修复（v2.6.0 一键更新链路闭环）**：① `DSH_DSH_BIN` 注入（spawnExecutor 从 `process.argv[1]` 注入 dsh CLI 路径——此前从未注入，apply 安装必然 BAD_ARGS 失败）；② **健康检查端口自解析**（updater-host 改由 `readServicePort` 读服务配置端口，兜底 3080——旧版误用执行器端口 3081 导致健康检查恒通过、服务未恢复也报「重启成功」、5 次重试形同虚设）；③ 执行器版本 bump `0.1.0 → 0.1.2` 触发 executorEnsure 版本对齐重建（否则修复代码不上线）— [VU-001]
+- **执行器 CORS 头修复**：响应补 `access-control-allow-methods: POST, OPTIONS` 与 `access-control-allow-headers: content-type`（旧版仅 allow-origin，浏览器预检失败 → fetch reject →「更新执行器不可用」；浏览器模拟预检实测通过）— [VU-001]
 - **环境检测收敛为执行器重启阶段真实依赖**：保留 service / svc-type / svc-bin / exec-port（更新端口独立，承接 no-port 语义）；**svc-bin 升级为降级链**（nssm `Parameters\Application` → 未装 nssm 的原生服务读 SCM `ImagePath` 首段 → 均无则跳过，覆盖两种安装形态）；**新增 tools 重启工具检查**（sc/netstat/reg 存在于 SystemRoot\System32，block——重启命令缺失必失败）；删除 port 占用检查（标准场景不可达）、account、restart — [VU-001]
 - **AGENTS.md 发布 SOP 修订**（v2.7.0 实战教训固化）：发布前新增「先跑项目地图 sync」（release-notes 新文件会触发 pre-commit 漂移拦截，未 sync 即 commit 曾致 tag 错位断链）；新增「tag 错位修复」流程与打 tag 前 HEAD 核对约定 — 治理规则
 
