@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Syntax check
+        run: |
+          node --check plugin-host.js
+          node --check plugin-client.js
+          node --check lib/index.cjs
+          node --check lib/sys.cjs
+          node --check lib/updater-host.cjs
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build client bundle
+        run: npm run build
+
+      - name: Verify generated client is committed
+        run: git diff --exit-code -- lib/client.cjs
