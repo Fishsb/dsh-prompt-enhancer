@@ -6,6 +6,9 @@
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
 ## [Unreleased]
+
+## [2.8.1] - 2026-08-16
+
 ### Fixed
 - **更新模块重启链路修复（执行器改由 Task Scheduler 拉起）**：执行器不再作为 dsh-web 服务的直接 detached 子进程启动，而是通过一次性计划任务（`schtasks /Create + /Run`）以 SYSTEM 身份独立拉起；修复实测中 `sc stop dsh-web` 把旧执行器连带杀死、导致 `restart start` 后无后续日志、一键更新重启“走不通”的问题。执行器启动后自删计划任务（删除任务不会终止已运行实例）；EXECUTOR_VERSION 0.1.3→0.1.4 触发旧执行器版本对齐重建 — [VU-001]
 
@@ -176,6 +179,7 @@
 - 版本检测与一键更新（update/check + update/pull，contents API 下载）— [VU-001]
 - 插件管理页版本检测卡片；按钮三态字体锚点对齐模型选择器（13px/500/20px）— [VU-001]
 
+[2.8.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.1
 [2.8.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.0
 [2.7.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.7.1
 [2.7.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.7.0
