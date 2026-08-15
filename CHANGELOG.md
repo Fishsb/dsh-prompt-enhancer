@@ -41,6 +41,7 @@
   - 新增 `src/host/pipeline.js`：增强管道注册/执行/错误隔离
   - `src/host/index.js` 接入 services/pipeline 并提供 `enhance.pipeline` 等服务
   - 新增 `test/pipeline.test.cjs`（73 tests）— 架构治理
+  - **enhance 服务接入 Pipeline**：`src/host/enhance.js` 新增 `createService`（analyze/retrieve/assemble/llm 四阶段）与默认 no-op handler；新增 `test/enhance-pipeline.test.cjs`（75 tests）— 架构治理
 
 ## [2.8.3] - 2026-08-16
 
