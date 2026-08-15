@@ -1984,28 +1984,30 @@ function ParamsTab(props) {
   const save = (patch) => { saveConfig(patch); };
   const onNumber = (key) => (e) => save({ params: { ...cfg.params, [key]: Number(e.target.value) } });
   const selectProps = (key, options) => ({ className: 'dsh-plg-select', value: String(cfg.params[key]), onChange: onNumber(key), children: options });
-  // v2.4.7（每模式独立自定义模板 + 默认预填）：
-  // 切到「自定义模板」且当前模式无内容时 → host template/default 取默认预填（非空白）；
-  // 模式切换时 textarea 内容跟随当前模式；编辑只写当前模式。
+  // v2.4.7（每模式独立自定义模板 + 默认预填）+ v2.5.3 修复：
+  // 切到「自定义模板」且当前优化模式无内容时 → host template/default 取该模式默认预填；
+  // 索引键 = cfg.mode（优化模式 base/lite/standard/smart），非 cfg.template.mode（模板模式 custom/builtin）——
+  // v2.5.2 及以前误用 template.mode 索引 texts/defaults（恒 undefined），预填与显示全部失效。
   const [prefillBusy, setPrefillBusy] = React.useState(false);
   React.useEffect(() => {
     if (cfg.template.mode !== 'custom' || prefillBusy) return;
-    const cur = (cfg.template.texts && cfg.template.texts[cfg.template.mode]) || '';
+    const cur = (cfg.template.texts && cfg.template.texts[cfg.mode]) || '';
     if (cur.trim() !== '') return; // 已有内容不覆盖
     setPrefillBusy(true);
     host.call('template/default').then((res) => {
       const r = res && typeof res === 'object' ? res : {};
-      const def = r.ok && r.defaults && typeof r.defaults[cfg.template.mode] === 'string'
-        ? r.defaults[cfg.template.mode] : '';
+      const def = r.ok && r.defaults && typeof r.defaults[cfg.mode] === 'string'
+        ? r.defaults[cfg.mode] : '';
       if (def !== '') {
-        save({ template: { ...cfg.template, texts: { ...(cfg.template.texts || {}), [cfg.template.mode]: def } } });
+        save({ template: { ...cfg.template, texts: { ...(cfg.template.texts || {}), [cfg.mode]: def } } });
       }
     }).catch(() => { /* 预填失败：保持空白，用户可手填；host 侧仍按模式回退内置 */ }).then(() => {
       setPrefillBusy(false);
     });
-  }, [cfg.template.mode, cfg.template.mode === 'custom' && prefillBusy ? 1 : 0]);
-  const curText = (cfg.template.texts && cfg.template.texts[cfg.template.mode]) || '';
-  const curLabel = t('cfgTemplateTextFor').replace('{mode}', modeShortLabel(t, cfg.template.mode));
+    // prefillBusy 入依赖：快速切换优化模式时（前一个模式预填进行中），完成后自动补预填当前模式
+  }, [cfg.template.mode, cfg.mode, prefillBusy]);
+  const curText = (cfg.template.texts && cfg.template.texts[cfg.mode]) || '';
+  const curLabel = t('cfgTemplateTextFor').replace('{mode}', modeShortLabel(t, cfg.mode));
   return React.createElement(React.Fragment, null,
     // v2.2（§6.6）：优化模式下拉（4 模式，记忆模式已删除）
     // v2.4.6（布局）：优化模式与模板合并为同一行双字段（两控件均属「优化行为」配置、
@@ -2081,7 +2083,7 @@ function ParamsTab(props) {
             value: curText,
             rows: 6,
             placeholder: t('cfgTemplateText'),
-            onChange: (e) => save({ template: { ...cfg.template, texts: { ...(cfg.template.texts || {}), [cfg.template.mode]: e.target.value.slice(0, 4000) } } }),
+            onChange: (e) => save({ template: { ...cfg.template, texts: { ...(cfg.template.texts || {}), [cfg.mode]: e.target.value.slice(0, 4000) } } }),
           }),
           React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgTemplateNote')),
         )

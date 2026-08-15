@@ -32,13 +32,13 @@ DeepSeek Harness (DSH) 提示词增强插件：输入模糊提示词 → 一键�
 ### 方式一：一条命令（推荐）
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v2.5.1
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v2.5.3
 ```
 
 安装后重启 DSH（`dsh web`），输入框工具行出现 ✨ 按钮即安装成功。
 
 > 前提：本机已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，且 `pnpm` 在 PATH 中（`npm i -g pnpm` 或 `corepack enable`）。
-> `#v2.5.1` 为版本锁定（可换成任意 [Release tag](https://github.com/Fishsb/dsh-prompt-enhancer/releases)），避免装到未发布的主分支。
+> `#v2.5.3` 为版本锁定（可换成任意 [Release tag](https://github.com/Fishsb/dsh-prompt-enhancer/releases)），避免装到未发布的主分支。
 > 若 pnpm 提示需要授权构建（`allowBuilds`），把提示的包 key 加进 `~/.dsh/profiles/web/pnpm-workspace.yaml` 的 `allowBuilds` 后重跑即可。
 
 更新 / 卸载：
@@ -50,10 +50,10 @@ dsh plugin --profile web remove dsh-prompt-enhancer
 
 ### 方式二：下载安装包离线安装
 
-从 [Releases 页面](https://github.com/Fishsb/dsh-prompt-enhancer/releases) 下载 `dsh-prompt-enhancer-<版本>.tgz`（如 `dsh-prompt-enhancer-2.5.1.tgz`），然后安装：
+从 [Releases 页面](https://github.com/Fishsb/dsh-prompt-enhancer/releases) 下载 `dsh-prompt-enhancer-<版本>.tgz`（如 `dsh-prompt-enhancer-2.5.3.tgz`），然后安装：
 
 ```sh
-dsh plugin --profile web add ./dsh-prompt-enhancer-2.5.1.tgz
+dsh plugin --profile web add ./dsh-prompt-enhancer-2.5.3.tgz
 ```
 
 > 安装包为 pnpm 打包的完整产物（含预构建 `lib/`），无需联网、无需构建授权；装完同样重启 `dsh web` 生效。
