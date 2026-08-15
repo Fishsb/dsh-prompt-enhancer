@@ -730,3 +730,40 @@ test('U40 prompts 外置一致性（v2.4.6）：生成区 = prompts/*.md 逐行�
   assert.equal(extractConst('TASK_ANALYSIS_PROMPT'), mdOf('task-analysis.md'), 'TASK_ANALYSIS_PROMPT 应与 prompts/task-analysis.md 一致');
   assert.equal(extractConst('CONTEXT_GUARD'), mdOf('context-guard.md'), 'CONTEXT_GUARD 应与 prompts/context-guard.md 一致');
 });
+
+// v2.4.7（每模式独立自定义模板）：validateConfig 对 template.texts 的解析与迁移契约。
+test('U41 template.texts 每模式解析/迁移/超长忽略（v2.4.7）', () => {
+  // ① 新结构 texts：按模式白名单解析，未给键保持空串
+  const per = validateConfig({ template: { mode: 'custom', texts: { base: 'B模板', smart: 'S模板' } } });
+  assert.equal(per.templateMode, 'custom');
+  assert.equal(per.templateTexts.base, 'B模板', 'base 模式自定义文本应解析');
+  assert.equal(per.templateTexts.smart, 'S模板', 'smart 模式自定义文本应解析');
+  assert.equal(per.templateTexts.lite, '', '未给键应保持空串');
+  assert.equal(per.templateTexts.standard, '', '未给键应保持空串');
+  // ② 非法键忽略（不在 4 模式白名单）
+  const badKey = validateConfig({ template: { mode: 'custom', texts: { foo: 'x', 'base:extra': 'y' } } });
+  assert.equal(badKey.templateTexts.base, '', '非法键应忽略');
+  assert.equal(badKey.templateTexts.smart, '', '非法键应忽略');
+  // ③ 超长忽略（>4000 不采用）
+  const tooLong = validateConfig({ template: { mode: 'custom', texts: { base: 'x'.repeat(4001) } } });
+  assert.equal(tooLong.templateTexts.base, '', '超长文本应忽略');
+  // ④ 旧全局 templateText 迁移：无 texts 时复制到全部 4 模式（保持"全局一份"语义）
+  const legacy = validateConfig({ template: { mode: 'custom', templateText: '旧全局模板' } });
+  assert.equal(legacy.templateTexts.base, '旧全局模板', '旧 templateText 应迁移到 base');
+  assert.equal(legacy.templateTexts.lite, '旧全局模板', '旧 templateText 应迁移到 lite');
+  assert.equal(legacy.templateTexts.standard, '旧全局模板', '旧 templateText 应迁移到 standard');
+  assert.equal(legacy.templateTexts.smart, '旧全局模板', '旧 templateText 应迁移到 smart');
+  // ⑤ 无自定义 → 全空（enhance 按模式回退内置 SYSTEM_PROMPT）
+  const none = validateConfig({ template: { mode: 'builtin' } });
+  assert.equal(none.templateTexts.base, '', 'builtin 无自定义文本');
+  assert.equal(none.templateTexts.smart, '', 'builtin 无自定义文本');
+  // ⑥ texts 存在时旧 templateText 不覆盖 texts（新结构优先）
+  const both = validateConfig({ template: { mode: 'custom', templateText: '旧', texts: { base: '新' } } });
+  assert.equal(both.templateTexts.base, '新', 'texts 存在时优先新结构');
+  assert.equal(both.templateTexts.lite, '', 'texts 存在时旧值不扩散到其他模式');
+  // ⑦ v2 结构 template.mode/template.text（v2.4.7 修复：此前 v2 结构自定义模板不生效）
+  const v2 = validateConfig({ template: { mode: 'custom', text: 'v2文本' } });
+  assert.equal(v2.templateMode, 'custom', 'v2 结构 template.mode 应解析');
+  assert.equal(v2.templateTexts.base, 'v2文本', 'v2 结构 template.text 应迁移到全部模式');
+  assert.equal(v2.templateTexts.smart, 'v2文本', 'v2 结构 template.text 应迁移到全部模式');
+});

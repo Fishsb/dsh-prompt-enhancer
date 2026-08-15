@@ -1,5 +1,11 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Client 半部（v2.4.6：设置页布局——优化模式与模板合并同行）
+// DSH「提示词优化」插件 · Client 半部（v2.4.7：自定义模板每模式独立 + 默认预填）
+// v2.4.7：① config.template 新增 texts（base/lite/standard/smart 各一份）；旧 text
+//         （v2）与 templateText（v1）迁移到全部 4 模式；text 字段保留兼容；
+//         ② ParamsTab 自定义模板区：切「自定义」且当前模式无内容 → host
+//         template/default 预填默认（非空白）；模式切换时 textarea 跟随当前模式；
+//         编辑只写当前模式（互不干扰）；label 带当前模式名（cfgTemplateTextFor）；
+//         ③ 新增 i18n cfgTemplateTextFor/cfgTemplateNote（ZH/EN）。
 // v2.4.6：① ParamsTab 顶部「优化模式」与「模板」两个下拉合并为同一行双字段
 //         （.dsh-plg-row-duo + .dsh-plg-field，各占一半、窄屏自动换行；
 //          label 不再强制 96px 以免挤占 select）；自定义模板内容区仍独占一行；
@@ -90,7 +96,8 @@ const CONFIG_DEFAULTS = {
   customModels: [],
   order: [],
   params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
-  template: { mode: 'builtin', text: '' },
+  // v2.4.7（每模式独立自定义模板）：texts 4 模式各一份；text 保留兼容（读旧迁移）
+  template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '' } },
   // v2.2（§6.2/§6.4）：4 模式（base 默认）+ 记忆独立开关（缺省 false，行为零变化）
   mode: 'base',
   context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
@@ -133,7 +140,7 @@ function cloneDefaults() {
     customModels: [],
     order: [],
     params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
-    template: { mode: 'builtin', text: '' },
+    template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '' } },
     mode: 'base',
     context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
     memory: false,
@@ -183,7 +190,18 @@ function sanitizeV2(parsed) {
   if (Number.isInteger(p.outputLimit) && p.outputLimit >= 500 && p.outputLimit <= 50000) v.params.outputLimit = p.outputLimit;
   const t = parsed.template && typeof parsed.template === 'object' ? parsed.template : {};
   if (t.mode === 'custom' || t.mode === 'builtin') v.template.mode = t.mode;
+  // v2.4.7（每模式独立自定义模板）：
+  // ① texts（4 模式键白名单，各 ≤4000）为新结构；
+  // ② 无 texts 时旧 text 迁移到全部 4 模式（保持"全局一份"语义不丢内容）；
+  // ③ text 字段保留兼容（host validateConfig 双兼容，读旧值也 OK）
   if (typeof t.text === 'string' && t.text.length <= 4000) v.template.text = t.text;
+  if (t.texts && typeof t.texts === 'object') {
+    for (const key of ['base', 'lite', 'standard', 'smart']) {
+      if (typeof t.texts[key] === 'string' && t.texts[key].length <= 4000) v.template.texts[key] = t.texts[key];
+    }
+  } else if (typeof v.template.text === 'string' && v.template.text !== '') {
+    for (const key of ['base', 'lite', 'standard', 'smart']) v.template.texts[key] = v.template.text;
+  }
   const ctxCfg = parsed.context && typeof parsed.context === 'object' ? parsed.context : {};
   // v2.2（§6.4）：mode 解析（4 模式白名单；'memory' 历史值 → lite + memory:true）
   const rawMode = parsed.mode === 'memory' ? 'lite' : parsed.mode;
@@ -235,7 +253,11 @@ function migrateFromV1(parsed) {
   if (Number.isInteger(parsed.maxTokens) && parsed.maxTokens >= 100 && parsed.maxTokens <= 16000) v.params.maxTokens = parsed.maxTokens;
   if (Number.isInteger(parsed.outputLimit) && parsed.outputLimit >= 500 && parsed.outputLimit <= 50000) v.params.outputLimit = parsed.outputLimit;
   if (parsed.templateMode === 'custom' || parsed.templateMode === 'builtin') v.template.mode = parsed.templateMode;
-  if (typeof parsed.templateText === 'string' && parsed.templateText.length <= 4000) v.template.text = parsed.templateText;
+  // v2.4.7：v1 平铺 templateText → 迁移到全部 4 模式 texts（与 sanitizeV2 语义一致）
+  if (typeof parsed.templateText === 'string' && parsed.templateText.length <= 4000) {
+    v.template.text = parsed.templateText;
+    for (const key of ['base', 'lite', 'standard', 'smart']) v.template.texts[key] = parsed.templateText;
+  }
   return v;
 }
 
@@ -375,6 +397,9 @@ const ZH = {
   cfgTemplateBuiltin: '内置模板',
   cfgTemplateCustom: '自定义模板',
   cfgTemplateText: '自定义模板内容',
+  // v2.4.7（每模式独立）：label 带当前模式名；hint 说明独立与回退语义
+  cfgTemplateTextFor: '自定义模板内容（当前模式：{mode}）',
+  cfgTemplateNote: '每个模式独立保存一份；当前模式未填内容时自动使用内置模板。',
   cfgSaved: '✓ 已保存',
   cfgLoadFailed: '加载模型列表失败',
   cfgEmptyModels: '该提供方暂无可用模型',
@@ -526,6 +551,9 @@ const EN = {
   cfgTemplateBuiltin: 'Built-in',
   cfgTemplateCustom: 'Custom',
   cfgTemplateText: 'Custom template text',
+  // v2.4.7（per-mode）：label 带当前模式名；hint 说明独立与回退语义
+  cfgTemplateTextFor: 'Custom template text (current mode: {mode})',
+  cfgTemplateNote: 'Each mode keeps its own copy; when the current mode has no custom text, the built-in template is used.',
   cfgSaved: '✓ Saved',
   cfgLoadFailed: 'Failed to load models',
   cfgEmptyModels: 'No models available for this provider',
@@ -1747,6 +1775,28 @@ function ParamsTab(props) {
   const save = (patch) => { saveConfig(patch); };
   const onNumber = (key) => (e) => save({ params: { ...cfg.params, [key]: Number(e.target.value) } });
   const selectProps = (key, options) => ({ className: 'dsh-plg-select', value: String(cfg.params[key]), onChange: onNumber(key), children: options });
+  // v2.4.7（每模式独立自定义模板 + 默认预填）：
+  // 切到「自定义模板」且当前模式无内容时 → host template/default 取默认预填（非空白）；
+  // 模式切换时 textarea 内容跟随当前模式；编辑只写当前模式。
+  const [prefillBusy, setPrefillBusy] = React.useState(false);
+  React.useEffect(() => {
+    if (cfg.template.mode !== 'custom' || prefillBusy) return;
+    const cur = (cfg.template.texts && cfg.template.texts[cfg.template.mode]) || '';
+    if (cur.trim() !== '') return; // 已有内容不覆盖
+    setPrefillBusy(true);
+    host.call('template/default').then((res) => {
+      const r = res && typeof res === 'object' ? res : {};
+      const def = r.ok && r.defaults && typeof r.defaults[cfg.template.mode] === 'string'
+        ? r.defaults[cfg.template.mode] : '';
+      if (def !== '') {
+        save({ template: { ...cfg.template, texts: { ...(cfg.template.texts || {}), [cfg.template.mode]: def } } });
+      }
+    }).catch(() => { /* 预填失败：保持空白，用户可手填；host 侧仍按模式回退内置 */ }).then(() => {
+      setPrefillBusy(false);
+    });
+  }, [cfg.template.mode, cfg.template.mode === 'custom' && prefillBusy ? 1 : 0]);
+  const curText = (cfg.template.texts && cfg.template.texts[cfg.template.mode]) || '';
+  const curLabel = t('cfgTemplateTextFor').replace('{mode}', modeShortLabel(t, cfg.template.mode));
   return React.createElement(React.Fragment, null,
     // v2.2（§6.6）：优化模式下拉（4 模式，记忆模式已删除）
     // v2.4.6（布局）：优化模式与模板合并为同一行双字段（两控件均属「优化行为」配置、
@@ -1813,16 +1863,18 @@ function ParamsTab(props) {
       React.createElement('select', selectProps('outputLimit', OUTPUTLIMIT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v))))),
     ),
     // v2.4.6（布局）：模板模式下拉已并入上方与优化模式同一行；此处仅保留自定义模板内容区
+    // v2.4.7（每模式独立）：textarea 显示当前模式文本；编辑只写当前模式；切模式跟随
     cfg.template.mode === 'custom'
       ? React.createElement('div', { className: 'dsh-plg-col' },
-          React.createElement('label', { className: 'dsh-plg-label' }, t('cfgTemplateText')),
+          React.createElement('label', { className: 'dsh-plg-label' }, curLabel),
           React.createElement('textarea', {
             className: 'dsh-plg-textarea',
-            value: cfg.template.text,
+            value: curText,
             rows: 6,
             placeholder: t('cfgTemplateText'),
-            onChange: (e) => save({ template: { ...cfg.template, text: e.target.value.slice(0, 4000) } }),
+            onChange: (e) => save({ template: { ...cfg.template, texts: { ...(cfg.template.texts || {}), [cfg.template.mode]: e.target.value.slice(0, 4000) } } }),
           }),
+          React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgTemplateNote')),
         )
       : null,
     React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgHint')),

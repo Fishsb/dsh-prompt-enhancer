@@ -1,5 +1,14 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Host 半部（v2.4.6：提示词外置——prompts/*.md 事实源 + 生成区）
+// DSH「提示词优化」插件 · Host 半部（v2.4.7：自定义模板每模式独立 + 默认预填）
+// v2.4.7（用户需求：自定义提示词给默认内容、每模式独立对应）：
+// ① validateConfig 新增 template.texts（4 模式键白名单，各 ≤4000）——每模式独立
+//    自定义模板；无 texts 时旧全局 templateText 迁移到全部 4 模式（保持"全局一份"
+//    语义不丢内容）；非法键/超长忽略；缺省全空。
+// ② enhance system 组装：custom 且当前模式 texts 非空 → 用该模式文本；当前模式
+//    空串 → 回退内置 SYSTEM_PROMPT（不空白、不报错）。
+// ③ 新增 RPC template/default：返回 4 模式默认提示词（当前同值 = SYSTEM_PROMPT，
+//    取自生成区）——client 首次切换自定义且无内容时预填（client 侧无内置文本）。
+// ④ 单测 U41：texts 解析/非法键/超长/旧值迁移/新结构优先断言（43/43 通过）。
 // v2.4.6（提示词外置，用户需求）：
 // ① SYSTEM_PROMPT / TASK_ANALYSIS_PROMPT / CONTEXT_GUARD 三个静态提示词外置为
 //    prompts/*.md（system.md / task-analysis.md / context-guard.md）——事实源；
@@ -406,6 +415,8 @@ function validateConfig(raw) {
     outputLimit: DEFAULT_OUTPUT_LIMIT,
     templateMode: 'builtin',
     templateText: '',
+    // v2.4.7（每模式独立自定义模板）：4 模式各一份；缺省空串（enhance 按模式回退内置）
+    templateTexts: { base: '', lite: '', standard: '', smart: '' },
     // v2.2（§6.4）：4 模式 + 记忆开关（缺省 false，行为零变化）
     mode: DEFAULT_MODE,
     context: { mode: 'smart', budgetChars: DEFAULT_BUDGET, workspace: { maxFiles: 3, depth: 2 } },
@@ -457,8 +468,25 @@ function validateConfig(raw) {
   if (Number.isInteger(p.timeoutMs) && p.timeoutMs >= 1000 && p.timeoutMs <= 300000) out.timeoutMs = p.timeoutMs;
   if (Number.isInteger(p.maxTokens) && p.maxTokens >= 100 && p.maxTokens <= 16000) out.maxTokens = p.maxTokens;
   if (Number.isInteger(p.outputLimit) && p.outputLimit >= 500 && p.outputLimit <= 50000) out.outputLimit = p.outputLimit;
-  if (t.templateMode === 'custom' || t.templateMode === 'builtin') out.templateMode = t.templateMode;
-  if (typeof t.templateText === 'string' && t.templateText.length <= 4000) out.templateText = t.templateText;
+  // template 解析：v2 结构（template.mode/text/texts）与 v1 平铺（templateMode/templateText）双兼容。
+  // v2.4.7 修复：此前只读 v1 平铺字段，v2 结构下自定义模板实际从未生效（templateMode 恒为缺省）。
+  const templateMode = typeof t.templateMode === 'string' ? t.templateMode : t.mode;
+  const templateText = typeof t.templateText === 'string' ? t.templateText : (typeof t.text === 'string' ? t.text : '');
+  if (templateMode === 'custom' || templateMode === 'builtin') out.templateMode = templateMode;
+  if (templateText.length <= 4000) out.templateText = templateText;
+  // v2.4.7（每模式独立自定义模板）：
+  // ① 新结构 texts（4 模式键白名单，各 ≤4000）优先（v2 对象内 t.texts；v1 平铺无此字段）；
+  // ② 无 texts 时旧全局 templateText 迁移到全部 4 模式（保持"全局一份"语义不丢内容）；
+  // ③ 缺省全空 → enhance 按模式回退内置 SYSTEM_PROMPT。
+  const textsSrc = t.texts && typeof t.texts === 'object' ? t.texts : null;
+  if (textsSrc) {
+    for (const key of MODE_KEYS) {
+      const v = textsSrc[key];
+      if (typeof v === 'string' && v.length <= 4000) out.templateTexts[key] = v;
+    }
+  } else if (out.templateText !== '') {
+    for (const key of MODE_KEYS) out.templateTexts[key] = out.templateText;
+  }
   // v2.2（§6.4）：mode 解析（4 模式白名单；'memory' 历史值 → lite + memory:true）
   const rawMode = src.mode === 'memory' ? 'lite' : src.mode;
   out.mode = parseMode(rawMode, src.engine, src.context && src.context.mode);
@@ -880,7 +908,7 @@ async function pingStream(llmService, entry, ref) {
 // ================= v2.4.0 版本检测与一键更新 · 纯函数族 =================
 // 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
-const PLUGIN_VERSION = '2.4.6';
+const PLUGIN_VERSION = '2.4.7';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
 const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）
@@ -1535,6 +1563,20 @@ return {
 
     harness.handle('logs/last', async () => ({ ok: true, lines: LOG_RING.slice() }));
 
+    // v2.4.7（每模式独立自定义模板）：返回 4 模式默认提示词——client 首次切换
+    // 「自定义模板」且当前模式无内容时预填用（client 侧无内置模板文本，须 host 提供）。
+    // 当前 4 模式同值 = SYSTEM_PROMPT；若未来内置按模式拆分（prompts/system-<mode>.md），
+    // 此 RPC 返回随生成区自动变化，client 无需改动。
+    harness.handle('template/default', async () => ({
+      ok: true,
+      defaults: {
+        base: SYSTEM_PROMPT,
+        lite: SYSTEM_PROMPT,
+        standard: SYSTEM_PROMPT,
+        smart: SYSTEM_PROMPT,
+      },
+    }));
+
     // ================= v2.4.0 版本检测与一键更新 RPC =================
     // 方案「插件版本检测与一键更新方案.md」§3：检测（update/check）→ 一键拉取（update/pull）。
     // v2.4.1（实测回填 §9-T5/T6）架构：**host 不再出网**——本部署 web.fetch 无可用 provider
@@ -1703,7 +1745,14 @@ return {
       // v2.2（§6.5）：入口条件——模式注入或记忆叠加（记忆开 + 有记忆时 base/lite 也进入管道）
       let v2Block = '';
       let v2Log = 'none';
-      let system = cfg.templateMode === 'custom' && cfg.templateText.trim() !== '' ? cfg.templateText.trim() : SYSTEM_PROMPT;
+      // v2.4.7（每模式独立自定义模板）：custom 且当前模式 texts 非空 → 用该模式文本；
+      // 当前模式未写自定义（空串）→ 回退内置 SYSTEM_PROMPT（不空白、不报错）
+      let system = SYSTEM_PROMPT;
+      if (cfg.templateMode === 'custom') {
+        const perMode = cfg.templateTexts && typeof cfg.templateTexts === 'object' ? cfg.templateTexts[cfg.mode] : '';
+        const custom = typeof perMode === 'string' && perMode.trim() !== '' ? perMode.trim() : '';
+        if (custom !== '') system = custom;
+      }
       // v2.4.4（lite 规则引擎落地）：lite 模式对输入做 prompt 工程要素检查（目标/约束/格式/示例），
       // 缺失项的强化指令附加到 system——零 LLM 成本、零外部上下文（与「轻量」定位一致）。
       // v2.4.5：建议文案保守化（analyzeInputRules 内），拼接措辞同步——「遵循」而非「补全」。
