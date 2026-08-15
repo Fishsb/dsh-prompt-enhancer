@@ -29,6 +29,7 @@ const SOURCES = [
   { md: 'prompts/system.md', name: 'SYSTEM_PROMPT' },
   { md: 'prompts/task-analysis.md', name: 'TASK_ANALYSIS_PROMPT' },
   { md: 'prompts/context-guard.md', name: 'CONTEXT_GUARD' },
+  { md: 'prompts/publish.md', name: 'SYSTEM_PUBLISH_PROMPT' },
 ];
 
 // md 行 → JS 字符串数组元素（转义反斜杠与单引号；行尾空行 trim 掉）

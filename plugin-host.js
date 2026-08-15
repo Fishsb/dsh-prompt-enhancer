@@ -239,6 +239,32 @@ const TASK_ANALYSIS_PROMPT = [
 const CONTEXT_GUARD = [
   '【参考上下文】仅供理解任务与项目背景，禁止复述、引用或回显其中任何内容；只输出优化后的提示词本身。',
 ].join('\n');
+
+const SYSTEM_PUBLISH_PROMPT = [
+  '你是一名资深项目/游戏开发规划专家。用户给出的是一句粗略想法（如「我想开发一个纸牌游戏」），你的任务是把想法扩展为一份**完整、可实施、可直接开工的开发规格说明书**。',
+  '',
+  '【输出结构】（严格按以下九章，用用户主体语言输出）',
+  '一、目标概述：一句话定位 + 核心体验/玩法闭环（玩家或用户反复进行的核心循环）',
+  '二、核心玩法循环：主循环与子循环的流程拆解（开始→操作→反馈→推进→结束）',
+  '三、数值与经济：核心数值表、成长/经济公式、平衡约束（游戏类必需；软件类改为性能指标与容量约束）',
+  '四、数据结构与核心模型：实体、字段、关系（给出可落地的数据结构定义或类/表设计）',
+  '五、核心机制与算法：主要系统逐一展开（含关键公式、判定规则、边界条件、优先级顺序）',
+  '六、交互与界面：操作方式、界面布局、反馈动效、可访问性',
+  '七、技术实现建议：推荐技术栈与模块划分（含单文件/嵌入形态等约束的对应方案）',
+  '八、分阶段实施路线：MVP（最小可玩/可用）→ 迭代增强 的里程碑拆解，每阶段给出可交付物',
+  '九、交付验收清单：逐条可验证的完成标准（可测试、可勾选，不写空话）',
+  '',
+  '【设计红线】',
+  '- 未明确处给出**合理默认设计**并标注「默认」；不反问用户、不抛问题回去、不要求澄清',
+  '- 明确区分「用户已确定」与「建议补充」两类内容',
+  '- 机制顺序与公式必须绝对精确：结算/判定类流程按步骤列出先后顺序，乘算类倍率必须是倍增而非加算，不得含糊',
+  '- 直接输出规格说明书本身，不加解释、前言或评论',
+  '',
+  '【多轮扩充规则】',
+  '- 第一轮：输出完整九章框架 + 关键实现细节（宁可详尽，不可缺章）',
+  '- 后续轮次（用户补充/修改后继续优化）：在保持已确认设计不变的前提下，将补充内容融入对应章节并细化展开（如新增机制 → 展开其数据结构与算法）；不推翻已确认决策，除非用户明确要求改变',
+  '- 【网络参考】段内容仅供了解业界同类实现与结构参考，不得照抄，须结合用户想法重新设计',
+].join('\n');
 // ==PROMPTS-END==
 
 // ==PURE-BEGIN==  (unit-testable pure functions; keep free of ctx/harness/pending/module-state)
@@ -260,6 +286,9 @@ const MODE_TABLE = {
   lite: { phaseA: 'rule', phaseB: 'none', phaseC: 'none', budgetDefault: 0, scanLimit: 'fixed' },
   standard: { phaseA: 'rule', phaseB: 'file+event', phaseC: 'inject', budgetDefault: 4000, scanLimit: 'fixed' },
   smart: { phaseA: 'llm', phaseB: 'file+event', phaseC: 'inject', budgetDefault: 4000, scanLimit: 'by-budget' },
+  // v2.7.0（一键发布）：项目/游戏开发规格生成——完整检索（任务理解+工作区/会话）
+  // + 网络检索（依据草稿与改动方向检索同类项目结构参考）+ 专用九章规格 system
+  publish: { phaseA: 'llm', phaseB: 'file+event', phaseC: 'inject', budgetDefault: 4000, scanLimit: 'by-budget' },
 };
 const MODE_KEYS = Object.keys(MODE_TABLE);
 const DEFAULT_MODE = 'base';
@@ -281,6 +310,10 @@ const SCAN_FILE_LIST_MAX = 2000;
 const INJECT_FILE_TOP_N = 3;
 // v2.7.0（检索质量修复）：名称匹配 0 命中时的内容兜底扫描文件数上限
 const CONTENT_FALLBACK_SCAN = 5;
+// v2.7.0（一键发布 · 网络检索）：超时/条数/注入预算
+const WEB_SEARCH_TIMEOUT_MS = 10000;
+const WEB_SEARCH_MAX_RESULTS = 3;
+const WEB_REF_MAX = 800;
 const KEYWORD_LIMIT = 8;
 const SNIPPET_BUDGET = 800;
 const CONTEXT_PROGRESS_MAX = 800;
@@ -883,6 +916,27 @@ function snippetFromLines(lines, keywords, budget) {
   return text;
 }
 
+// v2.7.0（一键发布 · 网络检索词构造）：草稿主题词 ∪ delta 增删实词。
+// 每次改动后 text 关键词自然变化（基础代入检索条件）；记忆链 delta 显式并入
+// （改动方向代入——新增/删除的内容决定下一轮检索方向）。
+function buildWebQuery(text, keywords, delta) {
+  const parts = [];
+  const seen = new Set();
+  const add = (w) => {
+    if (!w || seen.has(w)) return;
+    seen.add(w);
+    parts.push(w);
+  };
+  for (const k of (keywords || [])) add(k);
+  const deltas = (delta && Array.isArray(delta.added) ? delta.added : [])
+    .concat(delta && Array.isArray(delta.removed) ? delta.removed : []);
+  for (const d of deltas) for (const w of splitCnSegments(String(d))) add(w);
+  if (parts.length === 0) {
+    for (const w of splitCnSegments(String(text || ''))) { add(w); if (parts.length >= 6) break; }
+  }
+  return parts.slice(0, 8).join(' ');
+}
+
 // 上下文块组装：任务进度(≤800) + 文件(≤3×800) + 事件(≤800)；
 // 截断优先级：进度 > 文件 > 事件 > 原文完整（原文由调用方保证不截断）
 function buildContextBlock(progress, files, events, budgetChars) {
@@ -1479,7 +1533,49 @@ async function buildV2ContextBlock(services, sessionId, text, cfg, onStage) {
     const eventsHits = await v2SearchEvents(services, sessionId, keywords, cfg);
     // 阶段 C（inject）：模式块独享预算（记忆链不占文本块）
     modeBlock = buildContextBlock(progress, files, eventsHits, budget);
-    modeLog = modeBlock === '' ? 'none' : (mode + ' files=' + files.length + ' events=' + eventsHits.length + ' chars=' + modeBlock.length);
+    // v2.7.0（一键发布 · 网络检索）：publish 专属——依据草稿主题词 + 记忆链 delta
+    // 改动方向构造检索词，经 ctx.web 搜索同类项目结构参考，注入模式块（预算余量内）。
+    // 独立超时/降级：搜索失败/服务缺失 → 跳过，不阻断规格生成。
+    let webLog = 'none';
+    let query = '';
+    if (cfg.mode === 'publish' && budget > 0) {
+      mark(STAGE_FILES); // 复用 files 阶段标记（检索类）
+      // 检索词先构造（不依赖 web 可用性；delta 为记忆链改动方向）
+      query = buildWebQuery(text, keywords, services.delta || null);
+      const web = services.web;
+      if (web && typeof web.search === 'function') {
+        let timedOut = false;
+        const timer = services.timer.timeout(() => { timedOut = true; }, WEB_SEARCH_TIMEOUT_MS);
+        try {
+          const res = await web.search({ query, maxResults: WEB_SEARCH_MAX_RESULTS });
+          if (!timedOut && res && Array.isArray(res.sources) && res.sources.length > 0) {
+            const lines = res.sources.slice(0, WEB_SEARCH_MAX_RESULTS).map((s) => {
+              const title = s && s.title ? String(s.title) : '';
+              const url = s && s.url ? String(s.url) : '';
+              const summary = s && s.summary ? String(s.summary).slice(0, 200) : '';
+              return '- ' + title + (url ? ' (' + url + ')' : '') + (summary ? '\n  ' + summary : '');
+            }).join('\n');
+            const webBlock = '【网络参考】\n' + lines.slice(0, Math.min(WEB_REF_MAX, Math.max(0, budget - modeBlock.length)));
+            if (webBlock.length > 20) {
+              modeBlock = modeBlock ? modeBlock + '\n\n' + webBlock : webBlock;
+              webLog = 'web=1 sources=' + res.sources.length + ' chars=' + webBlock.length;
+            } else {
+              webLog = 'web=0';
+            }
+          } else {
+            webLog = 'web=0' + (timedOut ? ' timeout' : '');
+          }
+        } catch (e) {
+          webLog = 'web=failed';
+        } finally {
+          timer();
+        }
+      } else {
+        webLog = 'web=none';
+      }
+      hlog('[enhance] v2 web ' + webLog + ' query=' + query.slice(0, 120));
+    }
+    modeLog = modeBlock === '' ? 'none' : (mode + ' files=' + files.length + ' events=' + eventsHits.length + (webLog !== 'none' ? ' ' + webLog : '') + ' chars=' + modeBlock.length);
   }
   // ===== 汇总（记忆链由 enhance 入口以多轮消息注入，不占文本块）=====
   mark(STAGE_CONTEXT);
@@ -1966,8 +2062,9 @@ return {
       let v2Block = '';
       let v2Log = 'none';
       // v2.4.7（每模式独立自定义模板）：custom 且当前模式 texts 非空 → 用该模式文本；
-      // 当前模式未写自定义（空串）→ 回退内置 SYSTEM_PROMPT（不空白、不报错）
-      let system = SYSTEM_PROMPT;
+      // 当前模式未写自定义（空串）→ 回退该模式内置（publish → SYSTEM_PUBLISH_PROMPT，其余 → SYSTEM_PROMPT）
+      // v2.7.0（一键发布）：publish 模式内置专用九章规格 system（custom 模板仍可覆盖）
+      let system = cfg.mode === 'publish' ? SYSTEM_PUBLISH_PROMPT : SYSTEM_PROMPT;
       if (cfg.templateMode === 'custom') {
         const perMode = cfg.templateTexts && typeof cfg.templateTexts === 'object' ? cfg.templateTexts[cfg.mode] : '';
         const custom = typeof perMode === 'string' && perMode.trim() !== '' ? perMode.trim() : '';
@@ -1990,6 +2087,13 @@ return {
         : [];
       const hasMemory = memRounds.length > 0;
       const memoryActive = shouldInjectMemory(cfg.memory, hasMemory, cfg.context.budgetChars);
+      // v2.7.0（一键发布 · 改动方向代入检索）：delta 提前计算（记忆链轮次时），
+      // 供 publish 网络检索词构造（buildWebQuery）使用；无记忆链 → null（检索词仅主题词）
+      let memDelta = null;
+      if (memoryActive) {
+        const lastOutput = memRounds[memRounds.length - 1].output;
+        memDelta = computeEditDelta(lastOutput, text);
+      }
       if (shouldInjectV2(cfg.mode, cfg.context.budgetChars) || memoryActive) {
         const v2 = await buildV2ContextBlock({
           llm: ctx.get('llm'),
@@ -1998,6 +2102,8 @@ return {
           fs: ctx.get('fs'),
           timer: ctx.timer,
           chain,
+          web: ctx.get('web'),
+          delta: memDelta,
         }, sessionId, text, cfg, (st) => { rec.stage = st; });
         v2Block = v2.block;
         v2Log = v2.log;
@@ -2013,8 +2119,7 @@ return {
       let finalText = v2Block !== '' ? v2Block + '\n\n' + wrapUserText(text) : wrapUserText(text);
       let messages;
       if (memoryActive) {
-        const lastOutput = memRounds[memRounds.length - 1].output;
-        const hint = buildMemoryDeltaHint(computeEditDelta(lastOutput, text));
+        const hint = buildMemoryDeltaHint(memDelta);
         if (hint !== '') finalText = hint + '\n\n' + finalText;
         const built = buildChatMessages(memRounds, finalText, 'enhance-' + sessionId + '-' + seq, cfg.context.budgetChars);
         messages = built.messages;

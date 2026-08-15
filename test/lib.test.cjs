@@ -24,7 +24,7 @@ const defaultsBlock = [grabConst('DEFAULT_TIMEOUT_MS'), grabConst('DEFAULT_MAX_T
 const pureFn = new Function(defaultsBlock + '\n' + pureText + `
   ;return { wrapUserText, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
     shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile, analyzeInputRules,
-    rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress,
+    rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
     buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages,
     MEMORY_ROUNDS_MAX, MEMORY_CHAIN_BUDGET_MAX, MEMORY_DELTA_MAX,
@@ -52,6 +52,7 @@ const {
   snippetFromLines,
   buildContextBlock,
   parseTaskProgress,
+  buildWebQuery,
   parseMode,
   parseMemory,
   shouldInjectMemory,
@@ -263,9 +264,9 @@ test('U1 validateConfig mode/context 解析', () => {
   assert.equal(bad.memory, false);
 });
 
-test('U19 MODE_TABLE 完整性 + parseMode 迁移（v2.2 四模式）', () => {
-  // 表完整性：4 模式齐全（记忆模式已删除）、字段合法、budget 属白名单
-  assert.deepEqual(Object.keys(MODE_TABLE).sort(), ['base', 'lite', 'smart', 'standard']);
+test('U19 MODE_TABLE 完整性 + parseMode 迁移（v2.7.0 五模式）', () => {
+  // 表完整性：5 模式齐全（记忆模式已删除；v2.7.0 加 publish 一键发布）、字段合法、budget 属白名单
+  assert.deepEqual(Object.keys(MODE_TABLE).sort(), ['base', 'lite', 'publish', 'smart', 'standard']);
   for (const [k, row] of Object.entries(MODE_TABLE)) {
     assert.ok(['none', 'rule', 'llm'].includes(row.phaseA), k + ' phaseA');
     assert.ok(['none', 'file+event'].includes(row.phaseB), k + ' phaseB');
@@ -515,6 +516,24 @@ test('U51 inferFocusRules 历史前缀噪音过滤（v2.7.0）', () => {
   const focus = inferFocusRules('[用户] 分析DSH项目的构建与发布流程\n[助手] 好的，构建命令是 pnpm build');
   assert.ok(!focus.includes('用户') && !focus.includes('助手'), '用户/助手 前缀被过滤');
   assert.ok(focus.includes('构建'), '实词仍保留');
+});
+
+test('U52 buildWebQuery 网络检索词构造（v2.7.0 一键发布）', () => {
+  // 主题词基础
+  const q1 = buildWebQuery('我想开发一个纸牌游戏', ['纸牌', '游戏'], null);
+  assert.ok(q1.includes('纸牌') && q1.includes('游戏'), '主题词并入');
+  // delta 改动方向代入：新增内容成为检索词
+  const q2 = buildWebQuery('我想开发一个纸牌游戏', ['纸牌'], { added: ['加入肉鸽元素'], removed: [] });
+  assert.ok(q2.includes('肉鸽'), 'delta 新增实词并入检索词');
+  // delta 删除内容同样代入（反馈方向）
+  const q3 = buildWebQuery('纸牌游戏', ['纸牌'], { added: [], removed: ['去掉联机功能'] });
+  assert.ok(q3.includes('联机'), 'delta 删除实词并入（反向反馈）');
+  // 去重 + 上限
+  const q4 = buildWebQuery('纸牌游戏', ['纸牌', '纸牌'], null);
+  assert.equal(q4.split(' ').filter((w) => w === '纸牌').length, 1, '关键词去重');
+  assert.ok(q4.split(' ').length <= 8, '检索词上限 8');
+  // 空输入兜底
+  assert.equal(buildWebQuery('', [], null), '');
 });
 
 test('U14 shouldIgnoreFile 敏感过滤', () => {

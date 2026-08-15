@@ -124,6 +124,8 @@ const MODE_OPTIONS = [
   { value: 'lite', label: '轻量模式', short: '轻量', hint: '本地规则分析输入要素（目标/约束/格式/示例），缺失项保守提示明确化；零外部上下文' },
   { value: 'standard', label: '标准模式', short: '标准', hint: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本' },
   { value: 'smart', label: '智能模式', short: '智能', hint: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准' },
+  // v2.7.0（一键发布）：项目/游戏开发规格生成——网络检索 + 工作区检索 + 九章规格
+  { value: 'publish', label: '一键发布', short: '发布', hint: '输入粗略想法（如"想开发一个纸牌游戏"）→ 网络检索同类项目结构 + 工作区参考，一键生成完整可实施的开发规格（九章：目标/核心循环/数值/数据结构/机制/交互/技术方案/实施路线/验收清单）；多轮补充可逐步细化（建议开启记忆）' },
 ];
 const MODE_VALUES = MODE_OPTIONS.map((m) => m.value);
 // v2.3（§7.2）：模式短标签解析——i18n 键（modeShort+Cap）优先（EN 正确），MODE_OPTIONS.short 回退
@@ -564,6 +566,8 @@ const ZH = {
   cfgModeHintLite: '本地规则分析输入要素（目标/约束/格式/示例），缺失项保守提示明确化；不注入任何外部上下文',
   cfgModeHintStandard: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本',
   cfgModeHintSmart: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准',
+  // v2.7.0（一键发布）：网络检索 + 工作区检索 + 九章规格生成
+  cfgModeHintPublish: '输入粗略想法（如"想开发一个纸牌游戏"）→ 网络检索同类项目结构 + 工作区参考，一键生成完整可实施的开发规格（九章：目标/核心循环/数值/数据结构/机制/交互/技术方案/实施路线/验收清单）；多轮补充可逐步细化（建议开启记忆）',
   cfgContextBudget: '上下文预算',
   cfgContextBudget0: '0（关闭注入）',
   cfgContextNote: 'V2 按任务进度与提示词主题检索工作区相关文件后注入优化参考；预算 0 = 不注入（等价基础优化）',
@@ -572,6 +576,7 @@ const ZH = {
   modeShortLite: '轻量',
   modeShortStandard: '标准',
   modeShortSmart: '智能',
+  modeShortPublish: '发布',
   stagePrepare: '准备中…',
   stageHistory: '读取会话…',
   stageAnalyze: '分析任务…',
@@ -764,6 +769,8 @@ const EN = {
   cfgModeHintLite: 'Local rule analysis of the input (goal/constraints/format/example); missing elements are clarified conservatively only when inferable; no external context is injected',
   cfgModeHintStandard: 'Rule understanding + file & session retrieval, no extra LLM call',
   cfgModeHintSmart: 'LLM task analysis + full retrieval, best understanding',
+  // v2.7.0（一键发布）：网络检索 + 工作区检索 + 九章规格生成
+  cfgModeHintPublish: 'Feed a rough idea (e.g. "I want to make a card game") → web-search similar project structures + workspace references, generate a complete implementable dev spec in one click (9 chapters: goal/core loop/numbers/data/mechanics/UI/tech/roadmap/acceptance); iterative refinements keep improving it (memory recommended)',
   cfgContextBudget: 'Context budget',
   cfgContextBudget0: '0 (no injection)',
   cfgContextNote: 'V2 analyzes task progress and retrieves relevant workspace files before optimizing; budget 0 = no injection (equivalent to basic)',
@@ -772,6 +779,7 @@ const EN = {
   modeShortLite: 'Lite',
   modeShortStandard: 'Standard',
   modeShortSmart: 'Smart',
+  modeShortPublish: 'Publish',
   stagePrepare: 'Preparing…',
   stageHistory: 'Reading history…',
   stageAnalyze: 'Analyzing task…',
