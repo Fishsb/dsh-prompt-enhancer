@@ -26,7 +26,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile, analyzeInputRules,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
-    buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages,
+    buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages, filterDeltaForPublish,
     MEMORY_ROUNDS_MAX, MEMORY_CHAIN_BUDGET_MAX, MEMORY_DELTA_MAX,
     MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE,
     STAGE_SEQUENCE, STAGE_LABELS,
@@ -64,6 +64,7 @@ const {
   computeEditDelta,
   buildMemoryDeltaHint,
   buildChatMessages,
+  filterDeltaForPublish,
   MEMORY_ROUNDS_MAX,
   MEMORY_CHAIN_BUDGET_MAX,
   MEMORY_DELTA_MAX,
@@ -109,6 +110,17 @@ test('U55 stripScenarioEcho 剥离判定行回显（v2.8.0 实测修正）', () 
   // 回显不在首部 → 不动正文
   const mid = '一、目标概述\n【场景判定】本次场景判定：game\n正文';
   assert.equal(stripScenarioEcho(mid), mid);
+});
+
+test('U56 filterDeltaForPublish publish 补充式轮次 removed 清零（v2.8.0 实测修正）', () => {
+  // publish：removed 清零，added 保留（改动方向由 added 承载）
+  const d = { added: ['补充：增加段位保护'], removed: ['一、目标概述', '二、核心玩法循环'] };
+  assert.deepEqual(filterDeltaForPublish(d, 'publish'), { added: ['补充：增加段位保护'], removed: [] });
+  // 非 publish：原样返回（行为不变）
+  assert.equal(filterDeltaForPublish(d, 'smart'), d);
+  // null / 异常 delta 原样返回
+  assert.equal(filterDeltaForPublish(null, 'publish'), null);
+  assert.deepEqual(filterDeltaForPublish({ removed: ['x'] }, 'publish'), { removed: ['x'] });
 });
 
 test('U54 wrapPublishText publish 中性包装（v2.8.0 实测修正）', () => {

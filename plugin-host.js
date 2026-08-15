@@ -448,6 +448,15 @@ function computeEditDelta(prevOutput, text) {
   };
 }
 
+// v2.8.0（一键发布 · 实测修正）：publish 多轮为「补充式」输入——行级 diff 的 removed 侧
+// = 上一轮完整规格（用户未复述即全算删除，恰为章节标题），实测曾把「-删除：一、目标概述」
+// 喂给模型导致幻觉「用户要求删除该章」。publish 的改动方向由 added 侧（用户本轮文本）承载，
+// removed 侧清零（非 publish 模式原样返回，行为不变）。
+function filterDeltaForPublish(delta, mode) {
+  if (mode !== 'publish' || !delta || !Array.isArray(delta.added)) return delta;
+  return { added: delta.added, removed: [] };
+}
+
 // 修改摘要格式化：`【本轮修改】相对上一轮优化结果：\n+新增：…\n-删除：…`；
 // 单侧为空只列一侧；合计 ≤ MEMORY_DELTA_MAX 字符（字符级截断）；无差异 → 空串。
 function buildMemoryDeltaHint(delta) {
@@ -2161,10 +2170,12 @@ return {
       const memoryActive = shouldInjectMemory(cfg.memory, hasMemory, cfg.context.budgetChars);
       // v2.7.0（一键发布 · 改动方向代入检索）：delta 提前计算（记忆链轮次时），
       // 供 publish 网络检索词构造（buildWebQuery）使用；无记忆链 → null（检索词仅主题词）
+      // v2.8.0（实测修正）：publish 的 removed 侧清零（补充式输入下 removed=上一轮规格，
+      // 污染检索词并误导模型——见 filterDeltaForPublish）；hint 与检索词均用过滤后 delta
       let memDelta = null;
       if (memoryActive) {
         const lastOutput = memRounds[memRounds.length - 1].output;
-        memDelta = computeEditDelta(lastOutput, text);
+        memDelta = filterDeltaForPublish(computeEditDelta(lastOutput, text), cfg.mode);
       }
       // v2.8.0（一键发布 · 场景路由）：publish 场景判定——会话级缓存固定（首轮判定写入、
       // 后续轮读取不重判）。判定源：缓存 miss 且记忆链非空 → 最早轮输入（进程重启续作兜底，
