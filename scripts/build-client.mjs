@@ -11,11 +11,15 @@ const source = join(root, 'src', 'client', 'legacy', 'plugin-client.js');
 let body = readFileSync(source, 'utf8');
 const i18nChunk = require('../src/client/i18n.js');
 const constantsChunk = require('../src/client/constants.js');
+const updaterChunk = require('../src/client/updater.js');
 if (body.includes('// @dsh-client-i18n-inject')) {
   body = body.replace('// @dsh-client-i18n-inject', i18nChunk);
 }
 if (body.includes('// @dsh-client-constants-inject')) {
   body = body.replace('// @dsh-client-constants-inject', constantsChunk);
+}
+if (body.includes('// @dsh-client-updater-inject')) {
+  body = body.replace('// @dsh-client-updater-inject', updaterChunk);
 }
 
 // Embed the body as a JSON string literal: safe against backticks, ${}, and

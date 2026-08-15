@@ -1003,44 +1003,7 @@ function stateKey(state) {
 // v2.4.1（实测回填 §9-T6）：host 侧无出网能力（web.fetch 无 provider）——**数据获取移到浏览器**：
 // GitHub API 支持 CORS（实机验证 200）；本组件直连 api.github.com 取 tags/release 载荷与
 // contents API 文件（base64 → atob 解码），host 只做解析/校验/写入（update/check、update/pull）。
-const UPDATER_DEFAULT_REPO = 'Fishsb/dsh-prompt-enhancer';
-// 与 host PURE UPDATE_MANIFEST 同步（host 侧 validateManifestFiles 为权威校验）
-const UPDATER_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
-const updaterContentsUrl = (repo, tag, file) => 'https://api.github.com/repos/' + repo + '/contents/' + file + '?ref=' + tag;
-const updaterTagsUrl = (repo) => 'https://api.github.com/repos/' + repo + '/tags?per_page=100';
-const updaterReleaseUrl = (repo) => 'https://api.github.com/repos/' + repo + '/releases/latest';
-
-function updaterRepoOf(cfg) {
-  const r = cfg && cfg.updater && typeof cfg.updater.repo === 'string' ? cfg.updater.repo.trim() : '';
-  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) && r.length <= 100 ? r : UPDATER_DEFAULT_REPO;
-}
-
-// v2.5.0：环境检测渲染元数据——展示顺序/标签键/detail 状态码 → 文案键
-// （detail 由 host probeEnv 返回；文案键对应 i18n 字典；
-// v2.5.2 收敛为重启链 6 项；v2.7.0 收敛为重启阶段真实依赖 5 项：
-// 删 port 占用（标准场景不可达），加 tools 重启工具，exec-port 承接 no-port）
-const ENV_ITEMS = [
-  { key: 'service', label: 'envService' },
-  { key: 'svc-type', label: 'envSvcType' },
-  { key: 'svc-bin', label: 'envSvcBin' },
-  { key: 'tools', label: 'envTools' },
-  { key: 'net', label: 'envNet' },
-  { key: 'exec-port', label: 'envExecPort' },
-];
-const ENV_DETAIL_TEXT = {
-  ok: 'envOk',
-  missing: 'envServiceMissing',
-  disabled: 'envSvcTypeDisabled',
-  'bin-missing': 'envSvcBinMissing',
-  'image-missing': 'envSvcImageMissing',
-  'no-service': 'envSvcNoService',
-  'tools-missing': 'envToolsMissing',
-  unreachable: 'envNetUnreachable',
-  'tool-unreachable': 'envToolUnreachable',
-  'same-as-service': 'envExecPortSame',
-  'exec-occupied': 'envExecPortOccupied',
-  'no-port': 'envExecPortNoPort',
-};
+// @dsh-client-updater-inject
 
 function UpdaterCard(props) {
   const t = makeT(props);
