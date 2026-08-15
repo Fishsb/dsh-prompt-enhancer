@@ -6,6 +6,8 @@
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
 ## [Unreleased]
+### Fixed
+- **一键更新 install timed out 修复**：Windows 下运行中的 dsh-web 会占用 `node_modules/dsh-prompt-enhancer` 文件，导致 pnpm 替换插件目录时 `EPERM` 或长时间卡住；`apply` 流程改为先停止服务再执行安装，安装失败会自动尝试恢复启动服务；EXECUTOR_VERSION 0.1.4→0.1.5 — [VU-001]
 
 ## [2.8.2] - 2026-08-16
 
