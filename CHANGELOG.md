@@ -53,6 +53,7 @@
   - 新增 `src/host/reloader.js`：Reloader 接口 + UnsupportedReloader
   - 新增 `src/host/update-platform.js`：`createUpdatePlatform`（热更新优先，executor fallback）
   - 新增 `test/update-platform.test.cjs`（85 tests）— 架构治理
+  - **ExecutorReloader fallback**：新增 `src/host/executor-reloader.js`，通过外部执行器 RPC `apply` 实现 Reloader；新增 `test/executor-reloader.test.cjs`（88 tests）— 架构治理
 
 ## [2.8.3] - 2026-08-16
 
