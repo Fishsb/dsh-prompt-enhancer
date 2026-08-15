@@ -9,26 +9,11 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 
 ## Features
 
-### ✨ Core
-
 - ✨ **One-click enhance** — an independent LLM call replaces the draft in place; edit the result and the button becomes a plain **Continue** for further refinement; **undo anytime** (also drops the last memory round), **true cancel** while enhancing
 - 🛡️ **Guards** — empty input / slash commands / submitting states are handled; `/cmd body` optimizes only the body, keeping the prefix
 - 🎛️ **4 optimization modes** — Basic (direct, fastest) / Lite (local rules) / Standard (rules + workspace & session retrieval) / Smart (LLM task-progress analysis + full retrieval)
 - 🧠 **Independent memory switch** — when on, iterative rounds (optimize → edit → re-optimize) accumulate into a memory chain (**persistent memory**: fixed window of the latest 4 pairs, rolling; sending or clearing the composer does not clear it, Undo drops only the last round); each re-optimization replays the chain as a multi-turn conversation and senses your edit direction; when off, nothing is read or written
-- 📊 **Live progress** — the button shows the current stage while optimizing (Preparing… → Optimizing…), hover switches to a red "Cancel", constant width with no flicker
-
-### ⚡ Update & maintenance
-
-- ⚡ **Update & restart** — with a new version detected, one button runs the official install command and restarts the service (restart only after a successful install; never on failure; the standalone executor auto-retries up to 5 times); refresh to finish
-- 🔔 **Restart reminder** — after installing a new version without restarting, the page shows a banner with the restart command (`net stop dsh-web && net start dsh-web`)
-- 🧪 **Environment check** — an inline button probes the update-restart environment read-only (service / start type / executable / restart tools / update port independence…), each with ✓/⚠/✗ and guidance; one-click update is blocked when not ready
-- 🚀 **Version check & one-click pull** — built-in updater detects new versions and pulls the release files ([Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases))
-- 🧪 **Unit-tested** — host pure-function tests (node:test) slice the PURE section, so tests run the shipped code
-
-### 🎨 Other
-
 - 🌐 **i18n** — follows the DSH interface language (中文 / English)
-- 📏 **Visual parity** — button style matches the DSH model selector (DengXian / pill / hover feedback)
 
 ## Screenshots
 
