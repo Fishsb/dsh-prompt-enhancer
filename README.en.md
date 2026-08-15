@@ -19,6 +19,8 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 - 📊 **Live progress** — the button shows the current stage while optimizing (Preparing… → Optimizing…), hover switches to a red "Cancel", constant width with no flicker
 - 📏 **Visual parity** — button font (DengXian) / weight / pill shape / gray label / darker hover ellipse match the DSH model selector
 - 🚀 **Version check & one-click update** — built-in updater detects new versions and pulls the release files ([Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases))
+- ⚡ **Update & restart** — with a new version detected, one button runs the official install command and restarts the service (restart only after a successful install; never on failure); refresh to finish. No shell commands needed
+- 🧪 **Environment check** — an inline button probes 7 environment items read-only (network / service / account / port / install form…), each with ✓/⚠/✗ and guidance; one-click update is blocked with the missing items listed when the environment is not ready
 - 🧪 **Unit-tested** — host pure-function tests (node:test) slice the PURE section, so tests run the shipped code
 
 ## Screenshots
@@ -92,6 +94,7 @@ Per-version release notes live on [GitHub Releases](https://github.com/Fishsb/ds
 
 - Depends on DSH runtime-injected APIs (`llm` / `slots` / `harness` / `inputActions` / `sessionQuery` / `fs`), which may change across DSH releases
 - **Version check & one-click update**: the browser talks to `api.github.com` directly (CORS-enabled; the host needs no outbound network). Restricted networks must let the browser reach GitHub (proxy etc.)
+- **Update & restart (v2.5.0+)**: requires the service to run under nssm/LocalSystem (default `dsh-web`; overridable via `updater.serviceName` / `updater.profile`). The install command auto-injects the user PATH (incl. pnpm); for GitHub pulls behind a proxy, configure `~/.npmrc` (same as manual install). Dynamic Cordis installs do not support this feature — use the bundle install
 - **Built-in fallback model chain**: points at the official DeepSeek provider (`deepseek-official`); using it requires a DeepSeek API key. Without one, configure a model chain under "Models & plugins" — a fresh install inherits the current model automatically, so manual setup is usually unnecessary
 - Use a recent DeepSeek Harness
 

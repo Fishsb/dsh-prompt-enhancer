@@ -29,7 +29,8 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     buildMemoryBlock, MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE,
     STAGE_SEQUENCE, STAGE_LABELS,
     PLUGIN_VERSION, UPDATE_MANIFEST, parseVersion, compareVersions, versionStatus,
-    normalizeRepo, isValidTag, pickMaxTag, parseTagsPayload, validateManifestFiles, defaultDirFor };
+    normalizeRepo, isValidTag, pickMaxTag, parseTagsPayload, validateManifestFiles, defaultDirFor,
+    ENV_PROBE_KEYS, buildInstallArgs, buildRestartChain, mergeEnvPath };
 `);
 const {
   wrapUserText,
@@ -70,6 +71,10 @@ const {
   parseTagsPayload,
   validateManifestFiles,
   defaultDirFor,
+  ENV_PROBE_KEYS,
+  buildInstallArgs,
+  buildRestartChain,
+  mergeEnvPath,
 } = pureFn();
 
 test('wrapUserText 包装用户输入', () => {
@@ -766,4 +771,54 @@ test('U41 template.texts 每模式解析/迁移/超长忽略（v2.4.7）', () =>
   assert.equal(v2.templateMode, 'custom', 'v2 结构 template.mode 应解析');
   assert.equal(v2.templateTexts.base, 'v2文本', 'v2 结构 template.text 应迁移到全部模式');
   assert.equal(v2.templateTexts.smart, 'v2文本', 'v2 结构 template.text 应迁移到全部模式');
+});
+
+// v2.5.0（一键更新并重启）：安装命令构造契约。
+test('U42 buildInstallArgs 命令构造（v2.5.0）', () => {
+  const args = buildInstallArgs('D:\\dsh\\bin.js', 'v2.5.0', 'web');
+  assert.deepEqual(args, [
+    'D:\\dsh\\bin.js', 'plugin', '--profile', 'web', 'add', 'github:Fishsb/dsh-prompt-enhancer#v2.5.0',
+  ], '命令数组形态：node <dshBin> plugin --profile <p> add github:Fishsb/dsh-prompt-enhancer#<tag>');
+  // tag 形态透传（含无 v 前缀；lib 层 isInstallArgs 另有正则把关，此处仅契约构造）
+  const noV = buildInstallArgs('bin', '2.4.8', 'web');
+  assert.equal(noV[5], 'github:Fishsb/dsh-prompt-enhancer#2.4.8', '无 v 前缀 tag 原样拼接');
+  // profile 透传
+  const p = buildInstallArgs('bin', 'v1.0.0', 'custom-profile');
+  assert.equal(p[3], 'custom-profile', 'profile 透传');
+  // 固定 repo：任何 tag 都只能拼到 Fishsb/dsh-prompt-enhancer
+  assert.match(args[5], /^github:Fishsb\/dsh-prompt-enhancer#/, 'repo 固定');
+});
+
+// v2.5.0：重启链模板契约。
+test('U43 buildRestartChain 重启链（v2.5.0）', () => {
+  const chain = buildRestartChain('dsh-web');
+  assert.equal(chain, 'net stop dsh-web & timeout /t 2 /nobreak >nul & net start dsh-web',
+    '链 = stop + 2s 缓冲 + start（& 无条件串联）');
+  const other = buildRestartChain('dsh-web-alt');
+  assert.ok(other.startsWith('net stop dsh-web-alt & '), 'serviceName 注入位置固定');
+  assert.ok(other.endsWith('& net start dsh-web-alt'), 'start 与 stop 同服务名');
+});
+
+// v2.5.0：PATH 合并契约（系统 PATH + 用户 PATH）。
+test('U44 mergeEnvPath PATH 合并去重（v2.5.0）', () => {
+  assert.equal(mergeEnvPath('C:\\A;C:\\B', 'C:\\B;D:\\C'), 'C:\\A;C:\\B;D:\\C', '大小写不敏感去重且保留顺序');
+  assert.equal(mergeEnvPath('C:\\A', 'C:\\a;D:\\x'), 'C:\\A;D:\\x', '重复段忽略（含大小写差异）');
+  assert.equal(mergeEnvPath('C:\\A', ''), 'C:\\A', '空用户 PATH 原样返回');
+  assert.equal(mergeEnvPath('', 'D:\\x'), 'D:\\x', '空系统 PATH 仅用户 PATH');
+  assert.equal(mergeEnvPath('C:\\A;;D:\\B', ''), 'C:\\A;D:\\B', '空段忽略');
+});
+
+// v2.5.0：环境探测计划契约（与 lib/index.cjs probeEnv 的 key 一一对应）。
+test('U45 ENV_PROBE_KEYS 探测计划（v2.5.0）', () => {
+  assert.ok(Array.isArray(ENV_PROBE_KEYS) && ENV_PROBE_KEYS.length === 7, '探测项 7 个');
+  const keys = ENV_PROBE_KEYS.map((e) => e.key);
+  assert.equal(new Set(keys).size, 7, 'key 唯一');
+  for (const e of ENV_PROBE_KEYS) {
+    assert.ok(['block', 'warn', 'info'].includes(e.level), 'level 合法: ' + e.key);
+  }
+  assert.ok(keys.includes('net') && keys.includes('service') && keys.includes('account')
+    && keys.includes('restart') && keys.includes('port') && keys.includes('mode') && keys.includes('pnpmInfo'),
+    '7 项 key 与 probeEnv 一致');
+  const json = JSON.stringify(ENV_PROBE_KEYS);
+  assert.ok(!/proxy|password|token|secret/i.test(json), '计划不含敏感字段');
 });

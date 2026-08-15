@@ -19,6 +19,8 @@ DeepSeek Harness (DSH) 提示词增强插件：输入模糊提示词 → 一键�
 - 📊 **实时进度**：优化中按钮显示当前阶段（准备中… → LLM 优化中…），悬停切换红色「取消」，宽度恒定无闪烁
 - 📏 **视觉对齐**：按钮字体（等线）/字重/胶囊/灰字/悬停深色椭圆背景与 DSH 模型选择器一致
 - 🚀 **版本检测与一键更新**：内置更新器检测新版本并一键拉取发布文件（[Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases)）
+- ⚡ **一键更新并重启**：检测到新版本后点一次按钮——自动执行官方安装命令并重启服务（安装成功才重启，失败绝不重启），刷新即生效，无需复制命令去命令行
+- 🧪 **环境检测**：行内按钮只读探测 7 项环境（网络/服务/账号/端口/形态等），每项 ✓/⚠/✗ 附指引；环境不满足时一键更新自动阻止并列出缺失项
 - 🧪 **单测保障**：host 纯函数单测（node:test）切片 PURE 区段，测试即发布代码
 
 ## 截图
@@ -30,13 +32,13 @@ DeepSeek Harness (DSH) 提示词增强插件：输入模糊提示词 → 一键�
 ### 方式一：一条命令（推荐）
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v2.4.8
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v2.5.0
 ```
 
 安装后重启 DSH（`dsh web`），输入框工具行出现 ✨ 按钮即安装成功。
 
 > 前提：本机已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，且 `pnpm` 在 PATH 中（`npm i -g pnpm` 或 `corepack enable`）。
-> `#v2.4.8` 为版本锁定（可换成任意 [Release tag](https://github.com/Fishsb/dsh-prompt-enhancer/releases)），避免装到未发布的主分支。
+> `#v2.5.0` 为版本锁定（可换成任意 [Release tag](https://github.com/Fishsb/dsh-prompt-enhancer/releases)），避免装到未发布的主分支。
 > 若 pnpm 提示需要授权构建（`allowBuilds`），把提示的包 key 加进 `~/.dsh/profiles/web/pnpm-workspace.yaml` 的 `allowBuilds` 后重跑即可。
 
 更新 / 卸载：
@@ -48,10 +50,10 @@ dsh plugin --profile web remove dsh-prompt-enhancer
 
 ### 方式二：下载安装包离线安装
 
-从 [Releases 页面](https://github.com/Fishsb/dsh-prompt-enhancer/releases) 下载 `dsh-prompt-enhancer-<版本>.tgz`（如 `dsh-prompt-enhancer-2.4.8.tgz`），然后安装：
+从 [Releases 页面](https://github.com/Fishsb/dsh-prompt-enhancer/releases) 下载 `dsh-prompt-enhancer-<版本>.tgz`（如 `dsh-prompt-enhancer-2.5.0.tgz`），然后安装：
 
 ```sh
-dsh plugin --profile web add ./dsh-prompt-enhancer-2.4.8.tgz
+dsh plugin --profile web add ./dsh-prompt-enhancer-2.5.0.tgz
 ```
 
 > 安装包为 pnpm 打包的完整产物（含预构建 `lib/`），无需联网、无需构建授权；装完同样重启 `dsh web` 生效。
@@ -109,6 +111,7 @@ dsh plugin --profile web add ./dsh-prompt-enhancer-2.4.8.tgz
 
 - 依赖 DSH 运行时注入 API（`llm` / `slots` / `harness` / `inputActions` / `sessionQuery` / `fs`），随 DSH 版本升级可能调整
 - **版本检测与一键更新**：由浏览器直连 `api.github.com`（CORS 可用，host 无需出网）；网络受限环境请确保浏览器可访问 GitHub（代理等）
+- **一键更新并重启（v2.5.0+）**：需服务以 nssm/LocalSystem 运行（默认 `dsh-web`，可通过 `updater.serviceName` / `updater.profile` 配置覆盖）；安装命令自动注入用户 PATH（含 pnpm）；GitHub 拉取需代理时在 `~/.npmrc` 配置（同手动安装）；动态 Cordis 安装不支持此功能，请用 bundle 安装
 - **内置兜底模型链**：指向 DeepSeek 官方（`deepseek-official`），使用该链需配置 DeepSeek API key；未配置时请在「模型与插件」中配置模型链——首次安装会自动继承当前使用模型，通常无需手动配置
 - 建议使用最新版 DeepSeek Harness
 

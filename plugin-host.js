@@ -1,5 +1,16 @@
 // ============================================================================
-// DSH「提示词优化」插件 · Host 半部（v2.4.8：恢复 v2.4.4 槽位占位 id 修复）
+// DSH「提示词优化」插件 · Host 半部（v2.5.0：一键更新并重启 + 环境检测）
+// v2.5.0（方案「一键更新并重启方案.md」）：
+// ① 新 RPC update/apply：官方路径安装（dsh plugin add github:...#<tag>，120s 超时，
+//    失败绝不重启）→ 成功后才 spawn 分离重启链（net stop <svc> & timeout 2 & net start <svc>，
+//    execDetached 脱离进程树，host 被终止是预期）；仅 bundle 形态可用（harness.execCommand
+//    判空 → UNSUPPORTED）；防重入 APPLY_BUSY。
+// ② 新 RPC update/envcheck：只读探测 7 项（net 连通性 curl 实测 / service 存在 / account
+//    LocalSystem / restart KillProcessTree / port 占用者 / mode 形态 / pnpmInfo 注入机制），
+//    探测执行在 lib/index.cjs（probeEnv），本侧合并 ENV_PROBE_KEYS 等级元数据（block/warn/info）。
+// ③ PURE 新增：ENV_PROBE_KEYS / buildInstallArgs / buildRestartChain / mergeEnvPath
+//    （lib/index.cjs 切片 PURE 区段复用 mergeEnvPath 做用户 PATH 注入）。
+// ④ 单测 U42-U45（命令构造/重启链/PATH 合并/探测计划）。
 // v2.4.8（发布断链修复）：v2.4.5 曾无记录把 sidebar.footer.action 占位 id 从
 // cordis-panel-enh 回退为 cordis-panel（与基座同槽位同 id 冲突，update/重挂时
 // single-occupant duplicate / "Failed to load plugins"）——本版在 client 半部恢复
@@ -912,7 +923,7 @@ async function pingStream(llmService, entry, ref) {
 // ================= v2.4.0 版本检测与一键更新 · 纯函数族 =================
 // 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
-const PLUGIN_VERSION = '2.4.8';
+const PLUGIN_VERSION = '2.5.0';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
 const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）
@@ -1057,6 +1068,50 @@ function validateManifestFiles(files) {
     if (!seen.has(name)) return { ok: false, message: 'missing file: ' + name };
   }
   return { ok: true, files: out };
+}
+
+// ================= v2.5.0 一键更新并重启 · 纯函数族 =================
+// 方案「一键更新并重启方案.md」：命令构造与探测计划保持 PURE（可单测、单一事实源）。
+// lib/index.cjs 会切片本区段复用 mergeEnvPath（注入用户 PATH 用），勿在此引入
+// ctx/harness/module 状态。
+
+// 环境探测计划（key 与 lib/index.cjs probeEnv 返回的 key 一一对应；
+// level 供 client 渲染与一键更新前置校验：block=硬阻断 / warn=风险提示 / info=仅展示）
+const ENV_PROBE_KEYS = [
+  { key: 'net', level: 'warn' },       // 网络连通性（curl 实测 codeload）
+  { key: 'service', level: 'block' },  // 服务名存在（sc query）
+  { key: 'account', level: 'block' },  // 服务账号 LocalSystem（sc qc）
+  { key: 'restart', level: 'warn' },   // 服务可停止/启动（KillProcessTree 未启用）
+  { key: 'port', level: 'warn' },      // 端口占用者 = 服务自身进程
+  { key: 'mode', level: 'warn' },      // 安装形态（bundle 可用 / 动态不可用）
+  { key: 'pnpmInfo', level: 'info' },  // pnpm 注入机制（仅展示）
+];
+
+// 安装命令构造：node <dshBin> plugin --profile <profile> add github:Fishsb/dsh-prompt-enhancer#<tag>
+// dshBin 由 lib/index.cjs 从 process.argv[1] 注入（host 沙箱无 process）；
+// 参数级白名单校验在 lib 层 isInstallArgs 二次把关。
+function buildInstallArgs(dshBin, tag, profile) {
+  return [dshBin, 'plugin', '--profile', profile, 'add', 'github:Fishsb/dsh-prompt-enhancer#' + tag];
+}
+
+// 重启链：net stop → 2s 缓冲 → net start（& 无条件串联，保证 stop 返回后必然继续；
+// 分离进程由 lib 层 execDetached 以 cmd /c 脱离进程树执行）
+function buildRestartChain(serviceName) {
+  return 'net stop ' + serviceName + ' & timeout /t 2 /nobreak >nul & net start ' + serviceName;
+}
+
+// PATH 合并（系统 PATH + 用户 PATH，大小写不敏感去重，保留顺序）；空段忽略
+function mergeEnvPath(sysPath, userPath) {
+  const seen = new Set();
+  const out = [];
+  for (const seg of String(sysPath + ';' + userPath).split(';')) {
+    if (seg === '') continue;
+    const key = seg.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(seg);
+  }
+  return out.join(';');
 }
 
 // ==PURE-END==
@@ -1588,6 +1643,7 @@ return {
     // host 只做解析/校验/比较/写入（能力均已实机验证可用）。
     const updateCache = new Map();      // repo → { at, value }（TTL UPDATE_CACHE_TTL_MS）
     const pullInFlight = new Set();     // repo → 拉取中（防重入 PULL_BUSY）
+    let applyInFlight = false;          // v2.5.0 一键更新中（防重入 APPLY_BUSY）
 
     // v2.4.1（实测回填 §9-T5）：策略必须**带会话解析**——无会话时 workspaceRoot 回退到 DSH
     // 安装目录且写工作区返回 FS_SANDBOX_DENIED（实机验证）；带 session 后 mode=会话预设
@@ -1712,6 +1768,87 @@ return {
         return { ok: true, repo, tag, dir, files: written };
       } finally {
         pullInFlight.delete(repo);
+      }
+    });
+
+    // v2.5.0（方案「一键更新并重启方案.md」）：环境检测——只读探测 7 项，
+    // 探测执行在 lib/index.cjs（probeEnv，bundle 形态注入）；本侧仅转发 + 合并展示元数据。
+    harness.handle('update/envcheck', async (args) => {
+      if (!harness.probeEnv) {
+        return { ok: false, code: 'UNSUPPORTED', message: '动态安装不支持环境检测，请用 bundle 安装' };
+      }
+      try {
+        const serviceName = args && typeof args.serviceName === 'string' && /^[A-Za-z0-9_-]+$/.test(args.serviceName)
+          ? args.serviceName : 'dsh-web';
+        const items = await harness.probeEnv(serviceName);
+        const meta = new Map(ENV_PROBE_KEYS.map((e) => [e.key, e]));
+        const out = items.map((it) => ({
+          key: it.key,
+          ok: it.ok === true,
+          warn: it.warn === true,
+          detail: typeof it.detail === 'string' ? it.detail : '',
+          level: meta.has(it.key) ? meta.get(it.key).level : 'warn',
+        }));
+        const blockMissing = out.filter((it) => it.level === 'block' && !it.ok).map((it) => it.key);
+        hlog('[enhance] update/envcheck ok svc=' + serviceName + ' items=' + out.length + ' blockMissing=' + (blockMissing.join(',') || '-'));
+        return { ok: true, items: out, blockMissing, checkedAt: Date.now() };
+      } catch (e) {
+        herr('[enhance] update/envcheck failed', e);
+        return { ok: false, code: 'ENVCHECK_FAILED', message: String(e && e.message ? e.message : e) };
+      }
+    });
+
+    // v2.5.0（方案「一键更新并重启方案.md」）：一键更新——官方路径安装（等完成）→
+    // 成功后才执行分离重启链（失败绝不重启）。仅 bundle 形态可用（harness.execCommand 判空）。
+    harness.handle('update/apply', async (args) => {
+      const repo = normalizeRepo(args && args.repo);
+      const tag = args && typeof args.tag === 'string' ? args.tag.trim() : '';
+      const profile = args && typeof args.profile === 'string' && /^[A-Za-z0-9_-]+$/.test(args.profile) ? args.profile : 'web';
+      const serviceName = args && typeof args.serviceName === 'string' && /^[A-Za-z0-9_-]+$/.test(args.serviceName)
+        ? args.serviceName : 'dsh-web';
+      if (!repo || repo !== 'Fishsb/dsh-prompt-enhancer') {
+        return { ok: false, code: 'BAD_REPO', message: 'repo must be Fishsb/dsh-prompt-enhancer' };
+      }
+      if (!isValidTag(tag)) return { ok: false, code: 'BAD_TAG', message: 'invalid tag' };
+      if (!harness.execCommand || typeof harness.execCommand !== 'function') {
+        return { ok: false, code: 'UNSUPPORTED', message: '动态安装不支持一键更新，请用 bundle 安装（dsh plugin add）' };
+      }
+      if (applyInFlight) {
+        return { ok: false, code: 'APPLY_BUSY', message: 'an apply is already in progress' };
+      }
+      const dshBin = harness.sysInfo && typeof harness.sysInfo.dshBin === 'string' ? harness.sysInfo.dshBin : '';
+      if (dshBin === '') {
+        return { ok: false, code: 'ENV_READ_FAIL', message: 'dsh 命令行入口不可用（非标准启动），请手动安装' };
+      }
+      applyInFlight = true;
+      try {
+        hlog('[enhance] update/apply start tag=' + tag + ' profile=' + profile + ' svc=' + serviceName);
+        const installArgs = buildInstallArgs(dshBin, tag, profile);
+        const r = await harness.execCommand(installArgs, { timeoutMs: 120000 });
+        if (!r.ok) {
+          herr('[enhance] update/apply install failed', r.code);
+          const code = r.code === 'TIMEOUT' ? 'TIMEOUT' : 'INSTALL_FAILED';
+          const snippet = String((r.stderr || r.stdout || '').trim()).slice(0, 500);
+          return { ok: false, code, message: snippet !== '' ? snippet : 'install failed (code ' + r.code + ')' };
+        }
+        // 安装成功 → 分离重启链（host 随后会被 net stop 终止——预期；execDetached 仅把链交出去）
+        let detachedOk = true;
+        try {
+          harness.execDetached(buildRestartChain(serviceName));
+        } catch (e) {
+          detachedOk = false;
+          herr('[enhance] update/apply execDetached failed', e);
+        }
+        hlog('[enhance] update/apply ok tag=' + tag + ' detached=' + detachedOk);
+        return {
+          ok: true,
+          code: detachedOk ? 'OK' : 'RESTART_SPAWN_FAILED',
+          restarted: detachedOk,
+          version: tag,
+          message: detachedOk ? '' : '已安装，请手动重启服务',
+        };
+      } finally {
+        applyInFlight = false;
       }
     });
 

@@ -387,6 +387,35 @@ const ZH = {
   updApplyCopy: '脚本分发：用拉取结果覆盖本地副本目录',
   updError: '操作失败，请重试',
   updRepoNotFound: '仓库不存在或无法访问（HTTP 404）',
+  // v2.5.0（一键更新并重启 + 环境检测）
+  envBtn: '环境检测',
+  envChecking: '检测中…',
+  envTitle: '环境状态',
+  envOk: '正常',
+  envNet: '网络连通性',
+  envNetUnreachable: '无法访问 GitHub（codeload）——请配置 npm 代理（如 http://127.0.0.1:10808）后重试',
+  envNetProxyUnreachable: '已配置代理但网络仍不通——请检查代理是否可用',
+  envService: '服务状态',
+  envServiceMissing: '服务不存在——请在插件配置中设置 updater.serviceName',
+  envAccount: '服务账号',
+  envAccountNotSystem: '非 LocalSystem——停止/启动服务可能无权限',
+  envRestart: '服务可重启',
+  envRestartKilltree: 'nssm 配置了 AppKillProcessTree——自动重启可能中断，建议关闭',
+  envPort: '端口占用',
+  envPortOccupied: '端口被其他进程占用——重启后服务可能起不来',
+  envMode: '安装形态',
+  envModeDynamic: '当前为动态安装——一键更新不可用，请改用 bundle 安装',
+  envPnpmInfo: 'pnpm 环境',
+  envPnpmInjected: '已自动注入用户 PATH',
+  envPnpmMissing: '未找到 pnpm——请安装 pnpm',
+  updApply: '⚡ 一键更新并重启',
+  updApplyConfirm: '确认重启服务？',
+  updApplying: '正在安装更新…（10–60 秒）',
+  updApplyDone: '正在重启服务（约 5–10 秒），请刷新页面',
+  updApplyReload: '刷新页面',
+  updApplyInstalledManual: '已安装，请手动重启服务',
+  updApplyUnsupported: '动态安装不支持一键更新，请用 bundle 安装',
+  updApplyBlocked: '环境检测未通过，请先处理：',
   cfgNav: '优化配置',
   cfgProvider: '模型提供方',
   cfgModel: '模型',
@@ -541,6 +570,35 @@ const EN = {
   updApplyCopy: 'Script copy: overwrite the local distribution folder with the pulled files',
   updError: 'Operation failed, please retry',
   updRepoNotFound: 'Repository not found or unreachable (HTTP 404)',
+  // v2.5.0 (one-click update & restart + environment check)
+  envBtn: 'Check env',
+  envChecking: 'Checking…',
+  envTitle: 'Environment',
+  envOk: 'OK',
+  envNet: 'Network (codeload)',
+  envNetUnreachable: 'Cannot reach GitHub (codeload) — configure an npm proxy (e.g. http://127.0.0.1:10808) and retry',
+  envNetProxyUnreachable: 'Proxy configured but network still fails — verify the proxy is up',
+  envService: 'Service',
+  envServiceMissing: 'Service not found — set updater.serviceName in the plugin config',
+  envAccount: 'Service account',
+  envAccountNotSystem: 'Not LocalSystem — stopping/starting the service may lack permission',
+  envRestart: 'Service restartable',
+  envRestartKilltree: 'nssm AppKillProcessTree is enabled — automatic restart may be interrupted; consider disabling it',
+  envPort: 'Port in use',
+  envPortOccupied: 'Port is held by another process — the service may fail to start after restart',
+  envMode: 'Install form',
+  envModeDynamic: 'Dynamic install — one-click update unavailable; use bundle install instead',
+  envPnpmInfo: 'pnpm env',
+  envPnpmInjected: 'User PATH auto-injected',
+  envPnpmMissing: 'pnpm not found — install pnpm',
+  updApply: '⚡ Update & restart',
+  updApplyConfirm: 'Confirm service restart?',
+  updApplying: 'Installing update… (10–60s)',
+  updApplyDone: 'Restarting service (≈5–10s), refresh the page',
+  updApplyReload: 'Refresh',
+  updApplyInstalledManual: 'Installed — restart the service manually',
+  updApplyUnsupported: 'Dynamic install does not support one-click update; use bundle install',
+  updApplyBlocked: 'Environment check failed, resolve first: ',
   cfgNav: 'Optimize settings',
   cfgProvider: 'Provider',
   cfgModel: 'Model',
@@ -1053,6 +1111,30 @@ function updaterRepoOf(cfg) {
   return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) && r.length <= 100 ? r : UPDATER_DEFAULT_REPO;
 }
 
+// v2.5.0：环境检测渲染元数据——展示顺序/标签键/detail 状态码 → 文案键
+// （detail 由 host probeEnv 返回；文案键对应 i18n 字典）
+const ENV_ITEMS = [
+  { key: 'net', label: 'envNet' },
+  { key: 'service', label: 'envService' },
+  { key: 'account', label: 'envAccount' },
+  { key: 'restart', label: 'envRestart' },
+  { key: 'port', label: 'envPort' },
+  { key: 'mode', label: 'envMode' },
+  { key: 'pnpmInfo', label: 'envPnpmInfo' },
+];
+const ENV_DETAIL_TEXT = {
+  ok: 'envOk',
+  'ok-direct': 'envOk',
+  injected: 'envPnpmInjected',
+  unreachable: 'envNetUnreachable',
+  'proxy-unreachable': 'envNetProxyUnreachable',
+  missing: 'envServiceMissing',
+  'not-system': 'envAccountNotSystem',
+  killtree: 'envRestartKilltree',
+  occupied: 'envPortOccupied',
+  dynamic: 'envModeDynamic',
+};
+
 function UpdaterCard(props) {
   const t = makeT(props);
   const [repoInput, setRepoInput] = React.useState(updaterRepoOf(configState.value));
@@ -1062,11 +1144,22 @@ function UpdaterCard(props) {
   const [result, setResult] = React.useState(null);
   const [pullRes, setPullRes] = React.useState(null);
   const [error, setError] = React.useState(null);
+  // v2.5.0：环境检测（null=未检测；host 侧 60s 缓存）
+  const [envItems, setEnvItems] = React.useState(null);
+  const [envChecking, setEnvChecking] = React.useState(false);
+  const [envError, setEnvError] = React.useState(null);
+  // v2.5.0：一键更新（idle|confirm|applying|done）
+  const [applyPhase, setApplyPhase] = React.useState('idle');
+  const [applyErr, setApplyErr] = React.useState(null);
 
   // v2.4.1（§9-T5）：RPC 携带 sessionId——host 需经会话解析 sandboxPolicy（写入边界=会话工作区）
   const sessionId = props.useSessions ? props.useSessions((s) => s.current) : undefined;
 
   const repo = updaterRepoOf({ updater: { repo: repoInput, targetDir: '' } });
+  // v2.5.0：可配置服务名/profile（config.updater，缺省 dsh-web / web）
+  const updaterCfg = configState.value && configState.value.updater ? configState.value.updater : {};
+  const serviceName = typeof updaterCfg.serviceName === 'string' && /^[A-Za-z0-9_-]+$/.test(updaterCfg.serviceName) ? updaterCfg.serviceName : 'dsh-web';
+  const profile = typeof updaterCfg.profile === 'string' && /^[A-Za-z0-9_-]+$/.test(updaterCfg.profile) ? updaterCfg.profile : 'web';
 
   const persist = (nextRepo, nextDir) => {
     saveConfig({ updater: { repo: nextRepo, targetDir: nextDir } });
@@ -1145,6 +1238,68 @@ function UpdaterCard(props) {
     });
   };
 
+  // v2.5.0：环境检测（只读；host 60s 缓存）
+  const doEnvCheck = () => {
+    if (envChecking) return;
+    setEnvChecking(true);
+    setEnvError(null);
+    host.call('update/envcheck', { serviceName }).then((res) => {
+      const r = res && typeof res === 'object' ? res : {};
+      if (r.ok !== true) {
+        setEnvItems(null);
+        setEnvError(r.message || t('updError'));
+      } else {
+        setEnvItems(r.items || []);
+      }
+    }).catch(() => {
+      setEnvError(t('updError'));
+    }).then(() => {
+      setEnvChecking(false);
+    });
+  };
+
+  // v2.5.0：一键更新——确认态 → 前置环境校验（block 级失败阻止）→ update/apply
+  const startApply = () => {
+    if (applyPhase !== 'idle') return;
+    setApplyPhase('confirm');
+  };
+  const cancelApply = () => {
+    if (applyPhase === 'confirm') setApplyPhase('idle');
+  };
+  const runApply = () => {
+    if (applyPhase !== 'confirm') return;
+    setApplyPhase('applying');
+    setApplyErr(null);
+    // 前置校验：先环境检测（host 60s 缓存），block 级失败 → 阻止并列出缺失项
+    host.call('update/envcheck', { serviceName }).then((envRes) => {
+      const er = envRes && typeof envRes === 'object' ? envRes : {};
+      if (er.ok === true && Array.isArray(er.blockMissing) && er.blockMissing.length > 0) {
+        const names = er.blockMissing
+          .map((k) => { const def = ENV_ITEMS.find((i) => i.key === k); return def ? t(def.label) : k; })
+          .join('、');
+        setApplyErr(t('updApplyBlocked') + ' ' + names);
+        setEnvItems(er.items || null);
+        setApplyPhase('idle');
+        return null;
+      }
+      if (er.ok === true && Array.isArray(er.items)) setEnvItems(er.items);
+      return host.call('update/apply', { repo, tag: result.remoteTag, profile, serviceName });
+    }).then((res) => {
+      if (!res) return; // 被前置校验阻止
+      const r = res && typeof res === 'object' ? res : {};
+      if (r.ok !== true) {
+        setApplyErr((r.message ? r.message + ' ' : '') + t('updError'));
+        setApplyPhase('idle');
+      } else {
+        setApplyPhase('done');
+        setApplyErr(r.code === 'RESTART_SPAWN_FAILED' ? t('updApplyInstalledManual') : null);
+      }
+    }).catch(() => {
+      setApplyErr(t('updError'));
+      setApplyPhase('idle');
+    });
+  };
+
   let statusNode = null;
   if (result) {
     const text = result.status === 'outdated' ? t('updOutdated')
@@ -1159,7 +1314,7 @@ function UpdaterCard(props) {
     React.createElement('div', { className: 'dsh-plg-head' },
       React.createElement('span', { className: 'dsh-plg-name' }, t('updTitle')),
     ),
-    // 行 1：repo 输入 + 检测按钮
+    // 行 1：repo 输入 + 检测按钮 + 环境检测按钮（v2.5.0，样式同检测按钮）
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label' }, t('updRepo')),
       React.createElement('input', {
@@ -1175,7 +1330,39 @@ function UpdaterCard(props) {
         disabled: checking || pulling,
         onClick: doCheck,
       }, checking ? t('updChecking') : t('updCheck')),
+      React.createElement('button', {
+        type: 'button',
+        className: 'dsh-plg-btn dsh-plg-btn-primary',
+        disabled: checking || pulling || envChecking,
+        onClick: doEnvCheck,
+      }, envChecking ? t('envChecking') : t('envBtn')),
     ),
+    // v2.5.0：环境检测结果区（✓ 绿 / ⚠ 黄灰 / ✗ 红 + 指引）
+    envItems || envError
+      ? React.createElement('div', { className: 'dsh-plg-env' },
+          React.createElement('div', { className: 'dsh-plg-row' },
+            React.createElement('span', { className: 'dsh-plg-label' }, t('envTitle')),
+          ),
+          envError
+            ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, envError)
+            : null,
+          envItems
+            ? React.createElement('div', { className: 'dsh-plg-env-list' },
+                ENV_ITEMS.map((def) => {
+                  const it = envItems.find((x) => x.key === def.key);
+                  if (!it) return null;
+                  const cls = it.ok ? 'ok' : (it.warn ? 'warn' : 'fail');
+                  const detailKey = ENV_DETAIL_TEXT[it.detail] || 'envOk';
+                  return React.createElement('div', { key: def.key, className: 'dsh-plg-env-item dsh-plg-env-' + cls },
+                    React.createElement('span', { className: 'dsh-plg-env-mark' }, it.ok ? '✓' : (it.warn ? '⚠' : '✗')),
+                    React.createElement('span', { className: 'dsh-plg-env-label' }, t(def.label)),
+                    React.createElement('span', { className: 'dsh-plg-env-detail' }, t(detailKey)),
+                  );
+                }),
+              )
+            : null,
+        )
+      : null,
     // 行 2：结果区（本地/远端/状态；release 元数据仅同名时展示）
     result
       ? React.createElement('div', { className: 'dsh-plg-row' },
@@ -1217,6 +1404,37 @@ function UpdaterCard(props) {
             React.createElement('div', { className: 'dsh-plg-hint' }, t('updApplyCopy')),
           ),
         )
+      : null,
+    // v2.5.0：一键更新并重启（仅 outdated；确认态 → 执行 → done 提供刷新按钮）
+    result && result.status === 'outdated'
+      ? React.createElement('div', { className: 'dsh-plg-row' },
+          React.createElement('button', {
+            type: 'button',
+            className: 'dsh-plg-btn ' + (applyPhase === 'confirm' ? 'dsh-plg-btn-danger' : 'dsh-plg-btn-primary'),
+            disabled: applyPhase === 'applying' || checking || pulling || envChecking,
+            onClick: applyPhase === 'confirm' ? runApply : startApply,
+          }, applyPhase === 'confirm' ? t('updApplyConfirm')
+            : applyPhase === 'applying' ? t('updApplying')
+            : applyPhase === 'done' ? t('updApplyDone')
+            : t('updApply')),
+          applyPhase === 'confirm'
+            ? React.createElement('button', {
+                type: 'button',
+                className: 'dsh-plg-btn',
+                onClick: cancelApply,
+              }, t('cancel'))
+            : null,
+          applyPhase === 'done'
+            ? React.createElement('button', {
+                type: 'button',
+                className: 'dsh-plg-btn dsh-plg-btn-primary',
+                onClick: () => window.location.reload(),
+              }, t('updApplyReload'))
+            : null,
+        )
+      : null,
+    applyErr
+      ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, applyErr)
       : null,
     error ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, error) : null,
   );
@@ -2031,6 +2249,17 @@ const CSS = [
   '.dsh-plg-upd-body{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:16px;max-height:64px;overflow:auto;white-space:pre-wrap;word-break:break-all}',
   '.dsh-plg-upd-done{display:flex;flex-direction:column;gap:6px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:8px 10px;background:var(--dsw-alias-bg-layer-1);font-size:12px;line-height:16px;color:var(--dsw-alias-label-primary)}',
   '.dsh-plg-upd-apply{display:flex;flex-direction:column;gap:2px}',
+  // v2.5.0：环境检测结果区 + 一键更新危险态
+  '.dsh-plg-env{display:flex;flex-direction:column;gap:4px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:6px 10px;background:var(--dsw-alias-bg-layer-1)}',
+  '.dsh-plg-env-list{display:flex;flex-direction:column;gap:3px}',
+  '.dsh-plg-env-item{display:flex;align-items:baseline;gap:6px;font-size:12px;line-height:16px}',
+  '.dsh-plg-env-mark{flex:none;width:14px;text-align:center}',
+  '.dsh-plg-env-label{flex:none;color:var(--dsw-alias-label-primary);min-width:88px}',
+  '.dsh-plg-env-detail{color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}',
+  '.dsh-plg-env-ok .dsh-plg-env-mark{color:var(--dsw-alias-state-success-primary)}',
+  '.dsh-plg-env-warn .dsh-plg-env-mark{color:var(--dsw-alias-state-warn-primary)}',
+  '.dsh-plg-env-fail .dsh-plg-env-mark{color:var(--dsw-alias-state-error-primary)}',
+  '.dsh-plg-btn-danger{border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}',
 ].join('\n');
 
 return {
