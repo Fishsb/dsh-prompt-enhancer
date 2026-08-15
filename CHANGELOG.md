@@ -35,6 +35,7 @@
   - **client updater/env 元数据提取**：从 `src/client/legacy/plugin-client.js` 抽出到 `src/client/updater.js`（UPDATER_DEFAULT_REPO / UPDATER_MANIFEST / URL 构造 / ENV_ITEMS / ENV_DETAIL_TEXT / updaterRepoOf），`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-updater.mjs` 维护工具 — 架构治理
   - **client 配置/状态逻辑提取**：从 `src/client/legacy/plugin-client.js` 抽出到 `src/client/state.js`（configState / cloneDefaults / sanitize / load/save/subscribe / saveStatus 等），`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-state.mjs` 维护工具 — 架构治理
   - **client helper/会话逻辑提取**：从 `src/client/legacy/plugin-client.js` 抽出到 `src/client/helpers.js`（errorKey / makeT / sessionStores / enhance / undo / guardPasses 等），`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-helpers.mjs` 维护工具 — 架构治理
+  - **client 模型 helper 提取**：从 `src/client/legacy/plugin-client.js` 抽出 `buildCandidates` 到 `src/client/model-helpers.js`，`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-model-helpers.mjs` 维护工具 — 架构治理
 
 ## [2.8.3] - 2026-08-16
 
