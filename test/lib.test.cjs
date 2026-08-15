@@ -810,15 +810,16 @@ test('U44 mergeEnvPath PATH 合并去重（v2.5.0）', () => {
 
 // v2.5.0：环境探测计划契约（与 lib/index.cjs probeEnv 的 key 一一对应）。
 test('U45 ENV_PROBE_KEYS 探测计划（v2.5.0）', () => {
-  assert.ok(Array.isArray(ENV_PROBE_KEYS) && ENV_PROBE_KEYS.length === 7, '探测项 7 个');
+  assert.ok(Array.isArray(ENV_PROBE_KEYS) && ENV_PROBE_KEYS.length === 6, '探测项 6 个（v2.5.2 收敛为重启链依赖）');
   const keys = ENV_PROBE_KEYS.map((e) => e.key);
-  assert.equal(new Set(keys).size, 7, 'key 唯一');
+  assert.equal(new Set(keys).size, 6, 'key 唯一');
   for (const e of ENV_PROBE_KEYS) {
-    assert.ok(['block', 'warn', 'info'].includes(e.level), 'level 合法: ' + e.key);
+    assert.ok(['block', 'warn'].includes(e.level), 'level 合法: ' + e.key);
   }
-  assert.ok(keys.includes('net') && keys.includes('service') && keys.includes('account')
-    && keys.includes('restart') && keys.includes('port') && keys.includes('mode') && keys.includes('pnpmInfo'),
-    '7 项 key 与 probeEnv 一致');
+  assert.ok(keys.includes('service') && keys.includes('account')
+    && keys.includes('svc-type') && keys.includes('svc-bin')
+    && keys.includes('restart') && keys.includes('port'),
+    '6 项 key 与 probeEnv 一致');
   const json = JSON.stringify(ENV_PROBE_KEYS);
   assert.ok(!/proxy|password|token|secret/i.test(json), '计划不含敏感字段');
 });

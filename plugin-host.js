@@ -923,7 +923,7 @@ async function pingStream(llmService, entry, ref) {
 // ================= v2.4.0 版本检测与一键更新 · 纯函数族 =================
 // 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
-const PLUGIN_VERSION = '2.5.1';
+const PLUGIN_VERSION = '2.5.2';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
 const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）
@@ -1076,15 +1076,16 @@ function validateManifestFiles(files) {
 // ctx/harness/module 状态。
 
 // 环境探测计划（key 与 lib/index.cjs probeEnv 返回的 key 一一对应；
-// level 供 client 渲染与一键更新前置校验：block=硬阻断 / warn=风险提示 / info=仅展示）
+// level 供 client 渲染与一键更新前置校验：block=硬阻断 / warn=风险提示。
+// v2.5.2 收敛：仅保留重启链直接依赖（service/account/svc-type/svc-bin/restart/port），
+// 安装链与形态类检查（net/mode/pnpmInfo）按用户决策移除。）
 const ENV_PROBE_KEYS = [
-  { key: 'net', level: 'warn' },       // 网络连通性（curl 实测 codeload）
   { key: 'service', level: 'block' },  // 服务名存在（sc query）
   { key: 'account', level: 'block' },  // 服务账号 LocalSystem（sc qc）
+  { key: 'svc-type', level: 'block' }, // 服务启用状态（START_TYPE != DISABLED）
+  { key: 'svc-bin', level: 'block' },  // nssm Application 可执行文件存在
   { key: 'restart', level: 'warn' },   // 服务可停止/启动（KillProcessTree 未启用）
-  { key: 'port', level: 'warn' },      // 端口占用者 = 服务自身进程
-  { key: 'mode', level: 'warn' },      // 安装形态（bundle 可用 / 动态不可用）
-  { key: 'pnpmInfo', level: 'info' },  // pnpm 注入机制（仅展示）
+  { key: 'port', level: 'warn' },      // 端口占用者 = 服务自身进程（解析失败 → warn）
 ];
 
 // 安装命令构造：node <dshBin> plugin --profile <profile> add github:Fishsb/dsh-prompt-enhancer#<tag>
@@ -1788,6 +1789,8 @@ return {
           warn: it.warn === true,
           detail: typeof it.detail === 'string' ? it.detail : '',
           level: meta.has(it.key) ? meta.get(it.key).level : 'warn',
+          // TEMP-DEBUG: raw 透传（定位后移除）
+          raw: it.raw || null,
         }));
         const blockMissing = out.filter((it) => it.level === 'block' && !it.ok).map((it) => it.key);
         hlog('[enhance] update/envcheck ok svc=' + serviceName + ' items=' + out.length + ' blockMissing=' + (blockMissing.join(',') || '-'));
