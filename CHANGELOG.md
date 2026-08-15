@@ -28,6 +28,7 @@
   - **diagnostics 日志块提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/diagnostics.js`，`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-diagnostics.mjs` 维护工具 — 架构治理
   - **models/config 缓存块提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/models.js`（DeepSeek 兜底链、默认参数、模型能力缓存、自适应链），`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-models.mjs` 维护工具 — 架构治理
   - **plugins 管理 RPC 块提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/plugins.js`（inventory/run/stop/undefine 四个 handler），`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-plugins.mjs` 维护工具 — 架构治理
+  - **update RPC 块提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/update.js`（check/pull/envcheck 三个 handler），`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-update.mjs` 维护工具 — 架构治理
 
 ## [2.8.3] - 2026-08-16
 
