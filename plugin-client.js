@@ -126,7 +126,7 @@ const MODE_OPTIONS = [
   { value: 'standard', label: '标准模式', short: '标准', hint: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本' },
   { value: 'smart', label: '智能模式', short: '智能', hint: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准' },
   // v2.7.0（一键发布）：项目/游戏开发规格生成——网络检索 + 工作区检索 + 九章规格
-  { value: 'publish', label: '一键发布', short: '发布', hint: '输入粗略想法（如"想开发一个纸牌游戏"）→ 网络检索同类项目结构 + 工作区参考，一键生成完整可实施的开发规格（九章：目标/核心循环/数值/数据结构/机制/交互/技术方案/实施路线/验收清单）；多轮补充可逐步细化（建议开启记忆；上下文预算需 > 0 才启用检索）' },
+  { value: 'publish', label: '一键发布', short: '发布', hint: '输入粗略想法（如"想开发一个纸牌游戏"）→ 网络检索同类项目结构 + 工作区参考，一键生成完整可实施的开发规格（九章：目标/核心循环/数值/数据结构/机制/交互/技术方案/实施路线/验收清单）；多轮补充可逐步细化（记忆强制开启；上下文预算需 > 0 才启用检索）' },
 ];
 const MODE_VALUES = MODE_OPTIONS.map((m) => m.value);
 // v2.3（§7.2）：模式短标签解析——i18n 键（modeShort+Cap）优先（EN 正确），MODE_OPTIONS.short 回退
@@ -233,6 +233,8 @@ function sanitizeV2(parsed) {
   }
   // v2.2（§6.4）：记忆开关——mode='memory' 显式选择优先，autoMemory 并入；缺省 false
   v.memory = parsed.mode === 'memory' || parsed.autoMemory === true || parsed.memory === true;
+  // v2.8.2（用户需求）：一键发布模式记忆默认开启且不可关闭
+  if (v.mode === 'publish') v.memory = true;
   // v2.4.0（方案 §4）：updater 白名单校验（repo 格式 + 长度；targetDir 长度），旧配置缺字段 → 默认
   const u = parsed.updater && typeof parsed.updater === 'object' ? parsed.updater : {};
   if (typeof u.repo === 'string' && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(u.repo) && u.repo.length <= 100) v.updater.repo = u.repo;
@@ -562,6 +564,7 @@ const ZH = {
   cfgOrderNote: '仅影响模型下拉与候选的展示顺序',
   cfgInherited: '已继承当前使用模型（含推理等级）',
   // v2.2（§0.2/§6.6）：模式体系文案（MODE_OPTIONS hint 由 cfgModeHint 提供）
+  cfgPublishMemoryLocked: '一键发布模式记忆强制开启（多轮扩充需要），不可关闭',
   cfgMode: '优化模式',
   cfgMemory: '记忆功能',
   cfgMemoryNote: '开启后，多轮「优化→修改→再优化」累积为记忆链（持续记忆：固定保留最近 4 轮输入与输出，滚动更新；发送或清空输入框均不清除——内容删除可能表示方向调整；仅撤回弹出最后一轮），每轮再优化以多轮对话形式代入全部轮次，并感知你对上一轮结果的修改方向（新增/删除）；首次自动走轻量模式；关闭后完全不再读取/写入',
@@ -570,7 +573,7 @@ const ZH = {
   cfgModeHintStandard: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本',
   cfgModeHintSmart: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准',
   // v2.7.0（一键发布）：网络检索 + 工作区检索 + 九章规格生成
-  cfgModeHintPublish: '输入粗略想法（如"想开发一个纸牌游戏"）→ 网络检索同类项目结构 + 工作区参考，一键生成完整可实施的开发规格（九章：目标/核心循环/数值/数据结构/机制/交互/技术方案/实施路线/验收清单）；多轮补充可逐步细化（建议开启记忆；上下文预算需 > 0 才启用检索）',
+  cfgModeHintPublish: '输入粗略想法（如"想开发一个纸牌游戏"）→ 网络检索同类项目结构 + 工作区参考，一键生成完整可实施的开发规格（九章：目标/核心循环/数值/数据结构/机制/交互/技术方案/实施路线/验收清单）；多轮补充可逐步细化（记忆强制开启；上下文预算需 > 0 才启用检索）',
   cfgContextBudget: '上下文预算',
   cfgContextBudget0: '0（关闭注入）',
   cfgContextNote: 'V2 按任务进度与提示词主题检索工作区相关文件后注入优化参考；预算 0 = 不注入（等价基础优化）',
@@ -766,6 +769,7 @@ const EN = {
   cfgInherited: 'Inherited from the current model (incl. reasoning level)',
   // v2.0.0（C3）：引擎与上下文配置文案
   cfgEngine: 'Engine',
+  cfgPublishMemoryLocked: 'Memory is forced ON in Publish mode (needed for iterative expansion) and cannot be disabled.',
   cfgMode: 'Mode',
   cfgMemory: 'Memory',
   cfgMemoryNote: 'When on, iterative rounds (optimize → edit → re-optimize) accumulate into a memory chain (persistent memory: fixed window of the latest 4 input/output pairs, rolling; sending or clearing the composer does NOT clear it — deleting content may signal a direction change; only Undo drops the last round). Each re-optimization replays the chain as a multi-turn conversation and senses your edit direction (added/removed); first run falls back to Lite automatically; when off, memory is never read or written',
@@ -774,7 +778,7 @@ const EN = {
   cfgModeHintStandard: 'Rule understanding + file & session retrieval, no extra LLM call',
   cfgModeHintSmart: 'LLM task analysis + full retrieval, best understanding',
   // v2.7.0（一键发布）：网络检索 + 工作区检索 + 九章规格生成
-  cfgModeHintPublish: 'Feed a rough idea (e.g. "I want to make a card game") → web-search similar project structures + workspace references, generate a complete implementable dev spec in one click (9 chapters: goal/core loop/numbers/data/mechanics/UI/tech/roadmap/acceptance); iterative refinements keep improving it (memory recommended; context budget must be > 0 to enable retrieval)',
+  cfgModeHintPublish: 'Feed a rough idea (e.g. "I want to make a card game") → web-search similar project structures + workspace references, generate a complete implementable dev spec in one click (9 chapters: goal/core loop/numbers/data/mechanics/UI/tech/roadmap/acceptance); iterative refinements keep improving it (memory forced ON; context budget must be > 0 to enable retrieval)',
   cfgContextBudget: 'Context budget',
   cfgContextBudget0: '0 (no injection)',
   cfgContextNote: 'V2 analyzes task progress and retrieves relevant workspace files before optimizing; budget 0 = no injection (equivalent to basic)',
@@ -2253,6 +2257,9 @@ function ParamsTab(props) {
   const curLabel = t('cfgTemplateTextFor').replace('{mode}', modeShortLabel(t, cfg.mode));
   // v2.8.0（实测修正）：发布模式不设输出限制（host 硬覆盖）——三项参数置灰的依据
   const isPublishMode = cfg.mode === 'publish';
+  // v2.8.2（用户需求）：一键发布模式记忆默认开启且不可关闭
+  const memoryLocked = isPublishMode;
+  const memoryValue = memoryLocked ? true : cfg.memory;
   return React.createElement(React.Fragment, null,
     // v2.2（§6.6）：优化模式下拉（4 模式，记忆模式已删除）
     // v2.4.6（布局）：优化模式与模板合并为同一行双字段（两控件均属「优化行为」配置、
@@ -2263,7 +2270,11 @@ function ParamsTab(props) {
         React.createElement('select', {
           className: 'dsh-plg-select',
           value: cfg.mode,
-          onChange: (e) => save({ mode: e.target.value }),
+          onChange: (e) => {
+            const next = e.target.value;
+            // v2.8.2：切到一键发布时同步把记忆置为开启
+            save(next === 'publish' ? { mode: next, memory: true } : { mode: next });
+          },
           children: MODE_OPTIONS.map((m) => React.createElement('option', { key: m.value, value: m.value }, m.label)),
         }),
       ),
@@ -2286,8 +2297,9 @@ function ParamsTab(props) {
       React.createElement('label', { className: 'dsh-plg-label' }, t('cfgMemory')),
       React.createElement('select', {
         className: 'dsh-plg-select dsh-plg-select-thinking',
-        value: cfg.memory ? 'on' : 'off',
-        onChange: (e) => save({ memory: e.target.value === 'on' }),
+        value: memoryValue ? 'on' : 'off',
+        disabled: memoryLocked,
+        onChange: (e) => { if (!memoryLocked) save({ memory: e.target.value === 'on' }); },
         children: [
           React.createElement('option', { key: 'on', value: 'on' }, t('cfgReasoningOn')),
           React.createElement('option', { key: 'off', value: 'off' }, t('cfgReasoningOff')),
@@ -2295,6 +2307,7 @@ function ParamsTab(props) {
       }),
     ),
     React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgMemoryNote')),
+    memoryLocked ? React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgPublishMemoryLocked')) : null,
     // 预算下拉（全模式可见；0 = 不注入）
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label' }, t('cfgContextBudget')),
@@ -2332,7 +2345,7 @@ function ParamsTab(props) {
           React.createElement('textarea', {
             className: 'dsh-plg-textarea',
             value: curText,
-            rows: 6,
+            rows: 12,
             placeholder: t('cfgTemplateText'),
             onChange: (e) => save({ template: { ...cfg.template, texts: { ...(cfg.template.texts || {}), [cfg.mode]: e.target.value.slice(0, 4000) } } }),
           }),
@@ -2450,7 +2463,7 @@ const CSS = [
   '.dsh-plg-label{font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary);flex:none;min-width:96px}',
   '.dsh-plg-muted{font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}',
   '.dsh-plg-select{flex:1;min-width:0;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:4px 6px}',
-  '.dsh-plg-textarea{flex:1;min-width:0;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:6px 8px;resize:vertical;font-family:inherit}',
+  '.dsh-plg-textarea{flex:1;min-width:0;min-height:180px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:6px 8px;resize:vertical;font-family:inherit}',
   '.dsh-plg-approval{color:var(--dsw-alias-state-warn-primary);font-size:12px;line-height:16px;flex-wrap:wrap}',
   '.dsh-plg-actions{display:flex;gap:8px;justify-content:flex-end}',
   // v2.4.3：切换确认行——目标版本高亮便于核对

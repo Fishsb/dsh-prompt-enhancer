@@ -666,6 +666,8 @@ function validateConfig(raw) {
   // v2.2（§6.4）：记忆开关——显式 memory 字段（client config.memory）最高优先（含 false 关闭）；
   // 无 memory 字段时回退 mode='memory' / autoMemory 历史值；缺省 false
   out.memory = src.memory === true ? true : (src.memory === false ? false : parseMemory(src.mode, src.autoMemory));
+  // v2.8.2（用户需求）：一键发布（publish）模式记忆强制开启且不可关闭——host 侧最终兜底
+  if (out.mode === 'publish') out.memory = true;
   return out;
 }
 
@@ -2139,6 +2141,8 @@ return {
       const cfg = validateConfig(args && args.config);
       // v2.1（§2.2）：client 已判定实际模式（显式/auto/seed），请求 mode 覆盖解析值
       if (args && typeof args.mode === 'string' && MODE_KEYS.includes(args.mode)) cfg.mode = args.mode;
+      // v2.8.2（用户需求）：一键发布模式记忆强制开启——args.mode 覆盖后仍需兜底
+      if (cfg.mode === 'publish') cfg.memory = true;
       // v23（D6）：模型链 = cfg.fallback 按序（每条独立 reasoningEffort）；
       // 链为空 → 自适应解析当前环境默认链（不再区分 main/fallback）
       const chain = buildTryChain(cfg.fallback, await resolveAdaptiveChain(ctx.get('llm'), ctx.get('agentDefaultModel')));

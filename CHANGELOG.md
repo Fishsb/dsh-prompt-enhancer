@@ -6,6 +6,9 @@
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
 ## [Unreleased]
+### Changed
+- **一键发布模式记忆强制开启且不可关闭**：切换到 `publish` 模式时自动将记忆置为开启，设置页记忆开关在发布模式下禁用并显示说明；host 侧 `validateConfig` 与 `enhance` 入口双重兜底，即使客户端配置被改为关闭也强制生效 — [PEN-003]
+- **自定义模板编辑区增大**：设置页自定义模板 `textarea` 行数由 6 增至 12，并增加 `min-height: 180px`，改善长模板/长规格的编辑体验 — [PEN-002]
 
 ## [2.8.1] - 2026-08-16
 
