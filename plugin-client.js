@@ -2640,7 +2640,7 @@ function ModelMainSection(props) {
       const applyStats = (sr) => {
         const s = sr && typeof sr === 'object' ? sr : {};
         setTestState((prev) => prev && prev.key === key
-          ? { ...prev, result: { ...prev.result, statsLoading: false, estimate: s.ok ? s.estimatedBaseSeconds : null, statsUnavailable: !s.ok, stats: s.ok ? { ttftMs: s.ttftMs, tokensPerSecond: s.tokensPerSecond } : undefined } }
+          ? { ...prev, result: { ...prev.result, statsLoading: false, estimate: s.ok ? s.estimatedBaseSeconds : null, statsUnavailable: !s.ok || typeof s.estimatedBaseSeconds !== 'number' || !Number.isFinite(s.estimatedBaseSeconds), stats: s.ok ? { ttftMs: s.ttftMs, tokensPerSecond: s.tokensPerSecond } : undefined } }
           : prev);
       };
       const statsP = host.call('models/stats', { provider: entry.provider, model: entry.model, inputChars });
@@ -2681,9 +2681,6 @@ function ModelMainSection(props) {
       } else if (testState.result && testState.result.ok) {
         const parts = [];
         parts.push(React.createElement('span', { className: 'dsh-plg-test-ok' }, t('cfgTestOk').replace('{ms}', String(testState.result.latencyMs))));
-        if (typeof testState.result.ttftMs === 'number') {
-          parts.push(React.createElement('span', { className: 'dsh-plg-test-ttft' }, t('cfgTestTtft').replace('{ms}', String(testState.result.ttftMs))));
-        }
         if (testState.result.statsLoading === true) {
           parts.push(React.createElement('span', { className: 'dsh-plg-muted' }, t('cfgTesting')));
         } else if (typeof testState.result.estimate === 'number' && Number.isFinite(testState.result.estimate)) {

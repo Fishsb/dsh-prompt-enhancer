@@ -2541,7 +2541,7 @@ return {
     const sessionProjectionCache = new Map();   // sid -> { values, at }
     const SESSION_MODEL_TTL_MS = 600000;        // persisted route 缓存 10 分钟
     const SESSION_PROJECTION_TTL_MS = 600000;   // persisted projection 缓存 10 分钟
-    const MODEL_STATS_SCAN_LIMIT = 5;           // 单次调用最多新读多少个 persisted 会话
+    const MODEL_STATS_SCAN_LIMIT = 20;          // 单次调用最多新读多少个 persisted 会话（有界防卡，覆盖更多历史）
 
     function cachedSessionModel(sid) {
       const hit = sessionModelCache.get(sid);
@@ -2571,7 +2571,8 @@ return {
       if (!sq || typeof sq.listSessions !== 'function' || !proj || typeof proj.snapshot !== 'function') {
         return { ok: false, code: 'NO_STATS', message: 'session stats unavailable' };
       }
-      const acc = { ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0, sessions: 0 };
+      const exactAcc = { ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0, sessions: 0 };
+      const modelAcc = { ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0, sessions: 0 };
       try {
         const records = await sq.listSessions();
         let scanBudget = MODEL_STATS_SCAN_LIMIT;
@@ -2610,16 +2611,19 @@ return {
               }
             }
           }
-          if (!route || route.provider !== provider || route.model !== model) continue;
+          if (!route || route.model !== model) continue;
           if (projection) {
-            accumulateProjectionStats(acc, { values: projection });
+            // 优先 provider+model 精确匹配；若精确无数据，回退到“只按 model 名匹配”
+            if (route.provider === provider) accumulateProjectionStats(exactAcc, { values: projection });
+            accumulateProjectionStats(modelAcc, { values: projection });
           }
         }
       } catch (e) {
         herr('[enhance] models/stats failed', e);
         return { ok: false, code: 'STATS_FAILED', message: String(e && e.message ? e.message : e) };
       }
-      return { ok: true, ...summarizeModelStats(acc) };
+      const stats = exactAcc.sessions > 0 ? summarizeModelStats(exactAcc) : summarizeModelStats(modelAcc);
+      return { ok: true, ...stats, matchedBy: exactAcc.sessions > 0 ? 'exact' : 'model' };
     }
 
     harness.handle('models/stats', async (args) => {
