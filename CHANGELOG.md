@@ -7,6 +7,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **测试覆盖缺口（审查发现）**：`test/bundle-smoke.test.cjs`（生成物运行时冒烟，SMK-01..17）自 M2 加入后从未挂入 `npm test` 脚本与 CI——CHANGELOG 的测试数字口径（95+17=112）一直包含它但实际只跑 95；修复为脚本收录，`npm test` 现为 112/112，与日志口径一致 — 架构治理
+
 ### Changed
 - **设置界面样式与交互逻辑对齐官方 Harness（方案 `docs/internal/方案-设置界面样式与交互对齐官方.md`）**：① 样式全面对齐官方 design platform——控件字号 12→13px、圆角 6/10→8/12、边框 l1→l2、背景层 1/2→2/3、卡片新增 hover 反馈、hint 11→12px、内容区 max-width 760px、主按钮改官方实底范式（`dsh-plg-btn-primary`，danger 保留描边红 + 新增 hover 底）；② tab 视觉对齐官方 PluginsSettingsSection（13px、gap 22px、label-primary 下划线 + business-primary focus outline），新增 roving tabindex + 方向键/Home/End 键盘导航与 tab/panel aria 关联；③ 可访问性补齐——label htmlFor/id（ParamsTab/PluginsSection/UpdaterCard）、hint aria-describedby、CollapsibleSection aria-controls/region、设置页 section 新增标题+简介（新增 i18n `secPluginsIntro` 中英）；④ composer 按钮硬编码 rgba 背景 → 令牌 color-mix（hover 用 `interactive-bg-hover`）——纯 client 视觉/交互调整，host RPC 与即时保存契约零改动 — [PEN-002] — 架构治理
 - **细粒度进度反馈（v3.0r，用户需求）**：标准/智能/一键发布等检索重模式执行期间，按钮进度提示全程动态变化，消除"卡顿"误判——① `enhance/progress` RPC 返回扩展字段（`detailKey`/`detailArgs`/`step`/`total`/`elapsedMs`，`stage` 兼容保留）；② host 新增子步骤注入点：会话窗口判定（i/n）、开发意向判定、文档分析、代码检索、检索主题规划、逐主题搜索（「正在搜索 2/3：体素引擎」）、链节重试（i/n）、工作区扫描；`rec` 增加 `startedAt` 计时；③ client 进度文案优先级 detailKey 模板（i18n 中英新键 8 个，`{current}/{total}/{query}` 占位）> stage 文案 > 默认；末尾追加**已用秒数**（如「正在搜索 2/3：体素引擎 · 8s」）；新增 SMK-17（publish 期间轮询断言 detailKey 序列与字段），测试 111 → 112 — 架构治理
