@@ -347,7 +347,8 @@ function finishSaveCheck(seq, ok) {
   if (seq !== saveStatus.seq) return;
   saveStatus.phase = ok ? 'saved' : 'failed';
   notifySaveStatus();
-  // 3s 后回到 idle（提示消失）
+  // 3s 后回到 idle（提示消失）；无 timer 服务 → 结果常驻（直到下次改动），保证显式反馈可见
+  if (!timerSvc) return;
   timerDelay(3000).then(() => {
     if (seq === saveStatus.seq && saveStatus.phase !== 'saving') {
       saveStatus.phase = 'idle';
@@ -364,7 +365,7 @@ async function runSaveCheck(seq) {
   finishSaveCheck(seq, ok);
 }
 function scheduleSaveCheck(seq) {
-  if (!timerSvc) return; // 无 timer 服务 → 不启动状态机（保持即时行为）
+  if (!timerSvc) { runSaveCheck(seq); return; } // 无 timer 服务 → 同步立即真实校验（无防抖）
   timerDelay(1000).then(() => { // 改动 1s 后执行真实检查（防抖：过期检查由 seq 丢弃）
     if (seq === saveStatus.seq) runSaveCheck(seq);
   });
@@ -375,13 +376,12 @@ function saveConfig(patch) {
   if (typeof localStorage !== 'undefined') {
     try { localStorage.setItem(CONFIG_KEY, JSON.stringify(configState.value)); } catch (e) { /* 忽略 */ }
   }
-  // v2.7.0：保存校验状态机——saving（转圈）→ 1s 后真实校验 → saved/failed
-  if (timerSvc) {
-    const seq = ++saveStatus.seq;
-    saveStatus.phase = 'saving';
-    notifySaveStatus();
-    scheduleSaveCheck(seq);
-  }
+  // v2.7.0：保存校验状态机——saving（转圈）→ 1s 后真实校验 → saved/failed；
+  // 全状况显式反馈：无 timer 服务也启动状态机（同步校验，结果常驻）
+  const seq = ++saveStatus.seq;
+  saveStatus.phase = 'saving';
+  notifySaveStatus();
+  scheduleSaveCheck(seq);
   for (const fn of [...configState.listeners]) fn();
 }
 
@@ -2724,10 +2724,8 @@ function ModelPluginsSection(props) {
       'aria-labelledby': tabsId + '-tab-' + tab,
     }, body),
     // v2.7.0：保存状态——saving 转圈 / saved ✓ / failed ✗ / idle 隐藏；
-    // 无 timer 服务（降级）→ 保持旧常驻「已保存」提示
-    !timerSvc
-      ? React.createElement('div', { className: 'dsh-plg-saved', role: 'status' }, t('cfgSaved'))
-      : saveStatus.phase === 'saving'
+    // 全状况显式反馈：任何环境（含无 timer 服务）均按真实校验结果渲染，无无条件「已保存」
+    saveStatus.phase === 'saving'
         ? React.createElement('div', { className: 'dsh-plg-save dsh-plg-save-busy', role: 'status' },
             React.createElement('span', { className: 'dsh-enh-spin', 'aria-hidden': true }),
             React.createElement('span', null, t('cfgSaving')))
