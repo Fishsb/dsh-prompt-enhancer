@@ -16,6 +16,7 @@
 - **工作区文档清理（用户指令）**：① 删除 5 个历史版本快照目录（`dsh-prompt-enhancer-v2.4.5/2.4.8/2.5.1/2.7.0/2.8.3`，本地归档备份，git tag 已有完整备份）与旧工作副本目录（`prompt-enhancer-release - 提示词增强脚本`）；② 删除旧版本发布说明 `release-notes/v2.4.0–v2.8.3`（22 个，保留 3.0.0；完整说明见 GitHub Releases 页）；③ 删除已完成使命的开发方案文档 `docs/internal/architecture-refactor-plan.md`（M0-M6 已全部落地）与 `docs/internal/方案-publish路由与自评.md`（已被 v3.0p 取代）；保留 `.internal/` 排障经验沉淀、`CONTRIBUTING.md`、模块结构说明、项目地图与 devref；`prompt-enhancer-plugin`（早期开发记录唯一副本）按用户指示删除不备份 — 架构治理
 - **记忆链发送清空（v3.0s，用户修正）**：发送消息（基座 submit 成功，phase 经 submitting/adjudicating 飞行期）即清空记忆链并重置 seen 标记——「持续记忆」仅限发送前一轮优化内的会话，发送后新一轮迭代从零开始（链空 + 无标记 → 重新「首次轻量兜底」）；仅手动清空输入框不清除（内容删除可能表示方向调整）；发送失败（draft 保留）不清除 — 架构治理
 - **智能模式更名为专家模式（用户指令）**：设置页「优化模式」下拉展示名「智能模式」→「专家模式」，按钮短标签「智能」→「专家」，英文 Smart→Expert（README 中英同步）；内部 mode value `smart`、配置存储键与模板键保持不变，存量配置零迁移 — [PEN-002] — 架构治理
+- **清理死代码（审查遗留）**：删除 `src/client/constants.js` 中遗留的重复 `module.exports` 段（v3.0 时代旧文案整段，`require` 只取末条、从未生效，含旧「智能模式」字样）；导出 chunk 逐字节不变，生成物与测试零改动 — 架构治理
 
 ## [3.0.0] - 2026-08-16
 
