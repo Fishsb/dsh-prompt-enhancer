@@ -7,36 +7,22 @@
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-08-16
+
+### Fixed
+- **检测版本缓存导致新版本检测不到（用户报告）**：手动「检测版本」曾受两层缓存影响——host 侧 `update/check` 5 分钟进程缓存（`UPDATE_CACHE_TTL_MS`）可能在刚发布 tag 后返回旧值、浏览器对 GitHub tags API 响应的 HTTP 缓存。修复：手动检测**总是取最新**——client fetch 加 `cache:'no-store'`、`update/check` 传 `noCache:true`（host 命中时先清缓存再拉取）；实测：同步安装副本后页面检测正确显示本地/远端版本差异并提示「发现新版本」（远端正确），本地版本号随 dsh-web 重启对齐 — [VU-001] — 架构治理
+- **更新完成后「端口重启」误报执行器不可用（用户报告）**：根因 = `runRestart` 依赖 host RPC（`ensureExecutor` 的 envcheck/executorEnsure）——而「一键更新」（apply restart:false）安装完成后**服务已停止**，host 不可达导致 RPC 失败，被外层 catch 误报「更新执行器不可用——请确认插件为 bundle 安装（端口 3081）」（实际插件是 bundle 安装、执行器 0.1.7 一直在线）。修复：**端口重启绕过 host，直连执行器**（ping 确认在线 → fire-and-forget restart → 1s 轮询）——执行器是独立进程（3081），服务停止不影响它；执行器确实不可达时才显示该提示（语义此时才正确）；顺带：安装完成（installed）后主动刷新「未重启」提醒横幅（host 可达时出现，不可达静默）、重启成功（healthy）后清除横幅；实测：执行器直连 ping 200、confirm/取消交互完好、112/112 测试 — [VU-001] — 架构治理
+- **一键更新误触发服务重启（用户报告）**：根因 = 运行中的更新执行器仍是 0.1.6（旧 dsh-web 进程内 `EXECUTOR_VERSION` 被 require 缓存锁在旧值，executorEnsure 与旧执行器恒等匹配、永不升级），旧执行器无 `restart:false` 支持、忽略该参数走完整「安装+重启」流程。修复双管齐下：① **client 执行前版本守卫**——`runPullApply` 调 apply 前先 ping 执行器，版本 <0.1.7 则阻止并提示「请重启 dsh-web 升级执行器」；② **executorEnsure 目标版本改从磁盘解析**（`readLatestExecutorVersion` 每次调用读安装副本 `sys.cjs`，不再依赖进程 require 缓存）——旧 host 也能 kill 旧执行器并拉起新版；③ 顺带修复 `result` 为空时 `result.remoteTag` 抛 TypeError 被外层 catch 误报「执行器不可用」的问题（新增 `updCheckFirst` 提示）；新增 i18n `updExecutorTooOld`/`updCheckFirst`（中英）；实测：手动复刻 envcheck/executorEnsure/ping/apply 全链路 200、执行器确认 0.1.7 在线且状态 idle、null-result 路径正确提示 — [VU-001] — 架构治理
+- **测试覆盖缺口（审查发现）**：`test/bundle-smoke.test.cjs`（生成物运行时冒烟，SMK-01..17）自 M2 加入后从未挂入 `npm test` 脚本与 CI——CHANGELOG 的测试数字口径（95+17=112）一直包含它但实际只跑 95；修复为脚本收录，`npm test` 现为 112/112，与日志口径一致 — 架构治理
+
 ### Changed
 - **历史会话参考仅注入「结论信息」（用户需求）**：lite/standard/smart 的「相关会话参考」与 publish 的 v2 历史段此前把会话事件预拼接文本整段代入——**工具调用名 + 参数 JSON（含命令全文/文件内容）占注入文本的 85-92%**（实测 f535f8ac 会话窗口 [1,2]：text 2654 字符 vs tool-call 29813 字符）。修复：历史提取改走 `sessionQuery.readSurface`（原始事件，保留 content 块结构）→ 新增块级 `extractHistoryConclusions` 只取 user/assistant 消息的 `text` 块（显式结论/正文），丢弃 reasoning（思考过程）、tool-call（工具名+参数）、tool-result（工具输出）块，并剥除 user 消息内 `<system-reminder>` 系统注入块；readSurface 缺失时回退旧路径。实测同会话窗口 [1,2] 注入变为纯结论（工具参数 0 残留）— [PEN-001]
 - **会话轮次覆盖修正（审查发现）**：旧 `V2_MSG_SEQ_SCAN=16` 事件上限只够 ~8 轮，会话 >8 轮时 standard 的 [6,10] 窗口会静默滑向最旧可用轮（20 轮会话实际判 13-16 轮）；现按 `V2_ROUNDS_SCAN_MAX=10` 轮向后扫描（1 = 最近一轮，对齐最深窗口 [6,10]），窗口语义恢复正确；单测 U64/U65/U65b + smoke readSurface mock，115/115 — [PEN-001]
 - **优化响应看门狗 + 延迟连通性预检（用户需求）**：点击「优化」不再立即探测——按原模式直接生成，首条模型 3s（`WATCHDOG_TIMEOUT_MS`）内无任何输出 → 判为不通 → 中断并逐个探测剩余链（`pingStream` 短输入可达性，每条 3s 超时 `PROBE_TIMEOUT_MS`，30s 缓存 `PROBE_CACHE_TTL_MS`）→ 第一个通畅模型接手生成（不再挂看门狗防死循环）；剩余全不通时回头探测首条（慢但健康不误杀），仍不通 → 秒级 `ALL_MODELS_UNAVAILABLE`（对比此前固定 30s 超时）；`llm.stream` 同步抛错也走链回退；单测 U66/U67 + SMK-17/18/19，120/120 — [PEN-001]
 - **fallback 完成按钮反馈（用户需求）**：由非首个模型完成优化时，成功后按钮显示「✓ {模型} 优化，可撤回」（host 结果新增 `fallbackUsed` + 沿用 `model`；client `prettifyModel` 映射显示名），点击仍为撤回（功能不变）；首条正常完成维持「✓ 已优化，可撤回」— [PEN-001]
 - **保存反馈全状况显式化（用户需求）**：设置「已保存」提示此前在无 timer 服务环境降级为**无条件常驻「✓ 已保存」**（未经验证）；现任何环境一律走真实校验状态机——无 timer 服务时改动后同步执行 localStorage 读回逐字校验，结果「✓ 已保存 / ✗ 保存失败，请重试」**常驻显示直到下次改动**（有 timer 服务维持 1s 防抖 + 转圈 + 3s 后消失）；删除 UI 无条件「已保存」分支，杜绝「未落实也显示已保存」— [PEN-002]
-
-## [3.1.2] - 2026-08-16
-
-### Fixed
-- **检测版本缓存导致新版本检测不到（用户报告）**：手动「检测版本」曾受两层缓存影响——host 侧 `update/check` 5 分钟进程缓存（`UPDATE_CACHE_TTL_MS`）可能在刚发布 tag 后返回旧值、浏览器对 GitHub tags API 响应的 HTTP 缓存。修复：手动检测**总是取最新**——client fetch 加 `cache:'no-store'`、`update/check` 传 `noCache:true`（host 命中时先清缓存再拉取）；实测：同步安装副本后页面检测显示「本地 v3.1.1 / 远端 v3.1.2 / 发现新版本」（远端正确），本地版本号随 dsh-web 重启对齐 3.1.2 — [VU-001] — 架构治理
-- **更新完成后「端口重启」误报执行器不可用（用户报告）**：根因 = `runRestart` 依赖 host RPC（`ensureExecutor` 的 envcheck/executorEnsure）——而「一键更新」（apply restart:false）安装完成后**服务已停止**，host 不可达导致 RPC 失败，被外层 catch 误报「更新执行器不可用——请确认插件为 bundle 安装（端口 3081）」（实际插件是 bundle 安装、执行器 0.1.7 一直在线）。修复：**端口重启绕过 host，直连执行器**（ping 确认在线 → fire-and-forget restart → 1s 轮询）——执行器是独立进程（3081），服务停止不影响它；执行器确实不可达时才显示该提示（语义此时才正确）；顺带：安装完成（installed）后主动刷新「未重启」提醒横幅（host 可达时出现，不可达静默）、重启成功（healthy）后清除横幅；实测：执行器直连 ping 200、confirm/取消交互完好、112/112 测试 — [VU-001] — 架构治理
-
-### Changed
 - **一键更新与端口重启职责划分（用户指令）**：「一键更新」**仅执行更新操作**——执行器 `apply` 改为只下载 + 校验新版本 tarball 到 staging（终态 `staged`），**不停止服务、不安装、不触碰任何端口**（服务全程在线）；所有端口相关操作（断开/监听/重启）与安装统一交由「端口重启」模块——执行器 `restart` 新增可选 `tag`：停服窗口内安装 staging tarball → 重启 + 健康检查（重启失败自动回滚旧版本）；client：一键更新轮询 `staged` 终态显示「✓ 新版本已下载，请点击端口重启完成安装并重启」，端口重启带 tag 直连执行器（安装/重启一体），纯重启（无 tag）不受影响；执行器 EXECUTOR_VERSION 0.1.7→0.1.8（executorEnsure 磁盘版本自动对齐）、client 版本守卫同步 ≥0.1.8；实测：执行器 apply 不再含 stop/install、restart 承载安装、安装副本同步验证、UI 渲染正常、112/112 测试 — [VU-001] — 架构治理
-
-## [3.1.1] - 2026-08-16
-
-### Fixed
-- **一键更新误触发服务重启（用户报告）**：根因 = 运行中的更新执行器仍是 0.1.6（旧 dsh-web 进程内 `EXECUTOR_VERSION` 被 require 缓存锁在旧值，executorEnsure 与旧执行器恒等匹配、永不升级），旧执行器无 `restart:false` 支持、忽略该参数走完整「安装+重启」流程。修复双管齐下：① **client 执行前版本守卫**——`runPullApply` 调 apply 前先 ping 执行器，版本 <0.1.7 则阻止并提示「请重启 dsh-web 升级执行器」；② **executorEnsure 目标版本改从磁盘解析**（`readLatestExecutorVersion` 每次调用读安装副本 `sys.cjs`，不再依赖进程 require 缓存）——旧 host 也能 kill 旧执行器并拉起新版；③ 顺带修复 `result` 为空时 `result.remoteTag` 抛 TypeError 被外层 catch 误报「执行器不可用」的问题（新增 `updCheckFirst` 提示）；新增 i18n `updExecutorTooOld`/`updCheckFirst`（中英）；实测：手动复刻 envcheck/executorEnsure/ping/apply 全链路 200、执行器确认 0.1.7 在线且状态 idle、null-result 路径正确提示 — [VU-001] — 架构治理
-
-### Changed
 - **重启过程反馈机制优化（用户需求）**：① 「端口重启」由**挂起等待**执行器完成（最长 1-2 分钟界面零更新）改为 **fire-and-forget + 1s 轮询**——发起即返回，进度由轮询接管；② 轮询间隔 2s→1s，**倒计时改为每秒更新**（原每 2s 跳 2 秒）；③ restarting 阶段状态行展示执行器阶段消息（正在停止服务 / 服务已停止，等待稳定 / 第 N 次重启：停止+启动 / 端口未就绪，准备重试）+ 轮次 + 剩余秒 + **已用秒数**（如「第 2 次重启：停止+启动（第 2 次 · 剩余 8 秒 · 已用 21s）」）；④ apply 安装阶段同样显示已用秒数；⑤ 轮询连续失败 15 次（约 15s 无响应）判定执行器不可达并终止，避免无限等待；新增 i18n 阶段文案 4 组（中英）——纯 client 改动，新旧执行器均兼容（旧版挂起模式由轮询接管展示）— [VU-001] — 架构治理
-
-## [3.1.0] - 2026-08-16
-
-### Fixed
-- **测试覆盖缺口（审查发现）**：`test/bundle-smoke.test.cjs`（生成物运行时冒烟，SMK-01..17）自 M2 加入后从未挂入 `npm test` 脚本与 CI——CHANGELOG 的测试数字口径（95+17=112）一直包含它但实际只跑 95；修复为脚本收录，`npm test` 现为 112/112，与日志口径一致 — 架构治理
-
-### Changed
 - **「一键拉取更新」按钮改名（用户指令）**：更新卡合并按钮显示文案「一键拉取更新」→「一键更新」（EN `Pull update`→`Update`），确认态文案同步「确认更新？」——仅名称变更，功能与交互行为（执行器 apply restart:false 只装不重启、确认/取消流程）保持不变 — [VU-001] — 架构治理
 - **更新按钮拆分（用户指令）**：插件管理更新卡「一键拉取更新」与「一键更新」合并为单一「一键拉取更新」按钮——执行器 `apply` 新增 `restart:false`（下载/校验/停服/安装后**不重启**，服务保持停止，phase 终态 `installed`）；「重启」拆为独立「端口重启」按钮（复用执行器既有 `restart` RPC，仅重启循环）；两按钮同置于「目标目录」行末，均带确认态（danger 文案 + 取消）与互斥禁用（installed 态拉取禁用、重启可用——引导生效）；安装完成显示「✓ 已安装，请点击端口重启生效」；退役 doPull 浏览器拉取路径与「应用指引」区块（i18n 键保留兼容）；执行器 EXECUTOR_VERSION 0.1.6→0.1.7（executorEnsure 自动版本对齐 kill 旧执行器）；实测验证（CDP）：目标目录行两按钮、确认/取消/互斥状态机全部命中 — [VU-001] — 架构治理
 - **设置页纵向间距修复（用户反馈：优化参数板块行间距过近）**：① 「优化参数」tabpanel 平铺子元素原先零间距（`display:block` 无 gap）——新增行间统一 12px、提示行贴紧其控件 4px（与下一控件行保持 12px，对齐官方 fields 的 label→hint 从属节奏）；② 排查其余板块：「模型配置」链区块 `sec-body` gap 8→10px；「插件管理」自带 root gap 12px、更新卡内部 gap 10px，经实测无需调整；③ 实测验证（CDP 计算样式）：参数 tab 行间 12px / hint 4px 全部命中 — [PEN-002] — 架构治理
@@ -46,65 +32,16 @@
 - **记忆链发送清空（v3.0s，用户修正）**：发送消息（基座 submit 成功，phase 经 submitting/adjudicating 飞行期）即清空记忆链并重置 seen 标记——「持续记忆」仅限发送前一轮优化内的会话，发送后新一轮迭代从零开始（链空 + 无标记 → 重新「首次轻量兜底」）；仅手动清空输入框不清除（内容删除可能表示方向调整）；发送失败（draft 保留）不清除 — 架构治理
 - **智能模式更名为专家模式（用户指令）**：设置页「优化模式」下拉展示名「智能模式」→「专家模式」，按钮短标签「智能」→「专家」，英文 Smart→Expert（README 中英同步）；内部 mode value `smart`、配置存储键与模板键保持不变，存量配置零迁移 — [PEN-002] — 架构治理
 - **清理死代码（审查遗留）**：删除 `src/client/constants.js` 中遗留的重复 `module.exports` 段（v3.0 时代旧文案整段，`require` 只取末条、从未生效，含旧「智能模式」字样）；导出 chunk 逐字节不变，生成物与测试零改动 — 架构治理
-
-## [3.0.0] - 2026-08-16
-
-### Changed
 - **一键更新执行器外挂 + staging 预拉取流程**：执行器不再从 `node_modules/dsh-prompt-enhancer/lib` 启动，改为复制到外部版本化目录（`%LOCALAPPDATA%\dsh-prompt-enhancer\executor\<version>`）并以外部目录为 WorkingDirectory；修复 Windows 下执行器自锁导致 pnpm 替换插件目录 EPERM 的根因。`apply` 流程改为：先在线下载 tarball 到 staging 并校验 → envcheck → 停止服务 → 本地安装 staging tarball → 启动 + 健康检查；重启失败自动回滚旧版本；安装失败恢复原服务；EXECUTOR_VERSION 0.1.5→0.1.6 — [VU-001]
 - **更新状态文案补充**：client 轮询新增 `staging/envcheck/preparing/rollback/rolledback` 状态展示，避免新阶段被误显示为“重启中”；失败时直接展示执行器返回的具体错误 — [VU-001]
 - **新增架构重构方案文档**：`docs/internal/architecture-refactor-plan.md`，记录从单文件 monolith 到 Cordis 子插件 / 服务化 / 契约化 / 平台热更新的完整调整方案 — 架构治理
 - **M0 基线固化**：
-  - 新增 `docs/compatibility-matrix.md`：RPC / 配置 / 形态 / 版本兼容矩阵
-  - 新增 `test/sys.test.cjs`、`test/updater-host.test.cjs`，测试数 61 → 70
-  - `lib/updater-host.cjs` 增加 `require.main === module` 守卫与导出，支持不启动 server 的单元测试
-  - 新增 GitHub Actions CI（语法检查 / 单测 / client 构建 / 生成物一致性）
-  - `package.json` 增加 `npm test`
-  - 修正 `docs/map/flow/prompt-enhance.md` 模式数量 4 → 5 — 架构治理
 - **M1 源码模块化脚手架**：
-  - 建立 `src/host/` 与 `src/client/` 目标模块目录，放置 legacy 源与模块骨架
-  - 新增 `scripts/build-host.mjs`，根 `plugin-host.js` 改为生成物
-  - `scripts/build-client.mjs` 改为读取 `src/client/legacy/plugin-client.js`，并同时生成根 `plugin-client.js` 与 `lib/client.cjs`
-  - `package.json` 增加 `build:host` / `build:client`，`build` 同时构建 host/client
-  - CI 增加对 `plugin-client.js` / `plugin-host.js` 生成物一致性校验 — 架构治理
-  - **PURE 纯函数区段提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/pure.js`（单一事实源），`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-pure.mjs` 维护工具 — 架构治理
-  - **diagnostics 日志块提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/diagnostics.js`，`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-diagnostics.mjs` 维护工具 — 架构治理
-  - **models/config 缓存块提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/models.js`（DeepSeek 兜底链、默认参数、模型能力缓存、自适应链），`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-models.mjs` 维护工具 — 架构治理
-  - **plugins 管理 RPC 块提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/plugins.js`（inventory/run/stop/undefine 四个 handler），`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-plugins.mjs` 维护工具 — 架构治理
-  - **update RPC 块提取**：从 `src/host/legacy/plugin-host.js` 抽出到 `src/host/update.js`（check/pull/envcheck 三个 handler），`build-host.mjs` 构建时注入回根 `plugin-host.js`；新增 `scripts/extract-update.mjs` 维护工具 — 架构治理
-  - **client i18n 字典提取**：从 `src/client/legacy/plugin-client.js` 抽出到 `src/client/i18n.js`（ZH/EN 字典），`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-i18n.mjs` 维护工具 — 架构治理
-  - **fix(M1)：修正 client i18n 提取范围**——此前只提取了 ZH，EN 仍残留在 legacy；修正为完整提取 ZH+EN 到 `src/client/i18n.js`，生成物内容不变 — 架构治理
-  - **client 常量/配置默认值提取**：从 `src/client/legacy/plugin-client.js` 抽出到 `src/client/constants.js`（CONFIG_DEFAULTS / BUILTIN_CHAIN / MODE_OPTIONS / modeShortLabel 等），`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-constants.mjs` 维护工具 — 架构治理
-  - **client updater/env 元数据提取**：从 `src/client/legacy/plugin-client.js` 抽出到 `src/client/updater.js`（UPDATER_DEFAULT_REPO / UPDATER_MANIFEST / URL 构造 / ENV_ITEMS / ENV_DETAIL_TEXT / updaterRepoOf），`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-updater.mjs` 维护工具 — 架构治理
-  - **client 配置/状态逻辑提取**：从 `src/client/legacy/plugin-client.js` 抽出到 `src/client/state.js`（configState / cloneDefaults / sanitize / load/save/subscribe / saveStatus 等），`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-state.mjs` 维护工具 — 架构治理
-  - **client helper/会话逻辑提取**：从 `src/client/legacy/plugin-client.js` 抽出到 `src/client/helpers.js`（errorKey / makeT / sessionStores / enhance / undo / guardPasses 等），`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-helpers.mjs` 维护工具 — 架构治理
-  - **client 模型 helper 提取**：从 `src/client/legacy/plugin-client.js` 抽出 `buildCandidates` 到 `src/client/model-helpers.js`，`build-client.mjs` 构建时注入回 client 源与 `lib/client.cjs`；新增 `scripts/extract-client-model-helpers.mjs` 维护工具 — 架构治理
 - **M2 服务化/事件化脚手架**：
-  - 新增 `src/host/services.js`：Cordis-style 服务注册表（`ctx.provide` 目标）
-  - 新增 `src/host/pipeline.js`：增强管道注册/执行/错误隔离
-  - `src/host/index.js` 接入 services/pipeline 并提供 `enhance.pipeline` 等服务
-  - 新增 `test/pipeline.test.cjs`（73 tests）— 架构治理
-  - **enhance 服务接入 Pipeline**：`src/host/enhance.js` 新增 `createService`（analyze/retrieve/assemble/llm 四阶段）与默认 no-op handler；新增 `test/enhance-pipeline.test.cjs`（75 tests）— 架构治理
-  - **models/update/diagnostics/plugins/config 服务接口**：新增 `src/host/{model,update,diagnostics,plugins,config}-service.js`，`src/host/index.js` 统一通过 service registry 提供；新增 `test/services.test.cjs`（77 tests）— 架构治理
 - **M3 RPC 契约化脚手架**：
-  - 新增 `src/host/protocol.js`：`PROTOCOL_VERSION` / RPC 方法注册表
-  - 新增 `src/host/rpc-schema.js`：轻量参数校验
-  - 新增 `test/protocol.test.cjs`（79 tests）— 架构治理
-  - **配置 Schema/迁移器**：新增 `src/host/config-schema.js`（默认值/校验/v1→v2 迁移），`config-service.js` 接入；新增 `test/config-schema.test.cjs`（83 tests）— 架构治理
-  - **RPC 边界接入参数校验**：新增 `lib/rpc-schema.cjs`（bundle-safe CommonJS），`lib/index.cjs` RPC 路由在分发前统一执行 `validateRpcArgs`，非法参数返回 400 — 架构治理
 - **M4 更新链路平台化脚手架**：
-  - 新增 `src/host/reloader.js`：Reloader 接口 + UnsupportedReloader
-  - 新增 `src/host/update-platform.js`：`createUpdatePlatform`（热更新优先，executor fallback）
-  - 新增 `test/update-platform.test.cjs`（85 tests）— 架构治理
-  - **ExecutorReloader fallback**：新增 `src/host/executor-reloader.js`，通过外部执行器 RPC `apply` 实现 Reloader；新增 `test/executor-reloader.test.cjs`（88 tests）— 架构治理
-  - **update 服务接入 UpdatePlatform**：`src/host/update-service.js` 新增 `apply`/`canHotReload`，`src/host/index.js` 支持 `options.update`；新增 `test/services.test.cjs` SVC-03（89 tests）— 架构治理
 - **M5 可观测性与安全加固**：
-  - 新增 `src/host/logger.js`：结构化 JSON 日志 + 环形 tail
-  - 新增 `src/host/integrity.js`：SHA-256 文件校验
-  - 新增 `test/observability.test.cjs`（91 tests）— 架构治理
 - **M6 工程化收尾**：
-  - 新增 `docs/internal/CONTRIBUTING.md`：开发环境 / 命令 / 修改流程 / 发布边界
-  - CI 已覆盖语法检查、测试、构建、生成物一致性
-  - 测试数 91，文档与地图同步 — 架构治理
 - **M5 运行时接入（目标架构）**：`diagnostics-service.js` 接入结构化 logger，日志/tail 统一走 JSON 格式 — 架构治理
 - **架构方案执行状态登记**：`docs/internal/architecture-refactor-plan.md` 增加当前执行状态表，明确 M0-M6 完成度与剩余项 — 架构治理
 - **M5 完整性校验接入实际 staging**：新增 `lib/integrity.cjs`（bundle-safe），`updater-host.verifyTarball` 返回 SHA-256，外部执行器目录同步复制 `integrity.cjs` — 架构治理
@@ -120,8 +57,6 @@
 - **smart 流程修订（v3.0v2，用户确认方案）**：① **开发意向判定前置**——会话窗口检索完成后先 LLM 判定提示词是否为「项目开发意向」（`judgeDevIntent`，prompts/intent.md → `DEV_INTENT_PROMPT`，10s 超时降级非意向）——非开发意向**直接停**，不进入工作区；② **B+C 合并**——工作区阶段的一次 LLM 调用（`analyzeDocsRelevance`，prompts/doc-analysis.md → `DOC_ANALYSIS_PROMPT`）同时完成「按提示词检索相关 .md 参考信息（输出 relatedDocs 要点）」与「分析项目地图/文档索引结构（hasProjectMap + codePaths）」；③ 进入第三步门槛 = **有 .md + 相关文档命中 + 项目地图结构**（开发意向已前置通过）；④ **代码阶段按项目地图指向路径优先**（codePaths 前缀命中排前，不足补全量），无指向按关键词扫描兜底；⑤ **SMART_TAIL 仅进入第三步时追加**（调整方案随代码阶段，未进入则不输出）；删除 dev-env 判定（judgeDevEnv/DEV_ENV_PROMPT/prompts/dev-env.md，parseDevEnv 保留待清理）；新增 `parseIntent`/`parseDocsAnalysis`（PURE）+ SMK-10 重写 + SMK-11（非开发意向停），测试 104 → 107 — 架构治理
 - **架构审查三项落地**：① **文档同步**——`AGENTS.md` 模块索引与 `docs/map/tree/files.md` 登记全部 8 个提示词事实源（新增 publish/relevance/intent/doc-analysis/smart），并修正 `sync-prompts.mjs` 目标描述（同步进 `src/host/app.js` 生成区，非根 bundle）；② **死代码清理**——移除 `shouldInjectV2`/`analyzeInputRules`/`parseDevEnv`（v3.0v2 修订后遗留，含 U12/U38 单测引用），测试 107 → 106；③ **publish 冒烟**——新增 SMK-12（publish 模式走通 v2 旧管道 + 无 smart tail），全量 106/106 通过 — 架构治理
 - **publish 多步检索 + 产物形态调整（v3.0p，用户确认方案）**：
-  - **产物形态**：九章规格重写为「**完善、有明确边界的生成提示词**」形态（参考 WebGL Demo 需求书样例）——① 目标概述+**场景化角色设定**（game→游戏开发专家/TA；software→软件架构师；generic→顶级技术专家）；② 需求范围与明确边界（绝对/必须/不得级硬边界）；③ 技术约束与架构（**架构层写实到方案名**，数值给量级）；④ 核心功能要求（**每条附设计意图**，如 SSAO 消除塑料感）；⑤ 场景与内容设计（含代码生成策略）；⑥ 交互与界面；⑦ 扩展方向（**强制沿用既有体系/尺度，不破坏闭合**）；⑧ 交付与限制（**禁止 TODO/占位/要求用户补齐**）；⑨ 验收清单；新增【网络信息运用】指令段（每轮必须参考网络参考、只补缺口、标注来源、**不得虚构来源**）
-  - **多步网络检索**：① **LLM 检索主题规划**——新 `prompts/websearch.md` → `WEBSEARCH_PLAN_PROMPT`，规划 2~3 个差异化主题（避开已检索主题），10s 超时/失败 → 降级 `buildWebQuery` 单 query（行为不变）；② **会话级检索记忆 `publishWebMemo`**——主题去重（≤12）+ 要点摘要累积（≤600 字符）；③ **跨轮要点回注**——历史要点以【已获取网络参考】注入当轮（预算内、防回显护栏），后续轮只补新缺口；④ **一轮多主题检索**——逐主题 `web.search`（各 10s 超时，单个失败仅跳过该主题），结果按「### 检索主题」合并注入，`WEB_REF_MAX` 800→1600；PURE 新增 `parseSearchPlan`（U66）；集成测试 SMK-13（多主题逐次搜索+注入）/ SMK-14（跨轮 memo 回注），SMK-12 更新为含 web-plan 的降级路径，测试 107 → 109 — 架构治理
 - **文档架构与发布边界规则（用户规则 2026-08-16）**：① 项目功能文档（README 中/英、docs/screenshots/、docs/compatibility-matrix.md、release-notes/、CHANGELOG）与开发治理文档（AGENTS.md、docs/map/、docs/devref/、docs/internal/）**分开存放**——新增 `docs/internal/` 开发治理区（gitignore，本地不推 GitHub），移入 `architecture-refactor-plan.md`、`CONTRIBUTING.md`、`方案-publish路由与自评.md`；`docs/map/`、`docs/devref/` 保持治理工具契约路径（已 gitignore）；② 对外发布仅含项目功能文档 + GitHub 需求说明（README）——`package.json` files 白名单核对（lib/plugin-host.js/plugin-client.js/cordis.patch.yml/README*/LICENSE，不含 docs/、AGENTS.md、src/test/prompts/scripts）；③ 发布 SOP 新增第 6 步 `npm pack --dry-run` 白名单核对；AGENTS.md 新增「文档架构与发布边界」章节与分类表 — 架构治理
 - **v3.0p 审查修复（五处）**：① **memo 截断方向**——`slice(0, 600)` 保旧丢新改为 `slice(-600)` 保留最新要点；② **失败主题不污染已检索列表**——仅 `hits > 0` 的检索主题并入会话记忆（搜索失败/超时不占位，后续轮仍可重试）；③ **规划主题硬去重**——`planWebSearch` 返回的主题与已检索主题过滤后再搜索（LLM 未遵从提示词时的兜底），过滤后为空 → 降级单 query；④ **预算门前置**——上下文预算 = 0 时跳过 `planWebSearch`（省 1 次 LLM 调用，与「预算 > 0 才启用检索」联动语义一致）；⑤ **用户可见文案同步**——client publish hint 更新为新九章形态 + 多步检索描述，README（中/英）publish 描述同步，`docs/map/flow/prompt-enhance.md` 登记 publish 检索链路；新增 SMK-15（失败主题不入 memo + 已检索主题去重），测试 109 → 110 — 架构治理
 - **超时/耗时匹配审查（真实 LLM 实测驱动）**：opencode-go/deepseek-v4-flash 实测——judge 形状（effort=max / 无 effort，含 2400 字长窗口）耗时 1.8~2.3s（10s 超时余量 5 倍，匹配良好）；**主调用形状（1500 字草稿 + effort=max + 8000 tokens）实测 42s > 非 publish 默认超时 30s → 正常情况必 TIMEOUT**（实锤实例）。修复三项：① **非 publish 主调用超时自动放宽**——链含 effort 时 `timeoutMs` 至少 120s（无 effort 行为不变）；② **judge 类小调用剥离 reasoningEffort**——relevance/intent/doc-analysis/web-plan/阶段 A 任务分析共 5 处（判定/规划任务无需深度思考；消除「effort 思考消耗 400 token 小预算 → 空流」边界风险，实测剥离后耗时相当）；主调用保留 effort（含 maxTokens ≥8000 放宽）；③ **会话历史/事件提取补超时保护**——`fetchSessionHistory` 与 `v2SearchEvents` 加 10s 超时（超时/失败 → [] 不阻断）；新增 SMK-16（judge 剥离 effort + 主调用保留），测试 110 → 111；工作区扫描 2s 经实测（155 条目 4ms）确认余量充足，保持不变 — 架构治理
@@ -310,9 +245,6 @@
 - 插件管理页版本检测卡片；按钮三态字体锚点对齐模型选择器（13px/500/20px）— [VU-001]
 
 [2.8.3]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.3
-[3.1.2]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.2
-[3.1.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.1
-[3.1.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.0
 [3.0.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.0.0
 [2.8.2]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.2
 [2.8.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.1
