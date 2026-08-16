@@ -512,6 +512,11 @@ const ZH = {
   updApplyRollingBack: '重启失败，正在回滚旧版本…',
   updApplyRolledBack: '✓ 已回滚到旧版本，请刷新页面',
   updApplyRestarting: '正在重启服务…（第 {round} 次 · 剩余 {sec} 秒）',
+  // v2.9.x（重启反馈优化·用户需求）：执行器 message 阶段文案（1s 轮询展示）
+  updRestartStopping: '正在停止服务',
+  updRestartSettling: '服务已停止，等待稳定',
+  updRestartRound: '第 {n} 次重启：停止+启动',
+  updRestartNotListening: '端口未就绪，准备重试',
   updApplyRetry: '第 {n} 次重启未恢复，执行器自动重试中…',
   updApplyRestartFailed: '5 次重启均未恢复——请手动执行 net start dsh-web 后刷新',
   updApplyExecutorDown: '更新执行器不可用——请确认插件为 bundle 安装（端口 3081）',
@@ -740,6 +745,11 @@ const EN = {
   updApplyRollingBack: 'Restart failed — rolling back to previous version…',
   updApplyRolledBack: '✓ Rolled back to the previous version — refresh the page',
   updApplyRestarting: 'Restarting service… (attempt {round} · {sec}s left)',
+  // v2.9.x (restart feedback): executor message stage texts (1s polling)
+  updRestartStopping: 'Stopping service',
+  updRestartSettling: 'Service stopped, waiting for stability',
+  updRestartRound: 'Restart attempt {n}: stop+start',
+  updRestartNotListening: 'Port not ready, about to retry',
   updApplyRetry: 'Attempt {n} did not recover — executor auto-retrying…',
   updApplyRestartFailed: 'Still down after 5 attempts — run `net start dsh-web` manually, then refresh',
   updApplyExecutorDown: 'Update executor unavailable — ensure bundle install (port 3081)',
@@ -1407,6 +1417,19 @@ const ENV_DETAIL_TEXT = {
   'no-port': 'envExecPortNoPort',
 };
 
+// v2.9.x（重启反馈优化·用户需求）：执行器 message → 中文阶段文案（兜底原文，保证任何时刻有显式反馈）
+function restartStageText(t, message) {
+  const msg = typeof message === 'string' ? message : '';
+  if (/stopping/.test(msg)) return t('updRestartStopping');
+  if (/settling/.test(msg)) return t('updRestartSettling');
+  if (/not listening/.test(msg)) return t('updRestartNotListening');
+  if (/round/i.test(msg)) {
+    const m = /rounds+(d+)/i.exec(msg);
+    return t('updRestartRound').replace('{n}', m ? m[1] : '?');
+  }
+  return msg !== '' ? msg : t('updApplyRestarting').replace('{round}', '?').replace('{sec}', '10');
+}
+
 function UpdaterCard(props) {
   const t = makeT(props);
   const [repoInput, setRepoInput] = React.useState(updaterRepoOf(configState.value));
@@ -1546,19 +1569,26 @@ function UpdaterCard(props) {
   // 用于 apply(restart:false) 的安装进度（终态 installed / failed）；restart 动作
   // 由执行器等待完成直接返回，不走轮询
   const pollExecutorStatus = (port) => {
+    // v2.9.x（重启反馈优化·用户需求）：轮询 2s→1s——倒计时每秒更新（原每 2s 跳 2 秒）；
+    // restarting 阶段展示执行器 message 阶段（停止/等待稳定/第 N 次尝试/端口未就绪）+
+    // 轮次 + 剩余秒 + 已用秒；轮询连续失败 15 次（约 15s 无响应）→ 判定执行器不可达并终止
+    const startedAt = Date.now();
     let localLeft = 10;
+    let failCount = 0;
     setRestartLeft(localLeft);
     setRestartRound(1);
     const tick = () => {
       executor.call('status', {}, port).then((st) => {
         const s = st && typeof st === 'object' ? st : {};
+        failCount = 0;
+        const elapsed = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
         if (s.phase === 'healthy') {
           setApplyErr(null);
           if (/rolled back/i.test(s.message || '')) {
             setApplyStatus(t('updApplyRolledBack'));
             setApplyPhase('rolledback');
           } else {
-            setApplyStatus(null);
+            setApplyStatus(t('updApplyDone'));
             setApplyPhase('done');
           }
           return;
@@ -1586,33 +1616,41 @@ function UpdaterCard(props) {
         };
         if (phaseStatus[s.phase]) {
           setApplyErr(null);
-          setApplyStatus(phaseStatus[s.phase]);
+          setApplyStatus(phaseStatus[s.phase] + ' · 已用 ' + elapsed + 's');
           setApplyPhase('applying');
-          setTimeout(tick, 2000);
+          setTimeout(tick, 1000);
           return;
         }
-        // restarting
+        // restarting：阶段文案 + 轮次 + 秒级倒计时 + 已用秒——每秒更新
         setApplyErr(null);
-        setApplyStatus(null);
         setApplyPhase('restarting');
-        setRestartRound(s.attempt || 1);
-        localLeft -= 2;
+        const round = s.attempt || 1;
+        setRestartRound(round);
+        localLeft -= 1;
         if (localLeft <= 0) {
           // 每轮倒计时结束反馈（执行器内部自动重试，这里仅展示进度）
-          setApplyErr(t('updApplyRetry').replace('{n}', String(s.attempt || 1)));
+          setApplyErr(t('updApplyRetry').replace('{n}', String(round)));
           localLeft = 10;
         }
         setRestartLeft(localLeft);
-        setTimeout(tick, 2000);
+        setApplyStatus(restartStageText(t, s.message) + '（第 ' + round + ' 次 · 剩余 ' + localLeft + ' 秒 · 已用 ' + elapsed + 's）');
+        setTimeout(tick, 1000);
       }).catch(() => {
-        // 执行器暂时不可达（服务重启窗口或执行器重启中）——继续轮询
-        localLeft -= 2;
+        // 执行器暂时不可达（重启窗口或执行器被重建）——连续失败 15 次才终止
+        failCount += 1;
+        if (failCount >= 15) {
+          setApplyErr(t('updApplyExecutorDown'));
+          setApplyStatus(null);
+          setApplyPhase('idle');
+          return;
+        }
+        localLeft -= 1;
         if (localLeft <= 0) {
           setApplyErr(t('updApplyRetry').replace('{n}', String('?')));
           localLeft = 10;
         }
         setRestartLeft(localLeft);
-        setTimeout(tick, 2000);
+        setTimeout(tick, 1000);
       });
     };
     tick();
@@ -1682,12 +1720,13 @@ function UpdaterCard(props) {
     });
   };
 
-  // 端口重启：执行器 restart（仅重启循环，完成才返回）
+  // 端口重启：执行器 restart（仅重启循环）——v2.9.x（反馈优化）：fire-and-forget，
+  // 不 await 执行器完成（挂起模式 1-2 分钟无响应），立即进入 1s 轮询获取秒级进度
   const runRestart = () => {
     if (applyPhase !== 'confirm' || action !== 'restart') return;
     setApplyPhase('restarting');
     setApplyErr(null);
-    setApplyStatus(null);
+    setApplyStatus(t('updApplyRestarting').replace('{sec}', '10').replace('{round}', '1'));
     setRestartLeft(10);
     setRestartRound(1);
     ensureExecutor().then((ensureRes) => {
@@ -1699,18 +1738,10 @@ function UpdaterCard(props) {
         setAction(null);
         return null;
       }
-      return executor.call('restart', { serviceName, port: en.port }, en.port);
-    }).then((res) => {
-      if (!res) return;
-      const r = res && typeof res === 'object' ? res : {};
-      if (r.ok !== true) {
-        setApplyErr((r.message ? r.message + ' ' : '') + t('updError'));
-        setApplyPhase('idle');
-        setAction(null);
-        return;
-      }
-      setApplyStatus(t('updApplyDone'));
-      setApplyPhase('done');
+      // 发送即返回（新旧执行器均兼容：旧版挂起模式由轮询 status 接管进度展示）
+      executor.call('restart', { serviceName, port: en.port }, en.port).then(() => {}).catch(() => {});
+      pollExecutorStatus(executorPort());
+      return null;
     }).catch(() => {
       setApplyErr(t('updApplyExecutorDown'));
       setApplyPhase('idle');
