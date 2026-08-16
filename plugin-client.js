@@ -574,7 +574,7 @@ const ZH = {
   cfgPublishMemoryLocked: '一键发布模式记忆强制开启（多轮扩充需要），不可关闭',
   cfgMode: '优化模式',
   cfgMemory: '记忆功能',
-  cfgMemoryNote: '开启后，多轮「优化→修改→再优化」累积为记忆链（持续记忆：固定保留最近 4 轮输入与输出，滚动更新；发送或清空输入框均不清除——内容删除可能表示方向调整；仅撤回弹出最后一轮），每轮再优化以多轮对话形式代入全部轮次，并感知你对上一轮结果的修改方向（新增/删除）；首次自动走轻量模式；关闭后完全不再读取/写入',
+  cfgMemoryNote: '开启后，多轮「优化→修改→再优化」累积为记忆链（持续记忆：固定保留最近 4 轮输入与输出，滚动更新；发送消息即清空记忆链（持续记忆仅限发送前一轮优化内的会话）；仅手动清空输入框不清除——内容删除可能表示方向调整；仅撤回弹出最后一轮），每轮再优化以多轮对话形式代入全部轮次，并感知你对上一轮结果的修改方向（新增/删除）；首次自动走轻量模式；关闭后完全不再读取/写入',
   cfgModeHintBase: '直发优化，不读取任何上下文，全体系最快最省',
   cfgModeHintLite: '本地规则分析输入要素（目标/约束/格式/示例），缺失项保守提示明确化；不注入任何外部上下文',
   cfgModeHintStandard: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本',
@@ -793,7 +793,7 @@ const EN = {
   cfgPublishMemoryLocked: 'Memory is forced ON in Publish mode (needed for iterative expansion) and cannot be disabled.',
   cfgMode: 'Mode',
   cfgMemory: 'Memory',
-  cfgMemoryNote: 'When on, iterative rounds (optimize → edit → re-optimize) accumulate into a memory chain (persistent memory: fixed window of the latest 4 input/output pairs, rolling; sending or clearing the composer does NOT clear it — deleting content may signal a direction change; only Undo drops the last round). Each re-optimization replays the chain as a multi-turn conversation and senses your edit direction (added/removed); first run falls back to Lite automatically; when off, memory is never read or written',
+  cfgMemoryNote: 'When on, iterative rounds (optimize → edit → re-optimize) accumulate into a memory chain (persistent memory: fixed window of the latest 4 input/output pairs, rolling; sending the message clears the memory chain (persistent memory covers only the pre-send iteration); manually clearing the composer does NOT clear it — deleting content may signal a direction change; only Undo drops the last round). Each re-optimization replays the chain as a multi-turn conversation and senses your edit direction (added/removed); first run falls back to Lite automatically; when off, memory is never read or written',
   cfgModeHintBase: 'Direct optimization, no context, fastest',
   cfgModeHintLite: 'Local rule analysis of the input (goal/constraints/format/example); missing elements are clarified conservatively only when inferable; no external context is injected',
   cfgModeHintStandard: 'Rule understanding + file & session retrieval, no extra LLM call',
@@ -873,6 +873,10 @@ function readSeen(sessionId) {
 }
 function writeSeen(sessionId) {
   try { localStorage.setItem(seenKey(sessionId), '1'); } catch (e) { /* 忽略 */ }
+}
+// v3.0s（发送清空记忆链·用户修正）：发送成功 = 新一轮迭代开始——重置 seen 标记
+function clearSeen(sessionId) {
+  try { localStorage.removeItem(seenKey(sessionId)); } catch (e) { /* 忽略 */ }
 }
 
 function subscribe(sessionId, fn) {
@@ -1060,17 +1064,35 @@ function EnhanceButton(props) {
     }
   }, [draft, sessionId]);
 
-  // v2.7.0：发送（提交后 composer 清空）/ 手动清空输入框 → 恢复初始优化形态
-  // （optimized 重置 → 按钮回「优化」而非「继续优化」）；后台记忆链（memoryRounds）
-  // 保留——用户删除内容可能表示方向调整或反馈方向不正确，不清除（持续记忆）。
+  // v3.0s（用户修正·发送清空记忆链）：发送（基座 submit 成功，draft 随之清空）→ 清空
+  // 记忆链并重置 seen 标记——「持续记忆」仅限发送前一轮优化内的会话，发送后新一轮
+  // 迭代从零开始（链空 + 无标记 → 重新「首次轻量兜底」）；手动清空输入框（phase 全程
+  // plain）不清除——内容删除可能表示方向调整；发送失败（draft 保留）也不清除。
+  // 发送信号 = 基座 phase 进入 submitting/adjudicating（submit 飞行期，draft 未清）。
+  const sendSeenRef = React.useRef(false);
   React.useEffect(() => {
+    const ph = input && typeof input.phase === 'string' ? input.phase : '';
+    if (ph === 'submitting' || ph === 'adjudicating') {
+      sendSeenRef.current = true;
+    } else if (typeof draft === 'string' && draft.trim() !== '') {
+      // 非发送期且草稿非空：无在途发送（含发送失败 draft 保留）→ 复位
+      sendSeenRef.current = false;
+    }
     if (typeof draft !== 'string' || draft.trim() !== '') return;
     const s = storeFor(sessionId);
     if (s.optimized === true) {
       s.optimized = false;
       notify(sessionId);
     }
-  }, [draft, sessionId]);
+    if (sendSeenRef.current === true) {
+      sendSeenRef.current = false;
+      if (s.memoryRounds.length > 0) {
+        s.memoryRounds = [];
+        notify(sessionId);
+      }
+      clearSeen(sessionId);
+    }
+  }, [draft, input && input.phase, sessionId]);
 
   React.useEffect(() => () => {
     const s = storeFor(sessionId);

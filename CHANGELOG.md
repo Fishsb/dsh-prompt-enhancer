@@ -10,6 +10,7 @@
 ### Changed
 - **细粒度进度反馈（v3.0r，用户需求）**：标准/智能/一键发布等检索重模式执行期间，按钮进度提示全程动态变化，消除"卡顿"误判——① `enhance/progress` RPC 返回扩展字段（`detailKey`/`detailArgs`/`step`/`total`/`elapsedMs`，`stage` 兼容保留）；② host 新增子步骤注入点：会话窗口判定（i/n）、开发意向判定、文档分析、代码检索、检索主题规划、逐主题搜索（「正在搜索 2/3：体素引擎」）、链节重试（i/n）、工作区扫描；`rec` 增加 `startedAt` 计时；③ client 进度文案优先级 detailKey 模板（i18n 中英新键 8 个，`{current}/{total}/{query}` 占位）> stage 文案 > 默认；末尾追加**已用秒数**（如「正在搜索 2/3：体素引擎 · 8s」）；新增 SMK-17（publish 期间轮询断言 detailKey 序列与字段），测试 111 → 112 — 架构治理
 - **工作区文档清理（用户指令）**：① 删除 5 个历史版本快照目录（`dsh-prompt-enhancer-v2.4.5/2.4.8/2.5.1/2.7.0/2.8.3`，本地归档备份，git tag 已有完整备份）与旧工作副本目录（`prompt-enhancer-release - 提示词增强脚本`）；② 删除旧版本发布说明 `release-notes/v2.4.0–v2.8.3`（22 个，保留 3.0.0；完整说明见 GitHub Releases 页）；③ 删除已完成使命的开发方案文档 `docs/internal/architecture-refactor-plan.md`（M0-M6 已全部落地）与 `docs/internal/方案-publish路由与自评.md`（已被 v3.0p 取代）；保留 `.internal/` 排障经验沉淀、`CONTRIBUTING.md`、模块结构说明、项目地图与 devref；`prompt-enhancer-plugin`（早期开发记录唯一副本）按用户指示删除不备份 — 架构治理
+- **记忆链发送清空（v3.0s，用户修正）**：发送消息（基座 submit 成功，phase 经 submitting/adjudicating 飞行期）即清空记忆链并重置 seen 标记——「持续记忆」仅限发送前一轮优化内的会话，发送后新一轮迭代从零开始（链空 + 无标记 → 重新「首次轻量兜底」）；仅手动清空输入框不清除（内容删除可能表示方向调整）；发送失败（draft 保留）不清除 — 架构治理
 
 ## [3.0.0] - 2026-08-16
 
