@@ -495,3 +495,40 @@ test('SMK-14 publish memo cross-round reinjection (v3.0p)', async () => {
   assert.ok(main2.includes('【已获取网络参考】'), 'round-2 main receives past memo block');
   assert.ok(main2.includes('【网络参考】'), 'round-2 main also receives fresh refs');
 });
+
+// v3.0p 审查修复：搜索失败的主题不污染已检索列表；规划主题与已检索主题硬去重。
+test('SMK-15 failed topics not pollute memo; searched topics filtered (v3.0p)', async () => {
+  const seen = [];
+  const webCalls = [];
+  const { handlers } = boot({
+    llm: mockLlmSmart(seen, { topics: [{ query: '体素引擎', note: '查实现' }, { query: '无结果主题', note: '查失败' }] }),
+    sessionQuery: mockSessionQuery(),
+    sandboxPolicy: { workspaceRoot: 'root' },
+    fs: mockWorkspaceFs(),
+    web: {
+      search: async (params) => {
+        webCalls.push(params.query);
+        if (params.query === '无结果主题') return { sources: [] };
+        return { sources: [{ title: '来源A', url: 'u', summary: 's' }] };
+      },
+    },
+  });
+  const base = {
+    sessionId: 's',
+    config: {
+      mode: 'publish',
+      fallback: [{ provider: 'p', model: 'm' }],
+      params: { maxTokens: 2000, timeoutMs: 300000 },
+    },
+  };
+  const r1 = await handlers.get('enhance')({ ...base, seq: 1, text: '我想开发一个体素游戏' });
+  assert.equal(r1.ok, true);
+  const r2 = await handlers.get('enhance')({ ...base, seq: 2, text: '再补充细节' });
+  assert.equal(r2.ok, true);
+  // r1：2 个主题各搜索一次；r2：体素引擎已在 memo（过滤），只搜无结果主题 → 共 3 次
+  assert.equal(webCalls.length, 3, 'r1 2 searches + r2 1 fresh search');
+  assert.equal(webCalls[2], '无结果主题', 'searched topic filtered from round-2 plan');
+  // 失败主题未进入已检索列表：r2 的 memo 只含成功主题内容
+  assert.ok(seen[3].system.includes('来源A'), 'round-2 web-plan memo has successful topic');
+  assert.ok(!seen[3].system.includes('无结果主题'), 'failed topic not recorded in memo');
+});

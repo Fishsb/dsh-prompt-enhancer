@@ -2860,8 +2860,12 @@ return {
         const memoText = memoRec && memoRec.memo ? memoRec.memo : '';
         const memoTopics = memoRec && Array.isArray(memoRec.topics) ? memoRec.topics : [];
         const chain0 = state.chain && state.chain.length > 0 ? state.chain[0] : null;
-        const plan = await planWebSearch(text, memoText, state.scenario, chain0);
-        hlog('[enhance] v3p web-plan ' + (plan ? 'topics=' + plan.topics.map((t) => t.query).join('|') : 'none→legacy'));
+        const budget = cfg.context && cfg.context.budgetChars ? cfg.context.budgetChars : 0;
+        // v3.0p：预算 > 0 才启用检索（与「上下文预算需 > 0 才启用检索」联动语义一致）
+        const plan = budget > 0 ? await planWebSearch(text, memoText, state.scenario, chain0) : null;
+        hlog('[enhance] v3p web-plan ' + (budget <= 0 ? 'skipped budget=0' : (plan ? 'topics=' + plan.topics.map((t) => t.query).join('|') : 'none→legacy')));
+        // v3.0p：规划主题与已检索主题去重（LLM 未遵从提示词时的硬过滤；过滤后为空 → 降级单 query）
+        const freshPlan = plan && budget > 0 ? plan.topics.filter((t) => memoTopics.indexOf(String(t && t.query || '').trim()) === -1) : null;
         const v2 = await buildV2ContextBlock({
           llm: ctx.get('llm'),
           sessionQuery: ctx.get('sessionQuery'),
@@ -2872,17 +2876,19 @@ return {
           web: ctx.get('web'),
           delta: state.memDelta,
           scenario: state.scenario,
-          webPlan: plan ? plan.topics : null,
+          webPlan: freshPlan && freshPlan.length > 0 ? freshPlan : null,
           webMemo: memoText,
         }, sessionId, text, cfg, (st) => { rec.stage = st; });
         state.v2Block = v2.block;
         state.v2Log = v2.log;
-        // v3.0p：跨轮检索记忆更新——主题去重（≤WEB_MEMO_TOPICS_MAX）+ 要点摘要累积（≤WEB_MEMO_MAX）
-        if (v2.webTopics && v2.webTopics.length > 0) {
-          const merged = memoTopics.concat(v2.webTopics.map((t) => t.query)).filter((q, i, a) => q && a.indexOf(q) === i).slice(-WEB_MEMO_TOPICS_MAX);
+        // v3.0p：跨轮检索记忆更新——仅成功命中的主题入已检索列表（失败/超时不占位），
+        // 主题去重（≤WEB_MEMO_TOPICS_MAX）+ 要点摘要累积（≤WEB_MEMO_MAX，保留最新）
+        const hitTopics = Array.isArray(v2.webTopics) ? v2.webTopics.filter((t) => t && t.hits > 0) : [];
+        if (hitTopics.length > 0) {
+          const merged = memoTopics.concat(hitTopics.map((t) => t.query)).filter((q, i, a) => q && a.indexOf(q) === i).slice(-WEB_MEMO_TOPICS_MAX);
           const memo = (memoText ? memoText + '\n' : '') + (v2.webMemoText || '');
-          publishWebMemo.set(sessionId, { topics: merged, memo: memo.slice(0, WEB_MEMO_MAX) });
-          hlog('[enhance] v3p memo topics=' + merged.length + ' chars=' + memo.slice(0, WEB_MEMO_MAX).length);
+          publishWebMemo.set(sessionId, { topics: merged, memo: memo.slice(-WEB_MEMO_MAX) });
+          hlog('[enhance] v3p memo topics=' + merged.length + ' chars=' + memo.slice(-WEB_MEMO_MAX).length);
         }
       }
       // v2.6.1：记忆链注入同样需要防回显护栏（base/lite + 记忆时 v2Block 为空）
