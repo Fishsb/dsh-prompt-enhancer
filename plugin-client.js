@@ -2631,6 +2631,9 @@ const CSS = [
   '.dsh-enh-bar-btn:hover{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
   '.dsh-enh-bar-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
   '.dsh-plg-root{display:flex;flex-direction:column;gap:12px;padding:2px 0;max-width:760px}',
+  '.dsh-plg-root [role="tabpanel"] > * + *{margin-top:12px}',
+  '.dsh-plg-root [role="tabpanel"] > .dsh-plg-hint{margin-top:4px}',
+  '.dsh-plg-root [role="tabpanel"] > .dsh-plg-hint + .dsh-plg-hint{margin-top:4px}',
   '.dsh-plg-note{color:var(--dsw-alias-label-secondary);font-size:13px;line-height:20px;margin:0}',
   '.dsh-plg-error{color:var(--dsw-alias-state-error-primary);font-size:13px;line-height:20px}',
   '.dsh-plg-toolbar{display:flex;justify-content:flex-end}',
@@ -2688,7 +2691,7 @@ const CSS = [
   '.dsh-cfg-chev-open{transform:rotate(90deg)}',
   '.dsh-cfg-sec-title{flex:none}',
   '.dsh-cfg-sec-summary{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:400;text-align:right}',
-  '.dsh-cfg-sec-body{padding:2px 12px 10px;display:flex;flex-direction:column;gap:8px}',
+  '.dsh-cfg-sec-body{padding:2px 12px 10px;display:flex;flex-direction:column;gap:10px}',
   // v17：思考控件与测试结果（窄下拉 + 状态色强调）
   '.dsh-plg-select-narrow{flex:0 0 auto;min-width:96px}',
   '.dsh-plg-test-ok{color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:16px;font-weight:600}',
