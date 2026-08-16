@@ -10,7 +10,7 @@ const path = require('node:path');
 
 const BODY = fs.readFileSync(path.join(__dirname, '..', 'plugin-host.js'), 'utf8');
 
-function boot() {
+function boot(opts) {
   const handlers = new Map();
   const harness = {
     handle(method, fn) {
@@ -23,14 +23,38 @@ function boot() {
   // apply() directly executes: ctx.get('llm'), handler registration, ctx.effect.
   // All deep paths (timer, sessions, sandboxPolicy, web...) are only touched
   // inside handlers, so a minimal mock keeps the fast paths testable.
+  // opts.llm injects a fake llm service to exercise the full enhance pipeline.
   const ctx = {
-    get: () => undefined,
+    get: (name) => (name === 'llm' && opts && opts.llm ? opts.llm : undefined),
     effect: () => {},
+    timer: { timeout: () => () => {} },
   };
   const plugin = new Function('harness', BODY)(harness);
   if (typeof plugin.apply !== 'function') throw new Error('plugin.apply missing from bundle');
   plugin.apply(ctx);
   return { handlers };
+}
+
+// Fake llm service: records every stream() request, returns a one-delta
+// successful stream (text-delta "OK" then finish stop).
+function mockLlm(seen) {
+  return {
+    stream(params) {
+      seen.push(params);
+      return {
+        [Symbol.asyncIterator]() {
+          let step = 0;
+          return {
+            async next() {
+              step += 1;
+              if (step === 1) return { done: false, value: { type: 'text-delta', text: 'OK' } };
+              return { done: false, value: { type: 'finish', reason: { kind: 'stop' } } };
+            },
+          };
+        },
+      };
+    },
+  };
 }
 
 test('SMK-01 bundle registers core RPC handlers', () => {
@@ -82,4 +106,43 @@ test('SMK-05 RPC schema accepts real client payload shapes', () => {
   assert.equal(validateRpcArgs('plugins/run', { sessionId: 's', pluginId: 'p', packageId: 'x', mode: 'run' }).ok, true);
   // 防回归：缺 text 应被拒
   assert.equal(validateRpcArgs('enhance', { sessionId: 's', draft: 'x' }).ok, false);
+});
+
+// v2.9.0-fix：reasoning（带 effort）链节自动放宽 maxTokens（>=8000）——
+// 思考过程消耗输出预算，配置的 2000 在长输入 + effort=max 时耗尽 → 空流。
+test('SMK-06 reasoning link auto-widens maxTokens', async () => {
+  const seen = [];
+  const { handlers } = boot({ llm: mockLlm(seen) });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '优化一下',
+    config: {
+      mode: 'base',
+      fallback: [{ provider: 'p', model: 'm', reasoning: { enabled: true, effort: 'max' } }],
+      params: { maxTokens: 2000, timeoutMs: 30000 },
+    },
+  });
+  assert.equal(out.ok, true);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].reasoningEffort, 'max');
+  assert.equal(seen[0].maxTokens, 8000);
+});
+
+test('SMK-07 non-reasoning link keeps configured maxTokens', async () => {
+  const seen = [];
+  const { handlers } = boot({ llm: mockLlm(seen) });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '优化一下',
+    config: {
+      mode: 'base',
+      fallback: [{ provider: 'p', model: 'm' }],
+      params: { maxTokens: 2000, timeoutMs: 30000 },
+    },
+  });
+  assert.equal(out.ok, true);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].maxTokens, 2000);
 });
