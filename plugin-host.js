@@ -2287,8 +2287,12 @@ return {
       if (tagsPayload === '') {
         return { ok: false, code: 'BAD_ARGS', message: 'tagsPayload required (client fetches GitHub tags, host evaluates)' };
       }
+      // v3.1.x（用户报告·检测不到新版本）：手动「检测版本」总是取最新——noCache 跳过 5 分钟缓存
+      // （刚发布的 tag 曾被缓存旧值覆盖，导致新版本检测不到）
       const hit = updateCache.get(repo);
-      if (hit && Date.now() - hit.at < UPDATE_CACHE_TTL_MS) {
+      if (args && args.noCache === true) {
+        updateCache.delete(repo);
+      } else if (hit && Date.now() - hit.at < UPDATE_CACHE_TTL_MS) {
         return { ...hit.value, cached: true };
       }
       try {

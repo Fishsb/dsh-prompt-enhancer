@@ -1502,11 +1502,13 @@ function UpdaterCard(props) {
     setChecking(true);
     setError(null);
     // v2.4.1（§9-T6）：浏览器直连 GitHub API（CORS），host 只做解析/比较
+    // v3.1.x（用户报告·检测不到新版本）：手动检测总是拉最新——fetch 禁用缓存（no-store），
+    // host update/check 传 noCache 跳过 5 分钟进程缓存（防刚发布 tag 被旧值覆盖）
     Promise.all([
-      window.fetch(updaterTagsUrl(repo)).then((r) => r.status === 200 ? r.text() : Promise.reject(new Error('tags HTTP ' + r.status))),
-      window.fetch(updaterReleaseUrl(repo)).then((r) => r.text()), // 404 属正常（无 release），透传载荷
+      window.fetch(updaterTagsUrl(repo), { cache: 'no-store' }).then((r) => r.status === 200 ? r.text() : Promise.reject(new Error('tags HTTP ' + r.status))),
+      window.fetch(updaterReleaseUrl(repo), { cache: 'no-store' }).then((r) => r.text()), // 404 属正常（无 release），透传载荷
     ]).then(([tagsText, releaseText]) => {
-      return host.call('update/check', { repo, sessionId, tagsPayload: tagsText, releasePayload: releaseText });
+      return host.call('update/check', { repo, sessionId, tagsPayload: tagsText, releasePayload: releaseText, noCache: true });
     }).then((res) => {
       const r = res && typeof res === 'object' ? res : {};
       if (r.ok !== true) {

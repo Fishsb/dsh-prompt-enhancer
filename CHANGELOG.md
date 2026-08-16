@@ -10,6 +10,7 @@
 ## [3.1.2] - 2026-08-16
 
 ### Fixed
+- **检测版本缓存导致新版本检测不到（用户报告）**：手动「检测版本」曾受两层缓存影响——host 侧 `update/check` 5 分钟进程缓存（`UPDATE_CACHE_TTL_MS`）可能在刚发布 tag 后返回旧值、浏览器对 GitHub tags API 响应的 HTTP 缓存。修复：手动检测**总是取最新**——client fetch 加 `cache:'no-store'`、`update/check` 传 `noCache:true`（host 命中时先清缓存再拉取）；实测：同步安装副本后页面检测显示「本地 v3.1.1 / 远端 v3.1.2 / 发现新版本」（远端正确），本地版本号随 dsh-web 重启对齐 3.1.2 — [VU-001] — 架构治理
 - **更新完成后「端口重启」误报执行器不可用（用户报告）**：根因 = `runRestart` 依赖 host RPC（`ensureExecutor` 的 envcheck/executorEnsure）——而「一键更新」（apply restart:false）安装完成后**服务已停止**，host 不可达导致 RPC 失败，被外层 catch 误报「更新执行器不可用——请确认插件为 bundle 安装（端口 3081）」（实际插件是 bundle 安装、执行器 0.1.7 一直在线）。修复：**端口重启绕过 host，直连执行器**（ping 确认在线 → fire-and-forget restart → 1s 轮询）——执行器是独立进程（3081），服务停止不影响它；执行器确实不可达时才显示该提示（语义此时才正确）；顺带：安装完成（installed）后主动刷新「未重启」提醒横幅（host 可达时出现，不可达静默）、重启成功（healthy）后清除横幅；实测：执行器直连 ping 200、confirm/取消交互完好、112/112 测试 — [VU-001] — 架构治理
 
 ### Changed
