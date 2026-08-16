@@ -470,6 +470,9 @@ const ZH = {
   updPullApplyConfirm: '确认更新？',
   updInstalled: '✓ 已安装，请点击「端口重启」生效',
   updInstalledShort: '已安装',
+  // v3.1.x（职责划分·用户指令）：一键更新仅下载（staged）——安装+重启由「端口重启」完成
+  updStaged: '✓ 新版本已下载，请点击「端口重启」完成安装并重启',
+  updStagedShort: '已下载',
   updPulling: '拉取中…',
   updDone: '✓ 已拉取',
   updApplyTitle: '应用更新（运行中的插件不可自替换，请按需选择）：',
@@ -703,6 +706,9 @@ const EN = {
   updPullApplyConfirm: 'Confirm update?',
   updInstalled: '✓ Installed — click "Restart port" to apply',
   updInstalledShort: 'Installed',
+  // v3.1.x (role split): one-click update downloads only; install+restart via port-restart button
+  updStaged: '✓ New version downloaded — click "Restart port" to install and restart',
+  updStagedShort: 'Downloaded',
   updPulling: 'Pulling…',
   updDone: '✓ Pulled',
   updApplyTitle: 'Apply (a running plugin cannot replace itself; pick one):',
@@ -1378,7 +1384,7 @@ function updaterRepoOf(cfg) {
 // v2.9.x（一键更新不重启·修复）：执行器 apply 的 restart:false 支持自 0.1.7 起——
 // 执行前校验运行中执行器版本，过旧则阻止执行并提示重启 dsh-web（防旧执行器
 // 忽略 restart:false 自动拉起服务）
-const MIN_EXECUTOR_VERSION = '0.1.7';
+const MIN_EXECUTOR_VERSION = '0.1.8';
 function executorVersionAtLeast(v) {
   if (typeof v !== 'string') return false;
   const pa = String(v).replace(/^v/, '').split('.').map((x) => Number(x) || 0);
@@ -1601,16 +1607,19 @@ function UpdaterCard(props) {
           setApplyPhase('idle');
           return;
         }
-        // v2.9.x：apply(restart:false) 终态——安装完成、服务保持停止，等待「端口重启」
+        // v3.1.x（职责划分·用户指令）：一键更新终态——新版本已下载到 staging，零端口操作；
+        // 安装与重启由「端口重启」按钮（restart RPC）执行
+        if (s.phase === 'staged') {
+          setApplyErr(null);
+          setApplyStatus(null);
+          setApplyPhase('staged');
+          return;
+        }
+        // 防御：旧执行器/历史状态残留的 installed（服务已停止待重启）
         if (s.phase === 'installed') {
           setApplyErr(null);
           setApplyStatus(null);
-          setApplyPhase('installed');
-          // v3.1.x（用户需求·更新完成重启提醒）：安装完成后主动刷新重启提醒横幅
-          // （磁盘文件已晚于本进程加载 → 横幅含重启命令，与「端口重启」按钮闭环）
-          host.call('update/restartNeeded', { serviceName }).then((r) => {
-            if (r && r.needed === true) setRestartNotice(r);
-          }).catch(() => { /* 旧 host/动态形态无此 RPC → 静默 */ });
+          setApplyPhase('staged');
           return;
         }
         const phaseStatus = {
@@ -1695,9 +1704,8 @@ function UpdaterCard(props) {
         setAction(null);
         return null;
       }
-      // v2.9.x（一键更新不重启·修复）：执行前校验执行器版本——旧执行器（<0.1.7）无
-      // restart:false 支持，会忽略该参数并自动拉起服务（executorEnsure 的目标版本此前
-      // 取自进程缓存，旧 dsh-web 永远不升级执行器）；过旧则阻止并提示重启 dsh-web
+      // v3.1.x（职责划分·用户指令）：执行前校验执行器版本——仅下载/校验（staged 模式）
+      // 需执行器 ≥0.1.8；过旧则阻止并提示重启 dsh-web 升级执行器
       return executor.call('ping', {}, en.port).then((p) => {
         const pv = p && typeof p === 'object' && typeof p.version === 'string' ? p.version : '';
         if (!executorVersionAtLeast(pv)) {
@@ -1706,8 +1714,8 @@ function UpdaterCard(props) {
           setAction(null);
           return null;
         }
-        // accepted 立即返回，安装进度走 status 轮询
-        return executor.call('apply', { repo, tag: result.remoteTag, profile, serviceName, port: en.port, restart: false }, en.port);
+        // accepted 立即返回，下载进度走 status 轮询（apply 仅下载+校验，零端口操作）
+        return executor.call('apply', { repo, tag: result.remoteTag, profile, serviceName, port: en.port }, en.port);
       });
     }).then((applyRes) => {
       if (!applyRes) return;
@@ -1741,6 +1749,9 @@ function UpdaterCard(props) {
     // 旧实现走 ensureExecutor 会被外层 catch 误报「更新执行器不可用——请确认插件为
     // bundle 安装」；执行器是独立进程（3081），直连 ping/restart 即可完成重启
     const port = executorPort();
+    // 带新版本 tag（一键更新已下载 staging）→ 需要执行器 ≥0.1.8（restart 承载安装）；
+    // 纯重启（无 tag）不设版本门槛
+    const installTag = result && result.remoteTag ? result.remoteTag : '';
     executor.call('ping', {}, port).then((p) => {
       if (!p || p.ok !== true) {
         // 执行器确实不可达（未以 bundle 安装/未拉起）——提示原文语义正确
@@ -1749,8 +1760,16 @@ function UpdaterCard(props) {
         setAction(null);
         return;
       }
-      // 发送即返回（新旧执行器均兼容：旧版挂起模式由轮询 status 接管进度展示）
-      executor.call('restart', { serviceName, port }, port).then(() => {}).catch(() => {});
+      const pv = p && typeof p === 'object' && typeof p.version === 'string' ? p.version : '';
+      if (installTag !== '' && !executorVersionAtLeast(pv)) {
+        setApplyErr(t('updExecutorTooOld').replace('{v}', pv || '?'));
+        setApplyPhase('idle');
+        setAction(null);
+        return;
+      }
+      // 发送即返回（旧版挂起模式由轮询 status 接管进度展示）；带 tag 时执行器在
+      // 停服窗口内安装 staging tarball 后重启（全部端口操作统一在此模块）
+      executor.call('restart', { serviceName, profile, tag: installTag, port }, port).then(() => {}).catch(() => {});
       pollExecutorStatus(port);
     }).catch(() => {
       setApplyErr(t('updApplyExecutorDown'));
@@ -1772,9 +1791,9 @@ function UpdaterCard(props) {
   const busy = applyPhase === 'applying' || applyPhase === 'restarting';
   const outdated = !!(result && result.status === 'outdated');
   // 拉取按钮：busy/已安装/完成/他方确认/未检出新版本时禁用
-  const pullApplyDisabled = busy || applyPhase === 'installed' || applyPhase === 'done'
+  const pullApplyDisabled = busy || applyPhase === 'staged' || applyPhase === 'installed' || applyPhase === 'done'
     || (applyPhase === 'confirm' && action === 'restart') || checking || envChecking || !outdated;
-  // 端口重启按钮：busy/完成/他方确认/未检出新版本时禁用（installed 态可用——正是引导重启的时机）
+  // 端口重启按钮：busy/完成/他方确认/未检出新版本时禁用（staged 态可用——正是引导安装+重启的时机）
   const portRestartDisabled = busy || applyPhase === 'done'
     || (applyPhase === 'confirm' && action === 'apply') || checking || envChecking || !outdated;
 
@@ -1870,7 +1889,7 @@ function UpdaterCard(props) {
         onClick: applyPhase === 'confirm' && action === 'apply' ? runPullApply : () => startConfirm('apply'),
       }, applyPhase === 'confirm' && action === 'apply' ? t('updPullApplyConfirm')
         : applyPhase === 'applying' ? t('updApplying')
-        : applyPhase === 'installed' ? t('updInstalledShort')
+        : (applyPhase === 'staged' || applyPhase === 'installed') ? t('updStagedShort')
         : t('updPull')),
       React.createElement('button', {
         type: 'button',
@@ -1896,9 +1915,9 @@ function UpdaterCard(props) {
           }, t('updApplyReload'))
         : null,
     ),
-    // v2.9.x：安装完成（未重启）提示——引导点「端口重启」
-    applyPhase === 'installed'
-      ? React.createElement('div', { className: 'dsh-plg-save dsh-plg-save-ok', role: 'status' }, t('updInstalled'))
+    // v3.1.x：新版本已下载（未安装/未重启）提示——引导点「端口重启」完成安装并重启
+    (applyPhase === 'staged' || applyPhase === 'installed')
+      ? React.createElement('div', { className: 'dsh-plg-save dsh-plg-save-ok', role: 'status' }, t('updStaged'))
       : null,
     applyStatus
       ? React.createElement('div', { className: 'dsh-plg-status', role: 'status' }, applyStatus)
