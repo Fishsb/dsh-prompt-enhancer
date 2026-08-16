@@ -1270,3 +1270,85 @@ test('U66 parseSearchPlan JSON 容错解析（v3.0p）', () => {
   assert.equal(parseSearchPlan('garbage'), null);
   assert.equal(parseSearchPlan(null), null);
 });
+
+// F4（配置卫生）：M3 脚手架 config-schema.validateConfig 与运行时 PURE validateConfig 语义奇偶——
+// 历史分叉：脚手架只保留 version/mode/memory/params/context，其余（模型链/模板/updater）被丢弃，
+// 一旦接入运行时即清空模型链。本测试锁定两者在 v2 契约上的语义一致（单一事实源 = 运行时）。
+test('U-parity config-schema vs 运行时 validateConfig（F4 语义奇偶）', () => {
+  const { validateConfig: schemaValidate } = require('../src/host/config-schema.js');
+  const texts5 = (t) => ['base', 'lite', 'standard', 'smart', 'publish'].map((k) => (t && t[k]) || '');
+  const canon = (r) => ({
+    main: r.provider && r.model ? { provider: r.provider, model: r.model, reasoningEffort: r.reasoningEffort || '' } : null,
+    fallback: (r.fallback || []).map((e) => ({ provider: e.provider, model: e.model, reasoningEffort: e.reasoningEffort || '' })),
+    customModels: (r.customModels || []).map((e) => ({ provider: e.provider, model: e.model, name: e.name || '' })),
+    order: r.order || [],
+    params: { timeoutMs: r.timeoutMs, maxTokens: r.maxTokens, outputLimit: r.outputLimit },
+    templateMode: r.templateMode,
+    templateTexts: texts5(r.templateTexts),
+    mode: r.mode,
+    memory: r.memory,
+  });
+  const canonSchema = (s) => ({
+    main: s.main && s.main.provider && s.main.model
+      ? { provider: s.main.provider, model: s.main.model, reasoningEffort: s.main.reasoning && s.main.reasoning.enabled ? s.main.reasoning.effort : '' }
+      : null,
+    fallback: (s.fallback || []).map((e) => ({ provider: e.provider, model: e.model, reasoningEffort: e.reasoning && e.reasoning.enabled ? e.reasoning.effort : '' })),
+    customModels: (s.customModels || []).map((e) => ({ provider: e.provider, model: e.model, name: e.name || '' })),
+    order: s.order || [],
+    params: { timeoutMs: s.params.timeoutMs, maxTokens: s.params.maxTokens, outputLimit: s.params.outputLimit },
+    templateMode: s.template.mode,
+    templateTexts: texts5(s.template.texts),
+    mode: s.mode,
+    memory: s.memory,
+  });
+  const battery = [
+    {},
+    { mode: 'base' },
+    { mode: 'publish' },
+    { mode: 'memory' },
+    { version: 2, mode: 'standard', memory: true },
+    // v1 平铺（无 main/template/params 结构）：双实现兼容
+    { provider: 'opencode-go', model: 'deepseek-v4-pro', mode: 'smart', timeoutMs: 120000, templateMode: 'custom', templateText: 'T' },
+    // v2 完整：main+reasoning、链、自定义模型、order、params、模板 texts、publish 记忆强制
+    {
+      version: 2, mode: 'publish',
+      main: { provider: 'opencode-go', model: 'deepseek-v4-flash', reasoning: { enabled: true, effort: 'max' } },
+      fallback: [
+        { provider: 'opencode-go', model: 'deepseek-v4-flash', reasoning: { enabled: true, effort: 'max' } },
+        { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+      ],
+      customModels: [{ provider: 'deepseek-official', model: 'my-model', name: '我的模型' }],
+      order: ['opencode-go/deepseek-v4-flash'],
+      params: { timeoutMs: 60000, maxTokens: 4000, outputLimit: 16000 },
+      template: { mode: 'custom', texts: { base: 'B', publish: 'P', nope: 'X' }, touched: ['base', 'nope'] },
+      context: { budgetChars: 8000 },
+    },
+    // 边界：fallback 去重+上限 8、effort 超长丢弃、reasoning disabled 不保留、非法条目跳过、
+    // customModels 名称截断、order 去重、params 越界回默认、texts 超长丢弃、touched 白名单
+    {
+      version: 2,
+      fallback: [
+        { provider: 'p', model: 'm1' }, { provider: 'p', model: 'm1' },
+        { provider: 'p', model: 'm2', reasoning: { enabled: true, effort: 'very-long-effort-string-over-32-chars-xxxxxxxx' } },
+        { provider: 'p', model: 'm3', reasoning: { enabled: false, effort: 'max' } },
+        { provider: '', model: 'x' }, { model: 'no-provider' }, null, 42,
+        ...Array.from({ length: 8 }, (_, i) => ({ provider: 'p', model: 'm' + (10 + i) })),
+      ],
+      customModels: [{ provider: 'p', model: 'cm', name: 'n'.repeat(60) }, { provider: 'p' }, { model: 'x' }],
+      order: ['p/m1', 'ghost/key', 'p/m1'],
+      params: { timeoutMs: 100, maxTokens: 99999, outputLimit: -5 },
+      template: { mode: 'builtin', texts: { base: 'B'.repeat(5000) }, touched: ['publish', 'unknown', 'publish'] },
+    },
+  ];
+  for (const input of battery) {
+    const r = canon(validateConfig(input));
+    const s = canonSchema(schemaValidate(input).value);
+    assert.deepEqual(s, r, 'parity failed for ' + JSON.stringify(input));
+  }
+  // 防回归：脚手架必须保留模型链（历史 bug——validateConfig 只保留 mode/memory/params/context）
+  const chain = schemaValidate({ version: 2, fallback: [{ provider: 'a', model: 'b' }] }).value.fallback;
+  assert.deepEqual(chain, [{ provider: 'a', model: 'b' }], 'fallback 不得被脚手架丢弃');
+  const tpl = schemaValidate({ version: 2, template: { mode: 'custom', texts: { base: 'B' } } }).value.template;
+  assert.equal(tpl.mode, 'custom', 'template.mode 不得被脚手架丢弃');
+  assert.equal(tpl.texts.base, 'B', 'template.texts 不得被脚手架丢弃');
+});

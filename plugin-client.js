@@ -107,7 +107,7 @@ const CONFIG_DEFAULTS = {
   params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
   // v2.4.7（每模式独立自定义模板）：texts 各模式一份（v2.7.0 起含 publish，键 = MODE_VALUES 动态）；
   // text 保留兼容（读旧迁移）
-  template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '', publish: '' } },
+  template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '', publish: '' }, touched: [] },
   // v2.2（§6.2/§6.4）：4 模式（base 默认）+ 记忆独立开关（缺省 false，行为零变化）
   mode: 'base',
   context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
@@ -144,7 +144,7 @@ const SEEN_KEY_PREFIX = 'dsh.enhance.seen.';
 // v2.6.1（记忆链）：发送前迭代记忆最多保留轮数（与 host MEMORY_ROUNDS_MAX 一致）
 const MEMORY_ROUNDS_MAX = 4;
 
-const configState = { value: { ...CONFIG_DEFAULTS }, listeners: new Set(), fresh: true };
+const configState = { value: { ...CONFIG_DEFAULTS }, listeners: new Set(), fresh: true, unsupported: false };
 
 function cloneDefaults() {
   return {
@@ -154,7 +154,7 @@ function cloneDefaults() {
     customModels: [],
     order: [],
     params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
-    template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '', publish: '' } },
+    template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '', publish: '' }, touched: [] },
     mode: 'base',
     context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
     memory: false,
@@ -208,15 +208,24 @@ function sanitizeV2(parsed) {
   // ① texts（4 模式键白名单，各 ≤4000）为新结构；
   // ② 无 texts 时旧 text 迁移到全部 4 模式（保持"全局一份"语义不丢内容）；
   // ③ text 字段保留兼容（host validateConfig 双兼容，读旧值也 OK）
-  if (typeof t.text === 'string' && t.text.length <= 4000) v.template.text = t.text;
   if (t.texts && typeof t.texts === 'object') {
     // v2.7.0：白名单动态化（MODE_VALUES 含 publish——修复 publish 自定义模板被丢弃，
     // 与 v2.5.3 同类问题的 publish 复发）
     for (const key of MODE_VALUES) {
       if (typeof t.texts[key] === 'string' && t.texts[key].length <= 4000) v.template.texts[key] = t.texts[key];
     }
-  } else if (typeof v.template.text === 'string' && v.template.text !== '') {
-    for (const key of MODE_VALUES) v.template.texts[key] = v.template.text;
+    // F7（配置卫生）：texts 存在时不再保留遗留 text 字段（写回即清理；texts 缺失时仍读 text 迁移）
+  } else if (typeof t.text === 'string' && t.text.length <= 4000) {
+    v.template.text = t.text;
+    if (t.text !== '') {
+      for (const key of MODE_VALUES) v.template.texts[key] = t.text;
+    }
+  }
+  // F2（配置卫生）：touched 白名单（MODE_VALUES 内键、去重、上限 5）——用户编辑过的模式不再被 prefill 回填
+  if (Array.isArray(t.touched)) {
+    for (const key of t.touched.slice(0, 5)) {
+      if (typeof key === 'string' && MODE_VALUES.includes(key) && !v.template.touched.includes(key)) v.template.touched.push(key);
+    }
   }
   const ctxCfg = parsed.context && typeof parsed.context === 'object' ? parsed.context : {};
   // v2.2（§6.4）：mode 解析（4 模式白名单；'memory' 历史值 → lite + memory:true）
@@ -286,6 +295,14 @@ function loadConfigFromStorage() {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
+        // F3（配置卫生）：版本门控——version>2 的新结构配置不 sanitize、不写回（保护用户数据不被白名单摧毁），
+        // 以默认配置运行并提示（configState.unsupported 由 UI 展示）
+        if (typeof parsed.version === 'number' && parsed.version > 2) {
+          configState.value = cloneDefaults();
+          configState.fresh = false;
+          configState.unsupported = true;
+          return;
+        }
         // v23（D7）：老 v2 main → 链首条迁移（写回，此后 main 置空不再使用）
         configState.value = migrateMainIntoChain(sanitizeV2(parsed));
         configState.fresh = false;
@@ -589,6 +606,14 @@ const ZH = {
   cfgCustomNote: '仅限已有 provider 路由下的模型 ID；添加后自动连通性测试',
   cfgOrderNote: '仅影响模型下拉与候选的展示顺序',
   cfgInherited: '已继承当前使用模型（含推理等级）',
+  // F1（配置卫生）：失效条目提示与清理
+  cfgRowInvalid: '当前不可用',
+  cfgChainHasInvalid: '模型链中存在失效条目（模型/提供方已不可用），建议清理',
+  cfgRemoveInvalid: '清理失效条目',
+  // F3（配置卫生）：新版本配置保护
+  cfgNewerVersion: '当前配置由更新版本的插件创建，本版本暂以默认配置运行；你的配置未被改动',
+  // F8（配置卫生）：恢复默认语义
+  cfgRestoreNote: '「恢复默认」仅重置模型链（自适应当前可用模型），不清除自定义模板、优化参数与记忆设置',
   // v2.2（§0.2/§6.6）：模式体系文案（MODE_OPTIONS hint 由 cfgModeHint 提供）
   cfgPublishMemoryLocked: '一键发布模式记忆强制开启（多轮扩充需要），不可关闭',
   cfgMode: '优化模式',
@@ -827,6 +852,14 @@ const EN = {
   cfgCustomNote: 'Model IDs under existing provider routes only; connectivity is tested on add',
   cfgOrderNote: 'Affects dropdown and candidate display order only',
   cfgInherited: 'Inherited from the current model (incl. reasoning level)',
+  // F1 (config hygiene): invalid entries
+  cfgRowInvalid: 'Unavailable',
+  cfgChainHasInvalid: 'The model chain contains entries that are no longer available — consider removing them',
+  cfgRemoveInvalid: 'Remove unavailable',
+  // F3 (config hygiene): newer-version config protection
+  cfgNewerVersion: 'This configuration was created by a newer plugin version; running with defaults for now — your stored configuration is untouched',
+  // F8 (config hygiene): restore-defaults semantics
+  cfgRestoreNote: '"Restore defaults" only resets the model chain (adaptive to currently available models); custom templates, parameters and memory settings are kept',
   // v2.0.0（C3）：引擎与上下文配置文案
   cfgEngine: 'Engine',
   cfgPublishMemoryLocked: 'Memory is forced ON in Publish mode (needed for iterative expansion) and cannot be disabled.',
@@ -1815,9 +1848,10 @@ function UpdaterCard(props) {
   // 拉取按钮：busy/已安装/完成/他方确认/未检出新版本时禁用
   const pullApplyDisabled = busy || applyPhase === 'staged' || applyPhase === 'installed' || applyPhase === 'done'
     || (applyPhase === 'confirm' && action === 'restart') || checking || envChecking || !outdated;
-  // 端口重启按钮：busy/完成/他方确认/未检出新版本时禁用（staged 态可用——正是引导安装+重启的时机）
+  // 端口重启按钮：busy/完成/他方确认时禁用——不依赖「检测到新版本」（纯重启服务本就不需新版本；
+  // v3.0.1（用户指令·端口重启默认可用）：去掉 !outdated 依赖，端口重启始终可点，点击即拉起执行器执行重启）
   const portRestartDisabled = busy || applyPhase === 'done'
-    || (applyPhase === 'confirm' && action === 'apply') || checking || envChecking || !outdated;
+    || (applyPhase === 'confirm' && action === 'apply') || checking || envChecking;
 
   return React.createElement('div', { className: 'dsh-plg-card dsh-plg-upd' },
     React.createElement('div', { className: 'dsh-plg-head' },
@@ -2214,6 +2248,16 @@ function ModelMainSection(props) {
   const fallback = props.fallback || [];
   const candidates = props.candidates || [];
   const saveFallback = props.saveFallback;
+  // F1（配置卫生）：失效条目 = 不在候选（内置+自定义）中的 provider/model（DSH 侧禁用/模型下线/旧版本残留）
+  const invalidIndexes = [];
+  fallback.forEach((entry, i) => {
+    if (!candidates.some((c) => c.provider === entry.provider && c.model === entry.model)) invalidIndexes.push(i);
+  });
+  const removeInvalid = () => {
+    const next = fallback.filter((entry) => candidates.some((c) => c.provider === entry.provider && c.model === entry.model));
+    if (next.length !== fallback.length) saveFallback(next);
+    setTestState(null);
+  };
   // 测试集中单点状态：{ index, entry, phase:'testing'|'done', result } | null
   const [testState, setTestState] = React.useState(null);
 
@@ -2240,14 +2284,16 @@ function ModelMainSection(props) {
   };
   const remove = (index) => {
     const next = fallback.slice();
+    const removed = next[index];
     next.splice(index, 1);
     saveFallback(next);
-    // 删除正在测试的行 → 清空结果区
-    if (testState && testState.index === index) setTestState(null);
+    // F5（配置卫生）：测试区按条目身份清空——仅当删除的是被测试条目（删除其他行不再串行错标）
+    if (testState && removed && testState.key === removed.provider + '/' + removed.model) setTestState(null);
   };
   const restore = () => {
     // 恢复默认 → 优先自适应链（host 解析当前环境默认模型），失败才用静态链
-    host.call('models/autochain').then((auto) => {
+    // F8（配置卫生）：noCache 绕过 60s TTL——恢复默认始终取最新自适应链
+    host.call('models/autochain', { noCache: true }).then((auto) => {
       const a = auto && typeof auto === 'object' && Array.isArray(auto.chain) && auto.chain.length > 0
         ? auto.chain : BUILTIN_CHAIN;
       saveFallback(a.map((b) => ({ provider: b.provider, model: b.model })));
@@ -2259,7 +2305,7 @@ function ModelMainSection(props) {
   // v23（D4）：单点测试——点某行 ⛓ → 结果区集中显示该行测试；行内不注入结果
   const runTest = (index, entry) => {
     if (!entry || !entry.provider || !entry.model) return;
-    setTestState({ index, entry, phase: 'testing', result: null });
+    setTestState({ key: entry.provider + '/' + entry.model, index, entry, phase: 'testing', result: null });
     host.call('models/test', { provider: entry.provider, model: entry.model }).then((res) => {
       const r = res && typeof res === 'object' ? res : {};
       setTestState({
@@ -2287,7 +2333,8 @@ function ModelMainSection(props) {
     let testArea = null;
     if (testState) {
       const p = providers.find((x) => x.provider === testState.entry.provider);
-      const label = '测试 #' + String(testState.index + 1) + ' · ' + (p && p.name ? p.name : testState.entry.provider) + ' / ' + testState.entry.model;
+      const curIndex = fallback.findIndex((x) => x.provider === testState.entry.provider && x.model === testState.entry.model);
+      const label = '测试 #' + String((curIndex >= 0 ? curIndex : testState.index) + 1) + ' · ' + (p && p.name ? p.name : testState.entry.provider) + ' / ' + testState.entry.model;
       let resultNode;
       if (testState.phase === 'testing') {
         resultNode = React.createElement('span', { className: 'dsh-plg-muted' }, t('cfgTesting'));
@@ -2317,18 +2364,22 @@ function ModelMainSection(props) {
         count: fallback.length,
         providers: providers,
         candidates: candidates,
-        testing: !!(testState && testState.index === index && testState.phase === 'testing'),
+        testing: !!(testState && testState.key === entry.provider + '/' + entry.model && testState.phase === 'testing'),
+        invalid: invalidIndexes.includes(index),
         onChange: (e) => updateEntry(index, e),
         onMove: (d) => move(index, d),
         onRemove: () => remove(index),
         onTest: () => runTest(index, entry),
       })),
       fallback.length === 0 ? React.createElement('p', { className: 'dsh-plg-note' }, t('secFallbackEmpty')) : null,
+      invalidIndexes.length > 0 ? React.createElement('p', { className: 'dsh-plg-note' }, t('cfgChainHasInvalid')) : null,
       testArea,
       React.createElement('div', { className: 'dsh-plg-row' },
         React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: addModel }, t('cfgAddFallback')),
         React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: restore }, t('cfgRestoreDefaults')),
+        invalidIndexes.length > 0 ? React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: removeInvalid }, t('cfgRemoveInvalid')) : null,
       ),
+      React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgRestoreNote')),
       React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgFallbackNote')),
     );
   }
@@ -2345,6 +2396,7 @@ function FallbackRow(props) {
   const providers = props.providers;       // [{provider, name, models:[{id,name}]}]
   const candidates = props.candidates;     // 跨厂家候选（含自定义，兼容存量）
   const testing = props.testing;           // 本行是否测试中（父级单点状态）
+  const invalid = props.invalid;           // F1：本行是否失效（不在候选列表中）
   const onChange = props.onChange;
   const onMove = props.onMove;
   const onRemove = props.onRemove;
@@ -2355,10 +2407,25 @@ function FallbackRow(props) {
     setReasoning(null);
     if (!entry.provider || !entry.model) return;
     let cancelled = false;
-    host.call('models/resolve', { provider: entry.provider, model: entry.model }).then((res) => {
+    // F1（配置卫生）：已启用思考的条目用 noCache 取新鲜能力表，用于 effort 纠偏
+    const needFresh = !!(entry.reasoning && entry.reasoning.enabled === true);
+    host.call('models/resolve', { provider: entry.provider, model: entry.model, ...(needFresh ? { noCache: true } : {}) }).then((res) => {
       if (cancelled) return;
       const r = res && typeof res === 'object' ? res : {};
-      if (r.ok && r.reasoning && r.reasoning.efforts && r.reasoning.efforts.length > 0) setReasoning(r.reasoning);
+      const meta = r.ok && r.reasoning && r.reasoning.efforts && r.reasoning.efforts.length > 0 ? r.reasoning : null;
+      if (meta) setReasoning(meta);
+      // F1（配置卫生）：effort 自动纠偏——存储 effort 不在模型能力列表 → 修正为默认等级；
+      // 模型不支持思考但存储仍启用 → 移除 reasoning（防止失效 effort 随请求发送给 LLM）
+      if (r.ok && entry.reasoning && entry.reasoning.enabled === true) {
+        if (meta) {
+          const valid = meta.efforts.some((e) => String(e.id) === entry.reasoning.effort);
+          if (!valid) onChange({ ...entry, reasoning: { enabled: true, effort: String(meta.defaultEffort || meta.efforts[0].id) } });
+        } else {
+          const fix = { ...entry };
+          delete fix.reasoning;
+          onChange(fix);
+        }
+      }
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [entry.provider, entry.model]);
@@ -2375,11 +2442,13 @@ function FallbackRow(props) {
     const provider = e.target.value;
     const p = providers && providers.find((x) => x.provider === provider);
     const first = p && p.models && p.models[0] ? p.models[0].id : '';
-    onChange({ provider, model: first, reasoning: { enabled: false, effort: '' } });
+    // F1（配置卫生）：切换厂家/模型保留 reasoning（不硬重置）——新模型能力纠偏由 resolve effect 接管
+    onChange({ ...entry, provider, model: first });
   };
 
   return React.createElement('div', { className: 'dsh-plg-row' },
     React.createElement('span', { className: 'dsh-plg-muted dsh-plg-num' }, String(index + 1)),
+    invalid ? React.createElement('span', { className: 'dsh-plg-badge-invalid', title: t('cfgRowInvalid') }, '⚠') : null,
     React.createElement('select', {
       className: 'dsh-plg-select dsh-plg-select-provider',
       value: entry.provider || '',
@@ -2389,7 +2458,7 @@ function FallbackRow(props) {
     React.createElement('select', {
       className: 'dsh-plg-select dsh-plg-select-model',
       value: entry.model || '',
-      onChange: (e) => onChange({ provider: entry.provider, model: e.target.value, reasoning: { enabled: false, effort: '' } }),
+      onChange: (e) => onChange({ ...entry, model: e.target.value }),
       children: modelOptions.map((m) => React.createElement('option', { key: m.id, value: m.id }, m.name || m.id)),
     }),
     reasoning
@@ -2399,7 +2468,8 @@ function FallbackRow(props) {
             value: effortOn ? 'on' : 'off',
             onChange: (e) => {
               const next = e.target.value === 'on';
-              onChange({ ...entry, reasoning: next ? { enabled: true, effort: (reasoning.defaultEffort || (reasoning.efforts[0] && reasoning.efforts[0].id) || '') } : { enabled: false, effort: '' } });
+              if (next) onChange({ ...entry, reasoning: { enabled: true, effort: (reasoning.defaultEffort || (reasoning.efforts[0] && reasoning.efforts[0].id) || '') } });
+              else { const fix = { ...entry }; delete fix.reasoning; onChange(fix); } // F7：关闭思考不再写 {enabled:false} 冗余
             },
             children: [React.createElement('option', { key: 'off', value: 'off' }, t('cfgReasoningOff')), React.createElement('option', { key: 'on', value: 'on' }, t('cfgReasoningOn'))],
           }),
@@ -2457,6 +2527,12 @@ function ModelConfigTab(props) {
       const r = res && typeof res === 'object' ? res : {};
       if (r.ok && Array.isArray(r.providers)) {
         setProviders(r.providers);
+        // F6（配置卫生）：order 幽灵键清理——仅保留候选（内置+自定义）存在的键，一次性写回
+        try {
+          const cand = buildCandidates(r.providers, configState.value.customModels, configState.value.order);
+          const keep = configState.value.order.filter((k) => cand.some((c) => c.provider + '/' + c.model === k));
+          if (keep.length !== configState.value.order.length) saveConfig({ order: keep });
+        } catch (e) { /* 清理失败静默（下次打开再试） */ }
         // v18/v19：fresh install → 模型链继承当前使用模型（含推理等级）+ 自适应链补足
         if (configState.fresh && configState.value.fallback.length === 0) {
           // 先取当前默认模型作首项（含推理等级），再用自适应链 / 静态链做补足
@@ -2499,6 +2575,7 @@ function ModelConfigTab(props) {
 
   return React.createElement(React.Fragment, null,
     error ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, error) : null,
+    configState.unsupported ? React.createElement('p', { className: 'dsh-plg-note dsh-plg-inherit' }, t('cfgNewerVersion')) : null,
     inherited ? React.createElement('p', { className: 'dsh-plg-note dsh-plg-inherit' }, t('cfgInherited')) : null,
     // v23：单一「模型配置」链区块（无主/兜之分；main 已迁移并忽略）
     React.createElement(ModelMainSection, { t: t, providers: providers, fallback: cfg.fallback, candidates: candidates, saveFallback: saveFallback }),
@@ -2535,6 +2612,8 @@ function ParamsTab(props) {
   React.useEffect(() => {
     if (cfg.template.mode !== 'custom' || prefillBusy) return;
     const cur = (cfg.template.texts && cfg.template.texts[cfg.mode]) || '';
+    // F2（配置卫生）：用户编辑过（touched）的模式不再自动回填——清空操作可持久
+    if ((cfg.template.touched || []).includes(cfg.mode)) return;
     if (cur.trim() !== '') return; // 已有内容不覆盖
     setPrefillBusy(true);
     host.call('template/default').then((res) => {
@@ -2652,7 +2731,12 @@ function ParamsTab(props) {
             value: curText,
             rows: 12,
             placeholder: t('cfgTemplateText'),
-            onChange: (e) => save({ template: { ...cfg.template, texts: { ...(cfg.template.texts || {}), [cfg.mode]: e.target.value.slice(0, 4000) } } }),
+            onChange: (e) => {
+              const touched = (cfg.template.touched || []).includes(cfg.mode)
+                ? (cfg.template.touched || [])
+                : (cfg.template.touched || []).concat(cfg.mode);
+              save({ template: { ...cfg.template, texts: { ...(cfg.template.texts || {}), [cfg.mode]: e.target.value.slice(0, 4000) }, touched } });
+            },
           }),
           React.createElement('p', { id: ids.templateNote, className: 'dsh-plg-hint' }, t('cfgTemplateNote')),
         )

@@ -146,11 +146,11 @@ const ADAPTIVE_CHAIN_TTL_MS = 60000;
 const modelInfoCache = new Map();
 const MODEL_INFO_TTL_MS = 300000;
 
-async function resolveModelInfoCached(llmService, provider, model) {
+async function resolveModelInfoCached(llmService, provider, model, noCache) {
   const key = provider + '/' + model;
   const hit = modelInfoCache.get(key);
   const now = Date.now();
-  if (hit && (now - hit.at) < MODEL_INFO_TTL_MS) return hit.value;
+  if (!noCache && hit && (now - hit.at) < MODEL_INFO_TTL_MS) return hit.value;
   const info = await llmService.resolveModelInfo(provider, model);
   modelInfoCache.set(key, { value: info, at: now });
   // 防无限增长：超过 200 条时清理过期项
@@ -162,9 +162,9 @@ async function resolveModelInfoCached(llmService, provider, model) {
   return info;
 }
 
-async function resolveAdaptiveChain(llmSvc, adm) {
+async function resolveAdaptiveChain(llmSvc, adm, noCache) {
   const now = Date.now();
-  if (adaptiveChainCache.value && (now - adaptiveChainCache.at) < ADAPTIVE_CHAIN_TTL_MS) {
+  if (!noCache && adaptiveChainCache.value && (now - adaptiveChainCache.at) < ADAPTIVE_CHAIN_TTL_MS) {
     return adaptiveChainCache.value;
   }
   const chain = [];
@@ -2147,7 +2147,8 @@ return {
       if (!provider || !model) return { ok: false, code: 'BAD_ARGS', message: 'provider and model required' };
       try {
         // v21（P1-4）：走 TTL 缓存，避免重复适配器能力查询
-        const info = await resolveModelInfoCached(llmService, provider, model);
+        // F1（配置卫生）：noCache 旁路 TTL——client effort 纠偏场景需要新鲜能力表
+        const info = await resolveModelInfoCached(llmService, provider, model, !!(args && args.noCache === true));
         const reasoning = info && info.reasoning ? {
           efforts: info.reasoning.efforts.map((e) => ({
             id: String(e.id),
@@ -2197,7 +2198,8 @@ return {
       const llmSvc = ctx.get('llm');
       const adm = ctx.get('agentDefaultModel');
       try {
-        const chain = await resolveAdaptiveChain(llmSvc, adm);
+        // F8（配置卫生）：noCache 旁路 TTL——「恢复默认」始终取最新自适应链
+        const chain = await resolveAdaptiveChain(llmSvc, adm, !!(args && args.noCache === true));
         return { ok: true, chain };
       } catch (e) {
         herr('[enhance] models/autochain failed', e);

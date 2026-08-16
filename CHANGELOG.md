@@ -8,7 +8,11 @@
 ## [Unreleased]
 
 ### Changed
+- **端口重启默认可用（用户指令）**：插件管理更新卡「端口重启」按钮不再依赖「检测到新版本」（`outdated`）前置——去掉 `portRestartDisabled` 的 `!outdated` 禁用条件，端口重启**始终可点**；纯重启服务本就不需新版本（`runRestart` 无 tag 走纯重启循环，逻辑已支持），点击即拉起执行器（3081）执行重启；「一键更新」按钮语义不变（仍须检测到新版本）；纯 client 改动，RPC/执行器/构建物版本零变化 — [VU-001]
 - **README 卸载/更新说明修正（用户反馈驱动）**：「更新 / 卸载」段落此前只列命令、未说明生效条件，导致 remove 后不重启被观感为「卸载不掉」——① 明确 **remove 后必须重启 dsh-web 才从运行中卸载**（dsh plugin 只清理磁盘安装与层列表，不重挂载运行实例）；② 注明重复 remove 报 `no such dependency found` 即表示已卸载；③ 注明 tag 锁定安装（`github:...#tag`）下 `update` 不跨 tag 升级，升级应用 `add github:...#新tag`；④ 注明卸载不清除浏览器端插件配置（localStorage `dsh.enhance.config.v2`），重装后保留 — 文档
+
+### Fixed
+- **模型配置残留与错位修复（配置卫生专项，方案 `docs/internal/方案-模型配置残留与错位修复.md`）**：① **失效条目可见化**——模型链条目指向不可用 provider/模型（DSH 侧禁用、模型下线、卸载重装后旧 id 残留）时显示 ⚠ 标记 + 顶部提示 + 一键清理；② **effort 自动纠偏**——已启用思考的条目 resolve 时校验存储的思考等级，不在模型能力列表 → 按默认等级修正；模型不支持思考 → 自动移除 reasoning（不再把失效 effort 随请求发给 LLM）；③ **切换厂家/模型不再静默重置思考等级**（保留字段，能力纠偏接管）；④ **自定义模板清空可持久**——新增 `template.touched` 标记，编辑过的模式不再被 prefill 自动回填，未编辑模式保留首访预填；⑤ **sanitize 版本门控**——`version>2` 的未来结构配置不 sanitize、不写回（保护用户数据不被白名单摧毁），以默认配置运行并提示；⑥ **M3 脚手架语义对齐**——`config-schema.validateConfig` 补齐 main/fallback/customModels/order/template/updater 白名单（此前会清空模型链，一旦接入运行时即错位），新增 **U-parity 奇偶单测**锁定与运行时 validateConfig 语义一致；⑦ **删除/移动行不再错标**——测试结果区按条目身份（provider/model）而非 index 定位；⑧ **残留清理**——order 幽灵键打开设置页自动清理、遗留 `template.text`（texts 存在时）写回即清除、关闭思考不再写入 `{enabled:false}` 冗余；⑨ 「恢复默认」走 noCache 最新自适应链 + README/设置页明确其语义（仅重置模型链）；`models/resolve`/`models/autochain` 新增 `noCache` 旁路参数；测试 120 → 121 — [PEN-002] — 架构治理
 
 ## [3.0.0] - 2026-08-16
 
