@@ -2128,6 +2128,25 @@ return {
     // 获取执行器地址后直连）。原因：重启/重试必须脱离 dsh-web 进程（服务停 = host 死，
     // 依赖 host 的重试必然无法送达——v2.5.5 out.log 无 update/restart 日志为证）。
 
+    // ================= M2 深化：增强管道（bundle 内 Pipeline，契约同 src/host/pipeline.js）=================
+    // 新增增强模式 / 检索源 = registerEnhanceStage 注册 stage handler，而非修改 enhance 主流程。
+    const enhancePipelineHandlers = new Map();
+    function registerEnhanceStage(name, handler, options) {
+      const priority = options && Number.isInteger(options.priority) ? options.priority : 0;
+      const list = enhancePipelineHandlers.get(name) || [];
+      list.push({ handler, priority });
+      list.sort((a, b) => a.priority - b.priority);
+      enhancePipelineHandlers.set(name, list);
+    }
+    async function runEnhanceStages(name, value) {
+      const list = enhancePipelineHandlers.get(name) || [];
+      let v = value;
+      for (const { handler } of list) {
+        v = await handler(v);
+      }
+      return v;
+    }
+
     // v2.3（§7.3）：优化进度轮询 RPC——从 pending Map 读 stage（纯展示，失败静默降级）
     harness.handle('enhance/progress', async (args) => {
       const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : '';
@@ -2137,22 +2156,11 @@ return {
       return { ok: true, stage: rec.stage || STAGE_PREPARE };
     });
 
-    harness.handle('enhance', async (args) => {
-      const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : 'unknown';
-      const seq = args && typeof args.seq === 'number' ? args.seq : -1;
-      const text = args && typeof args.text === 'string' ? args.text : '';
-      const key = requestKey(sessionId, seq);
-      if (text.trim() === '' || text.startsWith('/')) {
-        return { ok: false, code: 'GUARD', message: friendlyMessage({ code: 'GUARD' }) };
-      }
-      if (llm === undefined) {
-        return { ok: false, code: 'NO_LLM', message: friendlyMessage({ code: 'NO_LLM' }) };
-      }
-
-      // v2.3（§7.3）：记录提前创建（入参校验后）——stage 从 prepare 起可被 progress RPC 轮询
-      const rec = { cancelled: false, timedOut: false, iterator: null, stage: STAGE_PREPARE };
-      pending.set(key, rec);
-
+    // ---- stage: analyze——配置解析 / 模型链 / system 组装 / 记忆与场景准备 ----
+    async function enhanceStageAnalyze(state) {
+      const args = state.args;
+      const sessionId = state.sessionId;
+      const text = state.text;
       const cfg = validateConfig(args && args.config);
       // v2.1（§2.2）：client 已判定实际模式（显式/auto/seed），请求 mode 覆盖解析值
       if (args && typeof args.mode === 'string' && MODE_KEYS.includes(args.mode)) cfg.mode = args.mode;
@@ -2161,9 +2169,6 @@ return {
       // v23（D6）：模型链 = cfg.fallback 按序（每条独立 reasoningEffort）；
       // 链为空 → 自适应解析当前环境默认链（不再区分 main/fallback）
       const chain = buildTryChain(cfg.fallback, await resolveAdaptiveChain(ctx.get('llm'), ctx.get('agentDefaultModel')));
-      // v2.2（§6.5）：入口条件——模式注入或记忆叠加（记忆开 + 有记忆时 base/lite 也进入管道）
-      let v2Block = '';
-      let v2Log = 'none';
       // v2.4.7（每模式独立自定义模板）：custom 且当前模式 texts 非空 → 用该模式文本；
       // 当前模式未写自定义（空串）→ 回退该模式内置（publish → SYSTEM_PUBLISH_PROMPT，其余 → SYSTEM_PROMPT）
       // v2.7.0（一键发布）：publish 模式内置专用九章规格 system（custom 模板仍可覆盖）
@@ -2218,6 +2223,39 @@ return {
         }
         hlog('[enhance] scenario=' + scenario + (cached ? ' cached' : ' judged src=' + (memRounds.length > 0 ? 'rounds[0]' : 'text')));
       }
+      // v2.7.0（publish 一键发布）：规格长文生成不设限制——maxTokens 省略（provider 默认上限）、
+      // outputLimit=0（collectStream 不截断）、超时放宽至 ≥120s（长文生成耗时）
+      // v2.8.0（实测修正）：120s → 240s——带记忆链 rounds 的多轮规格生成（重负载路径）
+      // 实测 120s 超时（round-2 完整九章 + 融入补充 + 自评），240s 覆盖 4 轮链最坏情况
+      const isPublish = cfg.mode === 'publish';
+      state.cfg = cfg;
+      state.chain = chain;
+      state.system = system;
+      state.memRounds = memRounds;
+      state.hasMemory = hasMemory;
+      state.memoryActive = memoryActive;
+      state.memDelta = memDelta;
+      state.scenario = scenario;
+      state.isPublish = isPublish;
+      state.timeoutMs = isPublish ? Math.max(cfg.timeoutMs, 240000) : cfg.timeoutMs;
+      state.maxTokens = isPublish ? 0 : cfg.maxTokens;
+      state.outputLimit = isPublish ? 0 : cfg.outputLimit;
+      return state;
+    }
+
+    // ---- stage: retrieve——V2 上下文构建 / 检索 ----
+    async function enhanceStageRetrieve(state) {
+      const sessionId = state.sessionId;
+      const text = state.text;
+      const cfg = state.cfg;
+      const chain = state.chain;
+      const memoryActive = state.memoryActive;
+      const memDelta = state.memDelta;
+      const scenario = state.scenario;
+      const rec = state.rec;
+      // v2.2（§6.5）：入口条件——模式注入或记忆叠加（记忆开 + 有记忆时 base/lite 也进入管道）
+      let v2Block = '';
+      let v2Log = 'none';
       if (shouldInjectV2(cfg.mode, cfg.context.budgetChars) || memoryActive) {
         const v2 = await buildV2ContextBlock({
           llm: ctx.get('llm'),
@@ -2234,21 +2272,35 @@ return {
         v2Log = v2.log;
       }
       // v2.6.1：记忆链注入同样需要防回显护栏（base/lite + 记忆时 v2Block 为空）
-      if (v2Block !== '' || memoryActive) system = system + '\n\n' + CONTEXT_GUARD;
-      // v2.7.0（publish 一键发布）：规格长文生成不设限制——maxTokens 省略（provider 默认上限）、
-      // outputLimit=0（collectStream 不截断）、超时放宽至 ≥120s（长文生成耗时）
-      // v2.8.0（实测修正）：120s → 240s——带记忆链 rounds 的多轮规格生成（重负载路径）
-      // 实测 120s 超时（round-2 完整九章 + 融入补充 + 自评），240s 覆盖 4 轮链最坏情况
-      const isPublish = cfg.mode === 'publish';
-      const timeoutMs = isPublish ? Math.max(cfg.timeoutMs, 240000) : cfg.timeoutMs;
-      const maxTokens = isPublish ? 0 : cfg.maxTokens;
-      const outputLimit = isPublish ? 0 : cfg.outputLimit;
+      if (v2Block !== '' || memoryActive) state.system = state.system + '\n\n' + CONTEXT_GUARD;
+      state.v2Block = v2Block;
+      state.v2Log = v2Log;
+      return state;
+    }
+
+    // ---- stage: assemble——消息组装 / 日志 ----
+    async function enhanceStageAssemble(state) {
+      const args = state.args;
+      const sessionId = state.sessionId;
+      const seq = state.seq;
+      const text = state.text;
+      const cfg = state.cfg;
+      const chain = state.chain;
+      const system = state.system;
+      const memRounds = state.memRounds;
+      const memoryActive = state.memoryActive;
+      const memDelta = state.memDelta;
+      const v2Block = state.v2Block;
+      const v2Log = state.v2Log;
+      const timeoutMs = state.timeoutMs;
+      const maxTokens = state.maxTokens;
+      const outputLimit = state.outputLimit;
       // v2.6.1：消息组装——记忆链经 buildChatMessages 成为真多轮 user/assistant 消息，
       // 最终 user 消息 = 本轮修改摘要 + 模式块 + 原文包裹；无记忆 → 单 user 消息（旧行为）。
       let memoryLog = '';
       // v2.8.0（一键发布 · 实测修正）：publish 用中性用户包装（wrapPublishText），
       // 其余模式沿用「请优化以下提示词」包装（行为不变）
-      const wrappedText = isPublish ? wrapPublishText(text) : wrapUserText(text);
+      const wrappedText = state.isPublish ? wrapPublishText(text) : wrapUserText(text);
       let finalText = v2Block !== '' ? v2Block + '\n\n' + wrappedText : wrappedText;
       let messages;
       if (memoryActive) {
@@ -2263,59 +2315,109 @@ return {
       const modeTag = args && args.seed === true ? cfg.mode + '(seed)' : cfg.mode;
       const ctxLog = [v2Log === 'none' ? '' : v2Log, memoryLog].filter((s) => s !== '').join('+') || 'none';
       hlog('[enhance] cfg session=' + sessionId + ' mode=' + modeTag + ' ctx=' + ctxLog + ' chain=' + (chain.length > 0 ? chain.map((f) => f.provider + '/' + f.model).join(',') : '-') + ' timeout=' + timeoutMs + ' maxTokens=' + maxTokens + ' outputLimit=' + outputLimit + ' template=' + (system === SYSTEM_PROMPT ? 'builtin' : (system.indexOf(CONTEXT_GUARD) !== -1 ? 'custom+v2guard' : 'custom')));
+      state.messages = messages;
+      return state;
+    }
 
-      const timeoutDisposer = ctx.timer.timeout(() => {
-        markAndAbort(key, 'timedOut');
-      }, timeoutMs);
-
-      try {
-        let lastFailure = null;
-        for (let i = 0; i < chain.length; i++) {
-          const entry = chain[i];
-          if (rec.cancelled || rec.timedOut) {
-            return { ok: false, code: rec.timedOut ? 'TIMEOUT' : 'ABORTED', message: friendlyMessage({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED' }) };
-          }
-          hlog('[enhance] try session=' + sessionId + ' provider=' + entry.provider + ' model=' + entry.model + (entry.reasoningEffort ? ' effort=' + entry.reasoningEffort : '') + ' seq=' + seq);
-          rec.stage = STAGE_LLM;
-          const stream = llm.stream({
-            provider: entry.provider,
-            model: entry.model,
-            ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
-            system,
-            // v2.7.0（publish）：maxTokens<=0 省略字段 → provider 默认上限（不设限制）
-            ...(maxTokens > 0 ? { maxTokens } : {}),
-            messages,
-          });
-          const iterator = stream[Symbol.asyncIterator]();
-          rec.iterator = iterator;
-          let result;
-          try {
-            result = await collectStream(iterator, outputLimit);
-          } finally {
-            rec.iterator = null;
-          }
-          if (result.kind === 'ok') {
-            // v2.8.0（实测修正）：publish 剥离输出首部【场景判定】回显行（确定性，不依赖模型遵从）
-            const cleaned = isPublish ? stripScenarioEcho(cleanOutput(result.text)) : cleanOutput(result.text);
-            if (cleaned === '') {
-              lastFailure = { code: 'EMPTY_RESPONSE', message: 'model returned empty text' };
-              continue;
-            }
-            hlog('[enhance] ok session=' + sessionId + ' via ' + entry.model);
-            return { ok: true, text: cleaned, model: entry.model };
-          }
-          if (result.kind === 'toolong') {
-            lastFailure = { code: 'OUTPUT_TOO_LONG', message: 'output exceeded limit' };
+    // ---- stage: llm——模型链调用 / 流式收集 / 结果清理 ----
+    async function enhanceStageLlm(state) {
+      const sessionId = state.sessionId;
+      const seq = state.seq;
+      const rec = state.rec;
+      const chain = state.chain;
+      const system = state.system;
+      const messages = state.messages;
+      const isPublish = state.isPublish;
+      const maxTokens = state.maxTokens;
+      const outputLimit = state.outputLimit;
+      let lastFailure = null;
+      for (let i = 0; i < chain.length; i++) {
+        const entry = chain[i];
+        if (rec.cancelled || rec.timedOut) {
+          state.result = { ok: false, code: rec.timedOut ? 'TIMEOUT' : 'ABORTED', message: friendlyMessage({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED' }) };
+          return state;
+        }
+        hlog('[enhance] try session=' + sessionId + ' provider=' + entry.provider + ' model=' + entry.model + (entry.reasoningEffort ? ' effort=' + entry.reasoningEffort : '') + ' seq=' + seq);
+        rec.stage = STAGE_LLM;
+        const stream = llm.stream({
+          provider: entry.provider,
+          model: entry.model,
+          ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+          system,
+          // v2.7.0（publish）：maxTokens<=0 省略字段 → provider 默认上限（不设限制）
+          ...(maxTokens > 0 ? { maxTokens } : {}),
+          messages,
+        });
+        const iterator = stream[Symbol.asyncIterator]();
+        rec.iterator = iterator;
+        let result;
+        try {
+          result = await collectStream(iterator, outputLimit);
+        } finally {
+          rec.iterator = null;
+        }
+        if (result.kind === 'ok') {
+          // v2.8.0（实测修正）：publish 剥离输出首部【场景判定】回显行（确定性，不依赖模型遵从）
+          const cleaned = isPublish ? stripScenarioEcho(cleanOutput(result.text)) : cleanOutput(result.text);
+          if (cleaned === '') {
+            lastFailure = { code: 'EMPTY_RESPONSE', message: 'model returned empty text' };
             continue;
           }
-          if (result.kind === 'cancelled' || result.kind === 'aborted') {
-            return { ok: false, code: rec.timedOut ? 'TIMEOUT' : 'ABORTED', message: friendlyMessage({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED' }) };
-          }
-          hlog('[enhance] fail session=' + sessionId + ' model=' + entry.model + ' code=' + (result.failure ? result.failure.code : '?'));
-          lastFailure = result.failure || { code: 'LLM_FAILED', message: 'unknown failure' };
+          hlog('[enhance] ok session=' + sessionId + ' via ' + entry.model);
+          state.result = { ok: true, text: cleaned, model: entry.model };
+          return state;
         }
-        hlog('[enhance] chain exhausted session=' + sessionId + ' last code=' + (lastFailure ? lastFailure.code : '?'));
-        return { ok: false, code: lastFailure.code || 'LLM_FAILED', message: friendlyMessage(lastFailure) };
+        if (result.kind === 'toolong') {
+          lastFailure = { code: 'OUTPUT_TOO_LONG', message: 'output exceeded limit' };
+          continue;
+        }
+        if (result.kind === 'cancelled' || result.kind === 'aborted') {
+          state.result = { ok: false, code: rec.timedOut ? 'TIMEOUT' : 'ABORTED', message: friendlyMessage({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED' }) };
+          return state;
+        }
+        hlog('[enhance] fail session=' + sessionId + ' model=' + entry.model + ' code=' + (result.failure ? result.failure.code : '?'));
+        lastFailure = result.failure || { code: 'LLM_FAILED', message: 'unknown failure' };
+      }
+      hlog('[enhance] chain exhausted session=' + sessionId + ' last code=' + (lastFailure ? lastFailure.code : '?'));
+      state.result = { ok: false, code: lastFailure.code || 'LLM_FAILED', message: friendlyMessage(lastFailure) };
+      return state;
+    }
+
+    registerEnhanceStage('analyze', enhanceStageAnalyze, { priority: 100 });
+    registerEnhanceStage('retrieve', enhanceStageRetrieve, { priority: 100 });
+    registerEnhanceStage('assemble', enhanceStageAssemble, { priority: 100 });
+    registerEnhanceStage('llm', enhanceStageLlm, { priority: 100 });
+
+    harness.handle('enhance', async (args) => {
+      const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : 'unknown';
+      const seq = args && typeof args.seq === 'number' ? args.seq : -1;
+      const text = args && typeof args.text === 'string' ? args.text : '';
+      const key = requestKey(sessionId, seq);
+      if (text.trim() === '' || text.startsWith('/')) {
+        return { ok: false, code: 'GUARD', message: friendlyMessage({ code: 'GUARD' }) };
+      }
+      if (llm === undefined) {
+        return { ok: false, code: 'NO_LLM', message: friendlyMessage({ code: 'NO_LLM' }) };
+      }
+
+      // v2.3（§7.3）：记录提前创建（入参校验后）——stage 从 prepare 起可被 progress RPC 轮询
+      const rec = { cancelled: false, timedOut: false, iterator: null, stage: STAGE_PREPARE };
+      pending.set(key, rec);
+
+      // M2 深化：请求状态经 Pipeline 四阶段链式传递（analyze→retrieve→assemble→llm）。
+      // 准备阶段在 try 外（与原逻辑一致：准备期异常冒泡为 RPC 错误而非 LLM_FAILED）；
+      // 超时计时自 llm 阶段起（与原逻辑一致：准备阶段不设防）。
+      const state = { args, sessionId, seq, text, key, rec };
+      await runEnhanceStages('analyze', state);
+      await runEnhanceStages('retrieve', state);
+      await runEnhanceStages('assemble', state);
+      const timeoutDisposer = ctx.timer.timeout(() => {
+        markAndAbort(key, 'timedOut');
+      }, state.timeoutMs);
+
+      try {
+        await runEnhanceStages('llm', state);
+        return state.result;
       } catch (e) {
         herr('[enhance] unexpected error session=' + sessionId + ' seq=' + seq, e);
         return { ok: false, code: 'LLM_FAILED', message: friendlyMessage({ code: 'LLM_FAILED' }) };
@@ -2331,6 +2433,7 @@ return {
       markAndAbort(requestKey(sessionId, seq), 'cancelled');
       return { ok: true };
     });
+
 
     ctx.effect(() => () => {
       for (const key of [...pending.keys()]) {

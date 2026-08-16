@@ -2,10 +2,11 @@
 /**
  * Target module: enhance engine / pipeline.
  *
- * M2: this module exposes an EnhanceService built on the shared Pipeline.
- * The monolithic handler was extracted to src/host/enhance-handlers.js
- * (chunk, injected into the generated bundle); M2 深化时把真实 stage handler
- * 迁移到此处注册。
+ * M2 深化（2026-08-16）：真实增强流程已在生成 bundle 内管道化——
+ * src/host/enhance-handlers.js chunk 内置同契约 Pipeline（registerEnhanceStage/
+ * runEnhanceStages），analyze/retrieve/assemble/llm 四 stage 注册式执行。
+ * 本模块（src 侧）保持 M2 服务骨架：createService 供目标架构组合，
+ * register 注册 no-op 兜底（bundle 运行时不受本模块影响，产物自包含）。
  */
 const STAGES = {
   ANALYZE: 'analyze',
