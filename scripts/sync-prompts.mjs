@@ -47,6 +47,8 @@ const SOURCES = [
   { md: 'prompts/doc-analysis.md', name: 'DOC_ANALYSIS_PROMPT' },
   // publish 多步检索（v3.0p）：检索主题规划提示词（占位符 {text}/{memo}/{scenario} 运行时替换）
   { md: 'prompts/websearch.md', name: 'WEBSEARCH_PLAN_PROMPT' },
+  // 记忆链继续优化（2026-08-17）：基于本轮改动直接优化，不重新走完整检索流程
+  { md: 'prompts/continue.md', name: 'CONTINUE_PROMPT' },
 ];
 
 // md 行 → JS 字符串数组元素（转义反斜杠与单引号；行尾空行 trim 掉）

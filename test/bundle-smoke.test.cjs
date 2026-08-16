@@ -329,6 +329,31 @@ test('SMK-08 lite window hit injects session reference', async () => {
   assert.ok(mainText.includes('再优化一下'), 'reference contains window text');
 });
 
+test('SMK-08b continuation skips retrieve and uses delta as main direction', async () => {
+  const seen = [];
+  const { handlers } = boot({ llm: mockLlm(seen) });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 7,
+    text: '旧优化结果 新增加要求',
+    config: {
+      mode: 'lite',
+      memory: true,
+      fallback: [{ provider: 'p', model: 'm' }],
+      params: { maxTokens: 2000, timeoutMs: 30000 },
+    },
+    memory: { rounds: [{ input: '旧需求', output: '旧优化结果' }] },
+  });
+  assert.equal(out.ok, true);
+  assert.equal(seen.length, 1, 'continuation should only call main LLM, no judge/retrieval');
+  assert.ok(seen[0].system.includes('继续优化模式'), 'system should include CONTINUE_PROMPT');
+  const messages = seen[0].messages;
+  const finalText = messages[messages.length - 1].content[0].text;
+  assert.ok(finalText.includes('【本轮修改】（主要优化方向）'), 'finalText should lead with delta direction');
+  assert.ok(finalText.includes('旧优化结果'), 'current draft should be included');
+});
+
+
 test('SMK-09 standard all windows miss → no reference', async () => {
   const seen = [];
   const { handlers } = boot({ llm: mockLlmSmart(seen, { related: false }), sessionQuery: mockSessionQuery() });

@@ -1148,6 +1148,7 @@ function enhance(sessionId, draft, inputActions, draftRef) {
   const req = { sessionId, seq, text: parts.body, config, mode: actual.mode };
   if (actual.seed) req.seed = true;
   if (actual.memory) req.memory = actual.memory;
+  if (s.optimized && actual.memory && actual.memory.rounds.length > 0) req.continue = true;
   host.call('enhance', req).then((res) => {
     if (seq !== s.seq) return;
     const r = res && typeof res === 'object' ? res : {};

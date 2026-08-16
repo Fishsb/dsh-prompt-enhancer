@@ -575,6 +575,13 @@ const WEBSEARCH_PLAN_PROMPT = [
   '- 仅输出 JSON，格式：{"topics":[{"query":"…","note":"…"}]}',
   '- 除该 JSON 外不得输出任何内容（无解释、无前言、无代码块标记）',
 ].join('\n');
+
+const CONTINUE_PROMPT = [
+  '【继续优化模式】',
+  '- 用户正在修改上一轮优化结果，本次优化以「本轮修改」为主要方向，不要重新从零优化。',
+  '- 保留未修改部分的语义与结构，只围绕新增/删除/调整点完善。',
+  '- 输出完整更新后的提示词，禁止输出 diff、片段或仅回应修改。',
+].join('\n');
 // ==PROMPTS-END==
 
 // ==PURE-BEGIN==  (unit-testable pure functions; keep free of ctx/harness/pending/module-state)
@@ -2870,6 +2877,7 @@ return {
       state.hasMemory = hasMemory;
       state.memoryActive = memoryActive;
       state.memDelta = memDelta;
+      state.isContinuation = memoryActive && memRounds.length > 0 && memDelta !== null && (memDelta.added.length > 0 || memDelta.removed.length > 0);
       state.scenario = scenario;
       state.isPublish = isPublish;
       // v3.0p 审查（超时/耗时匹配）：非 publish 模式链含 effort 时超时自动放宽 ≥120s——
@@ -3202,6 +3210,10 @@ return {
       const row = RETRIEVE_TABLE[cfg.mode] || RETRIEVE_TABLE[DEFAULT_MODE];
       state.v2Block = '';
       state.v2Log = 'none';
+      if (state.isContinuation) {
+        state.v2Log = 'continuation-skip';
+        return state;
+      }
       if (row.kind === 'rounds' && row.windows.length > 0) {
         // v3.0：会话轮次窗口关联检索——逐窗口 LLM 判定，命中即停并注入参考；
         // 窗口越界（历史不足）跳过；全不中 → 无参考（不阻断主流程）。
@@ -3311,6 +3323,7 @@ return {
       const memDelta = state.memDelta;
       const v2Block = state.v2Block;
       const v2Log = state.v2Log;
+      const isContinuation = state.isContinuation === true;
       const timeoutMs = state.timeoutMs;
       const maxTokens = state.maxTokens;
       const outputLimit = state.outputLimit;
@@ -3321,10 +3334,15 @@ return {
       // 其余模式沿用「请优化以下提示词」包装（行为不变）
       const wrappedText = state.isPublish ? wrapPublishText(text) : wrapUserText(text);
       let finalText = v2Block !== '' ? v2Block + '\n\n' + wrappedText : wrappedText;
+      if (isContinuation) {
+        state.system = system + '\n\n' + CONTINUE_PROMPT;
+        const hint = buildMemoryDeltaHint(memDelta);
+        finalText = '【本轮修改】（主要优化方向）\n' + (hint !== '' ? hint : '请基于当前草稿继续完善。') + '\n\n【当前提示词】\n"""\n' + text + '\n"""\n\n请基于以上修改继续完善，输出完整更新后的提示词。';
+      }
       let messages;
       if (memoryActive) {
         const hint = buildMemoryDeltaHint(memDelta);
-        if (hint !== '') finalText = hint + '\n\n' + finalText;
+        if (hint !== '' && !isContinuation) finalText = hint + '\n\n' + finalText;
         const built = buildChatMessages(memRounds, finalText, 'enhance-' + sessionId + '-' + seq, cfg.context.budgetChars);
         messages = built.messages;
         memoryLog = 'memory rounds=' + memRounds.length + ' chars=' + built.memChars + ' delta=' + (hint !== '' ? 'yes' : 'none');

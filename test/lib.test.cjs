@@ -934,6 +934,7 @@ test('U40 prompts 外置一致性（v2.4.6）：生成区 = prompts/*.md 逐行�
   assert.equal(extractConst('SYSTEM_DEV_PROMPT'), mdOf('system-dev.md'), 'SYSTEM_DEV_PROMPT 应与 prompts/system-dev.md 一致');
   assert.equal(extractConst('SYSTEM_PUBLISH_SUPPLEMENT_PROMPT'), mdOf('publish-supplement.md'), 'SYSTEM_PUBLISH_SUPPLEMENT_PROMPT 应与 prompts/publish-supplement.md 一致');
   assert.equal(extractConst('SYSTEM_PUBLISH_DEV_PROMPT'), mdOf('publish-dev.md'), 'SYSTEM_PUBLISH_DEV_PROMPT 应与 prompts/publish-dev.md 一致');
+  assert.equal(extractConst('CONTINUE_PROMPT'), mdOf('continue.md'), 'CONTINUE_PROMPT 应与 prompts/continue.md 一致');
 });
 
 // 2026-08-17（参考吸收规则）：prompts 必须包含「吸收参考明确需求 + 禁止逐字复述」语义，
