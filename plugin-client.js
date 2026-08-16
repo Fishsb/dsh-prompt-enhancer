@@ -126,7 +126,7 @@ const MODE_OPTIONS = [
   { value: 'base', label: '基础模式', short: '基础', hint: '直发优化，不读取任何上下文，全体系最快最省' },
   { value: 'lite', label: '轻量模式', short: '轻量', hint: '仅参考最近 1 轮会话（LLM 判定关联，有关联才作为参考）；零工作区检索' },
   { value: 'standard', label: '标准模式', short: '标准', hint: '会话递进参考（前 2 轮 → 第 3-5 轮 → 第 6-10 轮），LLM 判定关联、命中即止' },
-  { value: 'smart', label: '智能模式', short: '智能', hint: '会话关联递进 + 工作区 .md 文档与开发环境判断 + 代码文档检索；以软件工程专业词汇优化并输出调整方案' },
+  { value: 'smart', label: '专家模式', short: '专家', hint: '会话关联递进 + 工作区 .md 文档与开发环境判断 + 代码文档检索；以软件工程专业词汇优化并输出调整方案' },
   // v2.7.0（一键发布）：项目/游戏开发规格生成——网络检索 + 工作区检索 + 九章规格
   { value: 'publish', label: '一键发布', short: '发布', hint: '输入粗略想法（如"想开发一个纸牌游戏"）→ 自动规划 2~3 个检索主题 + 多步网络检索 + 工作区参考，一键生成完善、边界明确的生成提示词规格（九章：目标与角色/范围边界/技术架构/核心要求/场景内容/交互/扩展/交付限制/验收清单）；检索要点跨轮记忆，多轮补充逐步细化（记忆强制开启；上下文预算需 > 0 才启用检索）' },
 ];
@@ -591,7 +591,7 @@ const ZH = {
   modeShortBase: '基础',
   modeShortLite: '轻量',
   modeShortStandard: '标准',
-  modeShortSmart: '智能',
+  modeShortSmart: '专家',
   modeShortPublish: '发布',
   stagePrepare: '准备中…',
   stageHistory: '读取会话…',
@@ -812,7 +812,7 @@ const EN = {
   modeShortBase: 'Basic',
   modeShortLite: 'Lite',
   modeShortStandard: 'Standard',
-  modeShortSmart: 'Smart',
+  modeShortSmart: 'Expert',
   modeShortPublish: 'Publish',
   stagePrepare: 'Preparing…',
   stageHistory: 'Reading history…',

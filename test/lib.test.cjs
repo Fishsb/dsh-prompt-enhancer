@@ -345,7 +345,7 @@ test('U19 MODE_TABLE 完整性 + parseMode 迁移（v2.7.0 五模式）', () => 
 });
 
 test('U20 resolveScanLimit 联动查表（§0.2/§4.1）', () => {
-  // by-budget（智能）：4000 → 3/2；8000 → 6/3；2000 → 2/1（返回含 budget 档位字段）
+  // by-budget（专家）：4000 → 3/2；8000 → 6/3；2000 → 2/1（返回含 budget 档位字段）
   assert.deepEqual(resolveScanLimit('smart', 4000), { budget: 4000, maxFiles: 3, depth: 2 });
   assert.deepEqual(resolveScanLimit('smart', 8000), { budget: 8000, maxFiles: 6, depth: 3 });
   assert.deepEqual(resolveScanLimit('smart', 2000), { budget: 2000, maxFiles: 2, depth: 1 });

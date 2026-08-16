@@ -11,7 +11,7 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 
 - ✨ **One-click enhance** — an independent LLM call replaces the draft in place; edit the result and the button becomes a plain **Continue** for further refinement; **undo anytime** (also drops the last memory round), **true cancel** while enhancing
 - 🛡️ **Guards** — empty input / slash commands / submitting states are handled; `/cmd body` optimizes only the body, keeping the prefix
-- 🎛️ **5 optimization modes** — Basic (direct, fastest) / Lite (local rules) / Standard (rules + workspace & session retrieval) / Smart (LLM task-progress analysis + full retrieval) / **One-click Publish** (rough idea → complete dev-spec generator prompt with clear boundaries: 9-chapter structure, LLM-planned multi-step web retrieval, auto scenario routing (game/software), self-review verdict; retrieved points remembered across rounds, iterative refinement)
+- 🎛️ **5 optimization modes** — Basic (direct, fastest) / Lite (local rules) / Standard (rules + workspace & session retrieval) / Expert (LLM task-progress analysis + full retrieval) / **One-click Publish** (rough idea → complete dev-spec generator prompt with clear boundaries: 9-chapter structure, LLM-planned multi-step web retrieval, auto scenario routing (game/software), self-review verdict; retrieved points remembered across rounds, iterative refinement)
 - 🧠 **Independent memory switch** — when on, iterative rounds (optimize → edit → re-optimize) accumulate into a memory chain (**persistent memory**: fixed window of the latest 4 pairs, rolling; sending or clearing the composer does not clear it, Undo drops only the last round); each re-optimization replays the chain as a multi-turn conversation and senses your edit direction; when off, nothing is read or written
 - 🌐 **i18n** — follows the DSH interface language (中文 / English)
 
@@ -63,7 +63,7 @@ Settings → "Models & plugins" → "Optimization" tab:
 
 | Setting | Description |
 |---|---|
-| Optimization mode | Basic (default, direct) / Lite / Standard / Smart; switching takes effect immediately and persists |
+| Optimization mode | Basic (default, direct) / Lite / Standard / Expert; switching takes effect immediately and persists |
 | Memory | On / Off; when on, pre-send iterations accumulate into a memory chain (up to the latest 4 input/output pairs, injected as a multi-turn conversation with edit-direction sensing; first run falls back to Lite); when off, nothing is read or written |
 | Context budget | 0 / 2000 / 4000 / 8000 chars; 0 = no context injection (the memory chain is budget-constrained too, chain cap 2400 chars) |
 | Timeout / Max tokens / Output limit | Request parameters |
