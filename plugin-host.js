@@ -310,6 +310,53 @@ const RELEVANCE_PROMPT = [
   '{current}',
   '"""',
 ].join('\n');
+
+const SMART_TAIL_PROMPT = [
+  '你是一名资深软件工程专家。请在完成提示词优化后，额外输出【调整方案】分析块。',
+  '',
+  '【调整方案要求】（严格按以下逻辑，不改变优化结果本身）',
+  '一、可优化点分析：对照原始提示词，逐条列出表述不够准确、含糊、可执行性弱的地方。',
+  '二、专业词汇替换：将可用软件开发领域更专业、更精确的词汇/句式替换的表述列出',
+  '   （如「把文件看看」→「对指定路径执行只读检查」；「改一下」→「实施增量修改」；',
+  '    「弄好」→「完成实现并通过验证」）。替换必须保持语义等价，不得改变原意。',
+  '三、调整建议：给出 ≤5 条修订要点，每条 = 原文表述 → 专业表述 → 理由。',
+  '',
+  '【输出格式】',
+  '先输出优化后的提示词本身（遵守系统提示词的全部规则），然后另起一行输出：',
+  '【调整方案】',
+  '一、可优化点分析：…',
+  '二、专业词汇替换：…',
+  '三、调整建议：…',
+].join('\n');
+
+const DEV_ENV_PROMPT = [
+  '你是一个项目环境判定器。根据给定的「项目文档摘要」与「相关会话片段」，判断当前工作区是否为**项目开发环境**（软件/游戏/系统开发项目的工作区）。',
+  '',
+  '【开发环境的定义】',
+  '工作区包含项目级文档（README、设计文档、规格说明）且文档内容呈现项目开发特征（技术栈、架构、模块划分、功能需求、实施计划等）；或工作区存在可识别的项目结构。',
+  '',
+  '【非开发环境的定义】',
+  '工作区仅有个人笔记、零散文件、非项目内容（如学习笔记、普通文档整理），不具备项目开发特征。',
+  '',
+  '【判定规则】',
+  '1. 只依据给定内容判断；内容不足以判断时 → false。',
+  '2. 宁可漏判（false），不可错判（把非项目工作区当作开发环境）。',
+  '',
+  '【输出格式】',
+  '只输出一个 JSON 对象，不要输出任何其他内容：',
+  '{"isDevEnv": true 或 false, "reason": "一句话中文理由（不超过 30 字）"}',
+  '',
+  '【输入】',
+  '项目文档摘要：',
+  '"""',
+  '{docs}',
+  '"""',
+  '',
+  '相关会话片段：',
+  '"""',
+  '{session}',
+  '"""',
+].join('\n');
 // ==PROMPTS-END==
 
 // ==PURE-BEGIN==  (unit-testable pure functions; keep free of ctx/harness/pending/module-state)
@@ -1459,6 +1506,23 @@ const RELEVANCE_TIMEOUT_MS = 10000;
 const RELEVANCE_MAX_TOKENS = 400;
 const RELEVANCE_OUTPUT_LIMIT = 800;
 const RELEVANCE_WINDOW_MAX_CHARS = 2400;
+
+// v3.0（模式重构 S3）：开发环境判定 JSON 容错解析（{isDevEnv, reason}）——同 parseRelevance 模式。
+function parseDevEnv(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  s = s.slice(start, end + 1);
+  let obj;
+  try { obj = JSON.parse(s); } catch (e) { return null; }
+  if (!obj || typeof obj !== 'object') return null;
+  const isDevEnv = obj.isDevEnv === true || obj.isDevEnv === 'true' || obj.isDevEnv === 1 || obj.isDevEnv === '1';
+  return { isDevEnv, reason: typeof obj.reason === 'string' ? obj.reason.slice(0, 80) : '' };
+}
 // ==PURE-END==
 
 // ================= V2 上下文感知优化 · 运行时（阶段 A/B/C） =================
@@ -2389,6 +2453,145 @@ return {
       return { related: false, reason: 'judge-failed' };
     }
 
+    // ---- v3.0（S3）：工作区文件检索（扩展名过滤 + 关键词排序 + 摘要；2s 超时降级）----
+    const DOC_FILE_RE = /\.md$/i;
+    const CODE_FILE_RE = /\.(?:js|ts|jsx|tsx|py|go|rs|java|cpp|c|h|cs|rb|php|sql|sh|vue|html|css|json|yaml|yml|toml)$/i;
+    async function searchWorkspaceFiles(extRe, keywords, maxFiles, maxDepth) {
+      const fsSvc = ctx.get('fs');
+      const sp = ctx.get('sandboxPolicy');
+      const root = sp && sp.workspaceRoot;
+      if (!fsSvc || !root || typeof fsSvc.listDir !== 'function' || typeof fsSvc.resolve !== 'function' || typeof fsSvc.readText !== 'function') return [];
+      let aborted = false;
+      const timer = ctx.timer.timeout(() => { aborted = true; }, V2_WORKSPACE_TIMEOUT_MS);
+      try {
+        let rootTarget;
+        try { rootTarget = await fsSvc.resolve(root); } catch (e) { return []; }
+        const files = [];
+        const walk = async (target, rel, level) => {
+          if (aborted || files.length >= SCAN_FILE_LIST_MAX || level > maxDepth) return;
+          let entries;
+          try { entries = await fsSvc.listDir(target); } catch (e) { return; }
+          for (const en of entries || []) {
+            if (aborted) return;
+            const name = en && en.name;
+            if (!name) continue;
+            if (en.type === 'directory') {
+              if (V2_WORKSPACE_IGNORE_DIRS.has(name)) continue;
+              const sub = en.target;
+              if (sub) await walk(sub, rel ? rel + '/' + name : name, level + 1);
+              continue;
+            }
+            const p = rel ? rel + '/' + name : name;
+            if (extRe.test(name) && !shouldIgnoreFile(p)) files.push(p);
+          }
+        };
+        await walk(rootTarget, '', 1);
+        const kws = (keywords || []).filter((k) => typeof k === 'string' && k.length >= 2);
+        // 关键词为空（短文本提不出词）→ 不排序直接取前 maxFiles；
+        // 关键词非空但名称 0 命中 → 内容兜底扫描（中文关键词 vs 英文文件名的老问题，
+        // 与 v2SearchWorkspace content-fallback 同策略）
+        let ranked = kws.length > 0 ? rankFiles(files, kws, 10).map((c) => c.path) : files.slice(0, maxFiles);
+        if (ranked.length === 0 && kws.length > 0) {
+          const scored = [];
+          // 中文组合词分段匹配（「登录功能」→「登录」/「功能」），避免 4 字组合词 vs 内容子串失配
+          const kwSegs = [];
+          for (const k of kws) {
+            const kl = String(k).toLowerCase();
+            kwSegs.push(kl);
+            for (const sg of splitCnSegments(kl)) {
+              if (sg.length >= 2 && !kwSegs.includes(sg)) kwSegs.push(sg);
+            }
+            // 2 字前缀兜底（组合词切不开时，如「登录功能」→「登录」）
+            if (kl.length >= 2 && !kwSegs.includes(kl.slice(0, 2))) kwSegs.push(kl.slice(0, 2));
+          }
+          for (const rel of files.slice(0, 8)) {
+            try {
+              const target = await fsSvc.resolve(rel, { cwd: root });
+              const text = await fsSvc.readText(target);
+              let hits = 0;
+              for (const ln of text.split('\n')) {
+                if (kwSegs.length > 0 && kwSegs.some((sg) => ln.toLowerCase().includes(sg))) hits++;
+                if (hits >= 8) break;
+              }
+              if (hits > 0) scored.push({ path: rel, hits });
+            } catch (e) { /* 跳过 */ }
+          }
+          scored.sort((a, b) => b.hits - a.hits);
+          ranked = scored.slice(0, maxFiles).map((s) => s.path);
+        }
+        const out = [];
+        for (const rel of ranked.slice(0, maxFiles)) {
+          try {
+            const target = await fsSvc.resolve(rel, { cwd: root });
+            const text = await fsSvc.readText(target);
+            out.push({ path: rel, snippet: snippetFromLines(text.split('\n'), kws, SNIPPET_BUDGET) });
+          } catch (e) { /* 跳过 */ }
+        }
+        return out;
+      } finally {
+        timer();
+      }
+    }
+
+    // ---- v3.0（S3）：开发环境 LLM 判定（DEV_ENV_PROMPT 占位替换；10s 超时；失败 → 非开发环境）----
+    async function judgeDevEnv(docsText, sessionText, entry) {
+      if (llm === undefined || !entry) return { isDevEnv: false, reason: 'no-llm' };
+      const system = DEV_ENV_PROMPT
+        .replace('{docs}', String(docsText || ''))
+        .replace('{session}', String(sessionText || ''));
+      let timedOut = false;
+      const timer = ctx.timer.timeout(() => { timedOut = true; }, RELEVANCE_TIMEOUT_MS);
+      try {
+        const stream = llm.stream({
+          provider: entry.provider,
+          model: entry.model,
+          ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+          maxTokens: RELEVANCE_MAX_TOKENS,
+          system,
+          messages: [{
+            id: 'enhance-devenv',
+            role: 'user',
+            content: [{ type: 'text', text: '请依据上述规则判断。' }],
+            source: { kind: 'user' },
+          }],
+        });
+        const iterator = stream[Symbol.asyncIterator]();
+        const result = await collectStream(iterator, RELEVANCE_OUTPUT_LIMIT);
+        if (!timedOut && result.kind === 'ok') {
+          const parsed = parseDevEnv(result.text);
+          if (parsed) return parsed;
+        }
+        hlog('[enhance] v3 dev-env ' + (timedOut ? 'timeout' : 'unparsed'));
+      } catch (e) {
+        hlog('[enhance] v3 dev-env failed', e && e.message ? e.message : e);
+      } finally {
+        timer();
+      }
+      return { isDevEnv: false, reason: 'judge-failed' };
+    }
+
+    // ---- v3.0（S3）：smart 工作区阶段——.md 文档 → 开发环境判断 → 代码文档检索 ----
+    // 规则：须同时「存在 .md 文档」且「判定为开发环境」才进入代码文档检索；
+    // 非开发环境只注入文档参考，不注入代码；无 .md → 不进入工作区阶段。
+    async function enhanceSmartWorkspace(state, text, chain0) {
+      const kws = extractKeywords(text, []);
+      const docs = await searchWorkspaceFiles(DOC_FILE_RE, kws, 3, 2);
+      if (docs.length === 0) {
+        hlog('[enhance] v3 smart no-md');
+        return state.v2Block;
+      }
+      const docsText = docs.map((d) => '📄 ' + d.path + '\n' + d.snippet).join('\n\n').slice(0, RELEVANCE_WINDOW_MAX_CHARS);
+      const judge = await judgeDevEnv(docsText, state.v2Block || '', chain0);
+      const docPart = (state.v2Block ? state.v2Block + '\n\n' : '') + '【项目文档参考】\n' + docsText;
+      if (!judge.isDevEnv) {
+        hlog('[enhance] v3 smart not-dev-env reason=' + judge.reason);
+        return docPart;
+      }
+      hlog('[enhance] v3 smart dev-env reason=' + judge.reason);
+      const codes = await searchWorkspaceFiles(CODE_FILE_RE, kws, 3, 3);
+      const codeText = codes.map((c) => '📄 ' + c.path + '\n' + c.snippet).join('\n\n').slice(0, RELEVANCE_WINDOW_MAX_CHARS);
+      return codeText ? docPart + '\n\n【相关代码参考】\n' + codeText : docPart;
+    }
     // ---- stage: retrieve——v3.0 检索策略分发（rounds 窗口判定 / v2 旧管道 / none）----
     async function enhanceStageRetrieve(state) {
       const cfg = state.cfg;
@@ -2418,6 +2621,12 @@ return {
             break;
           }
           hlog('[enhance] v3 window miss rounds=' + win[0] + '-' + win[1] + ' reason=' + judge.reason);
+        }
+        // v3.0（S3）：smart 工作区阶段——.md 文档 → 开发环境判断 → 代码文档检索
+        if (cfg.mode === 'smart') {
+          state.v2Block = await enhanceSmartWorkspace(state, text, chain0);
+          state.system = state.system + '\n\n' + SMART_TAIL_PROMPT;
+          hlog('[enhance] v3 smart tail injected');
         }
       } else if (row.kind === 'v2') {
         // publish：保持旧 V2 管道（任务理解 + 文件/事件/网络检索；budget 语义不变）

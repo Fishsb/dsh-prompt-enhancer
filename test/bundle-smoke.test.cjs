@@ -28,6 +28,8 @@ function boot(opts) {
     get: (name) => {
       if (name === 'llm' && opts && opts.llm) return opts.llm;
       if (name === 'sessionQuery' && opts && opts.sessionQuery) return opts.sessionQuery;
+      if (name === 'sandboxPolicy' && opts && opts.sandboxPolicy) return opts.sandboxPolicy;
+      if (name === 'fs' && opts && opts.fs) return opts.fs;
       return undefined;
     },
     effect: () => {},
@@ -166,16 +168,22 @@ function streamOf(chunks) {
   };
 }
 
-// v3.0 llm mock：judge 调用（system 含 RELEVANCE_PROMPT 特征）返回可配置判定，
-// 主调用返回 OK；seen 记录全部请求。
-function mockLlmSmart(seen, judgeRelated) {
+// v3.0 llm mock：relevance judge（system 含 RELEVANCE 特征）返回可配置判定；
+// dev-env judge（system 含 DEV_ENV 特征）返回 isDevEnv 可配置；主调用返回 OK。
+function mockLlmSmart(seen, judgeRelated, devEnv) {
   return {
     stream(params) {
       seen.push(params);
-      const isJudge = typeof params.system === 'string' && params.system.includes('会话关联性判定器');
-      if (isJudge) {
+      const sys = typeof params.system === 'string' ? params.system : '';
+      if (sys.includes('会话关联性判定器')) {
         return streamOf([
           { type: 'text-delta', text: JSON.stringify({ related: judgeRelated, reason: 't' }) },
+          { type: 'finish', reason: { kind: 'stop' } },
+        ]);
+      }
+      if (sys.includes('项目环境判定器')) {
+        return streamOf([
+          { type: 'text-delta', text: JSON.stringify({ isDevEnv: devEnv !== false, reason: 'd' }) },
           { type: 'finish', reason: { kind: 'stop' } },
         ]);
       }
@@ -248,4 +256,64 @@ test('SMK-09 standard all windows miss → no reference', async () => {
   assert.ok(seen[0].system.includes('会话关联性判定器'), 'first call is relevance judge');
   const mainText = seen[1].messages[0].content[0].text;
   assert.ok(!mainText.includes('【相关会话参考】'), 'no reference when all windows miss');
+});
+
+// v3.0（S3）：smart 工作区阶段 mock——根目录含 README.md 与 index.js。
+function mockWorkspaceFs() {
+  const files = new Map([
+    ['README.md', '# 我的项目\n这是一个用户管理系统，支持注册登录权限管理。'],
+    ['src/index.js', 'function login(user) { return user; }\nexport default login;'],
+  ]);
+  return {
+    resolve: async (p) => (typeof p === 'object' && p !== null ? p : p),
+    listDir: async (target) => {
+      const base = target === undefined || target === null || target === 'root' ? '' : String(target).replace(/^root\//, '');
+      const out = [];
+      for (const p of files.keys()) {
+        if (base !== '' && !p.startsWith(base + '/')) continue;
+        const rest = base === '' ? p : p.slice(base.length + 1);
+        if (!rest) continue;
+        const seg = rest.split('/')[0];
+        const isDir = rest.includes('/');
+        out.push({ name: seg, type: isDir ? 'directory' : 'file', target: 'root/' + (base ? base + '/' : '') + seg });
+      }
+      return out;
+    },
+    readText: async (target) => {
+      const key = String(target).replace(/^root\//, '');
+      return files.get(key) || '';
+    },
+  };
+}
+
+test('SMK-10 smart workspace stage: md + dev-env + code reference', async () => {
+  const seen = [];
+  const { handlers } = boot({
+    llm: mockLlmSmart(seen, true),
+    sessionQuery: mockSessionQuery(),
+    sandboxPolicy: { workspaceRoot: 'root' },
+    fs: mockWorkspaceFs(),
+  });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '优化一下这个登录功能',
+    config: {
+      mode: 'smart',
+      fallback: [{ provider: 'p', model: 'm' }],
+      params: { maxTokens: 2000, timeoutMs: 30000 },
+    },
+  });
+  assert.equal(out.ok, true);
+  // 关联 judge（窗口命中）→ 开发环境 judge → 主调用
+  assert.ok(seen.length >= 3, 'judge(1) + devenv(1) + main(1), got ' + seen.length);
+  assert.ok(seen[0].system.includes('会话关联性判定器'), 'call 0 = relevance judge');
+  assert.ok(seen[1].system.includes('项目环境判定器'), 'call 1 = dev-env judge');
+  assert.equal(seen[1].maxTokens, 400, 'devenv judge 小预算');
+  // smart tail 注入 system
+  assert.ok(seen[2].system.includes('调整方案'), 'smart tail prompt injected');
+  // 代码参考注入 messages（smart 第三步）
+  const mainText = seen[2].messages[0].content[0].text;
+  assert.ok(mainText.includes('【相关代码参考】'), 'code reference injected');
+  assert.ok(mainText.includes('【项目文档参考】'), 'doc reference injected');
 });
