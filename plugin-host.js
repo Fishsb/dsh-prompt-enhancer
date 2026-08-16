@@ -1443,6 +1443,22 @@ function parseRelevance(raw) {
   const related = obj.related === true || obj.related === 'true' || obj.related === 1 || obj.related === '1';
   return { related, reason: typeof obj.reason === 'string' ? obj.reason.slice(0, 80) : '' };
 }
+
+// ================= v3.0 模式重构 · 检索策略表 =================
+// kind: none（不检索）/ rounds（会话轮次窗口 LLM 关联判定，命中即停）/ v2（旧管道：文件/事件/网络）
+// windows: [from, to] 1-based 轮次窗口（1 = 最近一轮；轮 = user 消息锚点及其回复）
+const RETRIEVE_TABLE = {
+  base: { kind: 'none', windows: [] },
+  lite: { kind: 'rounds', windows: [[1, 1]] },
+  standard: { kind: 'rounds', windows: [[1, 2], [3, 5], [6, 10]] },
+  smart: { kind: 'rounds', windows: [[1, 1], [2, 3]] },
+  publish: { kind: 'v2', windows: [] },
+};
+// v3.0：关联判定调用预算（独立小调用，失败降级不阻断主流程）
+const RELEVANCE_TIMEOUT_MS = 10000;
+const RELEVANCE_MAX_TOKENS = 400;
+const RELEVANCE_OUTPUT_LIMIT = 800;
+const RELEVANCE_WINDOW_MAX_CHARS = 2400;
 // ==PURE-END==
 
 // ================= V2 上下文感知优化 · 运行时（阶段 A/B/C） =================
@@ -2255,16 +2271,7 @@ return {
         const custom = typeof perMode === 'string' && perMode.trim() !== '' ? perMode.trim() : '';
         if (custom !== '') system = custom;
       }
-      // v2.4.4（lite 规则引擎落地）：lite 模式对输入做 prompt 工程要素检查（目标/约束/格式/示例），
-      // 缺失项的强化指令附加到 system——零 LLM 成本、零外部上下文（与「轻量」定位一致）。
-      // v2.4.5：建议文案保守化（analyzeInputRules 内），拼接措辞同步——「遵循」而非「补全」。
-      if (cfg.mode === 'lite') {
-        const rules = analyzeInputRules(text);
-        if (rules.suggestions.length > 0) {
-          system = system + '\n\n【轻量规则提示】输入要素检查（本地规则，非外部上下文）——优化时请遵循以下原则：\n' + rules.suggestions.map((s) => '- ' + s).join('\n');
-          hlog('[enhance] lite rules missing=' + rules.missing.map((m) => m.key).join(','));
-        }
-      }
+      // v3.0（模式重构）：lite 规则检查移除——lite 改为「前 1 轮会话关联参考」（见 retrieve stage）
       // v2.6.1（记忆链）：rounds 数组（时间序 [{input,output}]，≤MEMORY_ROUNDS_MAX 轮）→
       // 真多轮消息注入；hasMemory = rounds 非空；开关关 / 预算 0 → 不注入（行为不变）。
       const memRounds = args && args.memory && Array.isArray(args.memory.rounds)
@@ -2321,41 +2328,117 @@ return {
     }
 
     // ---- stage: retrieve——V2 上下文构建 / 检索 ----
+    // ---- v3.0：会话历史提取（listEvents/filterEvents → extractHistory；失败/不可用 → []）----
+    async function fetchSessionHistory(sessionId) {
+      const sq = ctx.get('sessionQuery');
+      if (!sq || typeof sq.listEvents !== 'function' || typeof sq.filterEvents !== 'function') return [];
+      try {
+        const records = await sq.listEvents(sessionId);
+        const msgSeqs = [];
+        for (let i = records.length - 1; i >= 0 && msgSeqs.length < V2_MSG_SEQ_SCAN; i--) {
+          const r = records[i];
+          const t = String(r && r.type || '');
+          if (t === 'user/message' || t === 'assistant/message') msgSeqs.push(r && r.seq);
+        }
+        if (msgSeqs.length === 0) return [];
+        const minSeq = msgSeqs[msgSeqs.length - 1];
+        const docs = await sq.filterEvents(sessionId, [{ kind: 'seq', from: minSeq }]);
+        const events = extractHistory(docs, V2_HISTORY_LIMIT);
+        hlog('[enhance] v3 history events=' + events.length);
+        return events;
+      } catch (e) {
+        hlog('[enhance] v3 history failed', e && e.message ? e.message : e);
+        return [];
+      }
+    }
+
+    // ---- v3.0：LLM 关联性判定（RELEVANCE_PROMPT 占位替换；10s 超时；失败/解析失败 → 不相关）----
+    async function judgeRelevance(historyText, currentText, entry) {
+      if (llm === undefined || !entry) return { related: false, reason: 'no-llm' };
+      const system = RELEVANCE_PROMPT
+        .replace('{history}', String(historyText || ''))
+        .replace('{current}', String(currentText || ''));
+      let timedOut = false;
+      const timer = ctx.timer.timeout(() => { timedOut = true; }, RELEVANCE_TIMEOUT_MS);
+      try {
+        const stream = llm.stream({
+          provider: entry.provider,
+          model: entry.model,
+          ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+          maxTokens: RELEVANCE_MAX_TOKENS,
+          system,
+          messages: [{
+            id: 'enhance-relevance',
+            role: 'user',
+            content: [{ type: 'text', text: '请依据上述规则判断关联性。' }],
+            source: { kind: 'user' },
+          }],
+        });
+        const iterator = stream[Symbol.asyncIterator]();
+        const result = await collectStream(iterator, RELEVANCE_OUTPUT_LIMIT);
+        if (!timedOut && result.kind === 'ok') {
+          const parsed = parseRelevance(result.text);
+          if (parsed) return parsed;
+        }
+        hlog('[enhance] v3 relevance ' + (timedOut ? 'timeout' : 'unparsed'));
+      } catch (e) {
+        hlog('[enhance] v3 relevance failed', e && e.message ? e.message : e);
+      } finally {
+        timer();
+      }
+      return { related: false, reason: 'judge-failed' };
+    }
+
+    // ---- stage: retrieve——v3.0 检索策略分发（rounds 窗口判定 / v2 旧管道 / none）----
     async function enhanceStageRetrieve(state) {
-      const sessionId = state.sessionId;
-      const text = state.text;
       const cfg = state.cfg;
-      const chain = state.chain;
-      const memoryActive = state.memoryActive;
-      const memDelta = state.memDelta;
-      const scenario = state.scenario;
+      const text = state.text;
+      const sessionId = state.sessionId;
       const rec = state.rec;
-      // v2.2（§6.5）：入口条件——模式注入或记忆叠加（记忆开 + 有记忆时 base/lite 也进入管道）
-      let v2Block = '';
-      let v2Log = 'none';
-      if (shouldInjectV2(cfg.mode, cfg.context.budgetChars) || memoryActive) {
+      const row = RETRIEVE_TABLE[cfg.mode] || RETRIEVE_TABLE[DEFAULT_MODE];
+      state.v2Block = '';
+      state.v2Log = 'none';
+      if (row.kind === 'rounds' && row.windows.length > 0) {
+        // v3.0：会话轮次窗口关联检索——逐窗口 LLM 判定，命中即停并注入参考；
+        // 窗口越界（历史不足）跳过；全不中 → 无参考（不阻断主流程）。
+        const events = await fetchSessionHistory(sessionId);
+        const chain0 = state.chain && state.chain.length > 0 ? state.chain[0] : null;
+        for (const win of row.windows) {
+          if (rec.cancelled || rec.timedOut) break;
+          const winText = splitHistoryRounds(events, win[0], win[1]).join('\n');
+          if (winText === '') {
+            hlog('[enhance] v3 window empty rounds=' + win[0] + '-' + win[1]);
+            continue;
+          }
+          const judge = await judgeRelevance(winText, text, chain0);
+          if (judge.related) {
+            state.v2Block = '【相关会话参考】\n' + winText.slice(0, RELEVANCE_WINDOW_MAX_CHARS);
+            state.v2Log = 'rounds=' + win[0] + '-' + win[1] + ' chars=' + winText.length + ' reason=' + judge.reason;
+            hlog('[enhance] v3 window hit rounds=' + win[0] + '-' + win[1] + ' reason=' + judge.reason);
+            break;
+          }
+          hlog('[enhance] v3 window miss rounds=' + win[0] + '-' + win[1] + ' reason=' + judge.reason);
+        }
+      } else if (row.kind === 'v2') {
+        // publish：保持旧 V2 管道（任务理解 + 文件/事件/网络检索；budget 语义不变）
         const v2 = await buildV2ContextBlock({
           llm: ctx.get('llm'),
           sessionQuery: ctx.get('sessionQuery'),
           sandboxPolicy: ctx.get('sandboxPolicy'),
           fs: ctx.get('fs'),
           timer: ctx.timer,
-          chain,
+          chain: state.chain,
           web: ctx.get('web'),
-          delta: memDelta,
-          scenario,
+          delta: state.memDelta,
+          scenario: state.scenario,
         }, sessionId, text, cfg, (st) => { rec.stage = st; });
-        v2Block = v2.block;
-        v2Log = v2.log;
+        state.v2Block = v2.block;
+        state.v2Log = v2.log;
       }
       // v2.6.1：记忆链注入同样需要防回显护栏（base/lite + 记忆时 v2Block 为空）
-      if (v2Block !== '' || memoryActive) state.system = state.system + '\n\n' + CONTEXT_GUARD;
-      state.v2Block = v2Block;
-      state.v2Log = v2Log;
+      if (state.v2Block !== '' || state.memoryActive) state.system = state.system + '\n\n' + CONTEXT_GUARD;
       return state;
-    }
-
-    // ---- stage: assemble——消息组装 / 日志 ----
+    }    // ---- stage: assemble——消息组装 / 日志 ----
     async function enhanceStageAssemble(state) {
       const args = state.args;
       const sessionId = state.sessionId;

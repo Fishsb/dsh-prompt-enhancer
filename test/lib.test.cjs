@@ -29,7 +29,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
     buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages, filterDeltaForPublish,
     MEMORY_ROUNDS_MAX, MEMORY_CHAIN_BUDGET_MAX, MEMORY_DELTA_MAX,
-    MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE,
+    MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE, RETRIEVE_TABLE,
     STAGE_SEQUENCE, STAGE_LABELS,
     PLUGIN_VERSION, UPDATE_MANIFEST, parseVersion, compareVersions, versionStatus,
     normalizeRepo, isValidTag, pickMaxTag, parseTagsPayload, validateManifestFiles, defaultDirFor,
@@ -50,6 +50,7 @@ const {
   analyzeInputRules,
   splitHistoryRounds,
   parseRelevance,
+  RETRIEVE_TABLE,
   shouldIgnoreFile,
   rankFiles,
   snippetFromLines,
@@ -1119,4 +1120,20 @@ test('U62 parseRelevance JSON 容错解析（v3.0）', () => {
   // 截断 reason
   const long = parseRelevance('{"related":true,"reason":"' + '长'.repeat(120) + '"}');
   assert.ok(long.reason.length <= 80, 'reason 截断到 80');
+});
+
+// v3.0（模式重构）：检索策略表契约——5 模式键、kind 合法、窗口递增且与用户定义一致。
+test('U63 RETRIEVE_TABLE 检索策略表（v3.0 模式重构）', () => {
+  assert.deepEqual(Object.keys(RETRIEVE_TABLE).sort(), ['base', 'lite', 'publish', 'smart', 'standard']);
+  assert.equal(RETRIEVE_TABLE.base.kind, 'none');
+  assert.equal(RETRIEVE_TABLE.publish.kind, 'v2');
+  assert.deepEqual(RETRIEVE_TABLE.lite.windows, [[1, 1]], 'lite = 前 1 轮');
+  assert.deepEqual(RETRIEVE_TABLE.standard.windows, [[1, 2], [3, 5], [6, 10]], 'standard = 三窗口递进');
+  assert.deepEqual(RETRIEVE_TABLE.smart.windows, [[1, 1], [2, 3]], 'smart = 1 轮 → 2-3 轮');
+  for (const mode of ['lite', 'standard', 'smart']) {
+    assert.equal(RETRIEVE_TABLE[mode].kind, 'rounds');
+    for (const [from, to] of RETRIEVE_TABLE[mode].windows) {
+      assert.ok(Number.isInteger(from) && Number.isInteger(to) && from >= 1 && to >= from, '窗口合法: ' + from + '-' + to);
+    }
+  }
 });

@@ -73,6 +73,7 @@
 - **fix(M3)：enhance RPC 校验契约修正**（实测暴露）：`lib/rpc-schema.cjs` 与 `src/host/rpc-schema.js` 的 enhance schema 误用不存在的 `draft` 字段（client 实际传 `text`，host handler 读 `args.text`）→ 全部 enhance 请求被校验层 400 拦截；改为 `required: ['sessionId', 'text']` 并对齐 client payload；新增 SMK-05 校验层契约测试 + PROTO-02 同步，测试 95 → 96 — 架构治理
 - **fix：reasoning 链节 maxTokens 自动放宽**（实测确证）：opencode-go 通道在 `reasoningEffort`（思考等级）下，思考过程消耗输出预算——配置的 maxTokens=2000 在长输入 + effort=max 时耗尽 → 空流（EMPTY_RESPONSE，600 字草稿 19s 空 / 同请求 maxTokens=8000 25s 成功）；llm stage 对带 effort 的链节自动放宽到 ≥8000（publish 不设限同策略的保守版，无 effort 行为不变）；新增 SMK-06/07（mock llm 走通完整管道验证放宽/保持），测试 96 → 98 — 架构治理
 - **模式体系重构 S1（基础设施）**：新增 `prompts/relevance.md`（会话关联性判定提示词事实源 → `RELEVANCE_PROMPT`，占位符 `{history}/{current}` 运行时替换）；`sync-prompts.mjs` 同步目标改 `src/host/app.js`（M1 退役后骨架为生成区源，避免被 build 覆盖）并修复生成区精确定位 + JSON 字符串转义写入；PURE 新增 `splitHistoryRounds`（会话轮次窗口切分，user 消息为轮锚点）与 `parseRelevance`（关联判定 JSON 容错解析）；单测 U61/U62，测试 98 → 100 — 架构治理
+- **模式体系重构 S2（lite/standard/smart 会话窗口检索）**：新增 `RETRIEVE_TABLE` 检索策略表（base=none / lite=前1轮 / standard=1-2轮→3-5轮→6-10轮递进 / smart=1轮→2-3轮 / publish=v2 旧管道保留）；retrieve stage 重构为策略分发——rounds 模式逐窗口 **LLM 关联判定**（`judgeRelevance`，RELEVANCE_PROMPT 占位替换，10s 超时/失败降级不相关），命中即停并注入【相关会话参考】（≤2400 字符，防回显护栏沿用），全不中无参考；lite 本地规则检查（analyzeInputRules）移除；新增 `fetchSessionHistory`（listEvents/filterEvents → extractHistory）；集成测试 SMK-08/09（mock llm + sessionQuery 走通窗口命中/全 miss）+ U63 策略表契约，测试 100 → 104；产物 diff 仅 host 检索区段 — 架构治理
 
 ## [2.8.3] - 2026-08-16
 

@@ -25,7 +25,11 @@ function boot(opts) {
   // inside handlers, so a minimal mock keeps the fast paths testable.
   // opts.llm injects a fake llm service to exercise the full enhance pipeline.
   const ctx = {
-    get: (name) => (name === 'llm' && opts && opts.llm ? opts.llm : undefined),
+    get: (name) => {
+      if (name === 'llm' && opts && opts.llm) return opts.llm;
+      if (name === 'sessionQuery' && opts && opts.sessionQuery) return opts.sessionQuery;
+      return undefined;
+    },
     effect: () => {},
     timer: { timeout: () => () => {} },
   };
@@ -145,4 +149,103 @@ test('SMK-07 non-reasoning link keeps configured maxTokens', async () => {
   assert.equal(out.ok, true);
   assert.equal(seen.length, 1);
   assert.equal(seen[0].maxTokens, 2000);
+});
+
+// ---- v3.0 模式重构：会话轮次窗口关联检索集成测试 ----
+
+function streamOf(chunks) {
+  return {
+    [Symbol.asyncIterator]() {
+      let i = 0;
+      return {
+        async next() {
+          return i < chunks.length ? { done: false, value: chunks[i++] } : { done: true };
+        },
+      };
+    },
+  };
+}
+
+// v3.0 llm mock：judge 调用（system 含 RELEVANCE_PROMPT 特征）返回可配置判定，
+// 主调用返回 OK；seen 记录全部请求。
+function mockLlmSmart(seen, judgeRelated) {
+  return {
+    stream(params) {
+      seen.push(params);
+      const isJudge = typeof params.system === 'string' && params.system.includes('会话关联性判定器');
+      if (isJudge) {
+        return streamOf([
+          { type: 'text-delta', text: JSON.stringify({ related: judgeRelated, reason: 't' }) },
+          { type: 'finish', reason: { kind: 'stop' } },
+        ]);
+      }
+      return streamOf([
+        { type: 'text-delta', text: 'OK' },
+        { type: 'finish', reason: { kind: 'stop' } },
+      ]);
+    },
+  };
+}
+
+// v3.0 sessionQuery mock：2 轮历史（4 条消息事件）。
+function mockSessionQuery() {
+  return {
+    listEvents: async () => [
+      { type: 'user/message', seq: 1 },
+      { type: 'assistant/message', seq: 2 },
+      { type: 'user/message', seq: 3 },
+      { type: 'assistant/message', seq: 4 },
+    ],
+    filterEvents: async () => [
+      { type: 'user/message', seq: 1, text: '帮我优化提示词' },
+      { type: 'assistant/message', seq: 2, text: '好的' },
+      { type: 'user/message', seq: 3, text: '再优化一下' },
+      { type: 'assistant/message', seq: 4, text: '可以' },
+    ],
+  };
+}
+
+test('SMK-08 lite window hit injects session reference', async () => {
+  const seen = [];
+  const { handlers } = boot({ llm: mockLlmSmart(seen, true), sessionQuery: mockSessionQuery() });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '优化一下',
+    config: {
+      mode: 'lite',
+      fallback: [{ provider: 'p', model: 'm' }],
+      params: { maxTokens: 2000, timeoutMs: 30000 },
+    },
+  });
+  assert.equal(out.ok, true);
+  // judge 调用（RELEVANCE_PROMPT）→ 主调用
+  assert.equal(seen.length, 2);
+  assert.ok(seen[0].system.includes('会话关联性判定器'), 'first call is relevance judge');
+  assert.equal(seen[0].maxTokens, 400, 'judge 小预算');
+  // 参考块注入到主调用的 user 消息文本（finalText = v2Block + 原文包裹）
+  const mainText = seen[1].messages[0].content[0].text;
+  assert.ok(mainText.includes('【相关会话参考】'), 'main call receives session reference');
+  assert.ok(mainText.includes('再优化一下'), 'reference contains window text');
+});
+
+test('SMK-09 standard all windows miss → no reference', async () => {
+  const seen = [];
+  const { handlers } = boot({ llm: mockLlmSmart(seen, false), sessionQuery: mockSessionQuery() });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '优化一下',
+    config: {
+      mode: 'standard',
+      fallback: [{ provider: 'p', model: 'm' }],
+      params: { maxTokens: 2000, timeoutMs: 30000 },
+    },
+  });
+  assert.equal(out.ok, true);
+  // judge 调用 1 次（前 2 轮窗口 miss；3-5 / 6-10 轮窗口越界跳过）
+  assert.equal(seen.length, 2);
+  assert.ok(seen[0].system.includes('会话关联性判定器'), 'first call is relevance judge');
+  const mainText = seen[1].messages[0].content[0].text;
+  assert.ok(!mainText.includes('【相关会话参考】'), 'no reference when all windows miss');
 });
