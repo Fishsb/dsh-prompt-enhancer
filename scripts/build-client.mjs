@@ -1,4 +1,4 @@
-// Build lib/client.cjs from plugin-client.js: inlines the dynamic client
+﻿// Build lib/client.cjs from plugin-client.js: inlines the dynamic client
 // body into the static __ModuleLoader__ bundle. Run: node scripts/build-client.mjs
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -26,6 +26,7 @@ const enhanceButtonChunk = require('../src/client/components/enhance-button.js')
 const enhanceBarChunk = require('../src/client/components/enhance-bar.js');
 const updaterCardChunk = require('../src/client/components/updater-card.js');
 const pluginsSectionChunk = require('../src/client/components/plugins-section.js');
+const marqueeSelectChunk = require('../src/client/components/marquee-select.js');
 const collapsibleSectionChunk = require('../src/client/components/collapsible-section.js');
 const modelMainSectionChunk = require('../src/client/components/model-main-section.js');
 const fallbackRowChunk = require('../src/client/components/fallback-row.js');
@@ -48,6 +49,7 @@ const injections = [
   ['// @dsh-client-comp-enhance-button-inject\n', enhanceButtonChunk],
   ['// @dsh-client-comp-enhance-bar-inject\n', enhanceBarChunk],
   ['// @dsh-client-comp-updater-card-inject\n', updaterCardChunk],
+  ['// @dsh-client-comp-marquee-select-inject\n', marqueeSelectChunk],
   ['// @dsh-client-comp-plugins-section-inject\n', pluginsSectionChunk],
   ['// @dsh-client-comp-collapsible-section-inject\n', collapsibleSectionChunk],
   ['// @dsh-client-comp-model-main-section-inject\n', modelMainSectionChunk],

@@ -2069,6 +2069,61 @@ function UpdaterCard(props) {
     error ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, error) : null,
   );
 }
+function MarqueeSelect(props) {
+  const textRef = React.useRef(null);
+  const [distance, setDistance] = React.useState(0);
+  const options = React.Children.toArray(props.children);
+  const selected = options.find(function (c) {
+    return c && c.props && String(c.props.value) === String(props.value);
+  });
+  const label = selected && selected.props && selected.props.children != null
+    ? String(selected.props.children)
+    : String(props.value == null ? '' : props.value);
+
+  // 选中项/容器宽度变化后重新测量溢出距离；未溢出时 distance = 0，不启动动效
+  React.useEffect(function () {
+    const el = textRef.current;
+    if (!el) return;
+    const next = Math.max(0, el.scrollWidth - el.clientWidth);
+    setDistance(function (prev) { return prev === next ? prev : next; });
+  }, [label, props.value, props.className]);
+
+  // 窗口尺寸变化时同步更新滚动距离（如侧栏展开/收起导致下拉宽度变化）
+  React.useEffect(function () {
+    function update() {
+      const el = textRef.current;
+      if (!el) return;
+      setDistance(Math.max(0, el.scrollWidth - el.clientWidth));
+    }
+    window.addEventListener('resize', update);
+    return function () { window.removeEventListener('resize', update); };
+  }, []);
+
+  const marquee = distance > 0;
+  const rest = {};
+  for (const key in props) {
+    if (key !== 'className' && key !== 'children' && key !== 'value') rest[key] = props[key];
+  }
+  return React.createElement('span', {
+    className: 'dsh-plg-mselect' + (props.className ? ' ' + props.className : ''),
+    'data-disabled': props.disabled ? 'true' : undefined,
+  },
+    React.createElement('select', Object.assign({}, rest, {
+      className: 'dsh-plg-mselect-native',
+      value: props.value,
+      children: props.children,
+    })),
+    React.createElement('span', { className: 'dsh-plg-mselect-visual', 'aria-hidden': true },
+      React.createElement('span', {
+        ref: textRef,
+        className: 'dsh-plg-mselect-text' + (marquee ? ' dsh-plg-mselect-text-marquee' : ''),
+        style: marquee ? { '--dsh-mselect-distance': distance + 'px' } : undefined,
+      }, label),
+    ),
+    React.createElement('span', { className: 'dsh-plg-mselect-arrow', 'aria-hidden': true }),
+  );
+}
+
 function PluginsSection(props) {
   const t = makeT(props);
   const [plugins, setPlugins] = React.useState(null);
@@ -2181,7 +2236,7 @@ function PluginsSection(props) {
         ),
         React.createElement('div', { className: 'dsh-plg-row' },
           React.createElement('label', { className: 'dsh-plg-label', htmlFor: versionId + '-' + p.pluginId }, t('pluginsVersion')),
-          React.createElement('select', {
+          React.createElement(MarqueeSelect, {
             id: versionId + '-' + p.pluginId,
             className: 'dsh-plg-select',
             value: sel,
@@ -2534,13 +2589,13 @@ function FallbackRow(props) {
   return React.createElement('div', { className: 'dsh-plg-row' },
     React.createElement('span', { className: 'dsh-plg-muted dsh-plg-num' }, String(index + 1)),
     invalid ? React.createElement('span', { className: 'dsh-plg-badge-invalid', title: t('cfgRowInvalid') }, '⚠') : null,
-    React.createElement('select', {
+    React.createElement(MarqueeSelect, {
       className: 'dsh-plg-select dsh-plg-select-provider',
       value: entry.provider || '',
       onChange: onProviderChange,
       children: (providers || []).map((p) => React.createElement('option', { key: p.provider, value: p.provider }, p.name || p.provider)),
     }),
-    React.createElement('select', {
+    React.createElement(MarqueeSelect, {
       className: 'dsh-plg-select dsh-plg-select-model',
       value: entry.model || '',
       onChange: (e) => onChange({ ...entry, model: e.target.value }),
@@ -2548,7 +2603,7 @@ function FallbackRow(props) {
     }),
     reasoning
       ? React.createElement(React.Fragment, null,
-          React.createElement('select', {
+          React.createElement(MarqueeSelect, {
             className: 'dsh-plg-select dsh-plg-select-thinking',
             value: effortOn ? 'on' : 'off',
             onChange: (e) => {
@@ -2558,7 +2613,7 @@ function FallbackRow(props) {
             },
             children: [React.createElement('option', { key: 'off', value: 'off' }, t('cfgReasoningOff')), React.createElement('option', { key: 'on', value: 'on' }, t('cfgReasoningOn'))],
           }),
-          React.createElement('select', {
+          React.createElement(MarqueeSelect, {
             className: 'dsh-plg-select dsh-plg-select-level',
             value: levelValue,
             disabled: !effortOn,
@@ -2752,7 +2807,7 @@ function ParamsTab(props) {
     React.createElement('div', { className: 'dsh-plg-row dsh-plg-row-duo' },
       React.createElement('div', { className: 'dsh-plg-field' },
         React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.mode }, t('cfgMode')),
-        React.createElement('select', {
+        React.createElement(MarqueeSelect, {
           id: ids.mode,
           'aria-describedby': ids.modeHint,
           className: 'dsh-plg-select',
@@ -2767,7 +2822,7 @@ function ParamsTab(props) {
       ),
       React.createElement('div', { className: 'dsh-plg-field' },
         React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.tpl }, t('cfgTemplateMode')),
-        React.createElement('select', {
+        React.createElement(MarqueeSelect, {
           id: ids.tpl,
           className: 'dsh-plg-select',
           value: pickValue,
@@ -2784,7 +2839,7 @@ function ParamsTab(props) {
     // v2.2（§6.2/§6.6）：记忆功能独立开关（所有模式可开/关，即时准确切换）
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.memory }, t('cfgMemory')),
-      React.createElement('select', {
+      React.createElement(MarqueeSelect, {
         id: ids.memory,
         'aria-describedby': ids.memoryHint,
         className: 'dsh-plg-select dsh-plg-select-thinking',
@@ -2802,7 +2857,7 @@ function ParamsTab(props) {
     // 预算下拉（全模式可见；0 = 不注入）
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.budget }, t('cfgContextBudget')),
-      React.createElement('select', {
+      React.createElement(MarqueeSelect, {
         id: ids.budget,
         'aria-describedby': ids.budgetHint,
         className: 'dsh-plg-select',
@@ -2817,15 +2872,15 @@ function ParamsTab(props) {
     // 避免「调整后状态没有更新」的误导（此前可编辑但实际无效）
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.timeout }, t('cfgTimeout')),
-      React.createElement('select', Object.assign({ id: ids.timeout, className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('timeoutMs', TIMEOUT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, (v / 1000) + 's'))))),
+      React.createElement(MarqueeSelect, Object.assign({ id: ids.timeout, className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('timeoutMs', TIMEOUT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, (v / 1000) + 's'))))),
     ),
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.maxTokens }, t('cfgMaxTokens')),
-      React.createElement('select', Object.assign({ id: ids.maxTokens, className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('maxTokens', MAXTOKENS_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v)))))),
+      React.createElement(MarqueeSelect, Object.assign({ id: ids.maxTokens, className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('maxTokens', MAXTOKENS_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v)))))),
     ),
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.outputLimit }, t('cfgOutputLimit')),
-      React.createElement('select', Object.assign({ id: ids.outputLimit, className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('outputLimit', OUTPUTLIMIT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v)))))),
+      React.createElement(MarqueeSelect, Object.assign({ id: ids.outputLimit, className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('outputLimit', OUTPUTLIMIT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v)))))),
     ),
     isPublishMode
       ? React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgPublishNoLimit'))
@@ -3020,6 +3075,18 @@ const CSS = [
   // v2.8.4（下拉箭头占位预算）：所有下拉框右侧预留 28px 箭头位；固定宽度窄下拉同步加宽，保持原内容宽度不变
   '.dsh-plg-select{flex:1;min-width:0;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:5px 28px 5px 12px}',
   '.dsh-plg-select:focus-visible{outline:none;border-color:var(--dsw-alias-brand-primary)}',
+  // v2.8.4（下拉选项溢出动效）：选中文本超宽时在可见区域内左右循环滚动
+  '.dsh-plg-mselect{position:relative;overflow:hidden;display:inline-flex;align-items:center;cursor:pointer}',
+  '.dsh-plg-mselect-native{position:absolute;inset:0;width:100%;height:100%;opacity:0;border:0;margin:0;padding:0;cursor:pointer;font:inherit;color:transparent;background:transparent;-webkit-appearance:none;appearance:none}',
+  '.dsh-plg-mselect:focus-within{border-color:var(--dsw-alias-brand-primary)}',
+  '.dsh-plg-mselect[data-disabled="true"]{opacity:.6;cursor:default}',
+  '.dsh-plg-mselect[data-disabled="true"] .dsh-plg-mselect-native{cursor:default}',
+  '.dsh-plg-mselect-visual{display:block;flex:1;min-width:0;overflow:hidden;pointer-events:none;line-height:20px}',
+  '.dsh-plg-mselect-text{display:inline-block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:top;will-change:transform}',
+  '.dsh-plg-mselect-text-marquee{animation:dsh-mselect-marquee 6s linear infinite}',
+  '@keyframes dsh-mselect-marquee{0%,8%{transform:translateX(0)}46%{transform:translateX(calc(-1 * var(--dsh-mselect-distance)))}54%{transform:translateX(calc(-1 * var(--dsh-mselect-distance)))}92%,100%{transform:translateX(0)}}',
+  '.dsh-plg-mselect-arrow{position:absolute;right:12px;top:50%;width:12px;height:12px;transform:translateY(-50%);pointer-events:none;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:12px;text-align:center}',
+  '.dsh-plg-mselect-arrow::before{content:"▾"}',
   '.dsh-plg-textarea{flex:1;min-width:0;min-height:180px;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:8px 12px;resize:vertical;font-family:inherit}',
   '.dsh-plg-textarea:focus-visible{outline:none;border-color:var(--dsw-alias-brand-primary)}',
   '.dsh-plg-approval{color:var(--dsw-alias-state-warn-primary);font-size:12px;line-height:16px;flex-wrap:wrap}',
