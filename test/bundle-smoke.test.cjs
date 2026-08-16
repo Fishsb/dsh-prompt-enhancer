@@ -325,7 +325,7 @@ test('SMK-08 lite window hit injects session reference', async () => {
   assert.equal(seen[0].maxTokens, 400, 'judge 小预算');
   // 参考块注入到主调用的 user 消息文本（finalText = v2Block + 原文包裹）
   const mainText = seen[1].messages[0].content[0].text;
-  assert.ok(mainText.includes('【相关会话参考】'), 'main call receives session reference');
+  assert.ok(mainText.includes('【相关会话参考（仅吸收明确需求，禁止复述）】'), 'main call receives session reference');
   assert.ok(mainText.includes('再优化一下'), 'reference contains window text');
 });
 
@@ -675,7 +675,7 @@ test('SMK-17 progress exposes fine-grained detail during publish (v3.0r)', async
 
 // ---- v3.1.3 看门狗 + 延迟连通性预检（base 模式直通 llm，无检索干扰） ----
 const REAL_TIMER = { timeout: (cb, ms) => { const id = setTimeout(cb, ms); return () => clearTimeout(id); } };
-const WATCHDOG_WAIT = 3600; // 略大于 bundle 内 WATCHDOG_TIMEOUT_MS=3000
+const WATCHDOG_WAIT = 5600; // 略大于 bundle 内 WATCHDOG_TIMEOUT_MS=5000
 
 // SMK-17：首条生成流静默挂起（看门狗 3s 触发）→ 探测剩余链 → 第二条可达 → 用第二条生成成功
 test('SMK-17 watchdog: silent head → probe next → fallback generation (fallbackUsed)', async () => {

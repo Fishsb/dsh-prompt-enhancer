@@ -936,6 +936,27 @@ test('U40 prompts 外置一致性（v2.4.6）：生成区 = prompts/*.md 逐行�
   assert.equal(extractConst('SYSTEM_PUBLISH_DEV_PROMPT'), mdOf('publish-dev.md'), 'SYSTEM_PUBLISH_DEV_PROMPT 应与 prompts/publish-dev.md 一致');
 });
 
+// 2026-08-17（参考吸收规则）：prompts 必须包含「吸收参考明确需求 + 禁止逐字复述」语义，
+// 防止后续改回「仅供理解背景」导致检索参考再次失效。
+test('U40b 参考吸收规则存在于全部参考相关 prompt（2026-08-17）', () => {
+  const { readFileSync } = require('node:fs');
+  const { join } = require('node:path');
+  const readPrompt = (file) => readFileSync(join(__dirname, '..', 'prompts', file), 'utf8');
+  const guard = readPrompt('context-guard.md');
+  assert.ok(guard.includes('吸收进优化后的提示词'), 'context-guard 应要求吸收参考明确需求');
+  assert.ok(guard.includes('禁止逐字复述'), 'context-guard 应禁止逐字复述参考');
+  for (const f of ['system.md', 'system-supplement.md']) {
+    const text = readPrompt(f);
+    assert.ok(text.includes('参考'), f + ' 应包含参考使用规则');
+    assert.ok(text.includes('吸收进优化结果') || text.includes('吸收进完善后的提示词'), f + ' 应包含吸收参考需求');
+  }
+  const pub = readPrompt('publish.md');
+  assert.ok(pub.includes('参考'), 'publish.md 应包含参考使用规则');
+  assert.ok(pub.includes('吸收进对应章节'), 'publish.md 应包含吸收参考需求');
+  assert.ok(src.includes('吸收进优化后的提示词'), 'plugin-host.js CONTEXT_GUARD 应与 prompts/context-guard.md 同步');
+});
+
+
 // v2.4.7（每模式独立自定义模板）：validateConfig 对 template.texts 的解析与迁移契约。
 test('U41 template.texts 每模式解析/迁移/超长忽略（v2.4.7）', () => {
   // ① 新结构 texts：按模式白名单解析，未给键保持空串

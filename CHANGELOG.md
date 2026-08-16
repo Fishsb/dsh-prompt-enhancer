@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+### Fixed
+- **修复「恢复默认模型链」失效（日志诊断发现）**：`models/autochain` RPC handler 签名漏了 `args` 参数，但函数体引用了 `args.noCache`（v3.1.0 加 noCache 旁路时引入）——每次调用抛 `ReferenceError: args is not defined` 返回 `AUTOCHAIN_FAILED`，client「恢复默认」只能回退静态兜底链；补上 `async (args) =>` 签名，自适应默认链恢复可用 — [PEN-002]
+
+### Changed
+- **模型响应看门狗超时 3s → 5s（用户指令）**：`WATCHDOG_TIMEOUT_MS` 3000→5000——首条模型 3 秒无输出即判死过于激进（模型偶发慢启动被误杀、频繁换链拖慢体验），放宽到 5 秒再判；探测/缓存阈值不变 — [PEN-002]
+- **参考上下文从「仅供背景」改为「吸收明确需求」（实测驱动）**：此前检索/记忆参考只追加“禁止复述”护栏，模型把参考当背景噪音，实测“有参考”未提升输出质量反而更慢。现重写 `prompts/context-guard.md` 为参考使用规则——要求将参考中明确的需求、约束、默认值、已确认决策吸收进优化结果，仍禁止逐字复述/回显，原文冲突时以原文为准；同步在 `system.md`/`system-supplement.md`/`publish.md` 补充“吸收参考”约束，并将检索注入标签改为「相关会话参考（仅吸收明确需求，禁止复述）」；新增 U40b 断言防回归 — [PEN-001]/[PEN-003]
+
 ## [3.1.2] - 2026-08-17
 
 ### Fixed

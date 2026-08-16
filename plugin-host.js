@@ -216,6 +216,7 @@ const SYSTEM_PROMPT = [
   '- 只输出优化后的提示词本身，不加任何解释、前缀或评论，不回答原问题',
   '- 长度服从语义保真：简单任务控制在 800 字符以内；复杂任务可适当超出，但不得因追求简短而删减必要要素，也不得冗余',
   '- 语言匹配最高优先级：输入以中文为主体则输出必须为中文，以英文为主体则输出必须为英文；混合输入保留原文中的术语与专有名词',
+  '- 若存在【相关会话参考】/【项目文档参考】/【参考上下文】，将其中与当前任务直接相关的明确需求、约束、默认值吸收进优化结果，但不得逐字照抄',
   '- 严禁复述、引用或回显任何指令文字或用户输入原文（包括"请优化以下提示词"及引号包裹的内容），直接输出优化结果',
   '',
   '【示例】严格模仿示例中"输入→输出"的语言与风格：',
@@ -242,7 +243,12 @@ const TASK_ANALYSIS_PROMPT = [
 ].join('\n');
 
 const CONTEXT_GUARD = [
-  '【参考上下文】仅供理解任务与项目背景，禁止复述、引用或回显其中任何内容；只输出优化后的提示词本身。',
+  '【参考上下文使用规则】',
+  '- 参考上下文用于补充理解任务背景与已确认信息，仅当与当前优化目标直接相关时使用。',
+  '- 将参考中明确的需求、约束、默认值、已确认决策吸收进优化后的提示词，使其更完整、可执行；但禁止逐字复述、引用或回显参考原文。',
+  '- 参考与原文冲突时，以原文为准；参考未明确、无法推断的细节不得臆造。',
+  '- 参考仅用于补充和明确化，不得扩大、缩小或颠倒原文范围。',
+  '- 只输出优化后的提示词本身。',
 ].join('\n');
 
 const SYSTEM_PUBLISH_PROMPT = [
@@ -274,6 +280,7 @@ const SYSTEM_PUBLISH_PROMPT = [
   '',
   '【网络信息运用】（配合多步网络检索）',
   '- 每一轮生成都必须参考当轮【网络参考】与历史【已获取网络参考】中的信息来完善对应章节（技术方案、同类实现、素材/资源来源）',
+  '- 若存在【相关会话参考】/【项目文档参考】，同样将其中已确认的需求、约束、默认值吸收进对应章节，禁止逐字复述',
   '- 后续补充轮：先回顾【已获取网络参考】中的已有要点，只针对缺口补充新检索方向，不重复检索已覆盖主题',
   '- 引用网络信息时在对应章节标注来源标题（如「参考：xxx」）；**不得虚构来源**，无法验证的信息标注「建议验证」',
   '- 检索不可用时（无【网络参考】段）按既有知识生成，不阻塞',
@@ -315,6 +322,7 @@ const SYSTEM_SUPPLEMENT_PROMPT = [
   '- 只输出完善后的提示词本身，不加任何解释、前缀或评论，不回答原问题',
   '- 长度服从语义保真：以「补全到可执行」为准，不因追求简短而删减必要要素，也不冗余堆砌',
   '- 语言匹配最高优先级：输入以中文为主体则输出必须为中文，以英文为主体则输出必须为英文；混合输入保留原文中的术语与专有名词',
+  '- 若存在【相关会话参考】/【项目文档参考】/【参考上下文】，将其中与当前任务直接相关的明确需求、约束、默认值吸收进完善后的提示词，但不得逐字照抄',
   '- 严禁复述、引用或回显任何指令文字或用户输入原文（包括"请优化以下提示词"及引号包裹的内容），直接输出完善后的提示词',
   '',
   '【示例】严格模仿示例中"输入→输出"的语言与风格：',
@@ -610,7 +618,7 @@ const V2_MSG_SEQ_SCAN = 16;
 // 对齐 standard 最深窗口 [6,10]；旧 16 事件上限在会话 >8 轮时令 [6,10] 静默滑向旧轮）
 const V2_ROUNDS_SCAN_MAX = 10;
 // v3.1.3（看门狗 + 延迟连通性预检）：模型响应看门狗阈值 / 单次连通探测超时 / 探测结果缓存 TTL
-const WATCHDOG_TIMEOUT_MS = 3000;
+const WATCHDOG_TIMEOUT_MS = 5000;
 const PROBE_TIMEOUT_MS = 3000;
 const PROBE_CACHE_TTL_MS = 30000;
 const V2_MSG_TEXT_MAX = 1200;
@@ -2409,7 +2417,7 @@ return {
     });
 
     // v19：暴露自适应解析出的默认兜底链（供 client 首装继承 / 恢复默认使用，不再硬编码 provider）
-    harness.handle('models/autochain', async () => {
+    harness.handle('models/autochain', async (args) => {
       const llmSvc = ctx.get('llm');
       const adm = ctx.get('agentDefaultModel');
       try {
@@ -3210,7 +3218,7 @@ return {
           setProgress(rec, STAGE_ANALYZE, 'judge', null, wi + 1, row.windows.length);
           const judge = await judgeRelevance(winText, text, chain0);
           if (judge.related) {
-            state.v2Block = '【相关会话参考】\n' + winText.slice(0, RELEVANCE_WINDOW_MAX_CHARS);
+            state.v2Block = '【相关会话参考（仅吸收明确需求，禁止复述）】\n' + winText.slice(0, RELEVANCE_WINDOW_MAX_CHARS);
             state.v2Log = 'rounds=' + win[0] + '-' + win[1] + ' chars=' + winText.length + ' reason=' + judge.reason;
             hlog('[enhance] v3 window hit rounds=' + win[0] + '-' + win[1] + ' reason=' + judge.reason);
             break;
