@@ -34,9 +34,11 @@ const SOURCES = [
   { md: 'prompts/publish.md', name: 'SYSTEM_PUBLISH_PROMPT' },
   // 模式重构（2026-08-16）：会话关联性判定提示词（占位符 {history}/{current} 运行时替换）
   { md: 'prompts/relevance.md', name: 'RELEVANCE_PROMPT' },
-  // 模式重构 S3：smart 专业词汇优化段（追加到 smart 模式 system）+ 开发环境判定（占位符运行时替换）
+  // 模式重构 S3：smart 专业词汇优化段（追加到 smart 模式 system）
   { md: 'prompts/smart.md', name: 'SMART_TAIL_PROMPT' },
-  { md: 'prompts/dev-env.md', name: 'DEV_ENV_PROMPT' },
+  // 模式重构 v2 修订：提示词开发意向判定 + 文档检索/项目地图合并分析（占位符运行时替换）
+  { md: 'prompts/intent.md', name: 'DEV_INTENT_PROMPT' },
+  { md: 'prompts/doc-analysis.md', name: 'DOC_ANALYSIS_PROMPT' },
 ];
 
 // md 行 → JS 字符串数组元素（转义反斜杠与单引号；行尾空行 trim 掉）

@@ -329,30 +329,76 @@ const SMART_TAIL_PROMPT = [
   '三、调整建议：…',
 ].join('\n');
 
-const DEV_ENV_PROMPT = [
-  '你是一个项目环境判定器。根据给定的「项目文档摘要」与「相关会话片段」，判断当前工作区是否为**项目开发环境**（软件/游戏/系统开发项目的工作区）。',
+const DEV_INTENT_PROMPT = [
+  '你是一个提示词意图判定器。判断给定的「当前用户输入（提示词）」是否表达**项目开发意向**。',
   '',
-  '【开发环境的定义】',
-  '工作区包含项目级文档（README、设计文档、规格说明）且文档内容呈现项目开发特征（技术栈、架构、模块划分、功能需求、实施计划等）；或工作区存在可识别的项目结构。',
+  '【项目开发意向的定义】',
+  '输入表达了对某个项目/软件/游戏/系统进行开发、实现、重构、修改、优化、调试、扩展、集成、部署等意图——例如：',
+  '- 「帮我开发一个用户管理系统」',
+  '- 「优化一下这个登录功能的实现」',
+  '- 「重构这段代码」',
+  '- 「给我的项目加一个功能」',
   '',
-  '【非开发环境的定义】',
-  '工作区仅有个人笔记、零散文件、非项目内容（如学习笔记、普通文档整理），不具备项目开发特征。',
+  '【非项目开发意向的定义】',
+  '输入不涉及具体项目开发——例如：',
+  '- 纯粹的写作/翻译/文案优化',
+  '- 通用知识问答',
+  '- 与代码/项目无关的日常请求',
   '',
   '【判定规则】',
-  '1. 只依据给定内容判断；内容不足以判断时 → false。',
-  '2. 宁可漏判（false），不可错判（把非项目工作区当作开发环境）。',
+  '1. 输入明确指向项目/代码/系统开发相关的任务 → true。',
+  '2. 输入含糊或无法确定是否涉及项目开发 → false（宁停勿滥）。',
+  '3. 只依据输入内容本身与给定的会话参考判断，不臆测。',
   '',
   '【输出格式】',
   '只输出一个 JSON 对象，不要输出任何其他内容：',
-  '{"isDevEnv": true 或 false, "reason": "一句话中文理由（不超过 30 字）"}',
+  '{"isDevIntent": true 或 false, "reason": "一句话中文理由（不超过 30 字）"}',
   '',
   '【输入】',
-  '项目文档摘要：',
+  '当前用户输入：',
+  '"""',
+  '{prompt}',
+  '"""',
+  '',
+  '相关会话参考（可能为空）：',
+  '"""',
+  '{session}',
+  '"""',
+].join('\n');
+
+const DOC_ANALYSIS_PROMPT = [
+  '你是一个项目文档分析器。根据给定的「候选 .md 文档清单与内容摘要」、「当前用户输入（提示词）」与「相关会话参考」，执行两项任务：',
+  '',
+  '【任务一：检索相关参考信息】',
+  '从候选 .md 文档中挑出与提示词**相关**的文档（主题/内容与提示词涉及的项目、功能、技术直接相关），并为每个相关文档提取一段要点摘要（≤200 字符）。无关文档不选。',
+  '',
+  '【任务二：分析项目地图结构】',
+  '判断这些相关 .md 文档（以及候选清单整体）中，是否存在**项目地图或类似的可快速定位代码文档位置的结构**——例如：',
+  '- README 中的目录树 / 模块结构说明',
+  '- docs/map、INDEX、文档索引、导航文件',
+  '- 文档中列出的源码目录结构 / 模块路径指引',
+  '',
+  '【输出格式】',
+  '只输出一个 JSON 对象，不要输出任何其他内容：',
+  '{',
+  '  "relatedDocs": [{"path": "文档路径", "excerpt": "要点摘要（≤200字）"}],',
+  '  "hasProjectMap": true 或 false,',
+  '  "codePaths": ["文档中明确指向的代码目录/路径（如 src/、packages/core/，无则空数组）"],',
+  '  "reason": "一句话中文理由（不超过 40 字）"',
+  '}',
+  '',
+  '【输入】',
+  '候选 .md 文档清单与内容摘要：',
   '"""',
   '{docs}',
   '"""',
   '',
-  '相关会话片段：',
+  '当前用户输入：',
+  '"""',
+  '{prompt}',
+  '"""',
+  '',
+  '相关会话参考（可能为空）：',
   '"""',
   '{session}',
   '"""',
@@ -1523,6 +1569,46 @@ function parseDevEnv(raw) {
   const isDevEnv = obj.isDevEnv === true || obj.isDevEnv === 'true' || obj.isDevEnv === 1 || obj.isDevEnv === '1';
   return { isDevEnv, reason: typeof obj.reason === 'string' ? obj.reason.slice(0, 80) : '' };
 }
+
+// v3.0v2（修订）：提示词开发意向判定 JSON 容错解析（{isDevIntent, reason}）。
+function parseIntent(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  s = s.slice(start, end + 1);
+  let obj;
+  try { obj = JSON.parse(s); } catch (e) { return null; }
+  if (!obj || typeof obj !== 'object') return null;
+  const isDevIntent = obj.isDevIntent === true || obj.isDevIntent === 'true' || obj.isDevIntent === 1 || obj.isDevIntent === '1';
+  return { isDevIntent, reason: typeof obj.reason === 'string' ? obj.reason.slice(0, 80) : '' };
+}
+
+// v3.0v2（修订）：文档检索/项目地图合并分析 JSON 容错解析
+// （{relatedDocs:[{path,excerpt}], hasProjectMap, codePaths:[], reason}）。
+function parseDocsAnalysis(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  s = s.slice(start, end + 1);
+  let obj;
+  try { obj = JSON.parse(s); } catch (e) { return null; }
+  if (!obj || typeof obj !== 'object') return null;
+  const relatedDocs = Array.isArray(obj.relatedDocs) ? obj.relatedDocs.slice(0, 3).map((d) => ({
+    path: String(d && d.path || '').slice(0, 200),
+    excerpt: String(d && d.excerpt || '').slice(0, 240),
+  })).filter((d) => d.path !== '') : [];
+  const codePaths = Array.isArray(obj.codePaths) ? obj.codePaths.map((p) => String(p || '').replace(/^\/+|\/+$/g, '')).filter((p) => p !== '').slice(0, 5) : [];
+  const hasProjectMap = obj.hasProjectMap === true || obj.hasProjectMap === 'true' || obj.hasProjectMap === 1 || obj.hasProjectMap === '1';
+  return { relatedDocs, hasProjectMap, codePaths, reason: typeof obj.reason === 'string' ? obj.reason.slice(0, 100) : '' };
+}
 // ==PURE-END==
 
 // ================= V2 上下文感知优化 · 运行时（阶段 A/B/C） =================
@@ -2456,7 +2542,7 @@ return {
     // ---- v3.0（S3）：工作区文件检索（扩展名过滤 + 关键词排序 + 摘要；2s 超时降级）----
     const DOC_FILE_RE = /\.md$/i;
     const CODE_FILE_RE = /\.(?:js|ts|jsx|tsx|py|go|rs|java|cpp|c|h|cs|rb|php|sql|sh|vue|html|css|json|yaml|yml|toml)$/i;
-    async function searchWorkspaceFiles(extRe, keywords, maxFiles, maxDepth) {
+    async function searchWorkspaceFiles(extRe, keywords, maxFiles, maxDepth, paths) {
       const fsSvc = ctx.get('fs');
       const sp = ctx.get('sandboxPolicy');
       const root = sp && sp.workspaceRoot;
@@ -2522,6 +2608,12 @@ return {
         // 最终兜底：内容仍不匹配（中文关键词 vs 英文代码/文件名的语义鸿沟）→ 取前 N 个
         // （开发环境已确认或 md 文档场景下文件有限，全取参考优于空参考）
         if (ranked.length === 0) ranked = files.slice(0, maxFiles);
+        // v3.0v2：项目地图指向路径优先（codePaths 前缀命中排前，不足补全量）
+        if (paths && paths.length > 0 && files.length > 0) {
+          const prefixed = files.filter((f) => paths.some((p) => f === p || f.startsWith(p + '/')));
+          const rest = files.filter((f) => !prefixed.includes(f));
+          ranked = prefixed.concat(rest).slice(0, maxFiles);
+        }
         const out = [];
         for (const rel of ranked.slice(0, maxFiles)) {
           try {
@@ -2536,12 +2628,41 @@ return {
       }
     }
 
-    // ---- v3.0（S3）：开发环境 LLM 判定（DEV_ENV_PROMPT 占位替换；10s 超时；失败 → 非开发环境）----
-    async function judgeDevEnv(docsText, sessionText, entry) {
-      if (llm === undefined || !entry) return { isDevEnv: false, reason: 'no-llm' };
-      const system = DEV_ENV_PROMPT
-        .replace('{docs}', String(docsText || ''))
-        .replace('{session}', String(sessionText || ''));
+    // ---- v3.0v2：smart 工作区阶段（门槛：有 .md + 相关文档命中 + 项目地图结构）----
+    // 返回 { block, enteredThird }——enteredThird 决定 SMART_TAIL（调整方案）是否追加。
+    async function enhanceSmartWorkspace(state, text, chain0) {
+      const kws = extractKeywords(text, []);
+      const docs = await searchWorkspaceFiles(DOC_FILE_RE, kws, 5, 2);
+      if (docs.length === 0) {
+        hlog('[enhance] v3 smart no-md');
+        return { block: state.v2Block, enteredThird: false };
+      }
+      const docsText = docs.map((d) => '📄 ' + d.path + '\n' + d.snippet).join('\n\n').slice(0, 3000);
+      // B+C 合并：一次 LLM 调用——检索相关文档 + 分析项目地图结构
+      const analysis = await analyzeDocsRelevance(docsText, text, state.v2Block || '', chain0);
+      if (!analysis || analysis.relatedDocs.length === 0) {
+        hlog('[enhance] v3 smart no-related-doc');
+        return { block: state.v2Block, enteredThird: false };
+      }
+      const docPart = (state.v2Block ? state.v2Block + '\n\n' : '') + '【项目文档参考】\n' +
+        analysis.relatedDocs.map((d) => '📄 ' + d.path + '\n' + d.excerpt).join('\n\n');
+      if (!analysis.hasProjectMap) {
+        hlog('[enhance] v3 smart no-project-map reason=' + analysis.reason);
+        return { block: docPart, enteredThird: false };
+      }
+      // 第三步：代码文档检索（项目地图指向路径优先）
+      hlog('[enhance] v3 smart project-map paths=' + JSON.stringify(analysis.codePaths));
+      const codes = await searchWorkspaceFiles(CODE_FILE_RE, kws, 3, 3, analysis.codePaths);
+      const codeText = codes.map((c) => '📄 ' + c.path + '\n' + c.snippet).join('\n\n').slice(0, RELEVANCE_WINDOW_MAX_CHARS);
+      return { block: codeText ? docPart + '\n\n【相关代码参考】\n' + codeText : docPart, enteredThird: true };
+    }
+
+    // ---- v3.0v2：提示词开发意向判定（DEV_INTENT_PROMPT；10s 超时降级非开发意向）----
+    async function judgeDevIntent(text, sessionRef, entry) {
+      if (llm === undefined || !entry) return { isDevIntent: false, reason: 'no-llm' };
+      const system = DEV_INTENT_PROMPT
+        .replace('{prompt}', String(text || ''))
+        .replace('{session}', String(sessionRef || ''));
       let timedOut = false;
       const timer = ctx.timer.timeout(() => { timedOut = true; }, RELEVANCE_TIMEOUT_MS);
       try {
@@ -2552,7 +2673,7 @@ return {
           maxTokens: RELEVANCE_MAX_TOKENS,
           system,
           messages: [{
-            id: 'enhance-devenv',
+            id: 'enhance-intent',
             role: 'user',
             content: [{ type: 'text', text: '请依据上述规则判断。' }],
             source: { kind: 'user' },
@@ -2561,39 +2682,54 @@ return {
         const iterator = stream[Symbol.asyncIterator]();
         const result = await collectStream(iterator, RELEVANCE_OUTPUT_LIMIT);
         if (!timedOut && result.kind === 'ok') {
-          const parsed = parseDevEnv(result.text);
+          const parsed = parseIntent(result.text);
           if (parsed) return parsed;
         }
-        hlog('[enhance] v3 dev-env ' + (timedOut ? 'timeout' : 'unparsed'));
+        hlog('[enhance] v3 intent ' + (timedOut ? 'timeout' : 'unparsed'));
       } catch (e) {
-        hlog('[enhance] v3 dev-env failed', e && e.message ? e.message : e);
+        hlog('[enhance] v3 intent failed', e && e.message ? e.message : e);
       } finally {
         timer();
       }
-      return { isDevEnv: false, reason: 'judge-failed' };
+      return { isDevIntent: false, reason: 'judge-failed' };
     }
 
-    // ---- v3.0（S3）：smart 工作区阶段——.md 文档 → 开发环境判断 → 代码文档检索 ----
-    // 规则：须同时「存在 .md 文档」且「判定为开发环境」才进入代码文档检索；
-    // 非开发环境只注入文档参考，不注入代码；无 .md → 不进入工作区阶段。
-    async function enhanceSmartWorkspace(state, text, chain0) {
-      const kws = extractKeywords(text, []);
-      const docs = await searchWorkspaceFiles(DOC_FILE_RE, kws, 3, 2);
-      if (docs.length === 0) {
-        hlog('[enhance] v3 smart no-md');
-        return state.v2Block;
+    // ---- v3.0v2：文档检索 + 项目地图合并分析（DOC_ANALYSIS_PROMPT 一次调用）----
+    async function analyzeDocsRelevance(docsText, text, sessionRef, entry) {
+      if (llm === undefined || !entry) return null;
+      const system = DOC_ANALYSIS_PROMPT
+        .replace('{docs}', String(docsText || ''))
+        .replace('{prompt}', String(text || ''))
+        .replace('{session}', String(sessionRef || ''));
+      let timedOut = false;
+      const timer = ctx.timer.timeout(() => { timedOut = true; }, RELEVANCE_TIMEOUT_MS);
+      try {
+        const stream = llm.stream({
+          provider: entry.provider,
+          model: entry.model,
+          ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+          maxTokens: RELEVANCE_MAX_TOKENS,
+          system,
+          messages: [{
+            id: 'enhance-docanalysis',
+            role: 'user',
+            content: [{ type: 'text', text: '请依据上述规则分析。' }],
+            source: { kind: 'user' },
+          }],
+        });
+        const iterator = stream[Symbol.asyncIterator]();
+        const result = await collectStream(iterator, RELEVANCE_OUTPUT_LIMIT);
+        if (!timedOut && result.kind === 'ok') {
+          const parsed = parseDocsAnalysis(result.text);
+          if (parsed) return parsed;
+        }
+        hlog('[enhance] v3 doc-analysis ' + (timedOut ? 'timeout' : 'unparsed'));
+      } catch (e) {
+        hlog('[enhance] v3 doc-analysis failed', e && e.message ? e.message : e);
+      } finally {
+        timer();
       }
-      const docsText = docs.map((d) => '📄 ' + d.path + '\n' + d.snippet).join('\n\n').slice(0, RELEVANCE_WINDOW_MAX_CHARS);
-      const judge = await judgeDevEnv(docsText, state.v2Block || '', chain0);
-      const docPart = (state.v2Block ? state.v2Block + '\n\n' : '') + '【项目文档参考】\n' + docsText;
-      if (!judge.isDevEnv) {
-        hlog('[enhance] v3 smart not-dev-env reason=' + judge.reason);
-        return docPart;
-      }
-      hlog('[enhance] v3 smart dev-env reason=' + judge.reason);
-      const codes = await searchWorkspaceFiles(CODE_FILE_RE, kws, 3, 3);
-      const codeText = codes.map((c) => '📄 ' + c.path + '\n' + c.snippet).join('\n\n').slice(0, RELEVANCE_WINDOW_MAX_CHARS);
-      return codeText ? docPart + '\n\n【相关代码参考】\n' + codeText : docPart;
+      return null;
     }
     // ---- stage: retrieve——v3.0 检索策略分发（rounds 窗口判定 / v2 旧管道 / none）----
     async function enhanceStageRetrieve(state) {
@@ -2625,11 +2761,22 @@ return {
           }
           hlog('[enhance] v3 window miss rounds=' + win[0] + '-' + win[1] + ' reason=' + judge.reason);
         }
-        // v3.0（S3）：smart 工作区阶段——.md 文档 → 开发环境判断 → 代码文档检索
+        // v3.0v2：smart——窗口判定后先判开发意向（非开发意向直接停，不进工作区）；
+        // 开发意向 → 工作区阶段（.md + 相关文档命中 + 项目地图三门槛），
+        // 仅进入第三步（代码阶段）才追加 SMART_TAIL（调整方案输出）
         if (cfg.mode === 'smart') {
-          state.v2Block = await enhanceSmartWorkspace(state, text, chain0);
-          state.system = state.system + '\n\n' + SMART_TAIL_PROMPT;
-          hlog('[enhance] v3 smart tail injected');
+          const intent = await judgeDevIntent(text, state.v2Block || '', chain0);
+          if (!intent.isDevIntent) {
+            hlog('[enhance] v3 smart not-dev-intent reason=' + intent.reason);
+          } else {
+            hlog('[enhance] v3 smart dev-intent reason=' + intent.reason);
+            const ws = await enhanceSmartWorkspace(state, text, chain0);
+            state.v2Block = ws.block;
+            if (ws.enteredThird) {
+              state.system = state.system + '\n\n' + SMART_TAIL_PROMPT;
+              hlog('[enhance] v3 smart tail injected');
+            }
+          }
         }
       } else if (row.kind === 'v2') {
         // publish：保持旧 V2 管道（任务理解 + 文件/事件/网络检索；budget 语义不变）

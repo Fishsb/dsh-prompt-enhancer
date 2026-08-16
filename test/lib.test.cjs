@@ -25,7 +25,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
   ;return { wrapUserText, wrapPublishText, stripScenarioEcho, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
     shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile, analyzeInputRules,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
-    splitHistoryRounds, parseRelevance,
+    splitHistoryRounds, parseRelevance, parseIntent, parseDocsAnalysis,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
     buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages, filterDeltaForPublish,
     MEMORY_ROUNDS_MAX, MEMORY_CHAIN_BUDGET_MAX, MEMORY_DELTA_MAX,
@@ -50,6 +50,8 @@ const {
   analyzeInputRules,
   splitHistoryRounds,
   parseRelevance,
+  parseIntent,
+  parseDocsAnalysis,
   RETRIEVE_TABLE,
   shouldIgnoreFile,
   rankFiles,
@@ -1136,4 +1138,29 @@ test('U63 RETRIEVE_TABLE 检索策略表（v3.0 模式重构）', () => {
       assert.ok(Number.isInteger(from) && Number.isInteger(to) && from >= 1 && to >= from, '窗口合法: ' + from + '-' + to);
     }
   }
+});
+
+// v3.0v2（修订）：开发意向判定 JSON 解析契约。
+test('U64 parseIntent JSON 容错解析（v3.0v2）', () => {
+  assert.deepEqual(parseIntent('{"isDevIntent":true,"reason":"开发项目"}'), { isDevIntent: true, reason: '开发项目' });
+  assert.deepEqual(parseIntent('{"isDevIntent":false,"reason":"写作"}'), { isDevIntent: false, reason: '写作' });
+  assert.deepEqual(parseIntent('```json\n{"isDevIntent": "true", "reason": "x"}\n```'), { isDevIntent: true, reason: 'x' });
+  assert.equal(parseIntent('not json'), null);
+  assert.equal(parseIntent(null), null);
+});
+
+// v3.0v2（修订）：文档检索/项目地图合并分析 JSON 解析契约。
+test('U65 parseDocsAnalysis JSON 容错解析（v3.0v2）', () => {
+  const ok = parseDocsAnalysis('{"relatedDocs":[{"path":"README.md","excerpt":"说明"}],"hasProjectMap":true,"codePaths":["src"],"reason":"r"}');
+  assert.equal(ok.relatedDocs.length, 1);
+  assert.equal(ok.relatedDocs[0].path, 'README.md');
+  assert.equal(ok.hasProjectMap, true);
+  assert.deepEqual(ok.codePaths, ['src']);
+  const noMap = parseDocsAnalysis('{"relatedDocs":[],"hasProjectMap":false,"codePaths":[],"reason":"r"}');
+  assert.equal(noMap.relatedDocs.length, 0);
+  assert.equal(noMap.hasProjectMap, false);
+  assert.equal(parseDocsAnalysis('garbage'), null);
+  // 路径清洗（去首尾斜杠）与上限
+  const paths = parseDocsAnalysis('{"relatedDocs":[],"hasProjectMap":true,"codePaths":["/src/","a/b","c"],"reason":"r"}');
+  assert.deepEqual(paths.codePaths, ['src', 'a/b', 'c']);
 });

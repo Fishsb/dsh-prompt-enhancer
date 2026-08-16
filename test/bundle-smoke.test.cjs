@@ -168,22 +168,38 @@ function streamOf(chunks) {
   };
 }
 
-// v3.0 llm mock：relevance judge（system 含 RELEVANCE 特征）返回可配置判定；
-// dev-env judge（system 含 DEV_ENV 特征）返回 isDevEnv 可配置；主调用返回 OK。
-function mockLlmSmart(seen, judgeRelated, devEnv) {
+// v3.0v2 llm mock：relevance（会话关联判定）/ intent（开发意向判定）/
+// docanalysis（文档检索+项目地图合并分析）三类 judge + 主调用；
+// opts: { related, devIntent, hasProjectMap }。
+function mockLlmSmart(seen, opts) {
+  const o = opts || {};
   return {
     stream(params) {
       seen.push(params);
       const sys = typeof params.system === 'string' ? params.system : '';
       if (sys.includes('会话关联性判定器')) {
         return streamOf([
-          { type: 'text-delta', text: JSON.stringify({ related: judgeRelated, reason: 't' }) },
+          { type: 'text-delta', text: JSON.stringify({ related: o.related !== false, reason: 't' }) },
           { type: 'finish', reason: { kind: 'stop' } },
         ]);
       }
-      if (sys.includes('项目环境判定器')) {
+      if (sys.includes('意图判定器')) {
         return streamOf([
-          { type: 'text-delta', text: JSON.stringify({ isDevEnv: devEnv !== false, reason: 'd' }) },
+          { type: 'text-delta', text: JSON.stringify({ isDevIntent: o.devIntent !== false, reason: 'i' }) },
+          { type: 'finish', reason: { kind: 'stop' } },
+        ]);
+      }
+      if (sys.includes('项目文档分析器')) {
+        return streamOf([
+          {
+            type: 'text-delta',
+            text: JSON.stringify({
+              relatedDocs: [{ path: 'README.md', excerpt: '用户管理系统，含登录功能说明' }],
+              hasProjectMap: o.hasProjectMap !== false,
+              codePaths: ['src'],
+              reason: 'd',
+            }),
+          },
           { type: 'finish', reason: { kind: 'stop' } },
         ]);
       }
@@ -215,7 +231,7 @@ function mockSessionQuery() {
 
 test('SMK-08 lite window hit injects session reference', async () => {
   const seen = [];
-  const { handlers } = boot({ llm: mockLlmSmart(seen, true), sessionQuery: mockSessionQuery() });
+  const { handlers } = boot({ llm: mockLlmSmart(seen, { related: true }), sessionQuery: mockSessionQuery() });
   const out = await handlers.get('enhance')({
     sessionId: 's',
     seq: 1,
@@ -239,7 +255,7 @@ test('SMK-08 lite window hit injects session reference', async () => {
 
 test('SMK-09 standard all windows miss → no reference', async () => {
   const seen = [];
-  const { handlers } = boot({ llm: mockLlmSmart(seen, false), sessionQuery: mockSessionQuery() });
+  const { handlers } = boot({ llm: mockLlmSmart(seen, { related: false }), sessionQuery: mockSessionQuery() });
   const out = await handlers.get('enhance')({
     sessionId: 's',
     seq: 1,
@@ -286,10 +302,10 @@ function mockWorkspaceFs() {
   };
 }
 
-test('SMK-10 smart workspace stage: md + dev-env + code reference', async () => {
+test('SMK-10 smart full flow: intent + doc-analysis + code reference', async () => {
   const seen = [];
   const { handlers } = boot({
-    llm: mockLlmSmart(seen, true),
+    llm: mockLlmSmart(seen, { related: true, devIntent: true, hasProjectMap: true }),
     sessionQuery: mockSessionQuery(),
     sandboxPolicy: { workspaceRoot: 'root' },
     fs: mockWorkspaceFs(),
@@ -305,15 +321,46 @@ test('SMK-10 smart workspace stage: md + dev-env + code reference', async () => 
     },
   });
   assert.equal(out.ok, true);
-  // 关联 judge（窗口命中）→ 开发环境 judge → 主调用
-  assert.ok(seen.length >= 3, 'judge(1) + devenv(1) + main(1), got ' + seen.length);
+  // 关联判定 → 开发意向判定 → 文档分析（B+C 合并）→ 主调用
+  assert.ok(seen.length >= 4, 'relevance+intent+docanalysis+main, got ' + seen.length);
   assert.ok(seen[0].system.includes('会话关联性判定器'), 'call 0 = relevance judge');
-  assert.ok(seen[1].system.includes('项目环境判定器'), 'call 1 = dev-env judge');
-  assert.equal(seen[1].maxTokens, 400, 'devenv judge 小预算');
-  // smart tail 注入 system
-  assert.ok(seen[2].system.includes('调整方案'), 'smart tail prompt injected');
-  // 代码参考注入 messages（smart 第三步）
-  const mainText = seen[2].messages[0].content[0].text;
-  assert.ok(mainText.includes('【相关代码参考】'), 'code reference injected');
+  assert.ok(seen[1].system.includes('意图判定器'), 'call 1 = dev-intent judge');
+  assert.equal(seen[1].maxTokens, 400, 'intent judge 小预算');
+  assert.ok(seen[2].system.includes('项目文档分析器'), 'call 2 = doc-analysis judge (B+C merged)');
+  // SMART_TAIL 仅在进入第三步时注入 system
+  assert.ok(seen[3].system.includes('调整方案'), 'smart tail injected when third step entered');
+  // 文档 + 代码参考注入 messages
+  const mainText = seen[3].messages[0].content[0].text;
   assert.ok(mainText.includes('【项目文档参考】'), 'doc reference injected');
+  assert.ok(mainText.includes('【相关代码参考】'), 'code reference injected');
+});
+
+test('SMK-11 smart non-dev-intent stops before workspace', async () => {
+  const seen = [];
+  const { handlers } = boot({
+    llm: mockLlmSmart(seen, { related: true, devIntent: false }),
+    sessionQuery: mockSessionQuery(),
+    sandboxPolicy: { workspaceRoot: 'root' },
+    fs: mockWorkspaceFs(),
+  });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '优化一下这个登录功能',
+    config: {
+      mode: 'smart',
+      fallback: [{ provider: 'p', model: 'm' }],
+      params: { maxTokens: 2000, timeoutMs: 30000 },
+    },
+  });
+  assert.equal(out.ok, true);
+  // 关联判定 → 意向判定（非开发意向 → 停）→ 主调用；无 doc-analysis
+  assert.equal(seen.length, 3, 'relevance+intent+main');
+  assert.ok(seen[1].system.includes('意图判定器'), 'call 1 = dev-intent judge');
+  assert.ok(!seen[2].system.includes('项目文档分析器'), 'no doc-analysis when non-dev-intent');
+  // 无 SMART_TAIL、无文档/代码参考
+  assert.ok(!seen[2].system.includes('调整方案'), 'no smart tail when stopped');
+  const mainText = seen[2].messages[0].content[0].text;
+  assert.ok(!mainText.includes('【项目文档参考】'), 'no doc reference when stopped');
+  assert.ok(!mainText.includes('【相关代码参考】'), 'no code reference when stopped');
 });
