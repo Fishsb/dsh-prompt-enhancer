@@ -23,7 +23,7 @@ const grabConst = (name) => {
 const defaultsBlock = [grabConst('DEFAULT_TIMEOUT_MS'), grabConst('DEFAULT_MAX_TOKENS'), grabConst('DEFAULT_OUTPUT_LIMIT')].join('\n');
 const pureFn = new Function(defaultsBlock + '\n' + pureText + `
   ;return { wrapUserText, wrapPublishText, stripScenarioEcho, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
-    shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile, analyzeInputRules,
+    extractHistory, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
     splitHistoryRounds, parseRelevance, parseIntent, parseDocsAnalysis,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
@@ -42,12 +42,10 @@ const {
   validateConfig,
   collectStream,
   buildTryChain,
-  shouldInjectV2,
   extractHistory,
   inferFocusRules,
   extractKeywords,
   splitCnSegments,
-  analyzeInputRules,
   splitHistoryRounds,
   parseRelevance,
   parseIntent,
@@ -443,17 +441,6 @@ test('U23 parseMemory/shouldInjectMemory 记忆开关语义（§6.4/§6.5）', (
   assert.equal(shouldInjectMemory(true, true, 0), false);     // 预算 0
   assert.equal(shouldInjectMemory(true, true, undefined), false);
   assert.equal(shouldInjectMemory(undefined, true, 4000), false);
-});
-
-test('U12 shouldInjectV2 分支判定（表驱动 §4.1）', () => {
-  assert.equal(shouldInjectV2('standard', 4000), true);
-  assert.equal(shouldInjectV2('smart', 4000), true);
-  assert.equal(shouldInjectV2('base', 4000), false);
-  assert.equal(shouldInjectV2('lite', 4000), false);
-  assert.equal(shouldInjectV2('standard', 0), false);
-  assert.equal(shouldInjectV2('standard', undefined), false);
-  assert.equal(shouldInjectV2('turbo', 4000), false); // 非法 → 默认表行（base）
-  assert.equal(shouldInjectV2('memory', 4000), false); // v2.2：memory 不再是模式 → 默认表行
 });
 
 test('U24 STAGE 常量/映射完整性（v2.3 §7.3）', () => {
@@ -882,34 +869,9 @@ test('U37 parseTagsPayload / validateManifestFiles（v2.4.1 新契约）', () =>
   assert.equal(validateManifestFiles([{ name: 'plugin-host.js' }]).ok, false, '缺 content');
 });
 
-test('U38 analyzeInputRules（v2.4.4 lite 规则引擎：目标/约束/格式/示例 要素检查）', () => {
-  // 全要素输入 → 无缺失、无建议
-  const full = analyzeInputRules('请生成一份 JSON 格式的月度报告，不超过 500 字，不要包含财务数据，例如输入输出对样例');
-  assert.equal(full.suggestions.length, 0, '全要素应无缺失');
-  // 目标缺失：无任务动词的模糊文本
-  const noGoal = analyzeInputRules('关于天气的说明文字');
-  assert.ok(noGoal.missing.some((m) => m.key === 'goal'), '应检出目标缺失');
-  // 约束缺失：有目标无限制
-  const noConstraint = analyzeInputRules('帮我写一个排序算法');
-  assert.ok(noConstraint.missing.some((m) => m.key === 'constraints'), '应检出约束缺失');
-  assert.ok(noConstraint.missing.some((m) => m.key === 'format'), '应检出格式缺失');
-  // 数字约束命中：长度上限
-  const withLen = analyzeInputRules('写一段话，不超过 50 字');
-  assert.ok(!withLen.missing.some((m) => m.key === 'constraints'), '长度约束应命中');
-  // 示例命中：示例词
-  const withExample = analyzeInputRules('翻译下面内容，示例：hello → 你好');
-  assert.ok(!withExample.missing.some((m) => m.key === 'example'), '示例应命中');
-  // 空输入 → 全部缺失
-  const empty = analyzeInputRules('');
-  assert.equal(empty.missing.length, 4, '空输入应四项全缺');
-  // 建议与缺失一一对应
-  const paired = analyzeInputRules('随便');
-  assert.equal(paired.suggestions.length, paired.missing.length, '建议数应等于缺失数');
-});
-
-// v2.4.5（语义保真修正）：SYSTEM_PROMPT 关键契约断言 + lite 规则保守化断言。
+// v2.4.5（语义保真修正）：SYSTEM_PROMPT 关键契约断言。
 // SYSTEM_PROMPT 定义在 PURE 区段之前，此处直接从源码文本求值（单一事实源）。
-test('U39 SYSTEM_PROMPT 语义保真契约 + lite 规则保守化（v2.4.5）', () => {
+test('U39 SYSTEM_PROMPT 语义保真契约（v2.4.5）', () => {
   // —— 从源码提取 SYSTEM_PROMPT 数组并求值 ——
   const m = src.match(/const SYSTEM_PROMPT = \[([\s\S]*?)\n\];/);
   assert.ok(m, 'SYSTEM_PROMPT array not found');
@@ -927,14 +889,6 @@ test('U39 SYSTEM_PROMPT 语义保真契约 + lite 规则保守化（v2.4.5）', 
   // 长度新表述与主体语言规则
   assert.ok(systemText.includes('长度服从语义保真'), '应含「长度服从语义保真」');
   assert.ok(systemText.includes('输入以中文为主体则输出必须为中文'), '语言规则应为「主体语言」');
-  // —— lite 规则保守化：建议不再诱导添加新要求 ——
-  const cons = analyzeInputRules('帮我写一个排序算法');
-  const consHint = cons.suggestions.find((s) => s.includes('约束')) || '';
-  assert.ok(consHint.includes('仅当原文语义暗示需要限制'), '约束建议应保守（不诱导硬加约束）');
-  assert.ok(!consHint.includes('请在优化结果中补充合理约束'), '约束建议不应含旧版诱导措辞');
-  const goal = analyzeInputRules('关于天气的说明文字');
-  const goalHint = goal.suggestions.find((s) => s.includes('目标')) || '';
-  assert.ok(goalHint.includes('推断不出时保持原文表述，不得臆造'), '目标建议应保守（不臆造目标）');
 });
 
 // v2.4.6（提示词外置）：prompts/*.md 为事实源，plugin-host.js 生成区由

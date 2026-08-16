@@ -863,10 +863,7 @@ function buildTryChain(fallback, adaptive) {
 // （v2.0.0 方案 §3：阶段 A 规则提取 / 阶段 B 检索排序与摘要 / 阶段 C 预算组装）
 
 // V2 分支判定（表驱动 §4.1）：phaseC 非 none 且预算 > 0 才走注入路径
-function shouldInjectV2(mode, budgetChars) {
-  const row = MODE_TABLE[mode] || MODE_TABLE[DEFAULT_MODE];
-  return row.phaseC !== 'none' && typeof budgetChars === 'number' && budgetChars > 0;
-}
+
 
 // 事件 → 文本消息列表（过滤噪音；**从尾部反向遍历**取最近 limit 条——DSH 日志可能达百万级）
 // DSH 事件类型形如 'user/message'、'assistant/message'、'assistant/chunk'、'tool/call'；
@@ -959,36 +956,7 @@ function inferFocusRules(historyText) {
 // 严禁诱导模型添加原文未提及的新要求（此前"请在优化结果中补充合理约束（如长度上限…）"
 // 会引导模型臆造内容，与「语义保真」冲突）。
 // 返回 { missing: [{key,label}], suggestions: string[] }；全部具备时 suggestions 为空。
-function analyzeInputRules(text) {
-  const s = String(text || '');
-  const missing = [];
-  const suggestions = [];
-  const add = (key, label, hint) => {
-    missing.push({ key, label });
-    suggestions.push(hint);
-  };
-  // 目标：任务动词（写/生成/创建/分析/翻译/总结/帮我/请/解释…）或问句/对象短语
-  const goalRe = /(?:写|生成|创建|设计|实现|分析|翻译|总结|修复|优化|解释|对比|列出|提供|编写|计算|转换|推荐|检查|评估|整理|描述|回答|解决|构建|部署|测试|调试|告诉我|帮我|请|教|怎么|如何|怎样|什么)/;
-  if (!goalRe.test(s)) {
-    add('goal', '目标', '输入未明确任务目标——若原文意图可合理推断，请在优化结果开头补全一个忠实于原文意图的目标；推断不出时保持原文表述，不得臆造。');
-  }
-  // 约束：长度/范围/禁止项等限制表达（数字上限、必须/禁止/不要/只能/保持/符合/在…内）
-  const constraintRe = /(?:不超过|不大于|不小于|至少|最多|最少|必须|禁止|不要|不能|只能|不允许|保持|符合|控制在|限制|尽量|[≤<>=~]\s*\d+|\d+\s*(?:字|字符|行|条|页|秒|分钟|个|次)|在.{0,6}(?:内|之间)|(?:少于|多于)\s*\d+)/;
-  if (!constraintRe.test(s)) {
-    add('constraints', '约束', '输入未指定约束条件——仅当原文语义暗示需要限制（如范围、数量、禁止项）且可合理推断时，才在优化结果中明确化；原文无此意图则不要添加。');
-  }
-  // 输出格式：列表/表格/JSON/代码/段落/大纲/报告/步骤/编号/markdown 等格式词
-  const formatRe = /(?:列表|表格|json|xml|yaml|csv|代码|段落|大纲|报告|标题|步骤|编号|序号|格式|模板|结构|markdown|md|bullet|清单|摘要|总结形式|要点|数组|对象|脚本|命令)/i;
-  if (!formatRe.test(s)) {
-    add('format', '输出格式', '输入未指定输出格式——仅当按内容类型判断合适的格式可合理推断（如清单/表格/JSON/代码块）时，在优化结果中明确；否则保持开放，不要强行指定。');
-  }
-  // 示例：示例/例子/例如/比如/样例/参考/范例 或引号包裹的输入输出对
-  const exampleRe = /(?:示例|例子|例如|比如|样例|参考|范例|示范|如下|像这样|类似|举.{0,4}(?:例子|例)|[“"「『].{0,24}[”"」』])/;
-  if (!exampleRe.test(s)) {
-    add('example', '示例', '输入未提供示例——仅当内容类型适合（如格式/风格对结果影响大）且补充示例不偏离原意时，在优化结果中加入一个输入→输出的示例；否则不要添加。');
-  }
-  return { missing, suggestions };
-}
+
 
 // 主题词提取：提示词关键词 ∪ focus（5–8 词）
 function extractKeywords(text, focus) {
@@ -1554,22 +1522,6 @@ const RELEVANCE_OUTPUT_LIMIT = 800;
 const RELEVANCE_WINDOW_MAX_CHARS = 2400;
 
 // v3.0（模式重构 S3）：开发环境判定 JSON 容错解析（{isDevEnv, reason}）——同 parseRelevance 模式。
-function parseDevEnv(raw) {
-  if (typeof raw !== 'string') return null;
-  let s = raw.trim();
-  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fence) s = fence[1].trim();
-  const start = s.indexOf('{');
-  const end = s.lastIndexOf('}');
-  if (start === -1 || end <= start) return null;
-  s = s.slice(start, end + 1);
-  let obj;
-  try { obj = JSON.parse(s); } catch (e) { return null; }
-  if (!obj || typeof obj !== 'object') return null;
-  const isDevEnv = obj.isDevEnv === true || obj.isDevEnv === 'true' || obj.isDevEnv === 1 || obj.isDevEnv === '1';
-  return { isDevEnv, reason: typeof obj.reason === 'string' ? obj.reason.slice(0, 80) : '' };
-}
-
 // v3.0v2（修订）：提示词开发意向判定 JSON 容错解析（{isDevIntent, reason}）。
 function parseIntent(raw) {
   if (typeof raw !== 'string') return null;

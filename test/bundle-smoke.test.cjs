@@ -203,6 +203,13 @@ function mockLlmSmart(seen, opts) {
           { type: 'finish', reason: { kind: 'stop' } },
         ]);
       }
+      if (sys.includes('会话任务分析器')) {
+        // publish v2 管道的阶段 A（LLM 任务分析）
+        return streamOf([
+          { type: 'text-delta', text: JSON.stringify({ task: '优化登录', currentStep: '', completed: [], focus: ['登录'] }) },
+          { type: 'finish', reason: { kind: 'stop' } },
+        ]);
+      }
       return streamOf([
         { type: 'text-delta', text: 'OK' },
         { type: 'finish', reason: { kind: 'stop' } },
@@ -363,4 +370,31 @@ test('SMK-11 smart non-dev-intent stops before workspace', async () => {
   const mainText = seen[2].messages[0].content[0].text;
   assert.ok(!mainText.includes('【项目文档参考】'), 'no doc reference when stopped');
   assert.ok(!mainText.includes('【相关代码参考】'), 'no code reference when stopped');
+});
+
+// v3.0v2：publish 保持 v2 管道（任务分析 + 文件检索），无 smart 专属环节。
+test('SMK-12 publish keeps v2 pipeline (no smart tail)', async () => {
+  const seen = [];
+  const { handlers } = boot({
+    llm: mockLlmSmart(seen, { related: true }),
+    sessionQuery: mockSessionQuery(),
+    sandboxPolicy: { workspaceRoot: 'root' },
+    fs: mockWorkspaceFs(),
+  });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '帮我优化登录功能的开发方案',
+    config: {
+      mode: 'publish',
+      fallback: [{ provider: 'p', model: 'm' }],
+      params: { maxTokens: 2000, timeoutMs: 300000 },
+    },
+  });
+  assert.equal(out.ok, true);
+  // 阶段 A（任务分析）→ 主调用；无 relevance/intent/docanalysis
+  assert.equal(seen.length, 2, 'task-analysis + main');
+  assert.ok(seen[0].system.includes('会话任务分析器'), 'call 0 = task analysis (v2 phase A)');
+  assert.ok(seen[1].system.includes('开发规格说明书'), 'publish system = 九章规格');
+  assert.ok(!seen[1].system.includes('调整方案'), 'publish 无 smart tail');
 });
