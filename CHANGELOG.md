@@ -70,6 +70,7 @@
 - **M1 尾项：client React 组件拆分**：从 `src/client/legacy/plugin-client.js` 抽出 10 个 React UI 组件（EnhanceButton/EnhanceBar/UpdaterCard/PluginsSection/CollapsibleSection/ModelMainSection/FallbackRow/ModelConfigTab/ParamsTab/ModelPluginsSection+CordisBadgePlaceholder）到 `src/client/components/*.js`；`build-client.mjs` 注入改为**循环注入**（组件 chunk 内嵌其他注入标记时多轮展开，产物逐字节不变）；新增 `scripts/extract-client-components.mjs` 维护工具 — 架构治理
 - **M1 尾项完成：legacy 双侧退役**：`src/host/legacy/` 与 `src/client/legacy/` 全部迁出——host 剩余外壳 → `src/host/app.js`（bundle 骨架，含全部注入标记）；client 剩余（CSS 数组 / 顶层插件对象 / 头注释+标记）→ `src/client/{styles,app,skeleton}.js`；`build-host.mjs`/`build-client.mjs` 改为直读 src 骨架 + 循环注入 + 换行规范化（产物与 HEAD 仅构建头 Source 注释不同，正文逐字节等价）；删除全部 extract-*.mjs（legacy 退役后不可再运行）；91 tests 通过 — 架构治理
 - **M2 深化：enhance 流程管道化**：`enhance-handlers.js` chunk 内置 bundle 内 Pipeline（契约同 `src/host/pipeline.js`），enhance 主流程拆为 analyze/retrieve/assemble/llm 四 stage 注册式执行——新增增强模式/检索源 = 注册 stage handler 而非修改主流程；逐段搬运行为等价（快路径/超时计时/错误边界/进度轮询不变，产物 diff 仅限 enhance 区段）；新增 `test/bundle-smoke.test.cjs`（首个生成 bundle 直接测试：RPC 注册冒烟 + GUARD/NO_LLM/NO_RECORD 快路径），测试 91 → 95 — 架构治理
+- **fix(M3)：enhance RPC 校验契约修正**（实测暴露）：`lib/rpc-schema.cjs` 与 `src/host/rpc-schema.js` 的 enhance schema 误用不存在的 `draft` 字段（client 实际传 `text`，host handler 读 `args.text`）→ 全部 enhance 请求被校验层 400 拦截；改为 `required: ['sessionId', 'text']` 并对齐 client payload；新增 SMK-05 校验层契约测试 + PROTO-02 同步，测试 95 → 96 — 架构治理
 
 ## [2.8.3] - 2026-08-16
 
