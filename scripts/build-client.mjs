@@ -15,24 +15,47 @@ const updaterChunk = require('../src/client/updater.js');
 const stateChunk = require('../src/client/state.js');
 const helpersChunk = require('../src/client/helpers.js');
 const modelHelpersChunk = require('../src/client/model-helpers.js');
-if (body.includes('// @dsh-client-i18n-inject')) {
-  body = body.replace('// @dsh-client-i18n-inject', i18nChunk);
-}
-if (body.includes('// @dsh-client-constants-inject')) {
-  body = body.replace('// @dsh-client-constants-inject', constantsChunk);
-}
-if (body.includes('// @dsh-client-updater-inject')) {
-  body = body.replace('// @dsh-client-updater-inject', updaterChunk);
-}
-if (body.includes('// @dsh-client-state-inject')) {
-  body = body.replace('// @dsh-client-state-inject', stateChunk);
-}
-if (body.includes('// @dsh-client-helpers-inject')) {
-  body = body.replace('// @dsh-client-helpers-inject', helpersChunk);
-}
-if (body.includes('// @dsh-client-model-helpers-inject')) {
-  body = body.replace('// @dsh-client-model-helpers-inject', modelHelpersChunk);
-}
+const enhanceButtonChunk = require('../src/client/components/enhance-button.js');
+const enhanceBarChunk = require('../src/client/components/enhance-bar.js');
+const updaterCardChunk = require('../src/client/components/updater-card.js');
+const pluginsSectionChunk = require('../src/client/components/plugins-section.js');
+const collapsibleSectionChunk = require('../src/client/components/collapsible-section.js');
+const modelMainSectionChunk = require('../src/client/components/model-main-section.js');
+const fallbackRowChunk = require('../src/client/components/fallback-row.js');
+const modelConfigTabChunk = require('../src/client/components/model-config-tab.js');
+const paramsTabChunk = require('../src/client/components/params-tab.js');
+const modelPluginsSectionChunk = require('../src/client/components/model-plugins-section.js');
+// Inject all chunks, looping until no marker remains: component chunks may
+// themselves contain other injection markers (e.g. the updater constants
+// lived between EnhanceBar and UpdaterCard), so a single pass would leave
+// nested markers unexpanded.
+const injections = [
+  ['// @dsh-client-i18n-inject', i18nChunk],
+  ['// @dsh-client-constants-inject', constantsChunk],
+  ['// @dsh-client-updater-inject', updaterChunk],
+  ['// @dsh-client-state-inject', stateChunk],
+  ['// @dsh-client-helpers-inject', helpersChunk],
+  ['// @dsh-client-model-helpers-inject', modelHelpersChunk],
+  ['// @dsh-client-comp-enhance-button-inject\n', enhanceButtonChunk],
+  ['// @dsh-client-comp-enhance-bar-inject\n', enhanceBarChunk],
+  ['// @dsh-client-comp-updater-card-inject\n', updaterCardChunk],
+  ['// @dsh-client-comp-plugins-section-inject\n', pluginsSectionChunk],
+  ['// @dsh-client-comp-collapsible-section-inject\n', collapsibleSectionChunk],
+  ['// @dsh-client-comp-model-main-section-inject\n', modelMainSectionChunk],
+  ['// @dsh-client-comp-fallback-row-inject\n', fallbackRowChunk],
+  ['// @dsh-client-comp-model-config-tab-inject\n', modelConfigTabChunk],
+  ['// @dsh-client-comp-params-tab-inject\n', paramsTabChunk],
+  ['// @dsh-client-comp-model-plugins-section-inject\n', modelPluginsSectionChunk],
+];
+let previous;
+do {
+  previous = body;
+  for (const [marker, chunk] of injections) {
+    if (body.includes(marker)) {
+      body = body.replace(marker, chunk);
+    }
+  }
+} while (body !== previous);
 
 // Embed the body as a JSON string literal: safe against backticks, ${}, and
 // every other JS metacharacter inside the plugin code.
