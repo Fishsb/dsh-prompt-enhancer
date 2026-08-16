@@ -7,6 +7,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **更新完成后「端口重启」误报执行器不可用（用户报告）**：根因 = `runRestart` 依赖 host RPC（`ensureExecutor` 的 envcheck/executorEnsure）——而「一键更新」（apply restart:false）安装完成后**服务已停止**，host 不可达导致 RPC 失败，被外层 catch 误报「更新执行器不可用——请确认插件为 bundle 安装（端口 3081）」（实际插件是 bundle 安装、执行器 0.1.7 一直在线）。修复：**端口重启绕过 host，直连执行器**（ping 确认在线 → fire-and-forget restart → 1s 轮询）——执行器是独立进程（3081），服务停止不影响它；执行器确实不可达时才显示该提示（语义此时才正确）；顺带：安装完成（installed）后主动刷新「未重启」提醒横幅（host 可达时出现，不可达静默）、重启成功（healthy）后清除横幅；实测：执行器直连 ping 200、confirm/取消交互完好、112/112 测试 — [VU-001] — 架构治理
+
 ## [3.1.1] - 2026-08-16
 
 ### Fixed

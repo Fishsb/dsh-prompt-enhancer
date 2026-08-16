@@ -1584,6 +1584,8 @@ function UpdaterCard(props) {
         const elapsed = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
         if (s.phase === 'healthy') {
           setApplyErr(null);
+          // v3.1.x（用户需求）：服务已重启完成 → 清除「未重启」提醒横幅
+          setRestartNotice(null);
           if (/rolled back/i.test(s.message || '')) {
             setApplyStatus(t('updApplyRolledBack'));
             setApplyPhase('rolledback');
@@ -1604,6 +1606,11 @@ function UpdaterCard(props) {
           setApplyErr(null);
           setApplyStatus(null);
           setApplyPhase('installed');
+          // v3.1.x（用户需求·更新完成重启提醒）：安装完成后主动刷新重启提醒横幅
+          // （磁盘文件已晚于本进程加载 → 横幅含重启命令，与「端口重启」按钮闭环）
+          host.call('update/restartNeeded', { serviceName }).then((r) => {
+            if (r && r.needed === true) setRestartNotice(r);
+          }).catch(() => { /* 旧 host/动态形态无此 RPC → 静默 */ });
           return;
         }
         const phaseStatus = {
@@ -1729,19 +1736,22 @@ function UpdaterCard(props) {
     setApplyStatus(t('updApplyRestarting').replace('{sec}', '10').replace('{round}', '1'));
     setRestartLeft(10);
     setRestartRound(1);
-    ensureExecutor().then((ensureRes) => {
-      if (!ensureRes) return;
-      const en = ensureRes && typeof ensureRes === 'object' ? ensureRes : {};
-      if (en.ok !== true) {
-        setApplyErr((en.message ? en.message + ' ' : '') + t('updError'));
+    // v3.1.x（用户报告·更新完成后端口重启误报执行器不可用）：重启**不依赖 host RPC**——
+    // 一键更新（apply restart:false）已停服，host 侧 envcheck/executorEnsure 必然失败，
+    // 旧实现走 ensureExecutor 会被外层 catch 误报「更新执行器不可用——请确认插件为
+    // bundle 安装」；执行器是独立进程（3081），直连 ping/restart 即可完成重启
+    const port = executorPort();
+    executor.call('ping', {}, port).then((p) => {
+      if (!p || p.ok !== true) {
+        // 执行器确实不可达（未以 bundle 安装/未拉起）——提示原文语义正确
+        setApplyErr(t('updApplyExecutorDown'));
         setApplyPhase('idle');
         setAction(null);
-        return null;
+        return;
       }
       // 发送即返回（新旧执行器均兼容：旧版挂起模式由轮询 status 接管进度展示）
-      executor.call('restart', { serviceName, port: en.port }, en.port).then(() => {}).catch(() => {});
-      pollExecutorStatus(executorPort());
-      return null;
+      executor.call('restart', { serviceName, port }, port).then(() => {}).catch(() => {});
+      pollExecutorStatus(port);
     }).catch(() => {
       setApplyErr(t('updApplyExecutorDown'));
       setApplyPhase('idle');
