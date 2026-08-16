@@ -3017,7 +3017,8 @@ const CSS = [
   '.dsh-plg-col{display:flex;flex-direction:column;gap:6px}',
   '.dsh-plg-label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);flex:none;min-width:96px}',
   '.dsh-plg-muted{font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}',
-  '.dsh-plg-select{flex:1;min-width:0;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:5px 12px}',
+  // v2.8.4（下拉箭头占位预算）：所有下拉框右侧预留 28px 箭头位；固定宽度窄下拉同步加宽，保持原内容宽度不变
+  '.dsh-plg-select{flex:1;min-width:0;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:5px 28px 5px 12px}',
   '.dsh-plg-select:focus-visible{outline:none;border-color:var(--dsw-alias-brand-primary)}',
   '.dsh-plg-textarea{flex:1;min-width:0;min-height:180px;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:8px 12px;resize:vertical;font-family:inherit}',
   '.dsh-plg-textarea:focus-visible{outline:none;border-color:var(--dsw-alias-brand-primary)}',
@@ -3075,8 +3076,8 @@ const CSS = [
   '.dsh-plg-num{width:18px;text-align:right;flex:none}',
   '.dsh-plg-select-provider{flex:0 1 136px;min-width:104px;max-width:176px}',
   '.dsh-plg-select-model{flex:1 1 0;min-width:120px}',
-  '.dsh-plg-select-thinking{flex:0 0 auto;width:43px}',
-  '.dsh-plg-select-level{flex:0 0 auto;width:56px}',
+  '.dsh-plg-select-thinking{flex:0 0 auto;width:59px}',
+  '.dsh-plg-select-level{flex:0 0 auto;width:72px}',
   // v23.1（D4）：测试结果集中单点区（链列表下方、操作按钮上方；空态隐藏）
   '.dsh-plg-testarea{display:flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 10px;background:var(--dsw-alias-bg-layer-2)}',
   // v2.4.0（方案 §4）：版本检测与更新卡片样式
