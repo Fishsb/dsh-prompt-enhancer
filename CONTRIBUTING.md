@@ -33,9 +33,8 @@ node --check lib/*.cjs
 ## 代码结构
 
 ```
-src/host/        # host 模块化源码（目标架构）
-src/client/      # client 模块化源码（目标架构）
-src/host/legacy/ # 当前单文件实现源（构建时注入模块）
+src/host/        # host 模块化源码（app.js 骨架 + chunk + 服务化层）
+src/client/      # client 模块化源码（skeleton.js 骨架 + chunk + components）
 lib/             # bundle-safe 运行时模块
 test/            # 单元测试
 docs/            # 架构方案 / 兼容矩阵 / 地图

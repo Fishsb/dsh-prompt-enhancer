@@ -1,7 +1,8 @@
 'use strict';
 // Client modular entry (target architecture).
 //
-// Current build stage: `scripts/build-client.mjs` still reads the legacy
-// `src/client/legacy/plugin-client.js` unchanged. This module is the target
-// composition point once UI logic is split into components/state/services.
+// Build stage: `scripts/build-client.mjs` assembles the generated root
+// plugin-client.js / lib/client.cjs from src/client/skeleton.js (bundle
+// skeleton) + chunk modules (i18n/constants/updater/state/helpers/
+// model-helpers/styles/app) + components/*.js.
 module.exports = {};

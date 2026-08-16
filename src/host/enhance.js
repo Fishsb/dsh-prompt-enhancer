@@ -3,8 +3,9 @@
  * Target module: enhance engine / pipeline.
  *
  * M2: this module exposes an EnhanceService built on the shared Pipeline.
- * The legacy monolithic handler in src/host/legacy/plugin-host.js will be
- * gradually migrated to register stage handlers here.
+ * The monolithic handler was extracted to src/host/enhance-handlers.js
+ * (chunk, injected into the generated bundle); M2 深化时把真实 stage handler
+ * 迁移到此处注册。
  */
 const STAGES = {
   ANALYZE: 'analyze',

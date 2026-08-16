@@ -1,10 +1,11 @@
 'use strict';
 /**
- * Host modular entry (target architecture).
+ * Host modular entry (M2 服务注册组合点).
  *
- * Current build stage: `scripts/build-host.mjs` still emits the legacy
- * `src/host/legacy/plugin-host.js` unchanged. This module is the target
- * composition point once legacy code is extracted into feature modules.
+ * Build stage: `scripts/build-host.mjs` assembles the generated root
+ * plugin-host.js from src/host/app.js (bundle skeleton) + chunk modules.
+ * This module is the service-registration composition point for the target
+ * architecture (M2 深化时接入生成的 bundle)。
  */
 const { createServiceRegistry } = require('./services');
 const { Pipeline } = require('./pipeline');

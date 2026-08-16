@@ -2,8 +2,8 @@
 /**
  * M2: PluginsService interface.
  *
- * Legacy plugin management RPCs live in src/host/legacy/plugin-host.js and the
- * extracted chunk src/host/plugins.js. This service is the target boundary.
+ * Plugin management RPCs live in the generated host bundle (src/host/plugins.js
+ * chunk + app.js). This service is the target boundary.
  */
 function createPluginsService() {
   async function inventory() {

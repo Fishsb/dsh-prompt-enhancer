@@ -1,7 +1,8 @@
 // Build root plugin-host.js from modular host source.
-// Current stage: legacy single-file source lives at src/host/legacy/plugin-host.js.
-// Later stages will compose src/host/*.js modules into this single self-contained
-// artifact (required for dynamic Cordis install).
+// The bundle skeleton (src/host/app.js) carries all injection markers; every
+// chunk (pure/diagnostics/models/plugins/update/enhance-handlers) is injected
+// below, producing the single self-contained artifact required for dynamic
+// Cordis install.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -2,9 +2,9 @@
 /**
  * M2: ModelService interface.
  *
- * The legacy model RPCs and cache live in src/host/legacy/plugin-host.js and
- * the extracted chunk src/host/models.js. This service is the target boundary
- * that those implementations will be wired into during M2/M3.
+ * The model RPCs and cache live in the generated host bundle (src/host/models.js
+ * chunk + app.js). This service is the target boundary those implementations
+ * will be wired into during M2 深化.
  */
 function createModelService() {
   async function resolve(provider, model) {
