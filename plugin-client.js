@@ -465,6 +465,11 @@ const ZH = {
   updUnknown: '状态未知',
   updDir: '目标目录',
   updPull: '一键拉取更新',
+  // v2.9.x（按钮拆分·用户指令）：一键拉取更新（合并原「一键更新」= 执行器 apply restart:false）+ 端口重启（执行器 restart）
+  updPortRestart: '端口重启',
+  updPullApplyConfirm: '确认拉取更新？',
+  updInstalled: '✓ 已安装，请点击「端口重启」生效',
+  updInstalledShort: '已安装',
   updPulling: '拉取中…',
   updDone: '✓ 已拉取',
   updApplyTitle: '应用更新（运行中的插件不可自替换，请按需选择）：',
@@ -685,6 +690,11 @@ const EN = {
   updUnknown: 'Unknown',
   updDir: 'Target directory',
   updPull: 'Pull update',
+  // v2.9.x (button split): one-click pull & install (executor apply restart:false) + port restart (executor restart)
+  updPortRestart: 'Restart port',
+  updPullApplyConfirm: 'Confirm pull & install?',
+  updInstalled: '✓ Installed — click "Restart port" to apply',
+  updInstalledShort: 'Installed',
   updPulling: 'Pulling…',
   updDone: '✓ Pulled',
   updApplyTitle: 'Apply (a running plugin cannot replace itself; pick one):',
@@ -1381,16 +1391,16 @@ function UpdaterCard(props) {
   const [repoInput, setRepoInput] = React.useState(updaterRepoOf(configState.value));
   const [dirInput, setDirInput] = React.useState((configState.value.updater && configState.value.updater.targetDir) || '');
   const [checking, setChecking] = React.useState(false);
-  const [pulling, setPulling] = React.useState(false);
   const [result, setResult] = React.useState(null);
-  const [pullRes, setPullRes] = React.useState(null);
   const [error, setError] = React.useState(null);
   // v2.5.0：环境检测（null=未检测；host 侧 60s 缓存）
   const [envItems, setEnvItems] = React.useState(null);
   const [envChecking, setEnvChecking] = React.useState(false);
   const [envError, setEnvError] = React.useState(null);
-  // v2.5.0：一键更新（idle|confirm|applying|restarting|done|rolledback）
+  // v2.9.x（按钮拆分）：idle|confirm|applying|installed|restarting|done|rolledback；
+  // action 区分当前动作（apply=一键拉取更新 / restart=端口重启）
   const [applyPhase, setApplyPhase] = React.useState('idle');
+  const [action, setAction] = React.useState(null);
   const [applyErr, setApplyErr] = React.useState(null);
   const [applyStatus, setApplyStatus] = React.useState(null);
   // v2.5.5：重启自检倒计时（秒）与重试轮次（首次 1 / 自动重试 2）
@@ -1426,9 +1436,8 @@ function UpdaterCard(props) {
 
   const onRepoChange = (value) => {
     setRepoInput(value);
-    // 方案 §4（L6）：repo 变更 → 清空陈旧结果与拉取态
+    // 方案 §4（L6）：repo 变更 → 清空陈旧结果
     setResult(null);
-    setPullRes(null);
     setError(null);
     persist(value, dirInput);
   };
@@ -1442,7 +1451,6 @@ function UpdaterCard(props) {
     if (checking) return;
     setChecking(true);
     setError(null);
-    setPullRes(null);
     // v2.4.1（§9-T6）：浏览器直连 GitHub API（CORS），host 只做解析/比较
     Promise.all([
       window.fetch(updaterTagsUrl(repo)).then((r) => r.status === 200 ? r.text() : Promise.reject(new Error('tags HTTP ' + r.status))),
@@ -1467,36 +1475,6 @@ function UpdaterCard(props) {
     });
   };
 
-  const doPull = () => {
-    if (pulling || !result || !result.remoteTag) return;
-    setPulling(true);
-    setError(null);
-    // v2.4.1（§9-T6）：浏览器直连 contents API 拉取 6 文件（base64 → atob 解码）→ host 校验写入
-    Promise.all(UPDATER_MANIFEST.map((name) =>
-      window.fetch(updaterContentsUrl(repo, result.remoteTag, name)).then((r) => {
-        if (r.status !== 200) throw new Error(name + ' HTTP ' + r.status);
-        return r.json();
-      }).then((meta) => {
-        if (!meta || meta.encoding !== 'base64' || typeof meta.content !== 'string') throw new Error(name + ' bad payload');
-        if (typeof meta.size === 'number' && meta.size > 1000000) throw new Error(name + ' too large');
-        return { name, content: atob(meta.content) };
-      }),
-    )).then((files) => {
-      return host.call('update/pull', { repo, tag: result.remoteTag, dir: dirInput, sessionId, files });
-    }).then((res) => {
-      const r = res && typeof res === 'object' ? res : {};
-      if (r.ok !== true) {
-        setError((r.message ? r.message + ' ' : '') + t('updError'));
-      } else {
-        setPullRes(r);
-      }
-    }).catch(() => {
-      setError(t('updError'));
-    }).then(() => {
-      setPulling(false);
-    });
-  };
-
   // v2.5.0：环境检测（只读；host 60s 缓存）；v2.7.0：带执行器端口供 exec-port 检查
   const doEnvCheck = () => {
     if (envChecking) return;
@@ -1517,22 +1495,35 @@ function UpdaterCard(props) {
     });
   };
 
-  // v2.6.0：一键更新——确认态 → 前置环境校验 → executorEnsure（拉起独立执行器）→
-  // 执行器 apply（安装 + 后台重启循环，3s 缓冲 / 5 次健康检查重试）→ 轮询 status。
-  // 执行器独立于 dsh-web 进程：服务重启期间它存活，client 全程可查询进度/倒计时。
-  const startApply = () => {
-    if (applyPhase !== 'idle') return;
-    setApplyPhase('confirm');
-  };
-  const cancelApply = () => {
-    if (applyPhase === 'confirm') setApplyPhase('idle');
-  };
+  // v2.6.0：独立执行器（executorEnsure 版本对齐拉起）→ 两个动作共用：
+  // 「一键拉取更新」= 执行器 apply restart:false（下载 + 校验 + 停服 + 安装，不重启）；
+  // 「端口重启」= 执行器 restart（仅重启循环）。服务重启期间执行器独立存活。
   const executorPort = () => {
     const p = configState.value && configState.value.updater && Number.isInteger(configState.value.updater.executorPort)
       ? configState.value.updater.executorPort : 3081;
     return p;
   };
-  // status 轮询（每 2s；倒计时每轮 10s；每轮结束反馈「第 N 次未恢复，自动重试中」）
+  // 公共前置：环境检测（block 级拦截）→ executorEnsure（拉起/版本对齐）→ 返回执行器端口
+  const ensureExecutor = () => {
+    return host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
+      const er = envRes && typeof envRes === 'object' ? envRes : {};
+      if (er.ok === true && Array.isArray(er.blockMissing) && er.blockMissing.length > 0) {
+        const names = er.blockMissing
+          .map((k) => { const def = ENV_ITEMS.find((i) => i.key === k); return def ? t(def.label) : k; })
+          .join('、');
+        setApplyErr(t('updApplyBlocked') + ' ' + names);
+        setEnvItems(er.items || null);
+        setApplyPhase('idle');
+        setAction(null);
+        return null;
+      }
+      if (er.ok === true && Array.isArray(er.items)) setEnvItems(er.items);
+      return host.call('update/executorEnsure', { port: executorPort() });
+    });
+  };
+  // status 轮询（每 2s；倒计时每轮 10s；每轮结束反馈「第 N 次未恢复，自动重试中」）——
+  // 用于 apply(restart:false) 的安装进度（终态 installed / failed）；restart 动作
+  // 由执行器等待完成直接返回，不走轮询
   const pollExecutorStatus = (port) => {
     let localLeft = 10;
     setRestartLeft(localLeft);
@@ -1555,6 +1546,13 @@ function UpdaterCard(props) {
           setApplyErr(s.message || t('updApplyRestartFailed'));
           setApplyStatus(null);
           setApplyPhase('idle');
+          return;
+        }
+        // v2.9.x：apply(restart:false) 终态——安装完成、服务保持停止，等待「端口重启」
+        if (s.phase === 'installed') {
+          setApplyErr(null);
+          setApplyStatus(null);
+          setApplyPhase('installed');
           return;
         }
         const phaseStatus = {
@@ -1598,50 +1596,84 @@ function UpdaterCard(props) {
     };
     tick();
   };
-  const runApply = () => {
-    if (applyPhase !== 'confirm') return;
+
+  const startConfirm = (which) => {
+    if (applyPhase !== 'idle' && applyPhase !== 'installed') return;
+    setAction(which);
+    setApplyPhase('confirm');
+  };
+  const cancelApply = () => {
+    if (applyPhase === 'confirm') { setApplyPhase('idle'); setAction(null); }
+  };
+
+  // 一键拉取更新：执行器 apply restart:false（下载 + 校验 + 停服 + 安装，不重启）
+  const runPullApply = () => {
+    if (applyPhase !== 'confirm' || action !== 'apply') return;
     setApplyPhase('applying');
     setApplyErr(null);
     setApplyStatus(null);
-    // 前置校验：先环境检测（host 60s 缓存），block 级失败 → 阻止并列出缺失项
-    host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
-      const er = envRes && typeof envRes === 'object' ? envRes : {};
-      if (er.ok === true && Array.isArray(er.blockMissing) && er.blockMissing.length > 0) {
-        const names = er.blockMissing
-          .map((k) => { const def = ENV_ITEMS.find((i) => i.key === k); return def ? t(def.label) : k; })
-          .join('、');
-        setApplyErr(t('updApplyBlocked') + ' ' + names);
-        setEnvItems(er.items || null);
-        setApplyPhase('idle');
-        return null;
-      }
-      if (er.ok === true && Array.isArray(er.items)) setEnvItems(er.items);
-      // v2.6.0：确保独立执行器运行（拉起/版本对齐），返回其端口
-      return host.call('update/executorEnsure', { port: executorPort() });
-    }).then((ensureRes) => {
-      if (!ensureRes) return; // 被前置校验阻止
+    ensureExecutor().then((ensureRes) => {
+      if (!ensureRes) return;
       const en = ensureRes && typeof ensureRes === 'object' ? ensureRes : {};
       if (en.ok !== true) {
         setApplyErr((en.message ? en.message + ' ' : '') + t('updError'));
         setApplyPhase('idle');
+        setAction(null);
         return null;
       }
-      // 执行器 apply：安装 + 后台重启（accepted 立即返回）
-      return executor.call('apply', { repo, tag: result.remoteTag, profile, serviceName, port: en.port }, en.port);
+      // accepted 立即返回，安装进度走 status 轮询
+      return executor.call('apply', { repo, tag: result.remoteTag, profile, serviceName, port: en.port, restart: false }, en.port);
     }).then((applyRes) => {
       if (!applyRes) return;
       const ar = applyRes && typeof applyRes === 'object' ? applyRes : {};
       if (ar.ok !== true) {
         setApplyErr((ar.message ? ar.message + ' ' : '') + t('updError'));
         setApplyPhase('idle');
+        setAction(null);
         return;
       }
-      // 轮询执行器状态（倒计时 + 每轮反馈；执行器独立存活，服务重启不断连）
       setApplyStatus(t('updApplying'));
       pollExecutorStatus(executorPort());
     }).catch(() => {
       setApplyErr(t('updApplyExecutorDown'));
       setApplyPhase('idle');
+      setAction(null);
+    });
+  };
+
+  // 端口重启：执行器 restart（仅重启循环，完成才返回）
+  const runRestart = () => {
+    if (applyPhase !== 'confirm' || action !== 'restart') return;
+    setApplyPhase('restarting');
+    setApplyErr(null);
+    setApplyStatus(null);
+    setRestartLeft(10);
+    setRestartRound(1);
+    ensureExecutor().then((ensureRes) => {
+      if (!ensureRes) return;
+      const en = ensureRes && typeof ensureRes === 'object' ? ensureRes : {};
+      if (en.ok !== true) {
+        setApplyErr((en.message ? en.message + ' ' : '') + t('updError'));
+        setApplyPhase('idle');
+        setAction(null);
+        return null;
+      }
+      return executor.call('restart', { serviceName, port: en.port }, en.port);
+    }).then((res) => {
+      if (!res) return;
+      const r = res && typeof res === 'object' ? res : {};
+      if (r.ok !== true) {
+        setApplyErr((r.message ? r.message + ' ' : '') + t('updError'));
+        setApplyPhase('idle');
+        setAction(null);
+        return;
+      }
+      setApplyStatus(t('updApplyDone'));
+      setApplyPhase('done');
+    }).catch(() => {
+      setApplyErr(t('updApplyExecutorDown'));
+      setApplyPhase('idle');
+      setAction(null);
     });
   };
 
@@ -1654,6 +1686,15 @@ function UpdaterCard(props) {
       className: result.status === 'outdated' ? 'dsh-plg-upd-outdated' : 'dsh-plg-upd-ok',
     }, text);
   }
+
+  const busy = applyPhase === 'applying' || applyPhase === 'restarting';
+  const outdated = !!(result && result.status === 'outdated');
+  // 拉取按钮：busy/已安装/完成/他方确认/未检出新版本时禁用
+  const pullApplyDisabled = busy || applyPhase === 'installed' || applyPhase === 'done'
+    || (applyPhase === 'confirm' && action === 'restart') || checking || envChecking || !outdated;
+  // 端口重启按钮：busy/完成/他方确认/未检出新版本时禁用（installed 态可用——正是引导重启的时机）
+  const portRestartDisabled = busy || applyPhase === 'done'
+    || (applyPhase === 'confirm' && action === 'apply') || checking || envChecking || !outdated;
 
   return React.createElement('div', { className: 'dsh-plg-card dsh-plg-upd' },
     React.createElement('div', { className: 'dsh-plg-head' },
@@ -1680,13 +1721,13 @@ function UpdaterCard(props) {
       React.createElement('button', {
         type: 'button',
         className: 'dsh-plg-btn dsh-plg-btn-primary',
-        disabled: checking || pulling,
+        disabled: checking || busy,
         onClick: doCheck,
       }, checking ? t('updChecking') : t('updCheck')),
       React.createElement('button', {
         type: 'button',
         className: 'dsh-plg-btn dsh-plg-btn-primary',
-        disabled: checking || pulling || envChecking,
+        disabled: checking || envChecking || busy,
         onClick: doEnvCheck,
       }, envChecking ? t('envChecking') : t('envBtn')),
     ),
@@ -1727,7 +1768,9 @@ function UpdaterCard(props) {
     result && result.body
       ? React.createElement('div', { className: 'dsh-plg-upd-body' }, result.body)
       : null,
-    // 行 3：目标目录 + 一键拉取（仅 outdated 可用）
+    // 行 3：目标目录 + 一键拉取更新 + 端口重启（v2.9.x 用户指令：原「一键拉取更新」与
+    // 「一键更新」合并为一键拉取更新（执行器 apply restart:false，只安装不重启）；
+    // 重启拆为独立「端口重启」（执行器 restart）——两按钮同放目标目录行末）
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label', htmlFor: updIds.dir }, t('updDir')),
       React.createElement('input', {
@@ -1740,54 +1783,40 @@ function UpdaterCard(props) {
       }),
       React.createElement('button', {
         type: 'button',
-        className: 'dsh-plg-btn dsh-plg-btn-primary',
-        disabled: pulling || !result || result.status !== 'outdated',
-        onClick: doPull,
-      }, pulling ? t('updPulling') : t('updPull')),
-    ),
-    // 行 4：拉取结果 + 应用指引
-    pullRes
-      ? React.createElement('div', { className: 'dsh-plg-upd-done' },
-          React.createElement('div', null, t('updDone') + ' ' + pullRes.tag + ' → ' + pullRes.dir),
-          React.createElement('div', { className: 'dsh-plg-muted' },
-            (pullRes.files || []).map((f) => f.name + ' (' + f.bytes + 'B)').join(' · ')),
-          React.createElement('div', { className: 'dsh-plg-upd-apply' },
-            React.createElement('div', { className: 'dsh-plg-label' }, t('updApplyTitle')),
-            React.createElement('div', { className: 'dsh-plg-hint' }, t('updApplyBundle')),
-            React.createElement('div', { className: 'dsh-plg-hint' }, t('updApplyDynamic')),
-            React.createElement('div', { className: 'dsh-plg-hint' }, t('updApplyCopy')),
-          ),
-        )
-      : null,
-    // v2.5.0：一键更新并重启（仅 outdated；确认态 → 执行 → done 提供刷新按钮）
-    result && result.status === 'outdated'
-      ? React.createElement('div', { className: 'dsh-plg-row' },
-          React.createElement('button', {
+        className: 'dsh-plg-btn ' + (applyPhase === 'confirm' && action === 'apply' ? 'dsh-plg-btn-danger' : 'dsh-plg-btn-primary'),
+        disabled: pullApplyDisabled,
+        onClick: applyPhase === 'confirm' && action === 'apply' ? runPullApply : () => startConfirm('apply'),
+      }, applyPhase === 'confirm' && action === 'apply' ? t('updPullApplyConfirm')
+        : applyPhase === 'applying' ? t('updApplying')
+        : applyPhase === 'installed' ? t('updInstalledShort')
+        : t('updPull')),
+      React.createElement('button', {
+        type: 'button',
+        className: 'dsh-plg-btn' + (applyPhase === 'confirm' && action === 'restart' ? ' dsh-plg-btn-danger' : ''),
+        disabled: portRestartDisabled,
+        onClick: applyPhase === 'confirm' && action === 'restart' ? runRestart : () => startConfirm('restart'),
+      }, applyPhase === 'confirm' && action === 'restart' ? t('updApplyConfirm')
+        : applyPhase === 'restarting' ? t('updApplyRestarting').replace('{sec}', String(restartLeft)).replace('{round}', String(restartRound))
+        : applyPhase === 'done' ? t('updApplyDone')
+        : t('updPortRestart')),
+      applyPhase === 'confirm'
+        ? React.createElement('button', {
             type: 'button',
-            className: 'dsh-plg-btn ' + (applyPhase === 'confirm' ? 'dsh-plg-btn-danger' : 'dsh-plg-btn-primary'),
-            disabled: applyPhase === 'applying' || applyPhase === 'restarting' || checking || pulling || envChecking,
-            onClick: applyPhase === 'confirm' ? runApply : startApply,
-          }, applyPhase === 'confirm' ? t('updApplyConfirm')
-            : applyPhase === 'applying' ? t('updApplying')
-            : applyPhase === 'restarting' ? t('updApplyRestarting').replace('{sec}', String(restartLeft)).replace('{round}', String(restartRound))
-            : applyPhase === 'done' ? t('updApplyDone')
-            : applyPhase === 'rolledback' ? t('updApplyRolledBack')
-            : t('updApply')),
-          applyPhase === 'confirm'
-            ? React.createElement('button', {
-                type: 'button',
-                className: 'dsh-plg-btn',
-                onClick: cancelApply,
-              }, t('cancel'))
-            : null,
-          applyPhase === 'done'
-            ? React.createElement('button', {
-                type: 'button',
-                className: 'dsh-plg-btn dsh-plg-btn-primary',
-                onClick: () => window.location.reload(),
-              }, t('updApplyReload'))
-            : null,
-        )
+            className: 'dsh-plg-btn',
+            onClick: cancelApply,
+          }, t('cancel'))
+        : null,
+      applyPhase === 'done'
+        ? React.createElement('button', {
+            type: 'button',
+            className: 'dsh-plg-btn dsh-plg-btn-primary',
+            onClick: () => window.location.reload(),
+          }, t('updApplyReload'))
+        : null,
+    ),
+    // v2.9.x：安装完成（未重启）提示——引导点「端口重启」
+    applyPhase === 'installed'
+      ? React.createElement('div', { className: 'dsh-plg-save dsh-plg-save-ok', role: 'status' }, t('updInstalled'))
       : null,
     applyStatus
       ? React.createElement('div', { className: 'dsh-plg-status', role: 'status' }, applyStatus)
@@ -1798,7 +1827,6 @@ function UpdaterCard(props) {
     error ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, error) : null,
   );
 }
-
 function PluginsSection(props) {
   const t = makeT(props);
   const [plugins, setPlugins] = React.useState(null);
