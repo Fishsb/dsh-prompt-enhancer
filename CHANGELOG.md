@@ -10,6 +10,8 @@
 ### Changed
 - **历史会话参考仅注入「结论信息」（用户需求）**：lite/standard/smart 的「相关会话参考」与 publish 的 v2 历史段此前把会话事件预拼接文本整段代入——**工具调用名 + 参数 JSON（含命令全文/文件内容）占注入文本的 85-92%**（实测 f535f8ac 会话窗口 [1,2]：text 2654 字符 vs tool-call 29813 字符）。修复：历史提取改走 `sessionQuery.readSurface`（原始事件，保留 content 块结构）→ 新增块级 `extractHistoryConclusions` 只取 user/assistant 消息的 `text` 块（显式结论/正文），丢弃 reasoning（思考过程）、tool-call（工具名+参数）、tool-result（工具输出）块，并剥除 user 消息内 `<system-reminder>` 系统注入块；readSurface 缺失时回退旧路径。实测同会话窗口 [1,2] 注入变为纯结论（工具参数 0 残留）— [PEN-001]
 - **会话轮次覆盖修正（审查发现）**：旧 `V2_MSG_SEQ_SCAN=16` 事件上限只够 ~8 轮，会话 >8 轮时 standard 的 [6,10] 窗口会静默滑向最旧可用轮（20 轮会话实际判 13-16 轮）；现按 `V2_ROUNDS_SCAN_MAX=10` 轮向后扫描（1 = 最近一轮，对齐最深窗口 [6,10]），窗口语义恢复正确；单测 U64/U65/U65b + smoke readSurface mock，115/115 — [PEN-001]
+- **优化响应看门狗 + 延迟连通性预检（用户需求）**：点击「优化」不再立即探测——按原模式直接生成，首条模型 3s（`WATCHDOG_TIMEOUT_MS`）内无任何输出 → 判为不通 → 中断并逐个探测剩余链（`pingStream` 短输入可达性，每条 3s 超时 `PROBE_TIMEOUT_MS`，30s 缓存 `PROBE_CACHE_TTL_MS`）→ 第一个通畅模型接手生成（不再挂看门狗防死循环）；剩余全不通时回头探测首条（慢但健康不误杀），仍不通 → 秒级 `ALL_MODELS_UNAVAILABLE`（对比此前固定 30s 超时）；`llm.stream` 同步抛错也走链回退；单测 U66/U67 + SMK-17/18/19，120/120 — [PEN-001]
+- **fallback 完成按钮反馈（用户需求）**：由非首个模型完成优化时，成功后按钮显示「✓ {模型} 优化，可撤回」（host 结果新增 `fallbackUsed` + 沿用 `model`；client `prettifyModel` 映射显示名），点击仍为撤回（功能不变）；首条正常完成维持「✓ 已优化，可撤回」— [PEN-001]
 
 ## [3.1.2] - 2026-08-16
 

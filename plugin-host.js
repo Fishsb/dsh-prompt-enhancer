@@ -469,6 +469,10 @@ const V2_MSG_SEQ_SCAN = 16;
 // v3.1.3（用户需求·仅结论参考 / 轮次覆盖修正）：结论提取按轮数扫描上限（1 = 最近一轮，
 // 对齐 standard 最深窗口 [6,10]；旧 16 事件上限在会话 >8 轮时令 [6,10] 静默滑向旧轮）
 const V2_ROUNDS_SCAN_MAX = 10;
+// v3.1.3（看门狗 + 延迟连通性预检）：模型响应看门狗阈值 / 单次连通探测超时 / 探测结果缓存 TTL
+const WATCHDOG_TIMEOUT_MS = 3000;
+const PROBE_TIMEOUT_MS = 3000;
+const PROBE_CACHE_TTL_MS = 30000;
 const V2_MSG_TEXT_MAX = 1200;
 const V2_WORKSPACE_TIMEOUT_MS = 2000;
 const SCAN_FILE_LIST_MAX = 2000;
@@ -718,6 +722,7 @@ function friendlyMessage(failure) {
     case 'OUTPUT_TOO_LONG': return 'optimization exceeds length limit';
     case 'TIMEOUT': return 'request timed out, original text restored';
     case 'ABORTED': return 'request cancelled';
+    case 'ALL_MODELS_UNAVAILABLE': return 'all models unavailable, check model config and retry';
     default: return failure && failure.message ? failure.message : 'optimize failed';
   }
 }
@@ -831,16 +836,21 @@ function validateConfig(raw) {
   return out;
 }
 
-async function collectStream(iterator, outputLimit) {
+async function collectStream(iterator, outputLimit, onFirst) {
   let text = '';
   let sawDelta = false;
   const blockTexts = [];
   let finish = null;
+  let sawAny = false;
   try {
     while (true) {
       const next = await iterator.next();
       if (next.done) break;
       const chunk = next.value;
+      if (!sawAny) {
+        sawAny = true;
+        if (typeof onFirst === 'function') onFirst(chunk);
+      }
       if (chunk.type === 'text-delta') {
         // v2.7.0（publish 一键发布）：outputLimit <= 0 表示不限制（规格长文不截断）
         if (outputLimit > 0 && text.length + chunk.text.length > outputLimit) return { kind: 'toolong' };
@@ -985,6 +995,33 @@ function extractHistoryConclusions(events) {
     out.push({ type: type === 'user/message' ? 'user' : 'assistant', text: text.slice(0, V2_MSG_TEXT_MAX) });
   }
   return out.reverse();
+}
+
+// v3.1.3（看门狗 + 延迟连通性预检）：探测结果缓存纯读写（注入 Map，单测友好；
+// LRU 上限 50，超限驱逐最早插入条目；TTL 过期即失效并删除）
+function probeCacheGet(cache, key, now) {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (now - hit.at >= PROBE_CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return hit;
+}
+function probeCacheSet(cache, key, value, now) {
+  if (cache.size >= 50) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(key, { ok: value.ok === true, code: value.code || '', at: now });
+}
+// 纯选择：entries 与 results 对齐，返回首个 ok 下标（无 → -1）
+function pickReachableIndex(entries, results) {
+  for (let i = 0; i < entries.length; i++) {
+    const r = results[i];
+    if (r && r.ok === true) return i;
+  }
+  return -1;
 }
 
 // 中文主题词切分（v2.7.0 检索质量修复）：连续中文按连接/虚词切段——
@@ -3066,7 +3103,7 @@ return {
       const sessionId = state.sessionId;
       const seq = state.seq;
       const rec = state.rec;
-      const chain = state.chain;
+      let chain = state.chain.slice();
       const system = state.system;
       const messages = state.messages;
       const isPublish = state.isPublish;
@@ -3081,25 +3118,74 @@ return {
         }
         hlog('[enhance] try session=' + sessionId + ' provider=' + entry.provider + ' model=' + entry.model + (entry.reasoningEffort ? ' effort=' + entry.reasoningEffort : '') + ' seq=' + seq);
         setProgress(rec, STAGE_LLM, i > 0 ? 'retry' : '', null, i + 1, chain.length);
-        const stream = llm.stream({
-          provider: entry.provider,
-          model: entry.model,
-          ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
-          system,
-          // v2.7.0（publish）：maxTokens<=0 省略字段 → provider 默认上限（不设限制）
-          // v2.9.0-fix（实测确证）：reasoning 模式（带 effort）下思考过程消耗 maxTokens
-          // 预算——配置的 2000 在长输入 + effort=max 时耗尽 → 空流（EMPTY_RESPONSE）；
-          // 自动放宽到 >=8000（保守版；publish 不设限同策略，无 effort 行为不变）
-          ...(entry.reasoningEffort ? { maxTokens: Math.max(maxTokens, 8000) } : (maxTokens > 0 ? { maxTokens } : {})),
-          messages,
-        });
+        let stream;
+        try {
+          stream = llm.stream({
+            provider: entry.provider,
+            model: entry.model,
+            ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+            system,
+            // v2.7.0（publish）：maxTokens<=0 省略字段 → provider 默认上限（不设限制）
+            // v2.9.0-fix（实测确证）：reasoning 模式（带 effort）下思考过程消耗 maxTokens
+            // 预算——配置的 2000 在长输入 + effort=max 时耗尽 → 空流（EMPTY_RESPONSE）；
+            // 自动放宽到 >=8000（保守版；publish 不设限同策略，无 effort 行为不变）
+            ...(entry.reasoningEffort ? { maxTokens: Math.max(maxTokens, 8000) } : (maxTokens > 0 ? { maxTokens } : {})),
+            messages,
+          });
+        } catch (e) {
+          // v3.1.3（看门狗 + 延迟连通性预检）：llm.stream 同步抛错 = 模型不可达 → 记失败走下一条
+          hlog('[enhance] fail session=' + sessionId + ' model=' + entry.model + ' code=STREAM_THROW');
+          lastFailure = { code: e && e.code ? String(e.code) : 'STREAM_THROW', message: String(e && e.message ? e.message : e) };
+          continue;
+        }
         const iterator = stream[Symbol.asyncIterator]();
         rec.iterator = iterator;
+        // v3.1.3（看门狗 + 延迟连通性预检）：仅首个尝试挂响应看门狗——WATCHDOG_TIMEOUT_MS 内
+        // 无任何 chunk → 判首模型不通，中断当前流并进入连通性探测（探测选模型重启生成，
+        // 重启不再挂看门狗，防「慢但健康」模型被反复打断成死循环）
+        let watchTimer = null;
+        let watchFired = false;
+        if (i === 0 && !state.watchdogDone) {
+          watchTimer = ctx.timer.timeout(() => {
+            watchFired = true;
+            if (rec.iterator && typeof rec.iterator.return === 'function') {
+              try { rec.iterator.return(); } catch (e) { /* 忽略 */ }
+            }
+          }, WATCHDOG_TIMEOUT_MS);
+        }
         let result;
         try {
-          result = await collectStream(iterator, outputLimit);
+          result = await collectStream(iterator, outputLimit, () => {
+            if (watchTimer) { watchTimer(); watchTimer = null; }
+          });
         } finally {
+          if (watchTimer) watchTimer();
           rec.iterator = null;
+        }
+        if (watchFired) {
+          state.watchdogDone = true;
+          hlog('[enhance] watchdog no-response in ' + WATCHDOG_TIMEOUT_MS + 'ms on ' + entry.provider + '/' + entry.model + ' seq=' + seq);
+          setProgress(rec, STAGE_LLM, 'probe', null, 1, chain.length);
+          // 连通性探测：跳过刚挂起的首条，探测剩余链（缓存优先，每条 PROBE_TIMEOUT_MS 超时）
+          const rest = chain.slice(i + 1);
+          const pick = await probeFirstReachable(rest);
+          if (!pick) {
+            // 剩余全不通 → 回头探测挂起首条：通畅（只是慢）→ 重试一次；不通 → 全不可用
+            const headOk = await probeEntry(entry);
+            if (!headOk) {
+              hlog('[enhance] chain all unavailable session=' + sessionId + ' last code=' + (lastFailure ? lastFailure.code : '?'));
+              state.result = { ok: false, code: 'ALL_MODELS_UNAVAILABLE', message: friendlyMessage({ code: 'ALL_MODELS_UNAVAILABLE' }) };
+              return state;
+            }
+            hlog('[enhance] watchdog retry head via ' + entry.provider + '/' + entry.model + ' seq=' + seq);
+            chain = [entry];
+            i = -1;
+            continue;
+          }
+          hlog('[enhance] watchdog restart via ' + pick.provider + '/' + pick.model + ' seq=' + seq);
+          chain = [pick].concat(chain.filter((e) => e !== pick && e !== entry));
+          i = -1;
+          continue;
         }
         if (result.kind === 'ok') {
           // v2.8.0（实测修正）：publish 剥离输出首部【场景判定】回显行（确定性，不依赖模型遵从）
@@ -3109,7 +3195,7 @@ return {
             continue;
           }
           hlog('[enhance] ok session=' + sessionId + ' via ' + entry.model);
-          state.result = { ok: true, text: cleaned, model: entry.model };
+          state.result = { ok: true, text: cleaned, model: entry.model, ...(state.watchdogDone === true || i > 0 ? { fallbackUsed: true } : {}) };
           return state;
         }
         if (result.kind === 'toolong') {
@@ -3126,6 +3212,42 @@ return {
       hlog('[enhance] chain exhausted session=' + sessionId + ' last code=' + (lastFailure ? lastFailure.code : '?'));
       state.result = { ok: false, code: lastFailure.code || 'LLM_FAILED', message: friendlyMessage(lastFailure) };
       return state;
+    }
+
+    // v3.1.3（看门狗 + 延迟连通性预检）：连通性探测——缓存优先，pingStream 短输入探测
+    // （可达性：QUOTA/网络/auth/超时；探测 ≠ 生成成功，生成级失败仍由原回退链兜底）
+    const probeCache = new Map();
+    async function probeEntry(entry) {
+      if (!entry) return false;
+      const key = entry.provider + '/' + entry.model;
+      const now = Date.now();
+      const hit = probeCacheGet(probeCache, key, now);
+      if (hit) return hit.ok === true;
+      if (llm === undefined) return false;
+      const ref = { current: null };
+      let timedOut = false;
+      const timer = ctx.timer.timeout(() => {
+        timedOut = true;
+        if (ref.current && typeof ref.current.return === 'function') {
+          try { ref.current.return(); } catch (e) { /* 忽略 */ }
+        }
+      }, PROBE_TIMEOUT_MS);
+      let r;
+      try {
+        r = await pingStream(llm, entry, ref);
+      } finally {
+        timer();
+      }
+      const ok = !timedOut && r && r.ok === true;
+      probeCacheSet(probeCache, key, { ok, code: timedOut ? 'TIMEOUT' : (r ? r.code : 'LLM_FAILED') }, now);
+      hlog('[enhance] probe ' + entry.provider + '/' + entry.model + ' → ' + (ok ? 'ok ' + (r ? r.latencyMs : '?') + 'ms' : (timedOut ? 'timeout' : (r ? r.code : 'LLM_FAILED'))));
+      return ok;
+    }
+    async function probeFirstReachable(entries) {
+      for (const entry of entries) {
+        if (await probeEntry(entry)) return entry;
+      }
+      return null;
     }
 
     registerEnhanceStage('analyze', enhanceStageAnalyze, { priority: 100 });

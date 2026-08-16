@@ -34,7 +34,8 @@ function boot(opts) {
       return undefined;
     },
     effect: () => {},
-    timer: { timeout: () => () => {} },
+    // v3.1.3（看门狗）：默认 timer 不触发（既有测试不依赖定时器）；看门狗用例传 opts.timer 注入真实定时器
+    timer: (opts && opts.timer) ? opts.timer : { timeout: () => () => {} },
   };
   const plugin = new Function('harness', BODY)(harness);
   if (typeof plugin.apply !== 'function') throw new Error('plugin.apply missing from bundle');
@@ -236,6 +237,41 @@ function mockLlmSmart(seen, opts) {
         { type: 'text-delta', text: 'OK' },
         { type: 'finish', reason: { kind: 'stop' } },
       ]);
+    },
+  };
+}
+
+// v3.1.3（看门狗 + 延迟连通性预检）：可编程 llm mock——
+// probe（system 含 'connectivity probe'）：probeFail ? QUOTA finish : OK；
+// 生成流：model === hangModel → 可中断挂起流（return() 可解挂）；否则 OK。
+function mockLlmProbe(seen, opts) {
+  const o = opts || {};
+  const okStream = (text) => streamOf([
+    { type: 'text-delta', text },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ]);
+  const hangStream = () => {
+    let resolveNext = null;
+    return {
+      [Symbol.asyncIterator]() {
+        return {
+          next() { return new Promise((resolve) => { resolveNext = resolve; }); },
+          return() { if (resolveNext) resolveNext({ done: true }); return Promise.resolve({ done: true }); },
+        };
+      },
+    };
+  };
+  return {
+    stream(params) {
+      seen.push(params);
+      const sys = typeof params.system === 'string' ? params.system : '';
+      if (sys.includes('connectivity probe')) {
+        return o.probeFail
+          ? streamOf([{ type: 'finish', reason: { kind: 'error', failure: { code: 'QUOTA', message: 'model quota exceeded' } } }])
+          : okStream('PING');
+      }
+      if (params.model === o.hangModel) return hangStream();
+      return okStream('ENH');
     },
   };
 }
@@ -635,4 +671,89 @@ test('SMK-17 progress exposes fine-grained detail during publish (v3.0r)', async
   assert.ok(keys.includes('search'), 'search detail observed, got ' + JSON.stringify(keys));
   assert.ok(sawStep, 'step/total populated during search');
   assert.ok(lastElapsed > 0, 'elapsedMs tracked');
+});
+
+// ---- v3.1.3 看门狗 + 延迟连通性预检（base 模式直通 llm，无检索干扰） ----
+const REAL_TIMER = { timeout: (cb, ms) => { const id = setTimeout(cb, ms); return () => clearTimeout(id); } };
+const WATCHDOG_WAIT = 3600; // 略大于 bundle 内 WATCHDOG_TIMEOUT_MS=3000
+
+// SMK-17：首条生成流静默挂起（看门狗 3s 触发）→ 探测剩余链 → 第二条可达 → 用第二条生成成功
+test('SMK-17 watchdog: silent head → probe next → fallback generation (fallbackUsed)', async () => {
+  const seen = [];
+  const { handlers } = boot({
+    llm: mockLlmProbe(seen, { hangModel: 'm-a' }),
+    timer: REAL_TIMER,
+  });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '优化一下',
+    config: {
+      mode: 'base',
+      fallback: [{ provider: 'p', model: 'm-a' }, { provider: 'p', model: 'm-b' }],
+      params: { maxTokens: 2000, timeoutMs: 30000 },
+    },
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.model, 'm-b', '由探测选中的第二条模型完成');
+  assert.equal(out.fallbackUsed, true, '非首个模型完成 → fallbackUsed');
+  // 调用序列：m-a 生成（挂起）→ 探测 m-b → m-b 生成
+  const gen = seen.filter((p) => !String(p.system || '').includes('connectivity probe'));
+  const probe = seen.filter((p) => String(p.system || '').includes('connectivity probe'));
+  assert.equal(gen[0].model, 'm-a', '首条尝试是 m-a');
+  assert.equal(gen[1].model, 'm-b', '重启生成用 m-b');
+  assert.equal(probe.length, 1, '仅探测一条');
+  assert.equal(probe[0].model, 'm-b');
+});
+
+// SMK-18：首条挂起 + 剩余链探测全失败 + 回头探首条也失败 → 立即 ALL_MODELS_UNAVAILABLE
+test('SMK-18 watchdog: all probes fail → ALL_MODELS_UNAVAILABLE fast', async () => {
+  const seen = [];
+  const t0 = Date.now();
+  const { handlers } = boot({
+    llm: mockLlmProbe(seen, { hangModel: 'm-a', probeFail: true }),
+    timer: REAL_TIMER,
+  });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '优化一下',
+    config: {
+      mode: 'base',
+      fallback: [{ provider: 'p', model: 'm-a' }, { provider: 'p', model: 'm-b' }],
+      params: { maxTokens: 2000, timeoutMs: 30000 },
+    },
+  });
+  const elapsed = Date.now() - t0;
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'ALL_MODELS_UNAVAILABLE');
+  assert.ok(elapsed < 15000, '秒级报错（远小于 30s 总超时），实际 ' + elapsed + 'ms');
+  // 探测了两条（m-b 失败后回头探 m-a）
+  const probe = seen.filter((p) => String(p.system || '').includes('connectivity probe'));
+  assert.ok(probe.length >= 2, '至少探测 m-b 与回头探 m-a');
+});
+
+// SMK-19：首条 3s 内出首个 chunk → 正常完成，不触发探测、无 fallbackUsed
+test('SMK-19 healthy head: no probe, no fallbackUsed', async () => {
+  const seen = [];
+  const { handlers } = boot({
+    llm: mockLlmProbe(seen, {}),
+    timer: REAL_TIMER,
+  });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '优化一下',
+    config: {
+      mode: 'base',
+      fallback: [{ provider: 'p', model: 'm-a' }, { provider: 'p', model: 'm-b' }],
+      params: { maxTokens: 2000, timeoutMs: 30000 },
+    },
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.model, 'm-a', '首条完成');
+  assert.equal(out.fallbackUsed, undefined, '首条正常完成不置 fallbackUsed');
+  const probe = seen.filter((p) => String(p.system || '').includes('connectivity probe'));
+  assert.equal(probe.length, 0, '健康路径零探测');
+  assert.equal(seen.length, 1, '仅一次生成调用');
 });

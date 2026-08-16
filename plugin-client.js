@@ -396,6 +396,7 @@ const ZH = {
   enhanceButton: '优化',
   enhancing: '优化中',
   result: '✓ 已优化，可撤回',
+  resultFallback: '✓ {model} 优化，可撤回',
   titleIdle: '一键优化提示词（独立 LLM 调用）',
   // v2.6.2（继续优化）：已优化过一轮后修改草稿的按钮文字与提示
   btnContinue: '继续优化',
@@ -625,6 +626,7 @@ const ZH = {
   stageDetailSearch: '正在搜索 {current}/{total}：{query}',
   stageDetailScan: '正在扫描工作区…',
   stageDetailRetry: '模型响应异常，重试 {current}/{total}…',
+  stageDetailProbe: '正在测试模型连通性 {current}/{total}…',
   stageDone: '✓',
 };
 
@@ -632,6 +634,7 @@ const EN = {
   enhanceButton: 'Optimize',
   enhancing: 'Optimizing',
   result: '✓ Optimized · Undo',
+  resultFallback: '✓ Optimized with {model} · Undo',
   titleIdle: 'Optimize the prompt with an independent LLM call',
   // v2.6.2（继续优化）：已优化过一轮后修改草稿的按钮文字与提示
   btnContinue: 'Continue',
@@ -862,6 +865,7 @@ const EN = {
   stageDetailSearch: 'Searching {current}/{total}: {query}',
   stageDetailScan: 'Scanning workspace…',
   stageDetailRetry: 'Model error, retrying {current}/{total}…',
+  stageDetailProbe: 'Probing model {current}/{total}…',
   stageDone: '✓',
 };
 
@@ -903,7 +907,7 @@ const sessionStores = new Map();
 function storeFor(sessionId) {
   let s = sessionStores.get(sessionId);
   if (!s) {
-    s = { phase: 'idle', backup: '', enhanced: '', error: null, seq: 0, listeners: new Set(), memoryRounds: [], optimized: false };
+    s = { phase: 'idle', backup: '', enhanced: '', error: null, seq: 0, listeners: new Set(), memoryRounds: [], optimized: false, lastModel: '', fallbackUsed: false };
     sessionStores.set(sessionId, s);
   }
   return s;
@@ -991,6 +995,19 @@ function resolveActualMode(sessionId, cfg) {
   return { mode, seed, memory };
 }
 
+// v3.1.3（按钮反馈）：模型 id → 显示名（已知映射，未知回退原文）
+function prettifyModel(id) {
+  const map = {
+    'deepseek-v4-flash': 'DeepSeek-V4-Flash',
+    'deepseek-v4-pro': 'DeepSeek-V4-Pro',
+    'mimo-v2.5': 'MiMo-V2.5',
+    'mimo-v2.5-pro': 'MiMo-V2.5-Pro',
+    'qwen3.7-max': 'Qwen3.7-Max',
+    'kimi-k2.7-code': 'Kimi-K2.7-Code',
+  };
+  return map[id] || id;
+}
+
 function enhance(sessionId, draft, inputActions, draftRef) {
   const s = storeFor(sessionId);
   if (s.phase === 'enhancing') {
@@ -1030,6 +1047,9 @@ function enhance(sessionId, draft, inputActions, draftRef) {
         s.error = null;
         // v2.6.2（继续优化标记）：成功应用过结果 → 后续修改草稿时按钮显示「继续优化」
         s.optimized = true;
+        // v3.1.3（按钮反馈）：记录实际执行模型与是否 fallback（非首个模型完成）——result 态按钮据此显示「模型X 优化，可撤回」
+        s.lastModel = r.model || '';
+        s.fallbackUsed = r.fallbackUsed === true;
         // v2.2（§6.5/R1）：仅结果已应用且记忆开关开启时写入记忆（斜杠命令存正文）并打标；
         // v2.6.1（记忆链）：追加本轮 {input, output} 并截断到最近 MEMORY_ROUNDS_MAX 轮
         if (config.memory) {
@@ -1291,7 +1311,7 @@ function EnhanceButton(props) {
             }, '✨'),
             React.createElement('span', { className: 'dsh-enh-mode' }, modeShortLabel(t, configState.value.mode)),
           ),
-    phase === 'result' ? t('result') : null,
+    phase === 'result' ? (s && s.fallbackUsed === true && s.lastModel ? t('resultFallback').replace('{model}', prettifyModel(s.lastModel)) : t('result')) : null,
   );
 }
 

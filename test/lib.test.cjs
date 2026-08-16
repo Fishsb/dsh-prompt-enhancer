@@ -24,6 +24,7 @@ const defaultsBlock = [grabConst('DEFAULT_TIMEOUT_MS'), grabConst('DEFAULT_MAX_T
 const pureFn = new Function(defaultsBlock + '\n' + pureText + `
   ;return { wrapUserText, wrapPublishText, stripScenarioEcho, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
     extractHistory, extractHistoryConclusions, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile,
+    pickReachableIndex, probeCacheGet, probeCacheSet, WATCHDOG_TIMEOUT_MS, PROBE_TIMEOUT_MS, PROBE_CACHE_TTL_MS,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
     splitHistoryRounds, parseRelevance, parseIntent, parseDocsAnalysis, parseSearchPlan,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
@@ -45,6 +46,12 @@ const {
   extractHistory,
   extractHistoryConclusions,
   inferFocusRules,
+  pickReachableIndex,
+  probeCacheGet,
+  probeCacheSet,
+  WATCHDOG_TIMEOUT_MS,
+  PROBE_TIMEOUT_MS,
+  PROBE_CACHE_TTL_MS,
   extractKeywords,
   splitCnSegments,
   splitHistoryRounds,
@@ -1132,6 +1139,56 @@ test('U65b extractHistoryConclusions 纯注入 user 消息不产生锚点', () =
     { type: 'assistant', text: '答复' },
   ]);
   assert.equal(splitHistoryRounds(h, 1, 1).length, 2, '仅真实请求锚定一轮');
+});
+
+// v3.1.3（看门狗 + 延迟连通性预检）：探测选择纯函数 + 探测结果缓存契约。
+test('U66 pickReachableIndex / probeCache（v3.1.3）', () => {
+  const e = [{ provider: 'a' }, { provider: 'b' }, { provider: 'c' }];
+  assert.equal(pickReachableIndex(e, [{ ok: false }, { ok: true }]), 1, '首个 ok 下标');
+  assert.equal(pickReachableIndex(e, [{ ok: false }, { ok: false }, { ok: false }]), -1, '全不通 → -1');
+  assert.equal(pickReachableIndex([], []), -1, '空链 → -1');
+  assert.equal(pickReachableIndex(e, []), -1, '无结果 → -1');
+  const cache = new Map();
+  const now = 1000000;
+  probeCacheSet(cache, 'a/m', { ok: true }, now);
+  assert.deepEqual(probeCacheGet(cache, 'a/m', now), { ok: true, code: '', at: now });
+  assert.equal(probeCacheGet(cache, 'a/m', now + PROBE_CACHE_TTL_MS), null, 'TTL 过期失效并删除');
+  assert.equal(cache.has('a/m'), false, '过期条目被删除');
+  probeCacheSet(cache, 'a/m', { ok: false, code: 'QUOTA' }, now);
+  assert.equal(probeCacheGet(cache, 'a/m', now).ok, false);
+  assert.equal(probeCacheGet(cache, 'a/m', now).code, 'QUOTA');
+  // LRU 上限 50：满后驱逐最早插入
+  for (let i = 0; i < 60; i++) probeCacheSet(cache, 'k' + i, { ok: true }, now);
+  assert.equal(cache.size, 50, '超限驱逐至 50');
+  assert.equal(cache.has('k0'), false, '最早插入被驱逐');
+  assert.equal(cache.has('k59'), true);
+});
+
+// v3.1.3（看门狗）：collectStream onFirst 回调——首个 chunk（任意类型）触发一次；空流不触发。
+test('U67 collectStream onFirst 回调（v3.1.3）', async () => {
+  let calls = 0;
+  let first = null;
+  const chunks = [{ type: 'text-delta', text: 'a' }, { type: 'finish', reason: { kind: 'stop' } }];
+  const it = (() => {
+    let i = 0;
+    return {
+      [Symbol.asyncIterator]() {
+        return {
+          async next() { return i < chunks.length ? { done: false, value: chunks[i++] } : { done: true }; },
+        };
+      },
+    };
+  })();
+  const r = await collectStream(it[Symbol.asyncIterator](), 8000, (c) => { calls++; first = c; });
+  assert.equal(r.kind, 'ok');
+  assert.equal(calls, 1, 'onFirst 仅触发一次');
+  assert.equal(first.type, 'text-delta');
+  // 空流（无任何 chunk）→ 不触发（看门狗据此判定无响应）
+  let calls2 = 0;
+  const empty = (() => ({ [Symbol.asyncIterator]() { return { async next() { return { done: true }; } }; } }))();
+  const r2 = await collectStream(empty[Symbol.asyncIterator](), 8000, () => { calls2++; });
+  assert.equal(calls2, 0, '空流不触发 onFirst');
+  assert.equal(r2.kind, 'cancelled');
 });
 
 // v3.0（模式重构）：关联判定 JSON 容错解析契约。
