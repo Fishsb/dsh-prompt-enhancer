@@ -2537,6 +2537,7 @@ return {
     // 性能约束：持久化会话全量日志读取很重，不能每次/每个会话都 readSession。
     // 策略：live 会话每次走内存（快）；persisted 会话首次最多扫描 SCAN_LIMIT 个，
     // 命中后把 model route + projection 缓存，后续调用只聚合缓存，避免卡 UI。
+    // 匹配口径：只按模型名匹配（用户要求），不区分 provider 路由。
     const sessionModelCache = new Map();        // sid -> { route, at }
     const sessionProjectionCache = new Map();   // sid -> { values, at }
     const SESSION_MODEL_TTL_MS = 600000;        // persisted route 缓存 10 分钟
@@ -2571,8 +2572,7 @@ return {
       if (!sq || typeof sq.listSessions !== 'function' || !proj || typeof proj.snapshot !== 'function') {
         return { ok: false, code: 'NO_STATS', message: 'session stats unavailable' };
       }
-      const exactAcc = { ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0, sessions: 0 };
-      const modelAcc = { ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0, sessions: 0 };
+      const acc = { ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0, sessions: 0 };
       try {
         const records = await sq.listSessions();
         let scanBudget = MODEL_STATS_SCAN_LIMIT;
@@ -2613,17 +2613,15 @@ return {
           }
           if (!route || route.model !== model) continue;
           if (projection) {
-            // 优先 provider+model 精确匹配；若精确无数据，回退到“只按 model 名匹配”
-            if (route.provider === provider) accumulateProjectionStats(exactAcc, { values: projection });
-            accumulateProjectionStats(modelAcc, { values: projection });
+            // 按用户要求：只按模型名匹配，不区分 provider 路由
+            accumulateProjectionStats(acc, { values: projection });
           }
         }
       } catch (e) {
         herr('[enhance] models/stats failed', e);
         return { ok: false, code: 'STATS_FAILED', message: String(e && e.message ? e.message : e) };
       }
-      const stats = exactAcc.sessions > 0 ? summarizeModelStats(exactAcc) : summarizeModelStats(modelAcc);
-      return { ok: true, ...stats, matchedBy: exactAcc.sessions > 0 ? 'exact' : 'model' };
+      return { ok: true, ...summarizeModelStats(acc) };
     }
 
     harness.handle('models/stats', async (args) => {
