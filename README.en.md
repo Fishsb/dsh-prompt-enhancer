@@ -35,7 +35,7 @@ dsh plugin --profile web remove dsh-prompt-enhancer
 ```
 
 > After `remove`, **restart DSH** (`dsh web`) to unload the running instance — `remove` only cleans the installed files (package.json / node_modules / layer list); the host half lives in the service process and the client half in the page until the restart. A repeated `remove` reporting `no such dependency found` means the plugin is already uninstalled.
-> Tag-locked installs (`github:...#v3.1.0`) do not upgrade via `update` — upgrade with `dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#<new-tag>`.
+> Tag-locked installs (`github:...#v3.1.1`) do not upgrade via `update` — upgrade with `dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#<new-tag>`.
 > Uninstalling does not clear the browser-side plugin config (`localStorage dsh.enhance.config.v2`); it persists across reinstall.
 
 ### Option 2: dynamic Cordis install

@@ -2071,11 +2071,13 @@ function UpdaterCard(props) {
 }
 function MarqueeOption(props) {
   const ref = React.useRef(null);
+  const innerRef = React.useRef(null);
   const [distance, setDistance] = React.useState(0);
   React.useEffect(function () {
-    const el = ref.current;
-    if (!el) return;
-    const next = Math.max(0, el.scrollWidth - el.clientWidth);
+    const outer = ref.current;
+    const inner = innerRef.current;
+    if (!outer || !inner) return;
+    const next = Math.max(0, inner.scrollWidth - outer.clientWidth);
     setDistance(function (prev) { return prev === next ? prev : next; });
   }, [props.label, props.hovered]);
   const marquee = props.hovered && distance > 0;
@@ -2093,13 +2095,19 @@ function MarqueeOption(props) {
     React.createElement('span', {
       ref: ref,
       className: 'dsh-plg-mselect-option-text' + (marquee ? ' dsh-plg-mselect-option-text-marquee' : ''),
-      style: marquee ? { '--dsh-mselect-distance': distance + 'px' } : undefined,
-    }, props.label),
+    },
+      React.createElement('span', {
+        ref: innerRef,
+        className: 'dsh-plg-mselect-option-text-inner',
+        style: marquee ? { '--dsh-mselect-distance': distance + 'px' } : undefined,
+      }, props.label),
+    ),
   );
 }
 
 function MarqueeSelect(props) {
   const textRef = React.useRef(null);
+  const innerTextRef = React.useRef(null);
   const rootRef = React.useRef(null);
   const [distance, setDistance] = React.useState(0);
   const [open, setOpen] = React.useState(false);
@@ -2112,23 +2120,44 @@ function MarqueeSelect(props) {
     ? String(options[selectedIndex].props.children)
     : String(props.value == null ? '' : props.value);
 
-  // 闭合态：选中项/容器宽度变化后重新测量溢出距离；未溢出时 distance = 0，不启动自动滚动
+  // 闭合态：选中项/数据/容器宽度变化后测量溢出距离；CSS 注入或布局稳定后再补测一次（rAF），未溢出时 distance = 0
   React.useEffect(function () {
-    const el = textRef.current;
-    if (!el) return;
-    const next = Math.max(0, el.scrollWidth - el.clientWidth);
-    setDistance(function (prev) { return prev === next ? prev : next; });
-  }, [label, props.value, props.className]);
+    function measure() {
+      const outer = textRef.current;
+      const inner = innerTextRef.current;
+      if (!outer || !inner) return;
+      const next = Math.max(0, inner.scrollWidth - outer.clientWidth);
+      setDistance(function (prev) { return prev === next ? prev : next; });
+    }
+    measure();
+    const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(measure) : 0;
+    return function () { if (raf) cancelAnimationFrame(raf); };
+  }, [label, props.value, props.className, options.length]);
 
   // 窗口尺寸变化时同步更新滚动距离
   React.useEffect(function () {
     function update() {
-      const el = textRef.current;
-      if (!el) return;
-      setDistance(Math.max(0, el.scrollWidth - el.clientWidth));
+      const outer = textRef.current;
+      const inner = innerTextRef.current;
+      if (!outer || !inner) return;
+      setDistance(Math.max(0, inner.scrollWidth - outer.clientWidth));
     }
     window.addEventListener('resize', update);
     return function () { window.removeEventListener('resize', update); };
+  }, []);
+
+  // 容器尺寸变化（CSS 注入/折叠展开/弹性宽度调整）时重新测量
+  React.useEffect(function () {
+    const outer = textRef.current;
+    if (!outer || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(function () {
+      const o = textRef.current;
+      const i = innerTextRef.current;
+      if (!o || !i) return;
+      setDistance(Math.max(0, i.scrollWidth - o.clientWidth));
+    });
+    ro.observe(outer);
+    return function () { ro.disconnect(); };
   }, []);
 
   // 点击外部关闭下拉
@@ -2205,8 +2234,13 @@ function MarqueeSelect(props) {
         React.createElement('span', {
           ref: textRef,
           className: 'dsh-plg-mselect-text' + (marquee ? ' dsh-plg-mselect-text-marquee' : ''),
-          style: marquee ? { '--dsh-mselect-distance': distance + 'px' } : undefined,
-        }, label),
+        },
+          React.createElement('span', {
+            ref: innerTextRef,
+            className: 'dsh-plg-mselect-text-inner',
+            style: marquee ? { '--dsh-mselect-distance': distance + 'px' } : undefined,
+          }, label),
+        ),
       ),
     ),
     React.createElement('span', { className: 'dsh-plg-mselect-arrow', 'aria-hidden': true }),
@@ -2224,6 +2258,7 @@ function MarqueeSelect(props) {
               disabled: disabled,
               selected: i === selectedIndex,
               active: i === activeIndex,
+              hovered: i === activeIndex,
               onHover: function () { setActiveIndex(i); },
               onPick: function () { if (!disabled) choose(opt.props.value); },
             });
@@ -2624,6 +2659,7 @@ function ModelMainSection(props) {
       invalidIndexes.length > 0 ? React.createElement('p', { className: 'dsh-plg-note' }, t('cfgChainHasInvalid')) : null,
       testArea,
       React.createElement('div', { className: 'dsh-plg-row' },
+        React.createElement('span', { className: 'dsh-plg-num', style: { visibility: 'hidden' } }),
         React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: addModel }, t('cfgAddFallback')),
         React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: restore }, t('cfgRestoreDefaults')),
         invalidIndexes.length > 0 ? React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: removeInvalid }, t('cfgRemoveInvalid')) : null,
@@ -3192,16 +3228,18 @@ const CSS = [
   '.dsh-plg-mselect[data-disabled="true"] .dsh-plg-mselect-trigger{cursor:default}',
   '.dsh-plg-mselect-visual{display:block;flex:1;min-width:0;overflow:hidden;pointer-events:none;line-height:20px}',
   '.dsh-plg-mselect-text{display:block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-primary)}',
-  '.dsh-plg-mselect-text-marquee{animation:dsh-mselect-marquee 6s linear infinite}',
+  '.dsh-plg-mselect-text-inner{display:inline-block;width:max-content;max-width:none;white-space:nowrap;vertical-align:top}',
+  '.dsh-plg-mselect-text-marquee .dsh-plg-mselect-text-inner{animation:dsh-mselect-marquee 6s linear infinite}',
   '@keyframes dsh-mselect-marquee{0%,8%{transform:translateX(0)}46%{transform:translateX(calc(-1 * var(--dsh-mselect-distance)))}54%{transform:translateX(calc(-1 * var(--dsh-mselect-distance)))}92%,100%{transform:translateX(0)}}',
   '.dsh-plg-mselect-arrow{position:absolute;right:12px;top:50%;width:12px;height:12px;transform:translateY(-50%);pointer-events:none;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:12px;text-align:center}',
   '.dsh-plg-mselect-arrow::before{content:"▾"}',
-  '.dsh-plg-mselect-list{position:absolute;top:calc(100% + 4px);left:0;z-index:100;min-width:100%;max-height:240px;overflow-y:auto;margin:0;padding:4px;list-style:none;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12)}',
+  '.dsh-plg-mselect-list{position:absolute;top:calc(100% + 4px);left:0;z-index:100;min-width:100%;max-width:min(92vw,420px);max-height:240px;overflow-y:auto;margin:0;padding:4px;list-style:none;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12)}',
   '.dsh-plg-mselect-list li{display:block;min-height:24px;padding:3px 8px;border-radius:6px;font-size:13px;line-height:20px;overflow:hidden;cursor:pointer;box-sizing:border-box}',
   '.dsh-plg-mselect-list li[data-active="true"]{background:var(--dsw-alias-interactive-bg-hover)}',
   '.dsh-plg-mselect-list li[aria-disabled="true"]{opacity:.4;cursor:default}',
   '.dsh-plg-mselect-option-text{display:inline-block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:top}',
-  '.dsh-plg-mselect-option-text-marquee{animation:dsh-mselect-marquee 6s linear infinite}',
+  '.dsh-plg-mselect-option-text-inner{display:inline-block;width:max-content;max-width:none;white-space:nowrap;vertical-align:top}',
+  '.dsh-plg-mselect-option-text-marquee .dsh-plg-mselect-option-text-inner{animation:dsh-mselect-marquee 6s linear infinite}',
   '.dsh-plg-textarea{flex:1;min-width:0;min-height:180px;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:8px 12px;resize:vertical;font-family:inherit}',
   '.dsh-plg-textarea:focus-visible{outline:none;border-color:var(--dsw-alias-brand-primary)}',
   '.dsh-plg-approval{color:var(--dsw-alias-state-warn-primary);font-size:12px;line-height:16px;flex-wrap:wrap}',

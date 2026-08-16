@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-08-17
+
+### Fixed
+- **下拉框超长文本自动滚动彻底修复（用户反馈，三轮根因）**：① 滚动显示仍是被压缩的省略号内容——`MarqueeSelect` 改为双层结构（外层裁剪/测量、内层全宽文字承载跑马灯动画），动画不再平移被 `max-width/ellipsis` 裁剪的盒子，滚动能真正露出全文；② 弹性宽度下拉（模型选择）不滚动——内层改用 `width:max-content`（`inline-block` 的 `max-width:none` 无法达到内容自然宽），弹出列表加 `max-width:min(92vw,420px)` 防被长文本撑宽；③ 初始不滚、切换后才滚——测量时机修复（`options.length` 入依赖 + `requestAnimationFrame` 补测 + `ResizeObserver` 容器尺寸变化重测），页面加载即正确滚动；另补传 `MarqueeOption` 缺失的 `hovered` 属性，列表悬停行滚动恢复 — [PEN-002]
+- **模型配置行操作按钮与模型控件左对齐（用户反馈）**：蓝色模型行带序号占位、红色按钮行无，导致按钮行偏左 26px——按钮行补 `visibility:hidden` 序号占位，两行控件左缘对齐 — [PEN-002]
+
 ## [3.1.0] - 2026-08-17
 
 ### Changed
@@ -262,6 +268,7 @@
 - 插件管理页版本检测卡片；按钮三态字体锚点对齐模型选择器（13px/500/20px）— [VU-001]
 
 [2.8.3]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.3
+[3.1.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.1
 [3.1.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.0
 [3.0.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.0.0
 [2.8.2]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.2
