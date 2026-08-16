@@ -532,3 +532,32 @@ test('SMK-15 failed topics not pollute memo; searched topics filtered (v3.0p)', 
   assert.ok(seen[3].system.includes('来源A'), 'round-2 web-plan memo has successful topic');
   assert.ok(!seen[3].system.includes('无结果主题'), 'failed topic not recorded in memo');
 });
+
+// v3.0p 审查（超时/耗时匹配）：judge 类小调用剥离 reasoningEffort（主链 effort=max 时 judge 也不带），
+// 主调用保留 effort 且 maxTokens 自动放宽；judge 10s 超时与实测 2s 级耗时匹配。
+test('SMK-16 judge drops reasoningEffort; main call keeps it (v3.0p review)', async () => {
+  const seen = [];
+  const { handlers } = boot({
+    llm: mockLlmSmart(seen, { related: true }),
+    sessionQuery: mockSessionQuery(),
+  });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '优化一下',
+    config: {
+      mode: 'lite',
+      fallback: [{ provider: 'p', model: 'm', reasoning: { enabled: true, effort: 'max' } }],
+      params: { maxTokens: 2000, timeoutMs: 30000 },
+    },
+  });
+  assert.equal(out.ok, true);
+  // relevance judge（seen[0]）：无 reasoningEffort、maxTokens=400 小预算
+  assert.equal(seen.length, 2, 'judge + main');
+  assert.ok(seen[0].system.includes('会话关联性判定器'), 'call 0 = relevance judge');
+  assert.equal(seen[0].reasoningEffort, undefined, 'judge strips reasoningEffort');
+  assert.equal(seen[0].maxTokens, 400, 'judge small budget kept');
+  // 主调用（seen[1]）：保留 effort + maxTokens 自动放宽 ≥8000
+  assert.equal(seen[1].reasoningEffort, 'max', 'main call keeps reasoningEffort');
+  assert.equal(seen[1].maxTokens, 8000, 'main call widens maxTokens');
+});

@@ -482,6 +482,8 @@ const WEB_PLAN_MAX_TOKENS = 400;
 const WEB_PLAN_OUTPUT_LIMIT = 800;
 const WEB_MEMO_MAX = 600;
 const WEB_MEMO_TOPICS_MAX = 12;
+// v3.0p 审查（超时/耗时匹配）：会话事件/历史提取超时保护
+const V2_SEARCH_EVENTS_TIMEOUT_MS = 10000;
 const KEYWORD_LIMIT = 8;
 const SNIPPET_BUDGET = 800;
 const CONTEXT_PROGRESS_MAX = 800;
@@ -1634,7 +1636,7 @@ async function v2ResolveProgress(services, historyText, cfg) {
       const stream = services.llm.stream({
         provider: entry.provider,
         model: entry.model,
-        ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+        // v3.0p 审查（超时/耗时匹配）：阶段 A 任务分析剥离 reasoningEffort（同 judge 策略）
         maxTokens: V2_PROGRESS_MAX_TOKENS,
         system: TASK_ANALYSIS_PROMPT,
         messages: [{
@@ -1797,8 +1799,12 @@ async function v2SearchEvents(services, sessionId, keywords, cfg) {
     hlog('[enhance] v2 searchEvents skipped kws=' + kws.length);
     return [];
   }
+  // v3.0p 审查（超时/耗时匹配）：searchEvents 补超时保护（10s，超时/失败 → [] 不阻断）
+  let timedOut = false;
+  const timer = services.timer.timeout(() => { timedOut = true; }, V2_SEARCH_EVENTS_TIMEOUT_MS);
   try {
     const page = await sq.searchEvents({ sessionId, query: kws.join(' '), limit: 3 });
+    if (timedOut) { hlog('[enhance] v2 searchEvents timeout'); return []; }
     const hits = page && Array.isArray(page.items) ? page.items : [];
     hlog('[enhance] v2 searchEvents kws=' + JSON.stringify(kws) + ' hits=' + hits.length);
     if (hits.length === 0) return [];
@@ -1809,6 +1815,8 @@ async function v2SearchEvents(services, sessionId, keywords, cfg) {
   } catch (e) {
     hlog('[enhance] v2 searchEvents failed', e && e.message ? e.message : e);
     return []; // 服务缺失/请求形状不符/失败 → 跳过事件段
+  } finally {
+    timer();
   }
 }
 
@@ -2508,7 +2516,11 @@ return {
       state.memDelta = memDelta;
       state.scenario = scenario;
       state.isPublish = isPublish;
-      state.timeoutMs = isPublish ? Math.max(cfg.timeoutMs, 240000) : cfg.timeoutMs;
+      // v3.0p 审查（超时/耗时匹配）：非 publish 模式链含 effort 时超时自动放宽 ≥120s——
+      // 实测 effort=max 长草稿（1500 字）完整生成 42s > 默认 30s → 必超时；无 effort 行为不变
+      state.timeoutMs = isPublish
+        ? Math.max(cfg.timeoutMs, 240000)
+        : (chain.some((e) => e && e.reasoningEffort) ? Math.max(cfg.timeoutMs, 120000) : cfg.timeoutMs);
       state.maxTokens = isPublish ? 0 : cfg.maxTokens;
       state.outputLimit = isPublish ? 0 : cfg.outputLimit;
       return state;
@@ -2519,6 +2531,9 @@ return {
     async function fetchSessionHistory(sessionId) {
       const sq = ctx.get('sessionQuery');
       if (!sq || typeof sq.listEvents !== 'function' || typeof sq.filterEvents !== 'function') return [];
+      // v3.0p 审查（超时/耗时匹配）：会话历史提取补超时保护（10s，超时/失败 → [] 不阻断）
+      let histTimedOut = false;
+      const histTimer = ctx.timer.timeout(() => { histTimedOut = true; }, V2_SEARCH_EVENTS_TIMEOUT_MS);
       try {
         const records = await sq.listEvents(sessionId);
         const msgSeqs = [];
@@ -2527,6 +2542,7 @@ return {
           const t = String(r && r.type || '');
           if (t === 'user/message' || t === 'assistant/message') msgSeqs.push(r && r.seq);
         }
+        if (histTimedOut) { hlog('[enhance] v3 history timeout'); return []; }
         if (msgSeqs.length === 0) return [];
         const minSeq = msgSeqs[msgSeqs.length - 1];
         const docs = await sq.filterEvents(sessionId, [{ kind: 'seq', from: minSeq }]);
@@ -2536,6 +2552,8 @@ return {
       } catch (e) {
         hlog('[enhance] v3 history failed', e && e.message ? e.message : e);
         return [];
+      } finally {
+        histTimer();
       }
     }
 
@@ -2551,7 +2569,7 @@ return {
         const stream = llm.stream({
           provider: entry.provider,
           model: entry.model,
-          ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+          // v3.0p 审查（超时/耗时匹配）：judge 类小调用剥离 reasoningEffort——判定/规划任务无需深度思考；effort 思考会消耗小预算输出（空流风险）并放大耗时
           maxTokens: RELEVANCE_MAX_TOKENS,
           system,
           messages: [{
@@ -2591,7 +2609,7 @@ return {
         const stream = llm.stream({
           provider: entry.provider,
           model: entry.model,
-          ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+          // v3.0p 审查（超时/耗时匹配）：judge 类小调用剥离 reasoningEffort——判定/规划任务无需深度思考；effort 思考会消耗小预算输出（空流风险）并放大耗时
           maxTokens: WEB_PLAN_MAX_TOKENS,
           system,
           messages: [{
@@ -2745,7 +2763,7 @@ return {
         const stream = llm.stream({
           provider: entry.provider,
           model: entry.model,
-          ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+          // v3.0p 审查（超时/耗时匹配）：judge 类小调用剥离 reasoningEffort——判定/规划任务无需深度思考；effort 思考会消耗小预算输出（空流风险）并放大耗时
           maxTokens: RELEVANCE_MAX_TOKENS,
           system,
           messages: [{
@@ -2783,7 +2801,7 @@ return {
         const stream = llm.stream({
           provider: entry.provider,
           model: entry.model,
-          ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+          // v3.0p 审查（超时/耗时匹配）：judge 类小调用剥离 reasoningEffort——判定/规划任务无需深度思考；effort 思考会消耗小预算输出（空流风险）并放大耗时
           maxTokens: RELEVANCE_MAX_TOKENS,
           system,
           messages: [{
