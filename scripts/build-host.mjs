@@ -16,6 +16,7 @@ const diagnosticsChunk = require('../src/host/diagnostics.js');
 const modelsChunk = require('../src/host/models.js');
 const pluginsChunk = require('../src/host/plugins.js');
 const updateChunk = require('../src/host/update.js');
+const enhanceChunk = require('../src/host/enhance-handlers.js');
 
 // Inject extracted chunks at the markers left by scripts/extract-*.mjs.
 let composed = body;
@@ -33,6 +34,9 @@ if (composed.includes('// @dsh-update-inject')) {
 }
 if (composed.includes('// @dsh-pure-inject')) {
   composed = composed.replace('// @dsh-pure-inject', pureChunk);
+}
+if (composed.includes('// @dsh-enhance-inject')) {
+  composed = composed.replace('// @dsh-enhance-inject', enhanceChunk);
 }
 
 // Keep the legacy header but mark it as a generated artifact.

@@ -66,6 +66,7 @@
 - **M5 运行时接入（目标架构）**：`diagnostics-service.js` 接入结构化 logger，日志/tail 统一走 JSON 格式 — 架构治理
 - **架构方案执行状态登记**：`docs/architecture-refactor-plan.md` 增加当前执行状态表，明确 M0-M6 完成度与剩余项 — 架构治理
 - **M5 完整性校验接入实际 staging**：新增 `lib/integrity.cjs`（bundle-safe），`updater-host.verifyTarball` 返回 SHA-256，外部执行器目录同步复制 `integrity.cjs` — 架构治理
+- **M1 尾项：enhance RPC 三 handler 提取**：从 `src/host/legacy/plugin-host.js` 抽出 `enhance/progress`、`enhance`、`cancel` 到 `src/host/enhance-handlers.js`（JSON 文本 chunk，构建注入回根文件，产物逐字节不变）；新增 `scripts/extract-enhance.mjs` 维护工具 — 架构治理
 
 ## [2.8.3] - 2026-08-16
 
