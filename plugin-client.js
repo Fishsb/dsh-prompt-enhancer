@@ -1813,7 +1813,11 @@ function UpdaterCard(props) {
   };
 
   const startConfirm = (which) => {
-    if (applyPhase !== 'idle' && applyPhase !== 'installed') return;
+    // v3.1.2（用户报告·一键更新后端口重启点不了）：一键更新（staged 模式）完成后
+    // applyPhase='staged'，新版本已下载——端口重启按钮应可点（放行 restart，进入确认态安装+重启）；
+    // 其余阶段（applying/restarting/done 等）仍禁止进入确认态
+    if (applyPhase !== 'idle' && applyPhase !== 'installed'
+      && !(applyPhase === 'staged' && which === 'restart')) return;
     setAction(which);
     setApplyPhase('confirm');
   };

@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+## [3.1.2] - 2026-08-17
+
+### Fixed
+- **修复一键更新后端口重启按钮点不了（用户报告）**：v3.0.0 职责划分后一键更新（staged 模式）终态为 `staged`（新版本已下载、服务未重启），但 `startConfirm` 白名单只放行 `idle/installed`，staged 态下点击端口重启被静默忽略——放行 `staged` 态下的 restart（端口重启），点击进入确认态完成安装+重启 — [VU-001]
+
 ## [3.1.1] - 2026-08-17
 
 ### Fixed
@@ -268,6 +273,7 @@
 - 插件管理页版本检测卡片；按钮三态字体锚点对齐模型选择器（13px/500/20px）— [VU-001]
 
 [2.8.3]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.3
+[3.1.2]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.2
 [3.1.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.1
 [3.1.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.0
 [3.0.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.0.0
