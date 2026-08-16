@@ -40,6 +40,10 @@ dsh plugin --profile web update dsh-prompt-enhancer
 dsh plugin --profile web remove dsh-prompt-enhancer
 ```
 
+> **卸载后必须重启 DSH**（`dsh web`）才从运行中移除——`remove` 只清理磁盘安装（package.json / node_modules / 层列表），host 半部仍在服务进程、client 半部仍在页面中加载；若重复执行 remove 提示 `no such dependency found`，即表示插件已卸载。
+> 更新注意：tag 锁定安装（`github:...#v3.0.0`）时 `update` 不会跨 tag 升级——升级请用 `dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#<新tag>`。
+> 卸载不会清除浏览器端的插件配置（localStorage `dsh.enhance.config.v2`），重装后配置仍保留。
+
 ### 方式二：下载安装包离线安装
 
 从 [Releases 页面](https://github.com/Fishsb/dsh-prompt-enhancer/releases) 下载 `dsh-prompt-enhancer-<版本>.tgz`（如 `dsh-prompt-enhancer-3.0.0.tgz`），然后安装：

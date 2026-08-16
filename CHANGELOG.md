@@ -7,6 +7,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **README 卸载/更新说明修正（用户反馈驱动）**：「更新 / 卸载」段落此前只列命令、未说明生效条件，导致 remove 后不重启被观感为「卸载不掉」——① 明确 **remove 后必须重启 dsh-web 才从运行中卸载**（dsh plugin 只清理磁盘安装与层列表，不重挂载运行实例）；② 注明重复 remove 报 `no such dependency found` 即表示已卸载；③ 注明 tag 锁定安装（`github:...#tag`）下 `update` 不跨 tag 升级，升级应用 `add github:...#新tag`；④ 注明卸载不清除浏览器端插件配置（localStorage `dsh.enhance.config.v2`），重装后保留 — 文档
+
 ## [3.0.0] - 2026-08-16
 
 ### Fixed
