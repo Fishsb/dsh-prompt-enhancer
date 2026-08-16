@@ -4,13 +4,14 @@
 # ---- 本地私有沉淀（永不推送 GitHub）----
 .internal/
 
-# ---- 项目地图（本地管理用，不推 GitHub）----
+# ---- 开发治理文档区（本地管理用，不推 GitHub；对外仅发布 package.json files 白名单内容）----
+# 开发治理/开发过程文档统一放 docs/internal/（架构方案/方案文档/贡献指南等）
+docs/internal/
+# 项目地图（本地管理用，不推 GitHub；治理工具契约路径，不可移动）
 docs/map/
-
-# ---- agent 协作治理文档（本地管理用，不推 GitHub）----
+# agent 协作治理文档（本地管理用，不推 GitHub）
 AGENTS.md
-
-# ---- 开发参考文档（本地管理用，不推 GitHub）----
+# 开发参考文档（本地管理用，不推 GitHub）
 docs/devref/
 
 # ---- 临时与系统文件 ----

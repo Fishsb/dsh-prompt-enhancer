@@ -10,7 +10,7 @@
 ### Changed
 - **一键更新执行器外挂 + staging 预拉取流程**：执行器不再从 `node_modules/dsh-prompt-enhancer/lib` 启动，改为复制到外部版本化目录（`%LOCALAPPDATA%\dsh-prompt-enhancer\executor\<version>`）并以外部目录为 WorkingDirectory；修复 Windows 下执行器自锁导致 pnpm 替换插件目录 EPERM 的根因。`apply` 流程改为：先在线下载 tarball 到 staging 并校验 → envcheck → 停止服务 → 本地安装 staging tarball → 启动 + 健康检查；重启失败自动回滚旧版本；安装失败恢复原服务；EXECUTOR_VERSION 0.1.5→0.1.6 — [VU-001]
 - **更新状态文案补充**：client 轮询新增 `staging/envcheck/preparing/rollback/rolledback` 状态展示，避免新阶段被误显示为“重启中”；失败时直接展示执行器返回的具体错误 — [VU-001]
-- **新增架构重构方案文档**：`docs/architecture-refactor-plan.md`，记录从单文件 monolith 到 Cordis 子插件 / 服务化 / 契约化 / 平台热更新的完整调整方案 — 架构治理
+- **新增架构重构方案文档**：`docs/internal/architecture-refactor-plan.md`，记录从单文件 monolith 到 Cordis 子插件 / 服务化 / 契约化 / 平台热更新的完整调整方案 — 架构治理
 - **M0 基线固化**：
   - 新增 `docs/compatibility-matrix.md`：RPC / 配置 / 形态 / 版本兼容矩阵
   - 新增 `test/sys.test.cjs`、`test/updater-host.test.cjs`，测试数 61 → 70
@@ -60,11 +60,11 @@
   - 新增 `src/host/integrity.js`：SHA-256 文件校验
   - 新增 `test/observability.test.cjs`（91 tests）— 架构治理
 - **M6 工程化收尾**：
-  - 新增 `CONTRIBUTING.md`：开发环境 / 命令 / 修改流程 / 发布边界
+  - 新增 `docs/internal/CONTRIBUTING.md`：开发环境 / 命令 / 修改流程 / 发布边界
   - CI 已覆盖语法检查、测试、构建、生成物一致性
   - 测试数 91，文档与地图同步 — 架构治理
 - **M5 运行时接入（目标架构）**：`diagnostics-service.js` 接入结构化 logger，日志/tail 统一走 JSON 格式 — 架构治理
-- **架构方案执行状态登记**：`docs/architecture-refactor-plan.md` 增加当前执行状态表，明确 M0-M6 完成度与剩余项 — 架构治理
+- **架构方案执行状态登记**：`docs/internal/architecture-refactor-plan.md` 增加当前执行状态表，明确 M0-M6 完成度与剩余项 — 架构治理
 - **M5 完整性校验接入实际 staging**：新增 `lib/integrity.cjs`（bundle-safe），`updater-host.verifyTarball` 返回 SHA-256，外部执行器目录同步复制 `integrity.cjs` — 架构治理
 - **M1 尾项：enhance RPC 三 handler 提取**：从 `src/host/legacy/plugin-host.js` 抽出 `enhance/progress`、`enhance`、`cancel` 到 `src/host/enhance-handlers.js`（JSON 文本 chunk，构建注入回根文件，产物逐字节不变）；新增 `scripts/extract-enhance.mjs` 维护工具 — 架构治理
 - **M1 尾项：client React 组件拆分**：从 `src/client/legacy/plugin-client.js` 抽出 10 个 React UI 组件（EnhanceButton/EnhanceBar/UpdaterCard/PluginsSection/CollapsibleSection/ModelMainSection/FallbackRow/ModelConfigTab/ParamsTab/ModelPluginsSection+CordisBadgePlaceholder）到 `src/client/components/*.js`；`build-client.mjs` 注入改为**循环注入**（组件 chunk 内嵌其他注入标记时多轮展开，产物逐字节不变）；新增 `scripts/extract-client-components.mjs` 维护工具 — 架构治理
@@ -80,6 +80,7 @@
 - **publish 多步检索 + 产物形态调整（v3.0p，用户确认方案）**：
   - **产物形态**：九章规格重写为「**完善、有明确边界的生成提示词**」形态（参考 WebGL Demo 需求书样例）——① 目标概述+**场景化角色设定**（game→游戏开发专家/TA；software→软件架构师；generic→顶级技术专家）；② 需求范围与明确边界（绝对/必须/不得级硬边界）；③ 技术约束与架构（**架构层写实到方案名**，数值给量级）；④ 核心功能要求（**每条附设计意图**，如 SSAO 消除塑料感）；⑤ 场景与内容设计（含代码生成策略）；⑥ 交互与界面；⑦ 扩展方向（**强制沿用既有体系/尺度，不破坏闭合**）；⑧ 交付与限制（**禁止 TODO/占位/要求用户补齐**）；⑨ 验收清单；新增【网络信息运用】指令段（每轮必须参考网络参考、只补缺口、标注来源、**不得虚构来源**）
   - **多步网络检索**：① **LLM 检索主题规划**——新 `prompts/websearch.md` → `WEBSEARCH_PLAN_PROMPT`，规划 2~3 个差异化主题（避开已检索主题），10s 超时/失败 → 降级 `buildWebQuery` 单 query（行为不变）；② **会话级检索记忆 `publishWebMemo`**——主题去重（≤12）+ 要点摘要累积（≤600 字符）；③ **跨轮要点回注**——历史要点以【已获取网络参考】注入当轮（预算内、防回显护栏），后续轮只补新缺口；④ **一轮多主题检索**——逐主题 `web.search`（各 10s 超时，单个失败仅跳过该主题），结果按「### 检索主题」合并注入，`WEB_REF_MAX` 800→1600；PURE 新增 `parseSearchPlan`（U66）；集成测试 SMK-13（多主题逐次搜索+注入）/ SMK-14（跨轮 memo 回注），SMK-12 更新为含 web-plan 的降级路径，测试 107 → 109 — 架构治理
+- **文档架构与发布边界规则（用户规则 2026-08-16）**：① 项目功能文档（README 中/英、docs/screenshots/、docs/compatibility-matrix.md、release-notes/、CHANGELOG）与开发治理文档（AGENTS.md、docs/map/、docs/devref/、docs/internal/）**分开存放**——新增 `docs/internal/` 开发治理区（gitignore，本地不推 GitHub），移入 `architecture-refactor-plan.md`、`CONTRIBUTING.md`、`方案-publish路由与自评.md`；`docs/map/`、`docs/devref/` 保持治理工具契约路径（已 gitignore）；② 对外发布仅含项目功能文档 + GitHub 需求说明（README）——`package.json` files 白名单核对（lib/plugin-host.js/plugin-client.js/cordis.patch.yml/README*/LICENSE，不含 docs/、AGENTS.md、src/test/prompts/scripts）；③ 发布 SOP 新增第 6 步 `npm pack --dry-run` 白名单核对；AGENTS.md 新增「文档架构与发布边界」章节与分类表 — 架构治理
 - **v3.0p 审查修复（五处）**：① **memo 截断方向**——`slice(0, 600)` 保旧丢新改为 `slice(-600)` 保留最新要点；② **失败主题不污染已检索列表**——仅 `hits > 0` 的检索主题并入会话记忆（搜索失败/超时不占位，后续轮仍可重试）；③ **规划主题硬去重**——`planWebSearch` 返回的主题与已检索主题过滤后再搜索（LLM 未遵从提示词时的兜底），过滤后为空 → 降级单 query；④ **预算门前置**——上下文预算 = 0 时跳过 `planWebSearch`（省 1 次 LLM 调用，与「预算 > 0 才启用检索」联动语义一致）；⑤ **用户可见文案同步**——client publish hint 更新为新九章形态 + 多步检索描述，README（中/英）publish 描述同步，`docs/map/flow/prompt-enhance.md` 登记 publish 检索链路；新增 SMK-15（失败主题不入 memo + 已检索主题去重），测试 109 → 110 — 架构治理
 - **超时/耗时匹配审查（真实 LLM 实测驱动）**：opencode-go/deepseek-v4-flash 实测——judge 形状（effort=max / 无 effort，含 2400 字长窗口）耗时 1.8~2.3s（10s 超时余量 5 倍，匹配良好）；**主调用形状（1500 字草稿 + effort=max + 8000 tokens）实测 42s > 非 publish 默认超时 30s → 正常情况必 TIMEOUT**（实锤实例）。修复三项：① **非 publish 主调用超时自动放宽**——链含 effort 时 `timeoutMs` 至少 120s（无 effort 行为不变）；② **judge 类小调用剥离 reasoningEffort**——relevance/intent/doc-analysis/web-plan/阶段 A 任务分析共 5 处（判定/规划任务无需深度思考；消除「effort 思考消耗 400 token 小预算 → 空流」边界风险，实测剥离后耗时相当）；主调用保留 effort（含 maxTokens ≥8000 放宽）；③ **会话历史/事件提取补超时保护**——`fetchSessionHistory` 与 `v2SearchEvents` 加 10s 超时（超时/失败 → [] 不阻断）；新增 SMK-16（judge 剥离 effort + 主调用保留），测试 110 → 111；工作区扫描 2s 经实测（155 条目 4ms）确认余量充足，保持不变 — 架构治理
 

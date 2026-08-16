@@ -8,8 +8,6 @@
     "lib",
     "plugin-host.js",
     "plugin-client.js",
-    "prompts",
-    "scripts",
     "cordis.patch.yml",
     "README.md",
     "README.en.md",
