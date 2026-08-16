@@ -515,6 +515,9 @@ const ZH = {
   updApplyRetry: '第 {n} 次重启未恢复，执行器自动重试中…',
   updApplyRestartFailed: '5 次重启均未恢复——请手动执行 net start dsh-web 后刷新',
   updApplyExecutorDown: '更新执行器不可用——请确认插件为 bundle 安装（端口 3081）',
+  // v2.9.x（一键更新不重启·修复）：旧执行器无 restart:false 支持，阻止执行并提示重启 dsh-web
+  updExecutorTooOld: '更新执行器版本过旧（v{v}），不支持「只安装不重启」——请重启 dsh-web 完成执行器升级（≥0.1.7）后重试',
+  updCheckFirst: '请先点击「检测版本」确认有新版本后再更新',
   updApplyDone: '✓ 重启成功，请刷新页面',
   updApplyReload: '刷新页面',
   updApplyInstalledManual: '已安装，请手动重启服务',
@@ -740,6 +743,9 @@ const EN = {
   updApplyRetry: 'Attempt {n} did not recover — executor auto-retrying…',
   updApplyRestartFailed: 'Still down after 5 attempts — run `net start dsh-web` manually, then refresh',
   updApplyExecutorDown: 'Update executor unavailable — ensure bundle install (port 3081)',
+  // v2.9.x (install-without-restart fix): old executor lacks restart:false — block and ask to restart dsh web
+  updExecutorTooOld: 'Update executor is too old (v{v}) and does not support install-without-restart — restart dsh web to upgrade the executor (≥0.1.7), then retry',
+  updCheckFirst: 'Run "Check version" first to confirm a new version before updating',
   updApplyDone: '✓ Restarted — refresh the page',
   updApplyReload: 'Refresh',
   updApplyInstalledManual: 'Installed — restart the service manually',
@@ -1359,6 +1365,21 @@ function updaterRepoOf(cfg) {
   return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) && r.length <= 100 ? r : UPDATER_DEFAULT_REPO;
 }
 
+// v2.9.x（一键更新不重启·修复）：执行器 apply 的 restart:false 支持自 0.1.7 起——
+// 执行前校验运行中执行器版本，过旧则阻止执行并提示重启 dsh-web（防旧执行器
+// 忽略 restart:false 自动拉起服务）
+const MIN_EXECUTOR_VERSION = '0.1.7';
+function executorVersionAtLeast(v) {
+  if (typeof v !== 'string') return false;
+  const pa = String(v).replace(/^v/, '').split('.').map((x) => Number(x) || 0);
+  const pb = MIN_EXECUTOR_VERSION.split('.').map((x) => Number(x) || 0);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0)) return true;
+    if ((pa[i] || 0) < (pb[i] || 0)) return false;
+  }
+  return true;
+}
+
 // v2.5.0：环境检测渲染元数据——展示顺序/标签键/detail 状态码 → 文案键
 // （detail 由 host probeEnv 返回；文案键对应 i18n 字典；
 // v2.5.2 收敛为重启链 6 项；v2.7.0 收敛为重启阶段真实依赖 5 项：
@@ -1609,6 +1630,14 @@ function UpdaterCard(props) {
   // 一键拉取更新：执行器 apply restart:false（下载 + 校验 + 停服 + 安装，不重启）
   const runPullApply = () => {
     if (applyPhase !== 'confirm' || action !== 'apply') return;
+    // v2.9.x：防御——未检测版本（result 缺失）时直接提示，避免 result.remoteTag 抛 TypeError
+    // 被外层 catch 误报为「执行器不可用」
+    if (!result || !result.remoteTag) {
+      setApplyErr(t('updCheckFirst'));
+      setApplyPhase('idle');
+      setAction(null);
+      return;
+    }
     setApplyPhase('applying');
     setApplyErr(null);
     setApplyStatus(null);
@@ -1621,8 +1650,20 @@ function UpdaterCard(props) {
         setAction(null);
         return null;
       }
-      // accepted 立即返回，安装进度走 status 轮询
-      return executor.call('apply', { repo, tag: result.remoteTag, profile, serviceName, port: en.port, restart: false }, en.port);
+      // v2.9.x（一键更新不重启·修复）：执行前校验执行器版本——旧执行器（<0.1.7）无
+      // restart:false 支持，会忽略该参数并自动拉起服务（executorEnsure 的目标版本此前
+      // 取自进程缓存，旧 dsh-web 永远不升级执行器）；过旧则阻止并提示重启 dsh-web
+      return executor.call('ping', {}, en.port).then((p) => {
+        const pv = p && typeof p === 'object' && typeof p.version === 'string' ? p.version : '';
+        if (!executorVersionAtLeast(pv)) {
+          setApplyErr(t('updExecutorTooOld').replace('{v}', pv || '?'));
+          setApplyPhase('idle');
+          setAction(null);
+          return null;
+        }
+        // accepted 立即返回，安装进度走 status 轮询
+        return executor.call('apply', { repo, tag: result.remoteTag, profile, serviceName, port: en.port, restart: false }, en.port);
+      });
     }).then((applyRes) => {
       if (!applyRes) return;
       const ar = applyRes && typeof applyRes === 'object' ? applyRes : {};

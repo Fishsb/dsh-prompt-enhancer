@@ -7,6 +7,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **一键更新误触发服务重启（用户报告）**：根因 = 运行中的更新执行器仍是 0.1.6（旧 dsh-web 进程内 `EXECUTOR_VERSION` 被 require 缓存锁在旧值，executorEnsure 与旧执行器恒等匹配、永不升级），旧执行器无 `restart:false` 支持、忽略该参数走完整「安装+重启」流程。修复双管齐下：① **client 执行前版本守卫**——`runPullApply` 调 apply 前先 ping 执行器，版本 <0.1.7 则阻止并提示「请重启 dsh-web 升级执行器」；② **executorEnsure 目标版本改从磁盘解析**（`readLatestExecutorVersion` 每次调用读安装副本 `sys.cjs`，不再依赖进程 require 缓存）——旧 host 也能 kill 旧执行器并拉起新版；③ 顺带修复 `result` 为空时 `result.remoteTag` 抛 TypeError 被外层 catch 误报「执行器不可用」的问题（新增 `updCheckFirst` 提示）；新增 i18n `updExecutorTooOld`/`updCheckFirst`（中英）；实测：手动复刻 envcheck/executorEnsure/ping/apply 全链路 200、执行器确认 0.1.7 在线且状态 idle、null-result 路径正确提示 — [VU-001] — 架构治理
+
 ## [3.1.0] - 2026-08-16
 
 ### Fixed
