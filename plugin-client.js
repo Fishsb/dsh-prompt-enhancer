@@ -539,6 +539,8 @@ const ZH = {
   cfgLogs: '诊断日志',
   cfgLogsEmpty: '暂无日志（执行优化后生成）',
   navModelPlugins: '模型与插件',
+  // 2026-08-16（方案「设置界面样式与交互对齐官方」）：设置页 section 简介
+  secPluginsIntro: '模型链、优化参数与插件管理的统一设置入口，修改即时保存。',
   tabModels: '模型配置',
   tabParams: '优化参数',
   tabPlugins: '插件管理',
@@ -757,6 +759,8 @@ const EN = {
   cfgLogs: 'Diagnostics log',
   cfgLogsEmpty: 'No logs yet (they appear after optimizations)',
   navModelPlugins: 'Models & plugins',
+  // 2026-08-16（方案「设置界面样式与交互对齐官方」）：设置页 section 简介
+  secPluginsIntro: 'Model chain, optimization parameters, and plugin management in one place; changes save immediately.',
   tabModels: 'Models',
   tabParams: 'Optimization',
   tabPlugins: 'Plugins',
@@ -828,6 +832,15 @@ const EN = {
   stageDetailRetry: 'Model error, retrying {current}/{total}…',
   stageDone: '✓',
 };
+
+let dshEnhIdSeq = 0;
+// 2026-08-16（方案「设置界面样式与交互对齐官方」）：稳定 id 生成器——
+// 组件内以 useState(() => ...)/useRef 固定一次，避免重渲染漂移；
+// 用于 label htmlFor / aria-controls / aria-describedby 关联
+function dshEnhId(prefix) {
+  dshEnhIdSeq += 1;
+  return (prefix || 'dsh-enh') + '-' + dshEnhIdSeq;
+}
 
 function errorKey(code) {
   const map = {
@@ -1385,6 +1398,8 @@ function UpdaterCard(props) {
   const [restartRound, setRestartRound] = React.useState(1);
   // v2.7.0：更新未重启提醒（null=无提醒；命中显示横幅 + 重启命令）
   const [restartNotice, setRestartNotice] = React.useState(null);
+  // 2026-08-16（方案「设置界面样式与交互对齐官方」）：repo/目录输入 label htmlFor 关联（稳定 id）
+  const updIds = React.useState(() => ({ repo: dshEnhId('dsh-enh-upd-repo'), dir: dshEnhId('dsh-enh-upd-dir') }))[0];
 
   // v2.4.1（§9-T5）：RPC 携带 sessionId——host 需经会话解析 sandboxPolicy（写入边界=会话工作区）
   const sessionId = props.useSessions ? props.useSessions((s) => s.current) : undefined;
@@ -1653,8 +1668,9 @@ function UpdaterCard(props) {
       : null,
     // 行 1：repo 输入 + 检测按钮 + 环境检测按钮（v2.5.0，样式同检测按钮）
     React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('label', { className: 'dsh-plg-label' }, t('updRepo')),
+      React.createElement('label', { className: 'dsh-plg-label', htmlFor: updIds.repo }, t('updRepo')),
       React.createElement('input', {
+        id: updIds.repo,
         className: 'dsh-plg-input',
         value: repoInput,
         spellCheck: false,
@@ -1713,8 +1729,9 @@ function UpdaterCard(props) {
       : null,
     // 行 3：目标目录 + 一键拉取（仅 outdated 可用）
     React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('label', { className: 'dsh-plg-label' }, t('updDir')),
+      React.createElement('label', { className: 'dsh-plg-label', htmlFor: updIds.dir }, t('updDir')),
       React.createElement('input', {
+        id: updIds.dir,
         className: 'dsh-plg-input',
         value: dirInput,
         spellCheck: false,
@@ -1792,6 +1809,8 @@ function PluginsSection(props) {
   const [logs, setLogs] = React.useState(null);
   // v2.4.3：版本选择与确认切换——选中非当前版本时显示「当前 → 目标」核对行，确认后执行 update
   const [selVersion, setSelVersion] = React.useState({});
+  // 2026-08-16（方案「设置界面样式与交互对齐官方」）：版本下拉 label htmlFor 关联（稳定 id）
+  const versionId = React.useState(() => dshEnhId('dsh-plg-version'))[0];
 
   const sessionId = props.useSessions ? props.useSessions((s) => s.current) : undefined;
 
@@ -1891,8 +1910,9 @@ function PluginsSection(props) {
           React.createElement('span', { className: 'dsh-plg-state' }, stateText),
         ),
         React.createElement('div', { className: 'dsh-plg-row' },
-          React.createElement('label', { className: 'dsh-plg-label' }, t('pluginsVersion')),
+          React.createElement('label', { className: 'dsh-plg-label', htmlFor: versionId + '-' + p.pluginId }, t('pluginsVersion')),
           React.createElement('select', {
+            id: versionId + '-' + p.pluginId,
             className: 'dsh-plg-select',
             value: sel,
             onChange: (e) => setSelVersion({ ...selVersion, [p.pluginId]: e.target.value }),
@@ -2015,18 +2035,23 @@ const OUTPUTLIMIT_OPTIONS = [2000, 4000, 8000, 16000];
 function CollapsibleSection(props) {
   // v2.4.3：默认展开（需求：模型配置栏打开即见完整内容）
   const [open, setOpen] = React.useState(true);
+  // 2026-08-16（方案「设置界面样式与交互对齐官方」）：稳定 id + aria 关联
+  // （head 按钮 aria-controls → body region）
+  const ids = React.useState(() => ({ head: dshEnhId('dsh-cfg-sec-head'), body: dshEnhId('dsh-cfg-sec-body') }))[0];
   return React.createElement('div', { className: 'dsh-cfg-sec' },
     React.createElement('button', {
       type: 'button',
+      id: ids.head,
       className: 'dsh-cfg-sec-head',
       onClick: () => setOpen(!open),
       'aria-expanded': open,
+      'aria-controls': ids.body,
     },
       React.createElement('span', { className: 'dsh-cfg-chev' + (open ? ' dsh-cfg-chev-open' : '') }, '▸'),
       React.createElement('span', { className: 'dsh-cfg-sec-title' }, props.title),
       props.summary ? React.createElement('span', { className: 'dsh-cfg-sec-summary' }, props.summary) : null,
     ),
-    open ? React.createElement('div', { className: 'dsh-cfg-sec-body' }, props.children) : null,
+    open ? React.createElement('div', { id: ids.body, role: 'region', 'aria-labelledby': ids.head, className: 'dsh-cfg-sec-body' }, props.children) : null,
   );
 }
 
@@ -2331,6 +2356,22 @@ function ModelConfigTab(props) {
 
 function ParamsTab(props) {
   const t = makeT(props);
+  // 2026-08-16（方案「设置界面样式与交互对齐官方」）：稳定 id——label htmlFor /
+  // aria-describedby 关联（useState 初始化只执行一次，重渲染不漂移）
+  const ids = React.useState(() => ({
+    mode: dshEnhId('dsh-enh-mode'),
+    modeHint: dshEnhId('dsh-enh-mode-hint'),
+    tpl: dshEnhId('dsh-enh-tpl'),
+    memory: dshEnhId('dsh-enh-memory'),
+    memoryHint: dshEnhId('dsh-enh-memory-hint'),
+    budget: dshEnhId('dsh-enh-budget'),
+    budgetHint: dshEnhId('dsh-enh-budget-hint'),
+    timeout: dshEnhId('dsh-enh-timeout'),
+    maxTokens: dshEnhId('dsh-enh-maxtokens'),
+    outputLimit: dshEnhId('dsh-enh-outputlimit'),
+    template: dshEnhId('dsh-enh-template'),
+    templateNote: dshEnhId('dsh-enh-template-note'),
+  }))[0];
   const cfg = configState.value;
   const save = (patch) => { saveConfig(patch); };
   const onNumber = (key) => (e) => save({ params: { ...cfg.params, [key]: Number(e.target.value) } });
@@ -2370,8 +2411,10 @@ function ParamsTab(props) {
     // 宽度不大，并排省一行纵向空间；窄屏自动换行，见 .dsh-plg-field flex-wrap）
     React.createElement('div', { className: 'dsh-plg-row dsh-plg-row-duo' },
       React.createElement('div', { className: 'dsh-plg-field' },
-        React.createElement('label', { className: 'dsh-plg-label' }, t('cfgMode')),
+        React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.mode }, t('cfgMode')),
         React.createElement('select', {
+          id: ids.mode,
+          'aria-describedby': ids.modeHint,
           className: 'dsh-plg-select',
           value: cfg.mode,
           onChange: (e) => {
@@ -2383,8 +2426,9 @@ function ParamsTab(props) {
         }),
       ),
       React.createElement('div', { className: 'dsh-plg-field' },
-        React.createElement('label', { className: 'dsh-plg-label' }, t('cfgTemplateMode')),
+        React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.tpl }, t('cfgTemplateMode')),
         React.createElement('select', {
+          id: ids.tpl,
           className: 'dsh-plg-select',
           value: cfg.template.mode,
           onChange: (e) => save({ template: { ...cfg.template, mode: e.target.value } }),
@@ -2395,11 +2439,13 @@ function ParamsTab(props) {
         }),
       ),
     ),
-    React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgModeHint' + cfg.mode.charAt(0).toUpperCase() + cfg.mode.slice(1))),
+    React.createElement('p', { id: ids.modeHint, className: 'dsh-plg-hint' }, t('cfgModeHint' + cfg.mode.charAt(0).toUpperCase() + cfg.mode.slice(1))),
     // v2.2（§6.2/§6.6）：记忆功能独立开关（所有模式可开/关，即时准确切换）
     React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('label', { className: 'dsh-plg-label' }, t('cfgMemory')),
+      React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.memory }, t('cfgMemory')),
       React.createElement('select', {
+        id: ids.memory,
+        'aria-describedby': ids.memoryHint,
         className: 'dsh-plg-select dsh-plg-select-thinking',
         value: memoryValue ? 'on' : 'off',
         disabled: memoryLocked,
@@ -2410,33 +2456,35 @@ function ParamsTab(props) {
         ],
       }),
     ),
-    React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgMemoryNote')),
+    React.createElement('p', { id: ids.memoryHint, className: 'dsh-plg-hint' }, t('cfgMemoryNote')),
     memoryLocked ? React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgPublishMemoryLocked')) : null,
     // 预算下拉（全模式可见；0 = 不注入）
     React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('label', { className: 'dsh-plg-label' }, t('cfgContextBudget')),
+      React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.budget }, t('cfgContextBudget')),
       React.createElement('select', {
+        id: ids.budget,
+        'aria-describedby': ids.budgetHint,
         className: 'dsh-plg-select',
         value: String(cfg.context.budgetChars),
         onChange: (e) => save({ context: { ...cfg.context, budgetChars: Number(e.target.value) } }),
         children: [0, 2000, 4000, 8000].map((v) => React.createElement('option', { key: String(v), value: String(v) }, v === 0 ? t('cfgContextBudget0') : String(v))),
       }),
     ),
-    React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgContextNote')),
+    React.createElement('p', { id: ids.budgetHint, className: 'dsh-plg-hint' }, t('cfgContextNote')),
     // v2.8.0（实测修正）：发布模式「不设输出限制」为 host 硬覆盖（超时 ≥240s、maxTokens 省略、
     // outputLimit=0）——超时/输出 Token 上限/输出字符上限三项对本模式不生效；置灰 + 说明，
     // 避免「调整后状态没有更新」的误导（此前可编辑但实际无效）
     React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('label', { className: 'dsh-plg-label' }, t('cfgTimeout')),
-      React.createElement('select', Object.assign({ className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('timeoutMs', TIMEOUT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, (v / 1000) + 's'))))),
+      React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.timeout }, t('cfgTimeout')),
+      React.createElement('select', Object.assign({ id: ids.timeout, className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('timeoutMs', TIMEOUT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, (v / 1000) + 's'))))),
     ),
     React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('label', { className: 'dsh-plg-label' }, t('cfgMaxTokens')),
-      React.createElement('select', Object.assign({ className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('maxTokens', MAXTOKENS_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v)))))),
+      React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.maxTokens }, t('cfgMaxTokens')),
+      React.createElement('select', Object.assign({ id: ids.maxTokens, className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('maxTokens', MAXTOKENS_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v)))))),
     ),
     React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('label', { className: 'dsh-plg-label' }, t('cfgOutputLimit')),
-      React.createElement('select', Object.assign({ className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('outputLimit', OUTPUTLIMIT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v)))))),
+      React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.outputLimit }, t('cfgOutputLimit')),
+      React.createElement('select', Object.assign({ id: ids.outputLimit, className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('outputLimit', OUTPUTLIMIT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v)))))),
     ),
     isPublishMode
       ? React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgPublishNoLimit'))
@@ -2445,15 +2493,17 @@ function ParamsTab(props) {
     // v2.4.7（每模式独立）：textarea 显示当前模式文本；编辑只写当前模式；切模式跟随
     cfg.template.mode === 'custom'
       ? React.createElement('div', { className: 'dsh-plg-col' },
-          React.createElement('label', { className: 'dsh-plg-label' }, curLabel),
+          React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.template }, curLabel),
           React.createElement('textarea', {
+            id: ids.template,
+            'aria-describedby': ids.templateNote,
             className: 'dsh-plg-textarea',
             value: curText,
             rows: 12,
             placeholder: t('cfgTemplateText'),
             onChange: (e) => save({ template: { ...cfg.template, texts: { ...(cfg.template.texts || {}), [cfg.mode]: e.target.value.slice(0, 4000) } } }),
           }),
-          React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgTemplateNote')),
+          React.createElement('p', { id: ids.templateNote, className: 'dsh-plg-hint' }, t('cfgTemplateNote')),
         )
       : null,
     React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgHint')),
@@ -2465,6 +2515,10 @@ function ModelPluginsSection(props) {
   const t = makeT(props);
   const [tab, setTab] = React.useState('models');
   const [, force] = React.useState(0);
+  // 2026-08-16（方案「设置界面样式与交互对齐官方」）：稳定 id——tab/panel 关联
+  // （useState 初始化只执行一次，重渲染不漂移）
+  const tabsId = React.useState(() => dshEnhId('dsh-plg-tabs'))[0];
+  const tabRefs = React.useRef([]);
   React.useEffect(() => subscribeConfig(() => force((v) => v + 1)), []);
   // v2.7.0：保存状态订阅（saving 转圈 / saved ✓ / failed ✗）
   React.useEffect(() => subscribeSaveStatus(() => force((v) => v + 1)), []);
@@ -2477,19 +2531,47 @@ function ModelPluginsSection(props) {
   const body = tab === 'models' ? React.createElement(ModelConfigTab, props)
     : tab === 'params' ? React.createElement(ParamsTab, props)
     : React.createElement(PluginsSection, props);
+  // 2026-08-16（方案「设置界面样式与交互对齐官方」）：tab 键盘导航——
+  // roving tabindex + 方向键/Home/End（对齐官方 PluginsSettingsSection）
+  const onTabKeyDown = (event, index) => {
+    let nextIndex;
+    switch (event.key) {
+      case 'ArrowRight': nextIndex = (index + 1) % tabs.length; break;
+      case 'ArrowLeft': nextIndex = (index - 1 + tabs.length) % tabs.length; break;
+      case 'Home': nextIndex = 0; break;
+      case 'End': nextIndex = tabs.length - 1; break;
+      default: return;
+    }
+    event.preventDefault();
+    setTab(tabs[nextIndex][0]);
+    const nextTab = tabRefs.current[nextIndex];
+    if (nextTab) nextTab.focus();
+  };
 
   return React.createElement('div', { className: 'dsh-plg-root' },
-    React.createElement('div', { className: 'dsh-cfg-tabs', role: 'tablist' },
-      tabs.map((entry) => React.createElement('button', {
+    // 2026-08-16（方案）：section 标题 + 简介（对齐官方 section 范式：h2 18/600 + intro 13px）
+    React.createElement('h2', { className: 'dsh-plg-title' }, t('navModelPlugins')),
+    React.createElement('p', { className: 'dsh-plg-intro' }, t('secPluginsIntro')),
+    React.createElement('div', { className: 'dsh-cfg-tabs', role: 'tablist', 'aria-label': t('navModelPlugins') },
+      tabs.map((entry, index) => React.createElement('button', {
         key: entry[0],
+        ref: (element) => { tabRefs.current[index] = element; },
+        id: tabsId + '-tab-' + entry[0],
         type: 'button',
         role: 'tab',
         'aria-selected': tab === entry[0],
+        'aria-controls': tabsId + '-panel-' + entry[0],
+        tabIndex: tab === entry[0] ? 0 : -1,
         className: 'dsh-cfg-tab' + (tab === entry[0] ? ' dsh-cfg-tab-active' : ''),
         onClick: () => setTab(entry[0]),
+        onKeyDown: (event) => onTabKeyDown(event, index),
       }, entry[1])),
     ),
-    body,
+    React.createElement('div', {
+      id: tabsId + '-panel-' + tab,
+      role: 'tabpanel',
+      'aria-labelledby': tabsId + '-tab-' + tab,
+    }, body),
     // v2.7.0：保存状态——saving 转圈 / saved ✓ / failed ✗ / idle 隐藏；
     // 无 timer 服务（降级）→ 保持旧常驻「已保存」提示
     !timerSvc
@@ -2509,14 +2591,13 @@ function ModelPluginsSection(props) {
 function CordisBadgePlaceholder() {
   return null;
 }
-
 const CSS = [
   // v2.3.3（§7.10）：font-weight:500 对齐 DSH ModelSelect trigger 样式
   // v2.4.3-c（统一样式）：容器对齐模型 trigger——无边框、24px 胶囊、label-secondary 灰字、
   // hover 更深色椭圆背景 rgba(38,49,72,.06)（trigger 实测同值）、padding 0 8px 0 4px（左4右8，用户指定）；
   // busy/result 保留状态色（追加淡色背景表达）；emoji ✨ 与字重 600 保留（用户确认项）
   '.dsh-enh-btn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px 0 4px;border:none;border-radius:24px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:600;line-height:20px;cursor:pointer;transition:background-color .15s ease;white-space:nowrap}',
-  '.dsh-enh-btn:hover:not(:disabled){background:rgba(38,49,72,.06)}',
+  '.dsh-enh-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}',
   // v2.3.2（§7.2）：空输入不再降低按钮饱和度——disabled 仅保留点击无效提示，无 opacity 变暗
   '.dsh-enh-btn:disabled{cursor:not-allowed}',
   // v2.4.0（方案 §10.2）：三态文字显式字体锚点——13px/500/20px 与模型 trigger 对齐（实机实测），
@@ -2533,8 +2614,8 @@ const CSS = [
   '.dsh-enh-icon-dim{filter:saturate(.2)}',
   // v2.4.0（方案 §10.2）：模式短标签不再独立声明字号——继承 .dsh-enh-btn-text 锚点（13px/500/20px）
   // v2.4.3-c（统一样式）：busy/result 去边框后以状态文字色 + 淡色背景表达（hover 时统一为深灰蓝椭圆反馈）
-  '.dsh-enh-btn-busy{color:var(--dsw-alias-state-warn-primary);background:rgba(245,158,11,.06)}',
-  '.dsh-enh-btn-result{color:var(--dsw-alias-state-success-primary);background:rgba(34,197,94,.06)}',
+  '.dsh-enh-btn-busy{color:var(--dsw-alias-state-warn-primary);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 6%,transparent)}',
+  '.dsh-enh-btn-result{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 6%,transparent)}',
   // v2.3.3（§7.10）：busy hover 闪烁修复——progress 文档流占位（宽度恒定），
   // cancel absolute 覆盖其上，hover 只切 opacity（无尺寸抖动，hover 判定区不变）
   '.dsh-enh-btn-busy .dsh-enh-status{position:relative;display:inline-block;text-align:center}',
@@ -2546,72 +2627,79 @@ const CSS = [
   '@keyframes dsh-enh-rotate{to{transform:rotate(360deg)}}',
   '@media (prefers-reduced-motion: reduce){.dsh-enh-spin{animation:none}}',
   '.dsh-enh-bar{display:flex;align-items:center;gap:10px;padding:5px 14px;font-size:12px;line-height:16px;color:var(--dsw-alias-state-error-primary)}',
-  '.dsh-enh-bar-btn{background:transparent;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:2px 8px;cursor:pointer}',
+  '.dsh-enh-bar-btn{background:transparent;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:2px 8px;cursor:pointer}',
   '.dsh-enh-bar-btn:hover{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
   '.dsh-enh-bar-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
-  '.dsh-plg-root{display:flex;flex-direction:column;gap:10px;padding:2px 0}',
+  '.dsh-plg-root{display:flex;flex-direction:column;gap:12px;padding:2px 0;max-width:760px}',
   '.dsh-plg-note{color:var(--dsw-alias-label-secondary);font-size:13px;line-height:20px;margin:0}',
   '.dsh-plg-error{color:var(--dsw-alias-state-error-primary);font-size:13px;line-height:20px}',
   '.dsh-plg-toolbar{display:flex;justify-content:flex-end}',
-  '.dsh-plg-card{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);padding:10px 12px;display:flex;flex-direction:column;gap:8px}',
+  '.dsh-plg-card{border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-3);padding:14px 16px;display:flex;flex-direction:column;gap:10px;transition:border-color .16s,background .16s}',
+  '.dsh-plg-card:hover{border-color:var(--dsw-alias-label-dimmed)}',
   '.dsh-plg-head{display:flex;align-items:center;gap:8px;justify-content:space-between}',
-  '.dsh-plg-name{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+  '.dsh-plg-name{font-size:15px;line-height:21px;font-weight:600;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
   '.dsh-plg-state{font-size:12px;line-height:16px;color:var(--dsw-alias-state-success-primary);flex:none}',
-  '.dsh-plg-row{display:flex;align-items:center;gap:6px}',
+  '.dsh-plg-row{display:flex;align-items:center;gap:8px}',
   // v2.4.6（布局）：同行双字段——优化模式 + 模板合并一行；field 各占一半，
   // 窄屏自动换行（flex-wrap）；label 不再强制 96px 以免挤占 select 空间
   '.dsh-plg-row-duo{display:flex;align-items:center;gap:12px;flex-wrap:wrap}',
-  '.dsh-plg-field{display:flex;align-items:center;gap:6px;flex:1 1 200px;min-width:0}',
+  '.dsh-plg-field{display:flex;align-items:center;gap:8px;flex:1 1 200px;min-width:0}',
   '.dsh-plg-field .dsh-plg-label{min-width:0;flex:none}',
   '.dsh-plg-col{display:flex;flex-direction:column;gap:6px}',
-  '.dsh-plg-label{font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary);flex:none;min-width:96px}',
+  '.dsh-plg-label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);flex:none;min-width:96px}',
   '.dsh-plg-muted{font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}',
-  '.dsh-plg-select{flex:1;min-width:0;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:4px 6px}',
-  '.dsh-plg-textarea{flex:1;min-width:0;min-height:180px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:6px 8px;resize:vertical;font-family:inherit}',
+  '.dsh-plg-select{flex:1;min-width:0;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:5px 12px}',
+  '.dsh-plg-select:focus-visible{outline:none;border-color:var(--dsw-alias-brand-primary)}',
+  '.dsh-plg-textarea{flex:1;min-width:0;min-height:180px;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:8px 12px;resize:vertical;font-family:inherit}',
+  '.dsh-plg-textarea:focus-visible{outline:none;border-color:var(--dsw-alias-brand-primary)}',
   '.dsh-plg-approval{color:var(--dsw-alias-state-warn-primary);font-size:12px;line-height:16px;flex-wrap:wrap}',
   '.dsh-plg-actions{display:flex;gap:8px;justify-content:flex-end}',
   // v2.4.3：切换确认行——目标版本高亮便于核对
-  '.dsh-plg-switch{flex-wrap:wrap;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:4px 8px;background:var(--dsw-alias-bg-layer-1)}',
+  '.dsh-plg-switch{flex-wrap:wrap;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 10px;background:var(--dsw-alias-bg-layer-2)}',
   '.dsh-plg-switch-target{color:var(--dsw-alias-brand-primary);font-size:12px;line-height:16px;font-weight:600}',
-  '.dsh-plg-btn{background:transparent;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:3px 10px;cursor:pointer}',
-  '.dsh-plg-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
-  '.dsh-plg-btn:disabled{opacity:.45;cursor:not-allowed}',
-  '.dsh-plg-btn-primary{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}',
-  '.dsh-plg-hint{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px;margin:0}',
+  '.dsh-plg-btn{background:transparent;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:5px 14px;cursor:pointer}',
+  '.dsh-plg-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
+  '.dsh-plg-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-label-dimmed)}',
+  '.dsh-plg-btn:disabled{opacity:.4;cursor:default}',
+  '.dsh-plg-btn-primary{background:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}',
+  '.dsh-plg-btn-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover);border-color:var(--dsw-alias-button-primary-hover)}',
+  '.dsh-plg-hint{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;margin:0}',
   '.dsh-plg-saved{color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:16px}',
   // v2.7.0：保存状态机样式（转圈复用 dsh-enh-spin；saved/failed 状态色）
   '.dsh-plg-save{display:flex;align-items:center;gap:6px;font-size:12px;line-height:16px;margin-top:8px}',
   '.dsh-plg-save-ok{color:var(--dsw-alias-state-success-primary)}',
   '.dsh-plg-save-fail{color:var(--dsw-alias-state-error-primary)}',
-  '.dsh-plg-logs{display:flex;flex-direction:column;gap:6px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:8px 10px;background:var(--dsw-alias-bg-layer-1)}',
+  '.dsh-plg-logs{display:flex;flex-direction:column;gap:6px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:8px 10px;background:var(--dsw-alias-bg-layer-2)}',
   '.dsh-plg-logs-head{display:flex;align-items:center;gap:8px;justify-content:space-between}',
   '.dsh-plg-logs-pre{margin:0;max-height:220px;overflow:auto;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-all}',
   // v16：页内 tab 条（对齐 Harness：14px、选中下划线）
-  '.dsh-cfg-tabs{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l1);padding:0 4px}',
-  '.dsh-cfg-tab{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--dsw-alias-label-secondary);font-size:14px;line-height:20px;padding:8px 12px;cursor:pointer;border-radius:8px 8px 0 0;transition:background-color .15s ease-out,color .15s ease-out}',
-  '.dsh-cfg-tab:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}',
-  '.dsh-cfg-tab-active{color:var(--dsw-alias-label-primary);font-weight:500;border-bottom-color:var(--dsw-alias-brand-primary)}',
-  '.dsh-cfg-tab:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-1px}',
+  '.dsh-cfg-tabs{display:flex;align-items:flex-end;gap:22px;border-bottom:1px solid var(--dsw-alias-border-l2);padding:0;margin-top:2px}',
+  '.dsh-cfg-tab{position:relative;border:none;padding:7px 1px 9px;background:transparent;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:20px;cursor:pointer;transition:color .15s ease-out}',
+  '.dsh-cfg-tab:hover{color:var(--dsw-alias-label-primary)}',
+  '.dsh-cfg-tab-active{color:var(--dsw-alias-label-primary)}',
+  '.dsh-cfg-tab-active::after,.dsh-cfg-tab:focus-visible::after{position:absolute;right:0;bottom:-1px;left:0;height:2px;border-radius:2px 2px 0 0;background:var(--dsw-alias-label-primary);content:""}',
+  '.dsh-cfg-tab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px;border-radius:2px;color:var(--dsw-alias-label-primary)}',
   // v16：可折叠区块（标题行 36px、hover 反馈、chevron 旋转）
   '.dsh-cfg-sec{border-radius:8px}',
-  '.dsh-cfg-sec-head{display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;border-radius:8px;color:var(--dsw-alias-label-primary);font-size:14px;line-height:20px;font-weight:500;padding:8px 12px;cursor:pointer;text-align:left;transition:background-color .15s ease-out}',
-  '.dsh-cfg-sec-head:hover{background:var(--dsw-alias-bg-layer-2)}',
+  '.dsh-cfg-sec-head{display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;border-radius:8px;color:var(--dsw-alias-label-primary);font-size:14px;line-height:20px;font-weight:500;padding:10px 12px;cursor:pointer;text-align:left;transition:background-color .15s ease-out}',
+  '.dsh-cfg-sec-head:hover{background:var(--dsw-alias-interactive-bg-hover)}',
   '.dsh-cfg-sec-head:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
   '.dsh-cfg-chev{font-size:11px;color:var(--dsw-alias-label-tertiary);transition:transform .2s cubic-bezier(.2,0,0,1);flex:none}',
   '.dsh-cfg-chev-open{transform:rotate(90deg)}',
   '.dsh-cfg-sec-title{flex:none}',
   '.dsh-cfg-sec-summary{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:400;text-align:right}',
-  '.dsh-cfg-sec-body{padding:4px 12px 8px;display:flex;flex-direction:column;gap:8px}',
+  '.dsh-cfg-sec-body{padding:2px 12px 10px;display:flex;flex-direction:column;gap:8px}',
   // v17：思考控件与测试结果（窄下拉 + 状态色强调）
   '.dsh-plg-select-narrow{flex:0 0 auto;min-width:96px}',
   '.dsh-plg-test-ok{color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:16px;font-weight:600}',
   '.dsh-plg-test-fail{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:16px;font-weight:600}',
   // v18：输入框、图标按钮、继承提示
-  '.dsh-plg-input{flex:1;min-width:0;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:16px;padding:4px 6px}',
-  '.dsh-plg-btn-icononly{min-width:22px;padding:2px 3px}',
+  '.dsh-plg-input{flex:1;min-width:0;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:5px 12px}',
+  '.dsh-plg-input:focus-visible{outline:none;border-color:var(--dsw-alias-brand-primary)}',
+  '.dsh-plg-btn-icononly{min-width:22px;padding:2px 4px;font-size:12px;line-height:16px}',
   '.dsh-plg-inherit{color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:16px}',
   // v22（C5）：行内测试连通性小图标（与整体一致：无背景 + token 边框/圆角 + hover 反馈）
-  '.dsh-plg-testicon{min-width:22px;padding:2px 3px;font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary)}',
+  '.dsh-plg-testicon{min-width:22px;padding:2px 4px;font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary)}',
   '.dsh-plg-testicon:hover:not(:disabled){color:var(--dsw-alias-label-primary)}',
   // v23.2：布局再分配——思考开关宽 2/3（43px）、厂家减 1/5（136px）、
   // 模型框 flex:1 1 0 吃满整行全部剩余空间；字体字号恢复默认（移除 font-family:inherit 强制统一）
@@ -2621,7 +2709,7 @@ const CSS = [
   '.dsh-plg-select-thinking{flex:0 0 auto;width:43px}',
   '.dsh-plg-select-level{flex:0 0 auto;width:56px}',
   // v23.1（D4）：测试结果集中单点区（链列表下方、操作按钮上方；空态隐藏）
-  '.dsh-plg-testarea{display:flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:4px 8px;background:var(--dsw-alias-bg-layer-1)}',
+  '.dsh-plg-testarea{display:flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 10px;background:var(--dsw-alias-bg-layer-2)}',
   // v2.4.0（方案 §4）：版本检测与更新卡片样式
   '.dsh-plg-upd-outdated{color:var(--dsw-alias-state-warn-primary);font-size:12px;line-height:16px;font-weight:600}',
   // v2.7.0：更新未重启提醒横幅（警告黄底 + 命令 code）
@@ -2629,10 +2717,10 @@ const CSS = [
   '.dsh-plg-restart-cmd{font-family:Consolas,Menlo,monospace;font-size:12px;line-height:16px;color:var(--dsw-alias-state-warn-primary);word-break:break-all}',
   '.dsh-plg-upd-ok{color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:16px;font-weight:600}',
   '.dsh-plg-upd-body{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:16px;max-height:64px;overflow:auto;white-space:pre-wrap;word-break:break-all}',
-  '.dsh-plg-upd-done{display:flex;flex-direction:column;gap:6px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:8px 10px;background:var(--dsw-alias-bg-layer-1);font-size:12px;line-height:16px;color:var(--dsw-alias-label-primary)}',
+  '.dsh-plg-upd-done{display:flex;flex-direction:column;gap:6px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:8px 10px;background:var(--dsw-alias-bg-layer-2);font-size:12px;line-height:16px;color:var(--dsw-alias-label-primary)}',
   '.dsh-plg-upd-apply{display:flex;flex-direction:column;gap:2px}',
   // v2.5.0：环境检测结果区 + 一键更新危险态
-  '.dsh-plg-env{display:flex;flex-direction:column;gap:4px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:6px 10px;background:var(--dsw-alias-bg-layer-1)}',
+  '.dsh-plg-env{display:flex;flex-direction:column;gap:4px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:6px 10px;background:var(--dsw-alias-bg-layer-2)}',
   '.dsh-plg-env-list{display:flex;flex-direction:column;gap:3px}',
   '.dsh-plg-env-item{display:flex;align-items:baseline;gap:6px;font-size:12px;line-height:16px}',
   '.dsh-plg-env-mark{flex:none;width:14px;text-align:center}',
@@ -2642,6 +2730,9 @@ const CSS = [
   '.dsh-plg-env-warn .dsh-plg-env-mark{color:var(--dsw-alias-state-warn-primary)}',
   '.dsh-plg-env-fail .dsh-plg-env-mark{color:var(--dsw-alias-state-error-primary)}',
   '.dsh-plg-btn-danger{border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}',
+  '.dsh-plg-btn-danger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger)}',
+  '.dsh-plg-title{font-size:18px;line-height:26px;font-weight:600;margin:0;color:var(--dsw-alias-label-primary)}',
+  '.dsh-plg-intro{font-size:13px;line-height:20px;margin:0;color:var(--dsw-alias-label-tertiary)}'
 ].join('\n');
 
 return {
