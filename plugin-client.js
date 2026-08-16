@@ -2071,7 +2071,6 @@ function UpdaterCard(props) {
 }
 function MarqueeSelect(props) {
   const textRef = React.useRef(null);
-  const selectRef = React.useRef(null);
   const [distance, setDistance] = React.useState(0);
   const options = React.Children.toArray(props.children);
   const selected = options.find(function (c) {
@@ -2081,7 +2080,7 @@ function MarqueeSelect(props) {
     ? String(selected.props.children)
     : String(props.value == null ? '' : props.value);
 
-  // 选中项/容器宽度变化后重新测量溢出距离；未溢出时 distance = 0，不启用滚动条
+  // 选中项/容器宽度变化后重新测量溢出距离；未溢出时 distance = 0，不启动自动滚动
   React.useEffect(function () {
     const el = textRef.current;
     if (!el) return;
@@ -2100,16 +2099,7 @@ function MarqueeSelect(props) {
     return function () { window.removeEventListener('resize', update); };
   }, []);
 
-  const scrollable = distance > 0;
-  const openPicker = function () {
-    const sel = selectRef.current;
-    if (!sel || sel.disabled) return;
-    if (typeof sel.showPicker === "function") {
-      try { sel.showPicker(); } catch (_) {}
-    } else {
-      sel.click();
-    }
-  };
+  const marquee = distance > 0;
   const rest = {};
   for (const key in props) {
     if (key !== 'className' && key !== 'children' && key !== 'value') rest[key] = props[key];
@@ -2119,19 +2109,18 @@ function MarqueeSelect(props) {
     'data-disabled': props.disabled ? 'true' : undefined,
   },
     React.createElement('select', Object.assign({}, rest, {
-      ref: selectRef,
       className: 'dsh-plg-mselect-native',
       value: props.value,
       children: props.children,
     })),
-    React.createElement('span', { className: 'dsh-plg-mselect-visual', 'aria-hidden': true, onClick: openPicker },
+    React.createElement('span', { className: 'dsh-plg-mselect-visual', 'aria-hidden': true },
       React.createElement('span', {
         ref: textRef,
-        className: 'dsh-plg-mselect-text' + (scrollable ? ' dsh-plg-mselect-text-scroll' : ''),
-        style: undefined,
+        className: 'dsh-plg-mselect-text' + (marquee ? ' dsh-plg-mselect-text-marquee' : ''),
+        style: marquee ? { '--dsh-mselect-distance': distance + 'px' } : undefined,
       }, label),
     ),
-    React.createElement('span', { className: 'dsh-plg-mselect-arrow', 'aria-hidden': true, onClick: openPicker }),
+    React.createElement('span', { className: 'dsh-plg-mselect-arrow', 'aria-hidden': true }),
   );
 }
 
@@ -3086,19 +3075,17 @@ const CSS = [
   // v2.8.4（下拉箭头占位预算）：所有下拉框右侧预留 28px 箭头位；固定宽度窄下拉同步加宽，保持原内容宽度不变
   '.dsh-plg-select{flex:1;min-width:0;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:5px 28px 5px 12px}',
   '.dsh-plg-select:focus-visible{outline:none;border-color:var(--dsw-alias-brand-primary)}',
-  // v2.8.4（下拉选项溢出动效）：选中文本超宽时可通过滚动条浏览
+  // v2.8.4（下拉选项溢出动效）：选中文本超宽时自动由左向右循环滚动
   '.dsh-plg-mselect{position:relative;overflow:hidden;display:inline-flex;align-items:center;cursor:pointer;box-sizing:border-box}',
-  '.dsh-plg-mselect-native{position:absolute;inset:0;width:100%;height:100%;opacity:0;border:0;margin:0;padding:0;cursor:pointer;font:inherit;color:var(--dsw-alias-label-primary);background:transparent;-webkit-appearance:none;appearance:none;pointer-events:none}',
+  '.dsh-plg-mselect-native{position:absolute;inset:0;width:100%;height:100%;opacity:0;border:0;margin:0;padding:0;cursor:pointer;font:inherit;color:var(--dsw-alias-label-primary);background:transparent;-webkit-appearance:none;appearance:none}',
   '.dsh-plg-mselect:focus-within{border-color:var(--dsw-alias-brand-primary)}',
   '.dsh-plg-mselect[data-disabled="true"]{opacity:.6;cursor:default}',
   '.dsh-plg-mselect[data-disabled="true"] .dsh-plg-mselect-native{cursor:default}',
-  '.dsh-plg-mselect-visual{display:block;flex:1;min-width:0;overflow:hidden;pointer-events:auto;line-height:20px}',
+  '.dsh-plg-mselect-visual{display:block;flex:1;min-width:0;overflow:hidden;pointer-events:none;line-height:20px}',
   '.dsh-plg-mselect-text{display:block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-primary)}',
-  '.dsh-plg-mselect-text-scroll{overflow-x:auto;overflow-y:hidden;text-overflow:clip;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-label-tertiary) transparent}',
-  '.dsh-plg-mselect-text-scroll::-webkit-scrollbar{height:4px}',
-  '.dsh-plg-mselect-text-scroll::-webkit-scrollbar-thumb{background:var(--dsw-alias-label-tertiary);border-radius:2px}',
-  '.dsh-plg-mselect-text-scroll::-webkit-scrollbar-track{background:transparent}',
-  '.dsh-plg-mselect-arrow{position:absolute;right:12px;top:50%;width:12px;height:12px;transform:translateY(-50%);pointer-events:auto;cursor:pointer;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:12px;text-align:center}',
+  '.dsh-plg-mselect-text-marquee{animation:dsh-mselect-marquee 6s linear infinite}',
+  '@keyframes dsh-mselect-marquee{0%,8%{transform:translateX(0)}46%{transform:translateX(calc(-1 * var(--dsh-mselect-distance)))}54%{transform:translateX(calc(-1 * var(--dsh-mselect-distance)))}92%,100%{transform:translateX(0)}}',
+  '.dsh-plg-mselect-arrow{position:absolute;right:12px;top:50%;width:12px;height:12px;transform:translateY(-50%);pointer-events:none;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:12px;text-align:center}',
   '.dsh-plg-mselect-arrow::before{content:"▾"}',
   '.dsh-plg-textarea{flex:1;min-width:0;min-height:180px;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:8px 12px;resize:vertical;font-family:inherit}',
   '.dsh-plg-textarea:focus-visible{outline:none;border-color:var(--dsw-alias-brand-primary)}',
