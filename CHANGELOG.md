@@ -68,6 +68,7 @@
 - **M5 完整性校验接入实际 staging**：新增 `lib/integrity.cjs`（bundle-safe），`updater-host.verifyTarball` 返回 SHA-256，外部执行器目录同步复制 `integrity.cjs` — 架构治理
 - **M1 尾项：enhance RPC 三 handler 提取**：从 `src/host/legacy/plugin-host.js` 抽出 `enhance/progress`、`enhance`、`cancel` 到 `src/host/enhance-handlers.js`（JSON 文本 chunk，构建注入回根文件，产物逐字节不变）；新增 `scripts/extract-enhance.mjs` 维护工具 — 架构治理
 - **M1 尾项：client React 组件拆分**：从 `src/client/legacy/plugin-client.js` 抽出 10 个 React UI 组件（EnhanceButton/EnhanceBar/UpdaterCard/PluginsSection/CollapsibleSection/ModelMainSection/FallbackRow/ModelConfigTab/ParamsTab/ModelPluginsSection+CordisBadgePlaceholder）到 `src/client/components/*.js`；`build-client.mjs` 注入改为**循环注入**（组件 chunk 内嵌其他注入标记时多轮展开，产物逐字节不变）；新增 `scripts/extract-client-components.mjs` 维护工具 — 架构治理
+- **M1 尾项完成：legacy 双侧退役**：`src/host/legacy/` 与 `src/client/legacy/` 全部迁出——host 剩余外壳 → `src/host/app.js`（bundle 骨架，含全部注入标记）；client 剩余（CSS 数组 / 顶层插件对象 / 头注释+标记）→ `src/client/{styles,app,skeleton}.js`；`build-host.mjs`/`build-client.mjs` 改为直读 src 骨架 + 循环注入 + 换行规范化（产物与 HEAD 仅构建头 Source 注释不同，正文逐字节等价）；删除全部 extract-*.mjs（legacy 退役后不可再运行）；91 tests 通过 — 架构治理
 
 ## [2.8.3] - 2026-08-16
 

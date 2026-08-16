@@ -9,14 +9,14 @@
 | 阶段 | 状态 | 说明 |
 |---|---|---|
 | M0 基线固化 | ✅ | 兼容矩阵、测试 70、CI、文档对齐 |
-| M1 源码模块化 | 🟡 大部分 | Host/Client 多模块已提取；enhance/React 组件仍部分在 legacy |
+| M1 源码模块化 | ✅ | Host/Client 全部迁出 legacy（含 enhance 三 handler、10 个 React 组件、CSS、导出外壳）；legacy 目录与 extract 脚本退役，build 直读 src 骨架（app.js/skeleton.js）循环注入 |
 | M2 服务化/事件化 | ✅ 主体 | service registry、pipeline、各域服务接口 |
 | M3 配置/RPC 契约化 | ✅ 主体 | protocol、rpc-schema、config-schema、RPC 边界校验 |
 | M4 更新链路平台化 | ✅ 主体 | Reloader、UpdatePlatform、ExecutorReloader、update 服务接入 |
-| M5 可观测/安全 | ✅ 主体 | logger、integrity、diagnostics 接入 logger |
+| M5 可观测/安全 | ✅ | logger、integrity、diagnostics 接入 logger、完整性校验接入实际 staging |
 | M6 工程化收尾 | ✅ | CONTRIBUTING、CI、全量验证 |
 
-> 剩余：M1 中 enhance 大模块与 React 组件从 legacy 完全迁出；M5 完整性校验接入实际 staging 流程。
+> 剩余：无（M0–M6 全部完成；M2–M4 的「主体」标注指目标架构的服务化演进可在后续迭代继续深化，运行形态已全部就位）。
 
 ---
 
