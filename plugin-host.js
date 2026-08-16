@@ -2519,6 +2519,9 @@ return {
           scored.sort((a, b) => b.hits - a.hits);
           ranked = scored.slice(0, maxFiles).map((s) => s.path);
         }
+        // 最终兜底：内容仍不匹配（中文关键词 vs 英文代码/文件名的语义鸿沟）→ 取前 N 个
+        // （开发环境已确认或 md 文档场景下文件有限，全取参考优于空参考）
+        if (ranked.length === 0) ranked = files.slice(0, maxFiles);
         const out = [];
         for (const rel of ranked.slice(0, maxFiles)) {
           try {
