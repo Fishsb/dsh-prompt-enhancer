@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-08-16
+
 ### Fixed
 - **测试覆盖缺口（审查发现）**：`test/bundle-smoke.test.cjs`（生成物运行时冒烟，SMK-01..17）自 M2 加入后从未挂入 `npm test` 脚本与 CI——CHANGELOG 的测试数字口径（95+17=112）一直包含它但实际只跑 95；修复为脚本收录，`npm test` 现为 112/112，与日志口径一致 — 架构治理
 
@@ -284,6 +286,7 @@
 - 插件管理页版本检测卡片；按钮三态字体锚点对齐模型选择器（13px/500/20px）— [VU-001]
 
 [2.8.3]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.3
+[3.1.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.0
 [3.0.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.0.0
 [2.8.2]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.2
 [2.8.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.1
