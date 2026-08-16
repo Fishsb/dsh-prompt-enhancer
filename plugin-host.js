@@ -1875,7 +1875,7 @@ async function buildV2ContextBlock(services, sessionId, text, cfg, onStage) {
     // 阶段 B（表驱动 phaseB：file+event 全量 / none 跳过）
     const focus = progress && Array.isArray(progress.focus) ? progress.focus : [];
     const keywords = extractKeywords(text, focus);
-    mark(STAGE_FILES);
+    mark(STAGE_FILES, { key: 'scan' });
     const files = await v2SearchWorkspace(services, keywords, cfg);
     mark(STAGE_EVENTS);
     const eventsHits = await v2SearchEvents(services, sessionId, keywords, cfg);
@@ -1904,13 +1904,16 @@ async function buildV2ContextBlock(services, sessionId, text, cfg, onStage) {
       if (web && typeof web.search === 'function') {
         const refParts = [];
         const memoParts = [];
-        for (const q of queries) {
+        for (let qi = 0; qi < queries.length; qi++) {
+          const q = queries[qi];
           let query = q;
           if (query === null) {
             query = buildWebQuery(text, keywords, services.delta || null);
             if (services.scenario === 'game') query = (query ? query + ' 游戏实现' : '游戏实现');
             else if (services.scenario === 'software') query = (query ? query + ' 软件架构' : '软件架构');
           }
+          // v3.0r（细粒度进度反馈）：逐主题搜索进度（detailKey=search，client 渲染「正在搜索 i/n：query」）
+          mark(STAGE_FILES, { key: 'search', args: { query }, step: qi + 1, total: queries.length });
           let timedOut = false;
           const timer = services.timer.timeout(() => { timedOut = true; }, WEB_SEARCH_TIMEOUT_MS);
           try {
@@ -2441,8 +2444,26 @@ return {
       const seq = args && typeof args.seq === 'number' ? args.seq : -1;
       const rec = pending.get(requestKey(sessionId, seq));
       if (!rec) return { ok: false, code: 'NO_RECORD' };
-      return { ok: true, stage: rec.stage || STAGE_PREPARE };
+      // v3.0r（细粒度进度反馈）：返回 stage + 子步骤详情 + 已用时间（纯展示，失败静默降级）
+      return {
+        ok: true,
+        stage: rec.stage || STAGE_PREPARE,
+        detailKey: rec.detailKey || '',
+        detailArgs: rec.detailArgs || null,
+        step: rec.step || 0,
+        total: rec.total || 0,
+        elapsedMs: rec.startedAt ? Date.now() - rec.startedAt : 0,
+      };
     });
+
+    // v3.0r（细粒度进度反馈）：写进度详情（stage/detailKey/detailArgs/step/total）
+    function setProgress(rec, stage, key, args, step, total) {
+      rec.stage = stage;
+      rec.detailKey = key || '';
+      rec.detailArgs = args || null;
+      rec.step = step || 0;
+      rec.total = total || 0;
+    }
 
     // ---- stage: analyze——配置解析 / 模型链 / system 组装 / 记忆与场景准备 ----
     async function enhanceStageAnalyze(state) {
@@ -2733,6 +2754,7 @@ return {
       }
       const docsText = docs.map((d) => '📄 ' + d.path + '\n' + d.snippet).join('\n\n').slice(0, 3000);
       // B+C 合并：一次 LLM 调用——检索相关文档 + 分析项目地图结构
+      if (state.rec) setProgress(state.rec, STAGE_FILES, 'docs');
       const analysis = await analyzeDocsRelevance(docsText, text, state.v2Block || '', chain0);
       if (!analysis || analysis.relatedDocs.length === 0) {
         hlog('[enhance] v3 smart no-related-doc');
@@ -2746,6 +2768,7 @@ return {
       }
       // 第三步：代码文档检索（项目地图指向路径优先）
       hlog('[enhance] v3 smart project-map paths=' + JSON.stringify(analysis.codePaths));
+      if (state.rec) setProgress(state.rec, STAGE_FILES, 'code');
       const codes = await searchWorkspaceFiles(CODE_FILE_RE, kws, 3, 3, analysis.codePaths);
       const codeText = codes.map((c) => '📄 ' + c.path + '\n' + c.snippet).join('\n\n').slice(0, RELEVANCE_WINDOW_MAX_CHARS);
       return { block: codeText ? docPart + '\n\n【相关代码参考】\n' + codeText : docPart, enteredThird: true };
@@ -2839,13 +2862,15 @@ return {
         // 窗口越界（历史不足）跳过；全不中 → 无参考（不阻断主流程）。
         const events = await fetchSessionHistory(sessionId);
         const chain0 = state.chain && state.chain.length > 0 ? state.chain[0] : null;
-        for (const win of row.windows) {
+        for (let wi = 0; wi < row.windows.length; wi++) {
+          const win = row.windows[wi];
           if (rec.cancelled || rec.timedOut) break;
           const winText = splitHistoryRounds(events, win[0], win[1]).join('\n');
           if (winText === '') {
             hlog('[enhance] v3 window empty rounds=' + win[0] + '-' + win[1]);
             continue;
           }
+          setProgress(rec, STAGE_ANALYZE, 'judge', null, wi + 1, row.windows.length);
           const judge = await judgeRelevance(winText, text, chain0);
           if (judge.related) {
             state.v2Block = '【相关会话参考】\n' + winText.slice(0, RELEVANCE_WINDOW_MAX_CHARS);
@@ -2859,6 +2884,7 @@ return {
         // 开发意向 → 工作区阶段（.md + 相关文档命中 + 项目地图三门槛），
         // 仅进入第三步（代码阶段）才追加 SMART_TAIL（调整方案输出）
         if (cfg.mode === 'smart') {
+          setProgress(rec, STAGE_ANALYZE, 'intent');
           const intent = await judgeDevIntent(text, state.v2Block || '', chain0);
           if (!intent.isDevIntent) {
             hlog('[enhance] v3 smart not-dev-intent reason=' + intent.reason);
@@ -2880,6 +2906,7 @@ return {
         const chain0 = state.chain && state.chain.length > 0 ? state.chain[0] : null;
         const budget = cfg.context && cfg.context.budgetChars ? cfg.context.budgetChars : 0;
         // v3.0p：预算 > 0 才启用检索（与「上下文预算需 > 0 才启用检索」联动语义一致）
+        setProgress(rec, STAGE_FILES, 'plan');
         const plan = budget > 0 ? await planWebSearch(text, memoText, state.scenario, chain0) : null;
         hlog('[enhance] v3p web-plan ' + (budget <= 0 ? 'skipped budget=0' : (plan ? 'topics=' + plan.topics.map((t) => t.query).join('|') : 'none→legacy')));
         // v3.0p：规划主题与已检索主题去重（LLM 未遵从提示词时的硬过滤；过滤后为空 → 降级单 query）
@@ -2896,7 +2923,20 @@ return {
           scenario: state.scenario,
           webPlan: freshPlan && freshPlan.length > 0 ? freshPlan : null,
           webMemo: memoText,
-        }, sessionId, text, cfg, (st) => { rec.stage = st; });
+        }, sessionId, text, cfg, (st, detail) => {
+          rec.stage = st;
+          if (detail && typeof detail === 'object') {
+            rec.detailKey = detail.key || '';
+            rec.detailArgs = detail.args || null;
+            rec.step = detail.step || 0;
+            rec.total = detail.total || 0;
+          } else {
+            rec.detailKey = '';
+            rec.detailArgs = null;
+            rec.step = 0;
+            rec.total = 0;
+          }
+        });
         state.v2Block = v2.block;
         state.v2Log = v2.log;
         // v3.0p：跨轮检索记忆更新——仅成功命中的主题入已检索列表（失败/超时不占位），
@@ -2972,7 +3012,7 @@ return {
           return state;
         }
         hlog('[enhance] try session=' + sessionId + ' provider=' + entry.provider + ' model=' + entry.model + (entry.reasoningEffort ? ' effort=' + entry.reasoningEffort : '') + ' seq=' + seq);
-        rec.stage = STAGE_LLM;
+        setProgress(rec, STAGE_LLM, i > 0 ? 'retry' : '', null, i + 1, chain.length);
         const stream = llm.stream({
           provider: entry.provider,
           model: entry.model,
@@ -3038,7 +3078,8 @@ return {
       }
 
       // v2.3（§7.3）：记录提前创建（入参校验后）——stage 从 prepare 起可被 progress RPC 轮询
-      const rec = { cancelled: false, timedOut: false, iterator: null, stage: STAGE_PREPARE };
+      // v3.0r（细粒度进度反馈）：rec 扩展——startedAt/detailKey/detailArgs/step/total
+      const rec = { cancelled: false, timedOut: false, iterator: null, stage: STAGE_PREPARE, startedAt: Date.now(), detailKey: '', detailArgs: null, step: 0, total: 0 };
       pending.set(key, rec);
 
       // M2 深化：请求状态经 Pipeline 四阶段链式传递（analyze→retrieve→assemble→llm）。

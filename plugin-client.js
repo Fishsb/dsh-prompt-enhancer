@@ -598,6 +598,15 @@ const ZH = {
   stageEvents: '检索会话…',
   stageContext: '组装上下文…',
   stageLlm: 'LLM 优化中…',
+  // v3.0r（细粒度进度反馈）：子步骤详情文案（detailKey → 模板，{current}/{total}/{query} 占位）
+  stageDetailJudge: '正在判定会话关联 {current}/{total}…',
+  stageDetailIntent: '正在判定开发意向…',
+  stageDetailDocs: '正在分析项目文档…',
+  stageDetailCode: '正在检索代码参考…',
+  stageDetailPlan: '正在规划检索主题…',
+  stageDetailSearch: '正在搜索 {current}/{total}：{query}',
+  stageDetailScan: '正在扫描工作区…',
+  stageDetailRetry: '模型响应异常，重试 {current}/{total}…',
   stageDone: '✓',
 };
 
@@ -808,6 +817,15 @@ const EN = {
   stageEvents: 'Searching events…',
   stageContext: 'Assembling context…',
   stageLlm: 'Optimizing…',
+  // v3.0r（fine-grained progress）：detailKey templates ({current}/{total}/{query})
+  stageDetailJudge: 'Checking session relevance {current}/{total}…',
+  stageDetailIntent: 'Checking dev intent…',
+  stageDetailDocs: 'Analyzing project docs…',
+  stageDetailCode: 'Searching code references…',
+  stageDetailPlan: 'Planning search topics…',
+  stageDetailSearch: 'Searching {current}/{total}: {query}',
+  stageDetailScan: 'Scanning workspace…',
+  stageDetailRetry: 'Model error, retrying {current}/{total}…',
   stageDone: '✓',
 };
 
@@ -1073,21 +1091,29 @@ function EnhanceButton(props) {
   // （hooks 必须位于条件提前 return 之前，保持每次渲染顺序稳定）
   const s = sessionId !== undefined ? storeFor(sessionId) : null;
   const phase = s ? s.phase : 'idle';
-  const [stage, setStage] = React.useState(null);
+  // v3.0r（细粒度进度反馈）：progress 对象 {stage, detailKey, detailArgs, step, total, elapsedMs}
+  const [prog, setProg] = React.useState(null);
   React.useEffect(() => {
     if (sessionId === undefined) return undefined;
     const st = storeFor(sessionId);
-    if (st.phase !== 'enhancing') { setStage(null); return undefined; }
+    if (st.phase !== 'enhancing') { setProg(null); return undefined; }
     let disposed = false;
     const seq = st.seq;
-    setStage(null);
+    setProg(null);
     // v2.3.1：动态 client 无浏览器 timer 全局——经 ctx timer 服务（inject:['timer']）；
     // 服务不可用时静默降级为默认「优化中…」文案（§7.3）
     if (!timerSvc || typeof timerSvc.interval !== 'function') return undefined;
     const disposer = timerSvc.interval(() => {
       host.call('enhance/progress', { sessionId, seq }).then((r) => {
         if (disposed || !r || r.ok !== true) return;
-        if (typeof r.stage === 'string') setStage(r.stage);
+        setProg({
+          stage: typeof r.stage === 'string' ? r.stage : '',
+          detailKey: typeof r.detailKey === 'string' ? r.detailKey : '',
+          detailArgs: r.detailArgs && typeof r.detailArgs === 'object' ? r.detailArgs : null,
+          step: typeof r.step === 'number' ? r.step : 0,
+          total: typeof r.total === 'number' ? r.total : 0,
+          elapsedMs: typeof r.elapsedMs === 'number' ? r.elapsedMs : 0,
+        });
       }).catch(() => { /* 轮询失败静默降级为默认「优化中…」文案（§7.3） */ });
     }, 500);
     return () => { disposed = true; disposer(); };
@@ -1101,12 +1127,30 @@ function EnhanceButton(props) {
   let cls = 'dsh-enh-btn';
 
   if (phase === 'enhancing') {
-    // 进度文案：stage → i18n 键（stage+Cap）；未知/缺键回退「优化中…」
+    // v3.0r（细粒度进度反馈）：进度文案优先级 detailKey 模板 > stage 文案 > 默认「优化中…」；
+    // 末尾追加已用秒数（如「正在搜索 2/3：体素引擎 · 8s」），任何时刻都有动态变化
     let prog = t('enhancing');
-    if (stage) {
-      const key = 'stage' + stage.charAt(0).toUpperCase() + stage.slice(1);
-      const localized = t(key);
-      if (localized !== key) prog = localized;
+    if (prog) {
+      if (prog.stage) {
+        const key = 'stage' + prog.stage.charAt(0).toUpperCase() + prog.stage.slice(1);
+        const localized = t(key);
+        if (localized !== key) prog = localized;
+      }
+      if (prog.detailKey) {
+        const dkey = 'stageDetail' + prog.detailKey.charAt(0).toUpperCase() + prog.detailKey.slice(1);
+        let tmpl = t(dkey);
+        if (tmpl !== dkey) {
+          const a = prog.detailArgs || {};
+          tmpl = tmpl
+            .replace('{current}', String(a.current != null ? a.current : ''))
+            .replace('{total}', String(a.total != null ? a.total : ''))
+            .replace('{query}', String(a.query != null ? a.query : ''));
+          prog = tmpl;
+        }
+      }
+      if (prog.elapsedMs > 0) {
+        prog = prog + ' ' + Math.round(prog.elapsedMs / 1000) + 's';
+      }
     }
     onClick = () => cancelEnhance(sessionId, inputActions);
     title = t('titleBusy');

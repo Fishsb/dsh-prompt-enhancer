@@ -216,10 +216,21 @@ function mockLlmSmart(seen, opts) {
         const topics = Array.isArray(o.topics) && o.topics.length > 0
           ? o.topics
           : [{ query: '登录功能实现', note: '查方案' }, { query: '开发方案', note: '查结构' }];
-        return streamOf([
-          { type: 'text-delta', text: JSON.stringify({ topics }) },
-          { type: 'finish', reason: { kind: 'stop' } },
-        ]);
+        // v3.0r：planDelayMs 制造可轮询窗口（SMK-17 进度反馈测试用）
+        const delay = o.planDelayMs || 0;
+        return {
+          [Symbol.asyncIterator]() {
+            let i = 0;
+            return {
+              async next() {
+                if (i === 0 && delay > 0) await new Promise((r) => setTimeout(r, delay));
+                i += 1;
+                if (i === 1) return { done: false, value: { type: 'text-delta', text: JSON.stringify({ topics }) } };
+                return { done: false, value: { type: 'finish', reason: { kind: 'stop' } } };
+              },
+            };
+          },
+        };
       }
       return streamOf([
         { type: 'text-delta', text: 'OK' },
@@ -560,4 +571,57 @@ test('SMK-16 judge drops reasoningEffort; main call keeps it (v3.0p review)', as
   // 主调用（seen[1]）：保留 effort + maxTokens 自动放宽 ≥8000
   assert.equal(seen[1].reasoningEffort, 'max', 'main call keeps reasoningEffort');
   assert.equal(seen[1].maxTokens, 8000, 'main call widens maxTokens');
+});
+
+// v3.0r：细粒度进度反馈——enhance/progress 返回扩展字段（detailKey/step/total/elapsedMs），
+// publish 检索期间 detailKey 动态变化（plan → search），elapsedMs 递增。
+test('SMK-17 progress exposes fine-grained detail during publish (v3.0r)', async () => {
+  const seen = [];
+  const webCalls = [];
+  const { handlers } = boot({
+    llm: mockLlmSmart(seen, { topics: [{ query: '体素引擎', note: '查实现' }], planDelayMs: 80 }),
+    sessionQuery: mockSessionQuery(),
+    sandboxPolicy: { workspaceRoot: 'root' },
+    fs: mockWorkspaceFs(),
+    web: {
+      search: async (params) => {
+        webCalls.push(params.query);
+        // 制造可轮询时间窗口（30ms）
+        await new Promise((r) => setTimeout(r, 30));
+        return { sources: [{ title: '来源A', url: 'u', summary: 's' }] };
+      },
+    },
+  });
+  const p = handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '我想开发一个体素游戏',
+    config: {
+      mode: 'publish',
+      fallback: [{ provider: 'p', model: 'm' }],
+      params: { maxTokens: 2000, timeoutMs: 300000 },
+    },
+  });
+  const keys = [];
+  let sawStep = false;
+  let lastElapsed = -1;
+  for (let i = 0; i < 8; i++) {
+    await new Promise((r) => setTimeout(r, 15));
+    const pr = await handlers.get('enhance/progress')({ sessionId: 's', seq: 1 });
+    if (pr.ok !== true) continue; // 请求可能已完成（NO_RECORD）
+    assert.equal(typeof pr.stage, 'string', 'stage is string');
+    assert.equal(typeof pr.detailKey, 'string', 'detailKey is string');
+    assert.equal(typeof pr.elapsedMs, 'number', 'elapsedMs is number');
+    assert.equal(typeof pr.step, 'number', 'step is number');
+    assert.equal(typeof pr.total, 'number', 'total is number');
+    if (pr.detailKey) keys.push(pr.detailKey);
+    if (pr.step > 0) sawStep = true;
+    if (pr.elapsedMs > 0) lastElapsed = pr.elapsedMs;
+  }
+  const out = await p;
+  assert.equal(out.ok, true);
+  assert.ok(keys.includes('plan'), 'plan detail observed, got ' + JSON.stringify(keys));
+  assert.ok(keys.includes('search'), 'search detail observed, got ' + JSON.stringify(keys));
+  assert.ok(sawStep, 'step/total populated during search');
+  assert.ok(lastElapsed > 0, 'elapsedMs tracked');
 });
