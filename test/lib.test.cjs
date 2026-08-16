@@ -22,7 +22,7 @@ const grabConst = (name) => {
 };
 const defaultsBlock = [grabConst('DEFAULT_TIMEOUT_MS'), grabConst('DEFAULT_MAX_TOKENS'), grabConst('DEFAULT_OUTPUT_LIMIT')].join('\n');
 const pureFn = new Function(defaultsBlock + '\n' + pureText + `
-  ;return { wrapUserText, wrapPublishText, stripScenarioEcho, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
+  ;return { wrapUserText, wrapPublishText, stripScenarioEcho, cleanOutput, friendlyMessage, validateConfig, resolveTemplateSystem, collectStream, buildTryChain,
     extractHistory, extractHistoryConclusions, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile,
     pickReachableIndex, probeCacheGet, probeCacheSet, WATCHDOG_TIMEOUT_MS, PROBE_TIMEOUT_MS, PROBE_CACHE_TTL_MS,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
@@ -30,6 +30,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
     buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages, filterDeltaForPublish,
     MEMORY_ROUNDS_MAX, MEMORY_CHAIN_BUDGET_MAX, MEMORY_DELTA_MAX,
+    TEMPLATE_CUSTOM_MAX, TEMPLATE_TEXT_MAX, TEMPLATE_NAME_MAX,
     MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE, RETRIEVE_TABLE,
     STAGE_SEQUENCE, STAGE_LABELS,
     PLUGIN_VERSION, UPDATE_MANIFEST, parseVersion, compareVersions, versionStatus,
@@ -41,6 +42,7 @@ const {
   cleanOutput,
   friendlyMessage,
   validateConfig,
+  resolveTemplateSystem,
   collectStream,
   buildTryChain,
   extractHistory,
@@ -81,6 +83,9 @@ const {
   MEMORY_ROUNDS_MAX,
   MEMORY_CHAIN_BUDGET_MAX,
   MEMORY_DELTA_MAX,
+  TEMPLATE_CUSTOM_MAX,
+  TEMPLATE_TEXT_MAX,
+  TEMPLATE_NAME_MAX,
   MODE_TABLE,
   BUDGET_OPTIONS,
   BUDGET_WORKSPACE_TABLE,
@@ -924,6 +929,11 @@ test('U40 prompts 外置一致性（v2.4.6）：生成区 = prompts/*.md 逐行�
   assert.equal(extractConst('SYSTEM_PROMPT'), mdOf('system.md'), 'SYSTEM_PROMPT 应与 prompts/system.md 一致');
   assert.equal(extractConst('TASK_ANALYSIS_PROMPT'), mdOf('task-analysis.md'), 'TASK_ANALYSIS_PROMPT 应与 prompts/task-analysis.md 一致');
   assert.equal(extractConst('CONTEXT_GUARD'), mdOf('context-guard.md'), 'CONTEXT_GUARD 应与 prompts/context-guard.md 一致');
+  // 模板体系扩展（2026-08-17）：T2/T3 内置模板事实源（system-* 四模式共用；publish-* 独立）
+  assert.equal(extractConst('SYSTEM_SUPPLEMENT_PROMPT'), mdOf('system-supplement.md'), 'SYSTEM_SUPPLEMENT_PROMPT 应与 prompts/system-supplement.md 一致');
+  assert.equal(extractConst('SYSTEM_DEV_PROMPT'), mdOf('system-dev.md'), 'SYSTEM_DEV_PROMPT 应与 prompts/system-dev.md 一致');
+  assert.equal(extractConst('SYSTEM_PUBLISH_SUPPLEMENT_PROMPT'), mdOf('publish-supplement.md'), 'SYSTEM_PUBLISH_SUPPLEMENT_PROMPT 应与 prompts/publish-supplement.md 一致');
+  assert.equal(extractConst('SYSTEM_PUBLISH_DEV_PROMPT'), mdOf('publish-dev.md'), 'SYSTEM_PUBLISH_DEV_PROMPT 应与 prompts/publish-dev.md 一致');
 });
 
 // v2.4.7（每模式独立自定义模板）：validateConfig 对 template.texts 的解析与迁移契约。
@@ -961,6 +971,67 @@ test('U41 template.texts 每模式解析/迁移/超长忽略（v2.4.7）', () =>
   assert.equal(v2.templateMode, 'custom', 'v2 结构 template.mode 应解析');
   assert.equal(v2.templateTexts.base, 'v2文本', 'v2 结构 template.text 应迁移到全部模式');
   assert.equal(v2.templateTexts.smart, 'v2文本', 'v2 结构 template.text 应迁移到全部模式');
+  // ⑧ 模板体系扩展（2026-08-17）：pick/custom 新结构解析——选中键 + 多自定义模板列表
+  const newTpl = validateConfig({
+    template: {
+      mode: 'builtin',
+      pick: { base: 'supplement', smart: 'dev', publish: 'custom:1' },
+      custom: { publish: [{ name: '甲', text: 'A' }, { name: '乙', text: 'B' }] },
+    },
+  });
+  assert.equal(newTpl.templatePick.base, 'supplement', 'pick supplement 应解析');
+  assert.equal(newTpl.templatePick.smart, 'dev', 'pick dev 应解析');
+  assert.equal(newTpl.templatePick.publish, 'custom:1', 'pick custom:1 应解析（列表内索引）');
+  assert.equal(newTpl.templateCustom.publish.length, 2, 'custom 列表应解析');
+  assert.equal(newTpl.templateCustom.publish[1].name, '乙', 'custom 条目 name 应解析');
+  assert.equal(newTpl.templateCustom.publish[1].text, 'B', 'custom 条目 text 应解析');
+  // ⑨ 越界/非法 pick 回退 default；超长/空文本条目忽略；name 截断
+  const badPick = validateConfig({
+    template: { pick: { base: 'custom:9', lite: 'nope' }, custom: { base: [{ name: 'x'.repeat(60), text: 'a' }, { text: '' }, { text: 'ok' }] } },
+  });
+  assert.equal(badPick.templatePick.base, 'default', '越界 custom:9 应回退 default');
+  assert.equal(badPick.templatePick.lite, 'default', '非法 pick 应回退 default');
+  assert.equal(badPick.templateCustom.base.length, 2, '空 text 条目应忽略');
+  assert.equal(badPick.templateCustom.base[0].name, 'x'.repeat(40), 'name 应截断到 40');
+  assert.equal(badPick.templateCustom.base[1].text, 'ok', '无 name 条目应补默认名');
+  // ⑩ 旧配置迁移：无 pick 且 mode==='custom' 时 texts 非空 → 迁为 custom:0（行为等价旧全局自定义）
+  const migrated = validateConfig({ template: { mode: 'custom', texts: { base: 'B模板' } } });
+  assert.equal(migrated.templatePick.base, 'custom:0', '旧 texts 应迁移为 custom:0');
+  assert.equal(migrated.templateCustom.base[0].text, 'B模板', '旧 texts 应迁移进 custom 列表');
+  assert.equal(migrated.templatePick.smart, 'default', '无 texts 的模式保持 default');
+  // ⑪ 已有 pick 的配置不再迁移（用户显式选择优先）
+  const noMigrate = validateConfig({ template: { mode: 'custom', texts: { base: 'B' }, pick: { base: 'default' } } });
+  assert.equal(noMigrate.templatePick.base, 'default', '显式 pick default 优先于 texts 迁移');
+  assert.equal(noMigrate.templateCustom.base.length, 0, '已有 pick 时不迁移 texts');
+});
+
+// 模板体系扩展（2026-08-17）：每模式选中模板解析契约——T1 现有默认保持不变，T2/T3 内置增量模板，
+// custom:N 自定义列表条目，legacy 旧配置兼容，非法/越界/空文本一律回退 T1。
+test('U57 resolveTemplateSystem 模板选中解析（default/supplement/dev/custom/legacy）', () => {
+  const B = { base: ['T1', 'T2', 'T3'], publish: ['P1', 'P2', 'P3'] };
+  // ① 缺省 / default → T1（模板1=现有默认，行为不变）
+  assert.equal(resolveTemplateSystem({ templatePick: {}, templateCustom: {} }, 'base', B), 'T1');
+  assert.equal(resolveTemplateSystem({ templatePick: { base: 'default' } }, 'base', B), 'T1');
+  // ② supplement / dev → T2 / T3
+  assert.equal(resolveTemplateSystem({ templatePick: { base: 'supplement' } }, 'base', B), 'T2');
+  assert.equal(resolveTemplateSystem({ templatePick: { base: 'dev' } }, 'base', B), 'T3');
+  // ③ custom:<index> → 自定义条目文本；越界/空文本回退 T1
+  const cfg = { templatePick: { base: 'custom:1' }, templateCustom: { base: [{ name: 'a', text: 'C0' }, { name: 'b', text: 'C1' }] } };
+  assert.equal(resolveTemplateSystem(cfg, 'base', B), 'C1');
+  assert.equal(resolveTemplateSystem({ templatePick: { base: 'custom:9' }, templateCustom: { base: [{ text: 'C0' }] } }, 'base', B), 'T1');
+  assert.equal(resolveTemplateSystem({ templatePick: { base: 'custom:0' }, templateCustom: { base: [{ text: '' }] } }, 'base', B), 'T1');
+  // ④ publish 模式走独立内置数组
+  assert.equal(resolveTemplateSystem({ templatePick: { publish: 'dev' } }, 'publish', B), 'P3');
+  // ⑤ legacy：无 pick 且 templateMode==='custom' → texts 文本；builtin → T1
+  assert.equal(resolveTemplateSystem({ templateMode: 'custom', templateTexts: { base: '旧自定义' } }, 'base', B), '旧自定义');
+  assert.equal(resolveTemplateSystem({ templateMode: 'builtin', templateTexts: { base: '旧自定义' } }, 'base', B), 'T1');
+  // ⑥ 未知 pick / 无内置数组 → 回退
+  assert.equal(resolveTemplateSystem({ templatePick: { base: 'weird' } }, 'base', B), 'T1');
+  assert.equal(resolveTemplateSystem({ templatePick: { base: 'default' } }, 'nope', B), '');
+  // 常量契约（与 client 一致）
+  assert.equal(TEMPLATE_CUSTOM_MAX, 10);
+  assert.equal(TEMPLATE_TEXT_MAX, 4000);
+  assert.equal(TEMPLATE_NAME_MAX, 40);
 });
 
 // v2.5.0（一键更新并重启）：安装命令构造契约。
@@ -1277,6 +1348,9 @@ test('U66 parseSearchPlan JSON 容错解析（v3.0p）', () => {
 test('U-parity config-schema vs 运行时 validateConfig（F4 语义奇偶）', () => {
   const { validateConfig: schemaValidate } = require('../src/host/config-schema.js');
   const texts5 = (t) => ['base', 'lite', 'standard', 'smart', 'publish'].map((k) => (t && t[k]) || '');
+  // 模板体系扩展（2026-08-17）：pick/custom 归一化对比
+  const picks5 = (t) => ['base', 'lite', 'standard', 'smart', 'publish'].map((k) => (t && t[k]) || 'default');
+  const customs5 = (t) => ['base', 'lite', 'standard', 'smart', 'publish'].map((k) => (Array.isArray(t && t[k]) ? t[k] : []).map((e) => ({ name: e.name || '', text: e.text || '' })));
   const canon = (r) => ({
     main: r.provider && r.model ? { provider: r.provider, model: r.model, reasoningEffort: r.reasoningEffort || '' } : null,
     fallback: (r.fallback || []).map((e) => ({ provider: e.provider, model: e.model, reasoningEffort: e.reasoningEffort || '' })),
@@ -1285,6 +1359,8 @@ test('U-parity config-schema vs 运行时 validateConfig（F4 语义奇偶）', 
     params: { timeoutMs: r.timeoutMs, maxTokens: r.maxTokens, outputLimit: r.outputLimit },
     templateMode: r.templateMode,
     templateTexts: texts5(r.templateTexts),
+    templatePick: picks5(r.templatePick),
+    templateCustom: customs5(r.templateCustom),
     mode: r.mode,
     memory: r.memory,
   });
@@ -1298,6 +1374,8 @@ test('U-parity config-schema vs 运行时 validateConfig（F4 语义奇偶）', 
     params: { timeoutMs: s.params.timeoutMs, maxTokens: s.params.maxTokens, outputLimit: s.params.outputLimit },
     templateMode: s.template.mode,
     templateTexts: texts5(s.template.texts),
+    templatePick: picks5(s.template.pick),
+    templateCustom: customs5(s.template.custom),
     mode: s.mode,
     memory: s.memory,
   });
@@ -1338,6 +1416,19 @@ test('U-parity config-schema vs 运行时 validateConfig（F4 语义奇偶）', 
       order: ['p/m1', 'ghost/key', 'p/m1'],
       params: { timeoutMs: 100, maxTokens: 99999, outputLimit: -5 },
       template: { mode: 'builtin', texts: { base: 'B'.repeat(5000) }, touched: ['publish', 'unknown', 'publish'] },
+    },
+    // 模板体系扩展（2026-08-17）：pick/custom 双实现一致——越界回退 default、超长丢弃、
+    // 空 text 丢弃、name 截断/默认名、publish 独立列表、已有 pick 不触发 texts 迁移
+    {
+      version: 2, mode: 'smart',
+      template: {
+        mode: 'builtin',
+        pick: { base: 'supplement', smart: 'custom:1', publish: 'custom:9', nope: 'dev' },
+        custom: {
+          smart: [{ name: 'A', text: 'x' }, { name: 'B', text: 'y'.repeat(5000) }, { text: 'ok' }],
+          publish: [{ name: 'P', text: 'z' }],
+        },
+      },
     },
   ];
   for (const input of battery) {

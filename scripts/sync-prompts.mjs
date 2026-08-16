@@ -32,6 +32,12 @@ const SOURCES = [
   { md: 'prompts/task-analysis.md', name: 'TASK_ANALYSIS_PROMPT' },
   { md: 'prompts/context-guard.md', name: 'CONTEXT_GUARD' },
   { md: 'prompts/publish.md', name: 'SYSTEM_PUBLISH_PROMPT' },
+  // 模板体系扩展（2026-08-17）：每模式 3 个内置模板——T2 增量补充完善 / T3 增量完善（开发向）
+  //（base/lite/standard/smart 共用 system-*；publish 单独 publish-*，保留九章规格目标）
+  { md: 'prompts/system-supplement.md', name: 'SYSTEM_SUPPLEMENT_PROMPT' },
+  { md: 'prompts/system-dev.md', name: 'SYSTEM_DEV_PROMPT' },
+  { md: 'prompts/publish-supplement.md', name: 'SYSTEM_PUBLISH_SUPPLEMENT_PROMPT' },
+  { md: 'prompts/publish-dev.md', name: 'SYSTEM_PUBLISH_DEV_PROMPT' },
   // 模式重构（2026-08-16）：会话关联性判定提示词（占位符 {history}/{current} 运行时替换）
   { md: 'prompts/relevance.md', name: 'RELEVANCE_PROMPT' },
   // 模式重构 S3：smart 专业词汇优化段（追加到 smart 模式 system）

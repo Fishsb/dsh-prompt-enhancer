@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Changed
+- **模板体系扩展：每模式 3 个内置模板 + 多自定义模板（用户需求）**：设置页「模板」由「内置/自定义」全局开关升级为**每模式模板选择**——每个优化模式（base/lite/standard/smart/publish）现各有 3 个内置模板：**模板1 默认模板**（现有提示词，行为零变化）、**模板2 增量补充完善**（在原有内容基础上补充与完善）、**模板3 增量完善（开发向）**（面向开发人员，开发化表达、技术术语与代码相关名词；publish 模式独立适配九章规格）；**自定义模板可添加多个**（每模式 ≤10 个，各 ≤4000 字符，可命名/编辑/删除），新建时以当前选中模板内容预填。实现：新增 4 个提示词事实源（`prompts/system-supplement.md`/`system-dev.md`/`publish-supplement.md`/`publish-dev.md` → `SYSTEM_SUPPLEMENT_PROMPT`/`SYSTEM_DEV_PROMPT`/`SYSTEM_PUBLISH_SUPPLEMENT_PROMPT`/`SYSTEM_PUBLISH_DEV_PROMPT`）；配置新增 `template.pick`（每模式选中键 default/supplement/dev/custom:N，非法/越界回退 default）与 `template.custom`（每模式多自定义列表），旧 `template.mode`+`texts` 配置自动迁移（custom 且有内容 → 迁为 custom:0，行为等价）；host 组装改走纯函数 `resolveTemplateSystem`（PURE 可单测），`template/default` RPC 新增 `catalog`（每模式 [T1,T2,T3]）供 client 下拉与预填；client sanitize 与 M3 脚手架同步白名单；单测 U40 扩展 4 常量一致性 + U41 扩展 pick/custom + 新增 U57/CFG-05 + U-parity 扩展，121 → 123 — [PEN-002]
 - **端口重启默认可用（用户指令）**：插件管理更新卡「端口重启」按钮不再依赖「检测到新版本」（`outdated`）前置——去掉 `portRestartDisabled` 的 `!outdated` 禁用条件，端口重启**始终可点**；纯重启服务本就不需新版本（`runRestart` 无 tag 走纯重启循环，逻辑已支持），点击即拉起执行器（3081）执行重启；「一键更新」按钮语义不变（仍须检测到新版本）；纯 client 改动，RPC/执行器/构建物版本零变化 — [VU-001]
 - **README 卸载/更新说明修正（用户反馈驱动）**：「更新 / 卸载」段落此前只列命令、未说明生效条件，导致 remove 后不重启被观感为「卸载不掉」——① 明确 **remove 后必须重启 dsh-web 才从运行中卸载**（dsh plugin 只清理磁盘安装与层列表，不重挂载运行实例）；② 注明重复 remove 报 `no such dependency found` 即表示已卸载；③ 注明 tag 锁定安装（`github:...#tag`）下 `update` 不跨 tag 升级，升级应用 `add github:...#新tag`；④ 注明卸载不清除浏览器端插件配置（localStorage `dsh.enhance.config.v2`），重装后保留 — 文档
 

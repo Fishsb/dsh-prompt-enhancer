@@ -13,7 +13,16 @@ const CONFIG_DEFAULTS = {
   customModels: [],
   order: [],
   params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
-  template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '', publish: '' }, touched: [] },
+  // 模板体系扩展（2026-08-17）：pick=每模式选中键（default/supplement/dev/custom:<index>）；
+  // custom=每模式多自定义模板列表 [{name,text}]（各 ≤4000、≤10 条）
+  template: {
+    mode: 'builtin',
+    text: '',
+    texts: { base: '', lite: '', standard: '', smart: '', publish: '' },
+    pick: { base: 'default', lite: 'default', standard: 'default', smart: 'default', publish: 'default' },
+    custom: { base: [], lite: [], standard: [], smart: [], publish: [] },
+    touched: [],
+  },
   mode: 'base',
   context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
   memory: false,
@@ -125,6 +134,43 @@ function validateConfig(raw) {
   if (Array.isArray(tSrc.touched)) {
     for (const key of tSrc.touched.slice(0, 5)) {
       if (typeof key === 'string' && MODES.includes(key) && !value.template.touched.includes(key)) value.template.touched.push(key);
+    }
+  }
+  // 模板体系扩展（2026-08-17）：pick/custom 解析镜像运行时 PURE validateConfig——pick 白名单
+  // default/supplement/dev/custom:<index>（index 越界回退 default）；custom 每模式 ≤10 条、
+  // 每条 {name(≤40), text(≤4000)}；旧配置（无 pick 字段）且 mode==='custom' 时 texts 非空 → 迁为 custom:0。
+  const TEMPLATE_CUSTOM_MAX = 10;
+  const TEMPLATE_TEXT_MAX = 4000;
+  const TEMPLATE_NAME_MAX = 40;
+  const hasNewPick = tSrc.pick && typeof tSrc.pick === 'object';
+  const customSrc = tSrc.custom && typeof tSrc.custom === 'object' ? tSrc.custom : null;
+  for (const key of MODES) {
+    const list = Array.isArray(customSrc && customSrc[key]) ? customSrc[key] : [];
+    for (const item of list.slice(0, TEMPLATE_CUSTOM_MAX)) {
+      if (item && typeof item === 'object' && typeof item.text === 'string' && item.text.trim() !== '' && item.text.length <= TEMPLATE_TEXT_MAX) {
+        value.template.custom[key].push({
+          name: typeof item.name === 'string' && item.name.trim() !== '' ? item.name.trim().slice(0, TEMPLATE_NAME_MAX) : '自定义模板 ' + (value.template.custom[key].length + 1),
+          text: item.text,
+        });
+      }
+    }
+  }
+  if (!hasNewPick && value.template.mode === 'custom') {
+    for (const key of MODES) {
+      const legacy = value.template.texts[key];
+      if (typeof legacy === 'string' && legacy.trim() !== '' && value.template.custom[key].length === 0) {
+        value.template.custom[key].push({ name: '自定义模板', text: legacy });
+        value.template.pick[key] = 'custom:0';
+      }
+    }
+  } else if (hasNewPick) {
+    for (const key of MODES) {
+      const p = typeof tSrc.pick[key] === 'string' ? tSrc.pick[key] : '';
+      if (p === 'supplement' || p === 'dev') value.template.pick[key] = p;
+      else if (p.indexOf('custom:') === 0) {
+        const idx = parseInt(p.slice(7), 10);
+        if (Number.isInteger(idx) && idx >= 0 && idx < value.template.custom[key].length) value.template.pick[key] = 'custom:' + idx;
+      }
     }
   }
   if (raw.updater && typeof raw.updater === 'object') {

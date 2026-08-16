@@ -71,7 +71,7 @@ Settings → "Models & plugins" → "Optimization" tab:
 | Memory | On / Off; when on, pre-send iterations accumulate into a memory chain (up to the latest 4 input/output pairs, injected as a multi-turn conversation with edit-direction sensing; first run falls back to Lite); when off, nothing is read or written |
 | Context budget | 0 / 2000 / 4000 / 8000 chars; 0 = no context injection (the memory chain is budget-constrained too, chain cap 2400 chars) |
 | Timeout / Max tokens / Output limit | Request parameters |
-| Template | Built-in / custom template text |
+| Template | 3 built-in templates per mode: default (existing) / incremental supplement / incremental refine (dev-oriented, technical terms & code nouns); **multiple custom templates** per mode (≤10, ≤4000 chars each, name/edit/delete) |
 
 The model chain lives in the "Models" tab: tried in order, reorderable, per-entry thinking toggle & level, inline connectivity test, restore defaults.
 

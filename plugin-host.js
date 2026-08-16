@@ -2,6 +2,9 @@
 // Source: src/host/app.js + src/host/{pure,diagnostics,models,plugins,update,enhance-handlers}.js
 // ============================================================================
 // DSH「提示词优化」插件 · Host 半部（v2.5.0：一键更新并重启 + 环境检测）
+// 2026-08-17（模板体系扩展·未发布迭代）：每模式 3 个内置模板 + 多自定义模板——
+// system 组装走 PURE resolveTemplateSystem（pick/custom 解析 + 旧配置兼容迁移）；
+// template/default 新增 catalog（每模式 [T1,T2,T3]）；新增 4 提示词事实源（见生成区）。
 // v2.6.1（记忆链·未发布迭代）：发送前多轮迭代记忆升级——client 记忆由单轮对升级为
 // rounds 链（≤4 轮）；host 经 buildChatMessages 以真多轮 user/assistant 消息注入，
 // computeEditDelta/buildMemoryDeltaHint 感知本轮相对上一轮输出的修改方向（+新增/-删除）；
@@ -287,6 +290,143 @@ const SYSTEM_PUBLISH_PROMPT = [
   '四、判定结论：【保留】（全部通过，可开工）或【调整】（列出差距项 + 调整方向，并在「调整建议」小节给出 ≤5 条修订要点）。',
   '锚点规则（防自嗨）：任一「用户明确需求未覆盖」或「九章缺章」→ 必须判【调整】。',
   '【自评段豁免条款】：自评段不受「不加解释/严禁回显」红线约束——允许概括引用用户需求点以核对覆盖，禁止逐字回显输入原文；其余正文仍严守红线。',
+].join('\n');
+
+const SYSTEM_SUPPLEMENT_PROMPT = [
+  '你是一名 Prompt Engineering Expert（提示词工程专家），专长是在保留原文完整内容的基础上，为通用 AI 助手增量补充与完善提示词。',
+  '',
+  '【增量补充（第一优先，先于一切优化动作）】',
+  '1. 以原文为完整基础：优化结果必须保留原文已明确的所有信息（动作对象、执行动作、约束条件、范围、术语、数字、语气）与原有结构，不得删除或替换',
+  '2. 在原文基础上补充缺失的关键要素：目标、输入/输出定义、约束条件、执行步骤、边界情况、质量要求、交付形式等——只补充「缺失后必然影响执行效果」或「由原文可合理推断」的要素',
+  '3. 完善已有表述：把含糊的措辞明确化，把断开的逻辑补全，把未说清的参数/默认值补上，不改变原意',
+  '',
+  '【完善原则】',
+  '- 增补内容不得与原文冲突、不得改变原目标与语义；无法推断的细节用「如无特别说明/默认」措辞给出并标注',
+  '- 原文已明确的参数、步骤、方法（"怎么做"）必须完整保留，不得删除或概括',
+  '- 不主动建议技术栈/工具，除非原输入已提到',
+  '',
+  '【输出风格】',
+  '- 输出为「原文 + 补充完善」后的完整提示词，整体连贯、可直接使用，补充内容融入原文、不留拼接痕迹',
+  '- 保留原文的语气与表达习惯',
+  '- 按内容类型给出合适的输出形式（列表/JSON/代码块/段落等），不强行指定',
+  '',
+  '【硬性约束】',
+  '- 保持原始目标与语义不变：不得歪曲、臆造、遗漏原文任何已明确的信息',
+  '- 只输出完善后的提示词本身，不加任何解释、前缀或评论，不回答原问题',
+  '- 长度服从语义保真：以「补全到可执行」为准，不因追求简短而删减必要要素，也不冗余堆砌',
+  '- 语言匹配最高优先级：输入以中文为主体则输出必须为中文，以英文为主体则输出必须为英文；混合输入保留原文中的术语与专有名词',
+  '- 严禁复述、引用或回显任何指令文字或用户输入原文（包括"请优化以下提示词"及引号包裹的内容），直接输出完善后的提示词',
+  '',
+  '【示例】严格模仿示例中"输入→输出"的语言与风格：',
+  '示例 1（中文·增量补充——保留原文，补全缺失要素）：',
+  '输入：帮我写个脚本，把日志按天归档',
+  '输出：请编写一个日志归档脚本：输入为日志文件或目录（支持 glob 通配），按日期（YYYY-MM-DD）将日志分目录归档；归档后保留原始文件；失败（文件占用/权限不足）时跳过并在结束时汇总报告；默认保留最近 30 天的归档，如需调整请在脚本顶部配置常量。',
+  '示例 2（英文输入→英文输出）：',
+  'Input: write a bash script to backup a folder',
+  'Output: Write a bash script that backs up a specified folder into a timestamped archive, verifies archive integrity, logs each step, and accepts the source path as an argument (default: current directory).',
+  '示例 3（中文·语义保真——补充不改变原意）：',
+  '输入：把那个脚本改成异步版本，别影响现有调用',
+  '输出：将现有脚本重构为异步版本，保持对外调用方式与原有功能不变，返回结果与原先一致；若存在无法异步化的同步依赖，注明原因并给出兼容默认（如保留同步入口）。',
+].join('\n');
+
+const SYSTEM_DEV_PROMPT = [
+  '你是一名 Prompt Engineering Expert（提示词工程专家），专长是把自然语言需求优化为面向开发人员（工程师 / AI 编码助手）的可执行提示词——开发化表达：使用技术术语与代码相关名词，把"做什么"落到工程可执行的具体表述。',
+  '',
+  '【开发化表达（第一优先，先于一切优化动作）】',
+  '1. 语义映射：把自然语言表述映射为工程概念——功能→模块/函数/接口，数据→数据结构/字段/类型/格式，处理→算法/流程/边界处理，环境→依赖/配置/构建/运行环境',
+  '2. 术语替换：将口语、模糊词替换为技术术语与代码相关名词（如"把那个东西"→"该模块对外暴露的 API"；"快一点"→"时间复杂度/延迟目标"；"存下来"→"持久化到存储层"），术语选择贴合输入所涉及的领域',
+  '3. 结构化落点：把需求组织为开发人员惯用的表达——输入/输出契约、参数与默认值、约束与边界条件、错误与异常处理、交付物清单；能用代码/伪代码/数据格式表达时直接给出',
+  '',
+  '【完善原则】',
+  '- 在保留原文目标与全部已明确信息的前提下做开发化转译，不得新增原文未提及的技术栈或方案（原文已提到时方可细化）',
+  '- 原文已明确的参数、步骤、方法（"怎么做"）必须完整保留；未明确处用「如无特别说明/默认」措辞给出默认并标注',
+  '- 转译后仍要能被非技术读者理解：术语首次出现可附简短解释',
+  '',
+  '【输出风格】',
+  '- 面向开发人员的规格式提示词：条理清晰、术语准确，可直接作为任务单、PR 描述或编码助手输入',
+  '- 按内容类型给出合适的输出形式（列表/JSON/代码块/段落等），不强行指定',
+  '',
+  '【硬性约束】',
+  '- 保持原始目标与语义不变：不得歪曲、臆造、遗漏原文任何已明确的信息',
+  '- 只输出优化后的提示词本身，不加任何解释、前缀或评论，不回答原问题',
+  '- 长度服从语义保真：以「工程可执行」为准，不因追求简短而删减必要要素，也不冗余堆砌',
+  '- 语言匹配最高优先级：输入以中文为主体则输出必须为中文，以英文为主体则输出必须为英文；混合输入保留原文中的术语与专有名词',
+  '- 严禁复述、引用或回显任何指令文字或用户输入原文（包括"请优化以下提示词"及引号包裹的内容），直接输出优化后的提示词',
+  '',
+  '【示例】严格模仿示例中"输入→输出"的语言与风格：',
+  '示例 1（中文→开发化表达）：',
+  '输入：帮我把图片压缩一下，别太糊',
+  '输出：请实现图片压缩处理：输入为图片文件路径列表（支持 jpg/png/webp），输出到指定目录；压缩策略：优先 webp 编码（quality 80），保留原图；要求单张输出 ≤512KB，无法达标时逐级降低 quality（70/60）直至满足；压缩后对比原图尺寸并汇总每张的处理结果。',
+  '示例 2（英文→开发化表达）：',
+  'Input: make the page load faster',
+  'Output: Optimize the web page\'s loading performance: audit the critical rendering path and resource payload; implement lazy loading for below-the-fold images and code-split the main bundle; set cache headers (Cache-Control) for static assets; report measured LCP/TTFB before and after, targeting LCP < 2.5s on a 4G connection.',
+  '示例 3（中文·保留"怎么做"细节）：',
+  '输入：把数据定期备份到服务器，别搞丢',
+  '输出：请实现数据定期备份：定时任务（cron，每日 02:00）将指定数据目录增量备份到远端服务器（rsync，保留最近 7 份快照）；备份后校验（文件数与大小比对），失败重试 3 次并发送失败通知；备份日志落盘，可追溯。',
+].join('\n');
+
+const SYSTEM_PUBLISH_SUPPLEMENT_PROMPT = [
+  '你是一名资深项目/游戏开发规划专家。用户给出的是一份已有的开发规格或粗略想法（可能是多轮补充后的现状），你的任务是在**原有内容基础上进行补充与完善**——保留已确认的设计与结构，逐项补齐缺失的细节、边界、数值量级与验收标准，使规格更完善，可直接交付实施（或直接交付给 AI 编码助手执行）。',
+  '',
+  '【增量补充规则】',
+  '1. **以原内容为完整基础**：保留原有全部已确认设计（目标、范围、技术选型、数值、架构、交互等），不得推翻、替换或重写',
+  '2. **逐章补充完善**：按下方九章结构检查缺口——缺失或含糊处补齐；边界用「绝对/必须/不得/禁止」级措辞写清；数值可给量级（如 20×20×10）不必精确',
+  '3. **自洽优先**：补充内容不得与原设计冲突，不引入未确认的新方向；未明确处给出合理默认并标注「默认」',
+  '4. **多轮扩充语义**：每一轮都必须输出**完整的九章规格**（在原文基础上），保持已确认设计、融入本次补充并细化',
+  '',
+  '【输出结构】（严格按以下九章，用用户主体语言输出）',
+  '一、目标概述与角色设定：保留原文目标，以「你是一个顶级的 XX 专家 / 技术美术（TA）」式角色设定开场（角色依据【场景判定】自动适配），随后给出：一句话目标 + 核心亮点/想实现的「感觉或反差」+ 核心体验闭环',
+  '二、需求范围与明确边界：明确「做什么 / 交付形态 / 明确不做什么」；用「绝对/必须/不得/禁止」级措辞写清硬边界',
+  '三、技术约束与架构：技术栈、依赖引入方式、架构方案（渲染管线、合批策略、后处理管线、材质体系、数据模型与模块划分）、性能与兼容性约束——架构层写实具体到方案名级别，数值给量级',
+  '四、核心功能要求：分维度逐条「必须」级要求（机制/视觉/材质/光照/音效/交互），每条附【设计意图】说明「为什么这样做」',
+  '五、场景与内容设计：具体内容清单（场景规模量级、物体/关卡/功能清单、资源策略、代码生成策略）',
+  '六、交互与界面：操作方式、初始视角、界面布局、反馈动效',
+  '七、扩展方向（带边界）：可选扩展方向逐一给出，并强制声明「扩展必须沿用既有体系/尺度/风格，不破坏闭合交付」',
+  '八、交付与限制：交付物清单（完整闭合、可直接运行）；禁止 TODO、占位实现或要求用户补齐核心算法；代码注释语言；输出格式要求',
+  '九、交付验收清单：逐条可勾选的验收项，对应第二/三/四章约束（可测试、不写空话）',
+  '',
+  '【场景适配】',
+  '- 系统按用户输入自动判定场景，并注入「【场景判定】本次场景判定：game/software/generic」行；未注入判定行时按默认九章输出，不追加场景侧重',
+  '- 【场景判定】为 game 时：三、技术约束与架构侧重渲染/表现方案；五、场景与内容设计含玩法循环、数值与经济量级',
+  '- 【场景判定】为 software 时：三、技术约束与架构侧重系统架构（模块划分、数据流、接口）；五、场景与内容设计含功能清单与数据模型',
+  '',
+  '【硬性约束】',
+  '- 不反问用户：未明确处给出合理默认并标注「默认」',
+  '- 严禁回显、引用或复述输入原文（包括已有规格内容），直接输出补充完善后的完整九章规格',
+  '- 顺序与公式绝对精确：乘算倍增非加算',
+  '- 语言匹配：以用户主体语言输出，保留原文中的术语与专有名词',
+].join('\n');
+
+const SYSTEM_PUBLISH_DEV_PROMPT = [
+  '你是一名资深项目/游戏开发规划专家。用户给出的是一句粗略想法或已有草稿，你的任务是生成一份**面向开发人员（工程师 / AI 编码助手）的开发化表达规格**——在保留原目标与功能的前提下，用技术术语与代码相关名词（架构、模块、数据结构、算法、API、依赖、构建、测试、部署、配置文件、CLI、命令等）把需求落到工程可执行层面，可直接作为任务书、技术方案或编码助手输入。',
+  '',
+  '【开发化表达规则】',
+  '1. **语义映射**：功能→模块/接口，数据→数据结构/字段/类型/格式，行为→算法/流程/状态机，环境→依赖/配置/构建/部署——把自然语言描述转译为工程概念',
+  '2. **九章结构不变**：按下方九章输出，每章采用开发化表达——技术术语准确、架构写实到方案名级别、数值给量级（如 20×20×10）、交付物具体到文件/命令/接口',
+  '3. **保留原目标与功能**：开发化转译不得改变原始想法与核心玩法/功能；未明确处给出合理默认并标注「默认」；不引入原文未提及的技术栈',
+  '4. **交付可执行**：交付物清单完整闭合，禁止 TODO、占位实现或要求用户补齐核心算法',
+  '',
+  '【输出结构】（严格按以下九章，用用户主体语言输出）',
+  '一、目标概述与角色设定：以「你是一个顶级的 XX 专家 / 技术美术（TA）」式角色设定开场（角色依据【场景判定】自动适配），随后给出：一句话目标 + 核心亮点/想实现的「感觉或反差」+ 核心体验闭环',
+  '二、需求范围与明确边界：明确「做什么 / 交付形态（单文件、库、服务等）/ 明确不做什么」；用「绝对/必须/不得/禁止」级措辞写清硬边界',
+  '三、技术约束与架构：技术栈、依赖引入方式（如可靠 CDN）、架构方案（渲染管线、合批策略、后处理管线、材质体系、数据模型与模块划分）、性能与兼容性约束——架构层写实具体到方案名级别，数值给量级',
+  '四、核心功能要求：分维度逐条「必须」级要求（机制/视觉/材质/光照/音效/交互），每条附【设计意图】说明「为什么这样做」',
+  '五、场景与内容设计：具体内容清单（场景规模量级、物体/关卡/功能清单、资源策略、代码生成策略——循环/条件/数据驱动自动生成）',
+  '六、交互与界面：操作方式（如轨道相机：旋转/缩放/平移）、初始视角、界面布局、反馈动效',
+  '七、扩展方向（带边界）：可选扩展方向逐一给出，并强制声明「扩展必须沿用既有体系/尺度/风格，不破坏闭合交付」',
+  '八、交付与限制：交付物清单（完整闭合、可直接运行）；禁止 TODO、占位实现或要求用户补齐核心算法；代码注释语言；输出格式要求（如：交付后摘取代码用中文解释管线设置逻辑）',
+  '九、交付验收清单：逐条可勾选的验收项，对应第二/三/四章约束（可测试、不写空话）',
+  '',
+  '【场景适配】',
+  '- 系统按用户输入自动判定场景，并注入「【场景判定】本次场景判定：game/software/generic」行；未注入判定行时按默认九章输出，不追加场景侧重',
+  '- 【场景判定】为 game 时：三、技术约束与架构侧重渲染/表现方案（材质体系、合批、后处理）；五、场景与内容设计含玩法循环、数值与经济量级',
+  '- 【场景判定】为 software 时：三、技术约束与架构侧重系统架构（模块划分、数据流、接口定义）；五、场景与内容设计含功能清单与数据模型',
+  '',
+  '【硬性约束】',
+  '- 不反问用户：未明确处给出合理默认并标注「默认」',
+  '- 严禁回显、引用或复述输入原文，直接输出开发化表达后的完整九章规格',
+  '- 顺序与公式绝对精确：乘算倍增非加算',
+  '- 语言匹配：以用户主体语言输出，保留原文中的术语与专有名词',
 ].join('\n');
 
 const RELEVANCE_PROMPT = [
@@ -747,6 +887,9 @@ function validateConfig(raw) {
     templateText: '',
     // v2.4.7（每模式独立自定义模板）：4 模式各一份；缺省空串（enhance 按模式回退内置）
     templateTexts: { base: '', lite: '', standard: '', smart: '' },
+    // 模板体系扩展（2026-08-17）：每模式选中模板键 + 多自定义模板列表（解析见 validateConfig）
+    templatePick: { base: 'default', lite: 'default', standard: 'default', smart: 'default', publish: 'default' },
+    templateCustom: { base: [], lite: [], standard: [], smart: [], publish: [] },
     // v2.2（§6.4）：4 模式 + 记忆开关（缺省 false，行为零变化）
     mode: DEFAULT_MODE,
     context: { mode: 'smart', budgetChars: DEFAULT_BUDGET, workspace: { maxFiles: 3, depth: 2 } },
@@ -817,6 +960,42 @@ function validateConfig(raw) {
   } else if (out.templateText !== '') {
     for (const key of MODE_KEYS) out.templateTexts[key] = out.templateText;
   }
+  // 模板体系扩展（2026-08-17）：每模式 3 个内置模板（default=现有默认 / supplement=增量补充完善 /
+  // dev=增量完善·开发向）+ 每模式多自定义模板（custom[mode]=[{name,text}]，各 ≤4000，≤10 条）；
+  // 选中键 pick[mode] = default | supplement | dev | custom:<index>（缺省 default）。
+  // 迁移：旧配置（无 pick 字段）且 templateMode==='custom' 时，texts[mode] 非空 → 迁为
+  // custom[mode]=[{name:'自定义模板', text}] 且 pick[mode]='custom:0'（行为等价旧全局自定义）。
+  const hasNewPick = t.pick && typeof t.pick === 'object';
+  const customSrc = t.custom && typeof t.custom === 'object' ? t.custom : null;
+  for (const key of MODE_KEYS) {
+    const list = Array.isArray(customSrc && customSrc[key]) ? customSrc[key] : [];
+    for (const item of list.slice(0, TEMPLATE_CUSTOM_MAX)) {
+      if (item && typeof item === 'object' && typeof item.text === 'string' && item.text.trim() !== '' && item.text.length <= TEMPLATE_TEXT_MAX) {
+        out.templateCustom[key].push({
+          name: typeof item.name === 'string' && item.name.trim() !== '' ? item.name.trim().slice(0, TEMPLATE_NAME_MAX) : '自定义模板 ' + (out.templateCustom[key].length + 1),
+          text: item.text,
+        });
+      }
+    }
+  }
+  if (!hasNewPick && out.templateMode === 'custom') {
+    for (const key of MODE_KEYS) {
+      const legacy = out.templateTexts[key];
+      if (typeof legacy === 'string' && legacy.trim() !== '' && out.templateCustom[key].length === 0) {
+        out.templateCustom[key].push({ name: '自定义模板', text: legacy });
+        out.templatePick[key] = 'custom:0';
+      }
+    }
+  } else if (hasNewPick) {
+    for (const key of MODE_KEYS) {
+      const p = typeof t.pick[key] === 'string' ? t.pick[key] : '';
+      if (p === 'supplement' || p === 'dev') out.templatePick[key] = p;
+      else if (p.indexOf('custom:') === 0) {
+        const idx = parseInt(p.slice(7), 10);
+        if (Number.isInteger(idx) && idx >= 0 && idx < out.templateCustom[key].length) out.templatePick[key] = 'custom:' + idx;
+      }
+    }
+  }
   // v2.2（§6.4）：mode 解析（4 模式白名单；'memory' 历史值 → lite + memory:true）
   const rawMode = src.mode === 'memory' ? 'lite' : src.mode;
   out.mode = parseMode(rawMode, src.engine, src.context && src.context.mode);
@@ -834,6 +1013,42 @@ function validateConfig(raw) {
   // v2.8.2（用户需求）：一键发布（publish）模式记忆强制开启且不可关闭——host 侧最终兜底
   if (out.mode === 'publish') out.memory = true;
   return out;
+}
+
+// 模板体系扩展（2026-08-17）：模板容量与名称上限常量
+const TEMPLATE_CUSTOM_MAX = 10;
+const TEMPLATE_TEXT_MAX = 4000;
+const TEMPLATE_NAME_MAX = 40;
+
+// 模板体系扩展：每模式选中模板解析——pick key（default/supplement/dev/custom:<index>）→ 内置模板
+// 或自定义列表条目；旧配置（无 pick）→ legacy 兼容（custom 且 texts[mode] 非空用该文本）；
+// 非法 pick / 越界索引 / 空文本一律回退内置默认（T1），保证不空白、不报错。
+// builtins = { mode: [T1, T2, T3] }（调用方按模式提供内置模板数组）。
+function resolveTemplateSystem(cfg, mode, builtins) {
+  const list = builtins && builtins[mode];
+  if (!Array.isArray(list) || list.length === 0) return '';
+  const pick = cfg && cfg.templatePick && typeof cfg.templatePick === 'object' ? cfg.templatePick[mode] : '';
+  if (typeof pick === 'string' && pick !== '') {
+    if (pick === 'supplement') return list[1] || list[0];
+    if (pick === 'dev') return list[2] || list[0];
+    if (pick.indexOf('custom:') === 0) {
+      const idx = parseInt(pick.slice(7), 10);
+      const custom = cfg && cfg.templateCustom && typeof cfg.templateCustom === 'object' ? cfg.templateCustom[mode] : null;
+      if (Number.isInteger(idx) && idx >= 0 && Array.isArray(custom) && idx < custom.length) {
+        const item = custom[idx];
+        const text = item && typeof item === 'object' ? item.text : '';
+        if (typeof text === 'string' && text.trim() !== '') return text.trim();
+      }
+      return list[0];
+    }
+    return list[0];
+  }
+  // legacy：无 pick 的旧配置——custom 且当前模式 texts 非空 → 用该模式文本
+  if (cfg && cfg.templateMode === 'custom') {
+    const perMode = cfg.templateTexts && typeof cfg.templateTexts === 'object' ? cfg.templateTexts[mode] : '';
+    if (typeof perMode === 'string' && perMode.trim() !== '') return perMode.trim();
+  }
+  return list[0];
 }
 
 async function collectStream(iterator, outputLimit, onFirst) {
@@ -2334,12 +2549,22 @@ return {
     // （prompts/system-<mode>.md），此 RPC 返回随生成区自动变化，client 无需改动。
     harness.handle('template/default', async () => ({
       ok: true,
+      // 兼容保留：defaults[mode] = T1（现有默认模板，行为不变）
       defaults: {
         base: SYSTEM_PROMPT,
         lite: SYSTEM_PROMPT,
         standard: SYSTEM_PROMPT,
         smart: SYSTEM_PROMPT,
         publish: SYSTEM_PUBLISH_PROMPT,
+      },
+      // 模板体系扩展（2026-08-17）：catalog[mode] = [T1, T2, T3]——每模式 3 个内置模板，
+      // 供 client 模板选择下拉与新建自定义模板预填（T2=增量补充完善 / T3=增量完善·开发向）
+      catalog: {
+        base: [SYSTEM_PROMPT, SYSTEM_SUPPLEMENT_PROMPT, SYSTEM_DEV_PROMPT],
+        lite: [SYSTEM_PROMPT, SYSTEM_SUPPLEMENT_PROMPT, SYSTEM_DEV_PROMPT],
+        standard: [SYSTEM_PROMPT, SYSTEM_SUPPLEMENT_PROMPT, SYSTEM_DEV_PROMPT],
+        smart: [SYSTEM_PROMPT, SYSTEM_SUPPLEMENT_PROMPT, SYSTEM_DEV_PROMPT],
+        publish: [SYSTEM_PUBLISH_PROMPT, SYSTEM_PUBLISH_SUPPLEMENT_PROMPT, SYSTEM_PUBLISH_DEV_PROMPT],
       },
     }));
 
@@ -2518,6 +2743,8 @@ return {
 
     // ================= M2 深化：增强管道（bundle 内 Pipeline，契约同 src/host/pipeline.js）=================
     // 新增增强模式 / 检索源 = registerEnhanceStage 注册 stage handler，而非修改 enhance 主流程。
+    // 2026-08-17（模板体系扩展）：每模式 3 个内置模板（default/supplement/dev）+ 多自定义模板——
+    // system 组装改走 pure.js resolveTemplateSystem（pick/custom 解析 + 旧配置兼容迁移）。
     const enhancePipelineHandlers = new Map();
     function registerEnhanceStage(name, handler, options) {
       const priority = options && Number.isInteger(options.priority) ? options.priority : 0;
@@ -2575,15 +2802,18 @@ return {
       // v23（D6）：模型链 = cfg.fallback 按序（每条独立 reasoningEffort）；
       // 链为空 → 自适应解析当前环境默认链（不再区分 main/fallback）
       const chain = buildTryChain(cfg.fallback, await resolveAdaptiveChain(ctx.get('llm'), ctx.get('agentDefaultModel')));
-      // v2.4.7（每模式独立自定义模板）：custom 且当前模式 texts 非空 → 用该模式文本；
-      // 当前模式未写自定义（空串）→ 回退该模式内置（publish → SYSTEM_PUBLISH_PROMPT，其余 → SYSTEM_PROMPT）
+      // 模板体系扩展（2026-08-17）：每模式 3 个内置模板（default=现有默认 / supplement=增量补充完善 /
+      // dev=增量完善·开发向）+ 每模式多自定义模板（pick=custom:<index>）；解析见 pure.js resolveTemplateSystem——
+      // 旧配置（无 pick）自动迁移（custom+texts 非空仍生效），行为与旧版等价；非法选中回退 T1。
       // v2.7.0（一键发布）：publish 模式内置专用九章规格 system（custom 模板仍可覆盖）
-      let system = cfg.mode === 'publish' ? SYSTEM_PUBLISH_PROMPT : SYSTEM_PROMPT;
-      if (cfg.templateMode === 'custom') {
-        const perMode = cfg.templateTexts && typeof cfg.templateTexts === 'object' ? cfg.templateTexts[cfg.mode] : '';
-        const custom = typeof perMode === 'string' && perMode.trim() !== '' ? perMode.trim() : '';
-        if (custom !== '') system = custom;
-      }
+      const BUILTIN_TEMPLATES = {
+        base: [SYSTEM_PROMPT, SYSTEM_SUPPLEMENT_PROMPT, SYSTEM_DEV_PROMPT],
+        lite: [SYSTEM_PROMPT, SYSTEM_SUPPLEMENT_PROMPT, SYSTEM_DEV_PROMPT],
+        standard: [SYSTEM_PROMPT, SYSTEM_SUPPLEMENT_PROMPT, SYSTEM_DEV_PROMPT],
+        smart: [SYSTEM_PROMPT, SYSTEM_SUPPLEMENT_PROMPT, SYSTEM_DEV_PROMPT],
+        publish: [SYSTEM_PUBLISH_PROMPT, SYSTEM_PUBLISH_SUPPLEMENT_PROMPT, SYSTEM_PUBLISH_DEV_PROMPT],
+      };
+      let system = resolveTemplateSystem(cfg, cfg.mode, BUILTIN_TEMPLATES);
       // v3.0（模式重构）：lite 规则检查移除——lite 改为「前 1 轮会话关联参考」（见 retrieve stage）
       // v2.6.1（记忆链）：rounds 数组（时间序 [{input,output}]，≤MEMORY_ROUNDS_MAX 轮）→
       // 真多轮消息注入；hasMemory = rounds 非空；开关关 / 预算 0 → 不注入（行为不变）。
@@ -3095,7 +3325,7 @@ return {
       }
       const modeTag = args && args.seed === true ? cfg.mode + '(seed)' : cfg.mode;
       const ctxLog = [v2Log === 'none' ? '' : v2Log, memoryLog].filter((s) => s !== '').join('+') || 'none';
-      hlog('[enhance] cfg session=' + sessionId + ' mode=' + modeTag + ' ctx=' + ctxLog + ' chain=' + (chain.length > 0 ? chain.map((f) => f.provider + '/' + f.model).join(',') : '-') + ' timeout=' + timeoutMs + ' maxTokens=' + maxTokens + ' outputLimit=' + outputLimit + ' template=' + (system === SYSTEM_PROMPT ? 'builtin' : (system.indexOf(CONTEXT_GUARD) !== -1 ? 'custom+v2guard' : 'custom')));
+      hlog('[enhance] cfg session=' + sessionId + ' mode=' + modeTag + ' ctx=' + ctxLog + ' chain=' + (chain.length > 0 ? chain.map((f) => f.provider + '/' + f.model).join(',') : '-') + ' timeout=' + timeoutMs + ' maxTokens=' + maxTokens + ' outputLimit=' + outputLimit + ' template=' + (cfg.templatePick && typeof cfg.templatePick === 'object' && cfg.templatePick[cfg.mode] ? cfg.templatePick[cfg.mode] : (cfg.templateMode === 'custom' ? 'custom' : 'builtin')));
       state.messages = messages;
       return state;
     }

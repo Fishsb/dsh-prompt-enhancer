@@ -2,6 +2,9 @@
 // Source: src/client/skeleton.js + src/client/{i18n,constants,updater,state,helpers,model-helpers,styles,app}.js + src/client/components/*.js
 // ============================================================================
 // DSH「提示词优化」插件 · Client 半部（v2.4.7：自定义模板每模式独立 + 默认预填）
+// 2026-08-17（模板体系扩展·未发布迭代）：每模式 3 个内置模板（默认/增量补充完善/增量完善·开发向）
+// + 多自定义模板——设置页模板下拉改按模式选择（pick=default/supplement/dev/custom:N），
+// 自定义条目可命名/编辑/删除、新建时以当前选中模板文本预填（template/default RPC catalog 惰性拉取）。
 // v2.6.2（继续优化·未发布迭代）：新增 s.optimized 标记（成功应用 ≥1 轮置 true、撤回重置
 // false）——空闲态非空且已优化过 → 按钮纯文字「继续优化」（无 ✨ 图标，hover titleContinue）；
 // 首次优化 → ✨ + 模式短标签；优化中 / 完成撤回 / 空输入记忆开关 / 守卫禁用等状态不变。
@@ -107,7 +110,16 @@ const CONFIG_DEFAULTS = {
   params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
   // v2.4.7（每模式独立自定义模板）：texts 各模式一份（v2.7.0 起含 publish，键 = MODE_VALUES 动态）；
   // text 保留兼容（读旧迁移）
-  template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '', publish: '' }, touched: [] },
+  // 模板体系扩展（2026-08-17）：pick=每模式选中键（default/supplement/dev/custom:<index>）；
+  // custom=每模式多自定义模板列表 [{name,text}]（各 ≤4000、≤10 条）
+  template: {
+    mode: 'builtin',
+    text: '',
+    texts: { base: '', lite: '', standard: '', smart: '', publish: '' },
+    pick: { base: 'default', lite: 'default', standard: 'default', smart: 'default', publish: 'default' },
+    custom: { base: [], lite: [], standard: [], smart: [], publish: [] },
+    touched: [],
+  },
   // v2.2（§6.2/§6.4）：4 模式（base 默认）+ 记忆独立开关（缺省 false，行为零变化）
   mode: 'base',
   context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
@@ -143,6 +155,18 @@ function modeShortLabel(t, mode) {
 const SEEN_KEY_PREFIX = 'dsh.enhance.seen.';
 // v2.6.1（记忆链）：发送前迭代记忆最多保留轮数（与 host MEMORY_ROUNDS_MAX 一致）
 const MEMORY_ROUNDS_MAX = 4;
+// 模板体系扩展（2026-08-17）：内置模板键（T1=default 现有默认 / T2=supplement 增量补充完善 /
+// T3=dev 增量完善·开发向）+ 自定义模板容量/长度上限（与 host PURE 常量一致）
+const TEMPLATE_BUILTIN_KEYS = ['default', 'supplement', 'dev'];
+const TEMPLATE_CUSTOM_MAX = 10;
+const TEMPLATE_TEXT_MAX = 4000;
+const TEMPLATE_NAME_MAX = 40;
+// 选中键中自定义模板的索引（pick 形如 custom:<index>）→ -1 表示非自定义
+function customPickIndex(pick) {
+  if (typeof pick !== 'string' || pick.indexOf('custom:') !== 0) return -1;
+  const idx = parseInt(pick.slice(7), 10);
+  return Number.isInteger(idx) && idx >= 0 ? idx : -1;
+}
 
 const configState = { value: { ...CONFIG_DEFAULTS }, listeners: new Set(), fresh: true, unsupported: false };
 
@@ -154,7 +178,14 @@ function cloneDefaults() {
     customModels: [],
     order: [],
     params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
-    template: { mode: 'builtin', text: '', texts: { base: '', lite: '', standard: '', smart: '', publish: '' }, touched: [] },
+    template: {
+      mode: 'builtin',
+      text: '',
+      texts: { base: '', lite: '', standard: '', smart: '', publish: '' },
+      pick: { base: 'default', lite: 'default', standard: 'default', smart: 'default', publish: 'default' },
+      custom: { base: [], lite: [], standard: [], smart: [], publish: [] },
+      touched: [],
+    },
     mode: 'base',
     context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
     memory: false,
@@ -225,6 +256,40 @@ function sanitizeV2(parsed) {
   if (Array.isArray(t.touched)) {
     for (const key of t.touched.slice(0, 5)) {
       if (typeof key === 'string' && MODE_VALUES.includes(key) && !v.template.touched.includes(key)) v.template.touched.push(key);
+    }
+  }
+  // 模板体系扩展（2026-08-17）：pick/custom 解析镜像 host PURE validateConfig——pick 白名单
+  // default/supplement/dev/custom:<index>（index 越界回退 default）；custom 每模式 ≤10 条、
+  // 每条 {name(≤40), text(≤4000)}；旧配置（无 pick 字段）且 mode==='custom' 时 texts 非空 → 迁为 custom:0。
+  const hasNewPick = t.pick && typeof t.pick === 'object';
+  const customSrc = t.custom && typeof t.custom === 'object' ? t.custom : null;
+  for (const key of MODE_VALUES) {
+    const list = Array.isArray(customSrc && customSrc[key]) ? customSrc[key] : [];
+    for (const item of list.slice(0, TEMPLATE_CUSTOM_MAX)) {
+      if (item && typeof item === 'object' && typeof item.text === 'string' && item.text.trim() !== '' && item.text.length <= TEMPLATE_TEXT_MAX) {
+        v.template.custom[key].push({
+          name: typeof item.name === 'string' && item.name.trim() !== '' ? item.name.trim().slice(0, TEMPLATE_NAME_MAX) : '自定义模板 ' + (v.template.custom[key].length + 1),
+          text: item.text,
+        });
+      }
+    }
+  }
+  if (!hasNewPick && v.template.mode === 'custom') {
+    for (const key of MODE_VALUES) {
+      const legacy = v.template.texts[key];
+      if (typeof legacy === 'string' && legacy.trim() !== '' && v.template.custom[key].length === 0) {
+        v.template.custom[key].push({ name: '自定义模板', text: legacy });
+        v.template.pick[key] = 'custom:0';
+      }
+    }
+  } else if (hasNewPick) {
+    for (const key of MODE_VALUES) {
+      const p = typeof t.pick[key] === 'string' ? t.pick[key] : '';
+      if (p === 'supplement' || p === 'dev') v.template.pick[key] = p;
+      else if (p.indexOf('custom:') === 0) {
+        const idx = parseInt(p.slice(7), 10);
+        if (Number.isInteger(idx) && idx >= 0 && idx < v.template.custom[key].length) v.template.pick[key] = 'custom:' + idx;
+      }
     }
   }
   const ctxCfg = parsed.context && typeof parsed.context === 'object' ? parsed.context : {};
@@ -562,6 +627,16 @@ const ZH = {
   // v2.4.7（每模式独立）：label 带当前模式名；hint 说明独立与回退语义
   cfgTemplateTextFor: '自定义模板内容（当前模式：{mode}）',
   cfgTemplateNote: '每个模式独立保存一份；当前模式未填内容时自动使用内置模板。',
+  // 模板体系扩展（2026-08-17）：每模式 3 个内置模板 + 多自定义模板
+  tplDefault: '默认模板',
+  tplSupplement: '增量补充完善',
+  tplDev: '增量完善（开发向）',
+  tplCustom: '自定义：{name}',
+  tplAddCustom: '+ 新建自定义模板',
+  tplRemoveCustom: '删除该模板',
+  tplName: '模板名称',
+  tplNamePlaceholder: '模板名称（≤40 字符）',
+  tplNote: '每个模式可选 3 个内置模板（默认 / 增量补充完善 / 增量完善·开发向）或自定义模板；自定义模板按模式独立保存、可添加多个（各 ≤4000 字符），当前选中项将用于优化。',
   cfgSaved: '✓ 已保存',
   // v2.7.0：保存校验状态（转圈/失败）
   cfgSaving: '保存中…',
@@ -808,6 +883,16 @@ const EN = {
   // v2.4.7（per-mode）：label 带当前模式名；hint 说明独立与回退语义
   cfgTemplateTextFor: 'Custom template text (current mode: {mode})',
   cfgTemplateNote: 'Each mode keeps its own copy; when the current mode has no custom text, the built-in template is used.',
+  // Template system extension (2026-08-17): 3 built-in templates per mode + multiple custom templates
+  tplDefault: 'Default template',
+  tplSupplement: 'Incremental supplement',
+  tplDev: 'Incremental refine (dev)',
+  tplCustom: 'Custom: {name}',
+  tplAddCustom: '+ New custom template',
+  tplRemoveCustom: 'Delete template',
+  tplName: 'Template name',
+  tplNamePlaceholder: 'Template name (≤40 chars)',
+  tplNote: 'Each mode can pick one of 3 built-in templates (default / incremental supplement / incremental refine for developers) or a custom template; custom templates are saved per mode and can be added multiple times (≤4000 chars each). The current selection is used for optimization.',
   cfgSaved: '✓ Saved',
   // v2.7.0：保存校验状态（转圈/失败）
   cfgSaving: 'Saving…',
@@ -2599,6 +2684,7 @@ function ParamsTab(props) {
     outputLimit: dshEnhId('dsh-enh-outputlimit'),
     template: dshEnhId('dsh-enh-template'),
     templateNote: dshEnhId('dsh-enh-template-note'),
+    templateName: dshEnhId('dsh-enh-template-name'),
   }))[0];
   const cfg = configState.value;
   const save = (patch) => { saveConfig(patch); };
@@ -2608,27 +2694,51 @@ function ParamsTab(props) {
   // 切到「自定义模板」且当前优化模式无内容时 → host template/default 取该模式默认预填；
   // 索引键 = cfg.mode（优化模式 base/lite/standard/smart），非 cfg.template.mode（模板模式 custom/builtin）——
   // v2.5.2 及以前误用 template.mode 索引 texts/defaults（恒 undefined），预填与显示全部失效。
-  const [prefillBusy, setPrefillBusy] = React.useState(false);
-  React.useEffect(() => {
-    if (cfg.template.mode !== 'custom' || prefillBusy) return;
-    const cur = (cfg.template.texts && cfg.template.texts[cfg.mode]) || '';
-    // F2（配置卫生）：用户编辑过（touched）的模式不再自动回填——清空操作可持久
-    if ((cfg.template.touched || []).includes(cfg.mode)) return;
-    if (cur.trim() !== '') return; // 已有内容不覆盖
-    setPrefillBusy(true);
-    host.call('template/default').then((res) => {
+  // 模板体系扩展（2026-08-17）：每模式 3 个内置模板（default=现有默认 / supplement=增量补充完善 /
+  // dev=增量完善·开发向）+ 每模式多自定义模板——选中键 template.pick[mode]（default/supplement/dev/custom:<index>）；
+  // 新建自定义模板时以当前选中模板文本预填（内置文本经 template/default RPC catalog 惰性拉取）。
+  const pickValue = (cfg.template.pick && cfg.template.pick[cfg.mode]) || 'default';
+  const customAll = (cfg.template.custom && typeof cfg.template.custom === 'object') ? cfg.template.custom : {};
+  const customList = Array.isArray(customAll[cfg.mode]) ? customAll[cfg.mode] : [];
+  const pickIdx = customPickIndex(pickValue);
+  const pickIsCustom = pickIdx >= 0 && pickIdx < customList.length;
+  const curEntry = pickIsCustom ? customList[pickIdx] : null;
+  const catalogRef = React.useRef(null);
+  const ensureCatalog = React.useCallback(() => {
+    if (catalogRef.current !== null) return Promise.resolve(catalogRef.current);
+    return host.call('template/default').then((res) => {
       const r = res && typeof res === 'object' ? res : {};
-      const def = r.ok && r.defaults && typeof r.defaults[cfg.mode] === 'string'
-        ? r.defaults[cfg.mode] : '';
-      if (def !== '') {
-        save({ template: { ...cfg.template, texts: { ...(cfg.template.texts || {}), [cfg.mode]: def } } });
+      catalogRef.current = (r.ok && r.catalog && typeof r.catalog === 'object') ? r.catalog : {};
+      return catalogRef.current;
+    }).catch(() => { catalogRef.current = {}; return catalogRef.current; });
+  }, []);
+  const onSelectTemplate = (v) => save({ template: { ...cfg.template, pick: { ...(cfg.template.pick || {}), [cfg.mode]: v } } });
+  const onAddCustom = () => {
+    if (customList.length >= TEMPLATE_CUSTOM_MAX) return;
+    ensureCatalog().then((cat) => {
+      let prefill = '';
+      if (curEntry) prefill = curEntry.text || '';
+      else if (cat && Array.isArray(cat[cfg.mode])) {
+        const bi = TEMPLATE_BUILTIN_KEYS.indexOf(pickValue);
+        prefill = cat[cfg.mode][bi >= 0 ? bi : 0] || '';
       }
-    }).catch(() => { /* 预填失败：保持空白，用户可手填；host 侧仍按模式回退内置 */ }).then(() => {
-      setPrefillBusy(false);
+      const entry = { name: '自定义模板 ' + (customList.length + 1), text: prefill.slice(0, TEMPLATE_TEXT_MAX) };
+      const newList = customList.concat(entry);
+      save({ template: { ...cfg.template, custom: { ...customAll, [cfg.mode]: newList }, pick: { ...(cfg.template.pick || {}), [cfg.mode]: 'custom:' + (newList.length - 1) } } });
     });
-    // prefillBusy 入依赖：快速切换优化模式时（前一个模式预填进行中），完成后自动补预填当前模式
-  }, [cfg.template.mode, cfg.mode, prefillBusy]);
-  const curText = (cfg.template.texts && cfg.template.texts[cfg.mode]) || '';
+  };
+  const onEditCustom = (patch) => {
+    const newList = customList.map((c, k) => k === pickIdx ? { ...c, ...patch } : c);
+    save({ template: { ...cfg.template, custom: { ...customAll, [cfg.mode]: newList } } });
+  };
+  const onRemoveCustom = () => {
+    const newList = customList.filter((_, k) => k !== pickIdx);
+    let nextPick = 'default';
+    const cur = customPickIndex(pickValue);
+    if (cur !== -1 && cur !== pickIdx) nextPick = 'custom:' + (cur > pickIdx ? cur - 1 : cur);
+    save({ template: { ...cfg.template, custom: { ...customAll, [cfg.mode]: newList }, pick: { ...(cfg.template.pick || {}), [cfg.mode]: nextPick } } });
+  };
+  const curText = curEntry ? curEntry.text : '';
   const curLabel = t('cfgTemplateTextFor').replace('{mode}', modeShortLabel(t, cfg.mode));
   // v2.8.0（实测修正）：发布模式不设输出限制（host 硬覆盖）——三项参数置灰的依据
   const isPublishMode = cfg.mode === 'publish';
@@ -2660,11 +2770,12 @@ function ParamsTab(props) {
         React.createElement('select', {
           id: ids.tpl,
           className: 'dsh-plg-select',
-          value: cfg.template.mode,
-          onChange: (e) => save({ template: { ...cfg.template, mode: e.target.value } }),
+          value: pickValue,
+          onChange: (e) => onSelectTemplate(e.target.value),
           children: [
-            React.createElement('option', { key: 'builtin', value: 'builtin' }, t('cfgTemplateBuiltin')),
-            React.createElement('option', { key: 'custom', value: 'custom' }, t('cfgTemplateCustom')),
+            // 模板体系扩展（2026-08-17）：3 个内置模板（T1 默认模板保持现有行为不变）+ 该模式自定义模板列表
+            ...TEMPLATE_BUILTIN_KEYS.map((k) => React.createElement('option', { key: k, value: k }, t('tpl' + k.charAt(0).toUpperCase() + k.slice(1)))),
+            ...customList.map((c, i) => React.createElement('option', { key: 'custom:' + i, value: 'custom:' + i }, t('tplCustom').replace('{name}', c.name || ('自定义模板 ' + (i + 1))))),
           ],
         }),
       ),
@@ -2719,28 +2830,50 @@ function ParamsTab(props) {
     isPublishMode
       ? React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgPublishNoLimit'))
       : null,
-    // v2.4.6（布局）：模板模式下拉已并入上方与优化模式同一行；此处仅保留自定义模板内容区
-    // v2.4.7（每模式独立）：textarea 显示当前模式文本；编辑只写当前模式；切模式跟随
-    cfg.template.mode === 'custom'
-      ? React.createElement('div', { className: 'dsh-plg-col' },
-          React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.template }, curLabel),
-          React.createElement('textarea', {
-            id: ids.template,
-            'aria-describedby': ids.templateNote,
-            className: 'dsh-plg-textarea',
-            value: curText,
-            rows: 12,
-            placeholder: t('cfgTemplateText'),
-            onChange: (e) => {
-              const touched = (cfg.template.touched || []).includes(cfg.mode)
-                ? (cfg.template.touched || [])
-                : (cfg.template.touched || []).concat(cfg.mode);
-              save({ template: { ...cfg.template, texts: { ...(cfg.template.texts || {}), [cfg.mode]: e.target.value.slice(0, 4000) }, touched } });
-            },
-          }),
-          React.createElement('p', { id: ids.templateNote, className: 'dsh-plg-hint' }, t('cfgTemplateNote')),
-        )
-      : null,
+    // 模板体系扩展（2026-08-17）：模板选择已并入上方下拉（每模式独立）；下方为自定义模板编辑区
+    //（选中 custom:<index> 时显示 名称+内容+删除）+「新建自定义模板」按钮（可添加多个）
+    React.createElement('div', { className: 'dsh-plg-col' },
+      pickIsCustom && curEntry
+        ? React.createElement(React.Fragment, null,
+            React.createElement('div', { className: 'dsh-plg-row' },
+              React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.templateName }, t('tplName')),
+              React.createElement('input', {
+                id: ids.templateName,
+                className: 'dsh-plg-input',
+                type: 'text',
+                value: curEntry.name || '',
+                maxLength: TEMPLATE_NAME_MAX,
+                placeholder: t('tplNamePlaceholder'),
+                onChange: (e) => onEditCustom({ name: e.target.value.slice(0, TEMPLATE_NAME_MAX) }),
+              }),
+            ),
+            React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.template }, curLabel),
+            React.createElement('textarea', {
+              id: ids.template,
+              'aria-describedby': ids.templateNote,
+              className: 'dsh-plg-textarea',
+              value: curText,
+              rows: 12,
+              placeholder: t('cfgTemplateText'),
+              onChange: (e) => onEditCustom({ text: e.target.value.slice(0, TEMPLATE_TEXT_MAX) }),
+            }),
+            React.createElement('button', {
+              type: 'button',
+              className: 'dsh-plg-btn dsh-plg-btn-danger',
+              onClick: onRemoveCustom,
+              children: t('tplRemoveCustom'),
+            }),
+          )
+        : null,
+      React.createElement('button', {
+        type: 'button',
+        className: 'dsh-plg-btn',
+        disabled: customList.length >= TEMPLATE_CUSTOM_MAX,
+        onClick: onAddCustom,
+        children: t('tplAddCustom'),
+      }),
+      React.createElement('p', { id: ids.templateNote, className: 'dsh-plg-hint' }, t('tplNote')),
+    ),
     React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgHint')),
   );
 }
