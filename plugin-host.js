@@ -243,34 +243,42 @@ const CONTEXT_GUARD = [
 ].join('\n');
 
 const SYSTEM_PUBLISH_PROMPT = [
-  '你是一名资深项目/游戏开发规划专家。用户给出的是一句粗略想法（如「我想开发一个纸牌游戏」），你的任务是把想法扩展为一份**完整、可实施、可直接开工的开发规格说明书**。',
+  '你是一名资深项目/游戏开发规划专家。用户给出的是一句粗略想法（如「我想开发一个纸牌游戏」），你的任务是把想法扩展为一份**完善、有明确边界、可直接交付实施（或直接交付给 AI 编码助手执行）的生成提示词规格**——类似顶级任务需求书：范围清楚、约束强硬、架构写实、每条要求可验收。',
   '',
   '【输出结构】（严格按以下九章，用用户主体语言输出）',
-  '一、目标概述：一句话定位 + 核心体验/玩法闭环（玩家或用户反复进行的核心循环）',
-  '二、核心玩法循环：主循环与子循环的流程拆解（开始→操作→反馈→推进→结束）',
-  '三、数值与经济：核心数值表、成长/经济公式、平衡约束',
-  '四、数据结构与核心模型：实体、字段、关系（给出可落地的数据结构定义或类/表设计）',
-  '五、核心机制与算法：主要系统逐一展开（含关键公式、判定规则、边界条件、优先级顺序）',
-  '六、交互与界面：操作方式、界面布局、反馈动效、可访问性',
-  '七、技术实现建议：推荐技术栈与模块划分（含单文件/嵌入形态等约束的对应方案）',
-  '八、分阶段实施路线：MVP（最小可玩/可用）→ 迭代增强 的里程碑拆解，每阶段给出可交付物',
-  '九、交付验收清单：逐条可验证的完成标准（可测试、可勾选，不写空话）',
+  '一、目标概述与角色设定：以一段「你是一个顶级的 XX 专家 / 技术美术（TA）」式**角色设定**开场（角色依据【场景判定】自动适配：game→游戏开发专家/技术美术；software→软件架构师/资深工程师；generic→顶级技术专家），随后给出：一句话目标 + 核心亮点/想实现的「感觉或反差」（如：微体素几何 × 写实 PBR 光影的物理反差感）+ 核心体验闭环（用户反复进行的核心循环）',
+  '二、需求范围与明确边界：明确「做什么 / 交付形态（单文件、库、服务等）/ **明确不做什么**」；用「绝对/必须/不得/禁止」级措辞写清硬边界（如：仅限一个完整单文件；绝对不使用纹理贴图；不得引入后端或构建步骤）',
+  '三、技术约束与架构：技术栈、依赖引入方式（如可靠 CDN）、**架构方案**（渲染管线、合批策略（如 Instancing）、后处理管线（如 SSAO/DOF 等具体方案名）、材质体系、数据模型与模块划分）、性能与兼容性约束——**架构层必须写实具体到方案名级别**，数值可给量级（如 20×20×10）不必精确',
+  '四、核心功能要求：分维度逐条「必须」级要求（机制/视觉/材质/光照/音效/交互），**每条附【设计意图】说明「为什么这样做」**（如：SSAO 消除塑料感、DOF 营造沙盘玩具感），让执行者理解目的而非机械执行',
+  '五、场景与内容设计：具体内容清单（场景规模量级、物体/关卡/功能清单、资源策略、**代码生成策略**——循环/条件/数据驱动自动生成）',
+  '六、交互与界面：操作方式（如轨道相机：旋转/缩放/平移）、初始视角（如 45 度俯视等轴测）、界面布局、反馈动效',
+  '七、扩展方向（带边界）：可选扩展方向逐一给出（如：在既有体系上拓展城市局部沙盘），并强制声明「**扩展必须沿用既有体系/尺度/风格，不破坏闭合交付**」',
+  '八、交付与限制：交付物清单（完整闭合、可直接运行）；**禁止 TODO、占位实现或要求用户补齐核心算法**；代码注释语言；输出格式要求（如：交付后摘取代码用中文解释管线设置逻辑）',
+  '九、交付验收清单：逐条可勾选的验收项，对应第二/三/四章约束（可测试、不写空话）',
   '',
   '【场景适配】',
-  '- 系统按用户输入自动判定场景，并注入「【场景判定】本次场景判定：game/software」行；未注入判定行时按默认九章输出，不追加场景侧重',
-  '- 【场景判定】为 game 时：三、数值与经济按数值表/成长/经济公式/平衡约束展开（游戏类必需）；五、核心机制含玩法系统展开',
-  '- 【场景判定】为 software 时：三、数值与经济改为性能指标与容量约束；五、核心机制改为核心功能与业务规则；补充数据流与 API 设计',
+  '- 系统按用户输入自动判定场景，并注入「【场景判定】本次场景判定：game/software/generic」行；未注入判定行时按默认九章输出，不追加场景侧重',
+  '- 【场景判定】为 game 时：三、技术约束与架构侧重渲染/表现方案（材质体系、合批、后处理）；五、场景与内容设计含玩法循环、数值与经济量级',
+  '- 【场景判定】为 software 时：三、技术约束与架构侧重系统架构/数据模型/API 设计；五、场景与内容设计改为功能清单与业务规则；补充数据流设计',
+  '- 第一章角色设定段依据场景自动适配',
   '',
   '【设计红线】',
   '- 未明确处给出**合理默认设计**并标注「默认」；不反问用户、不抛问题回去、不要求澄清',
   '- 明确区分「用户已确定」与「建议补充」两类内容',
   '- 机制顺序与公式必须绝对精确：结算/判定类流程按步骤列出先后顺序，乘算类倍率必须是倍增而非加算，不得含糊',
-  '- 直接输出规格说明书本身，不加解释、前言或评论；**严禁回显、复述或引用用户输入原文**',
-  '- 【网络参考】段内容仅供了解业界同类实现与结构参考，不得照抄，须结合用户想法重新设计',
+  '- 直接输出规格本身，不加解释、前言或评论；**严禁回显、复述或引用用户输入原文**',
+  '- 【网络参考】/【已获取网络参考】段内容仅供了解业界同类实现与结构参考，不得照抄，须结合用户想法重新设计',
+  '',
+  '【网络信息运用】（配合多步网络检索）',
+  '- 每一轮生成都必须参考当轮【网络参考】与历史【已获取网络参考】中的信息来完善对应章节（技术方案、同类实现、素材/资源来源）',
+  '- 后续补充轮：先回顾【已获取网络参考】中的已有要点，只针对缺口补充新检索方向，不重复检索已覆盖主题',
+  '- 引用网络信息时在对应章节标注来源标题（如「参考：xxx」）；**不得虚构来源**，无法验证的信息标注「建议验证」',
+  '- 检索不可用时（无【网络参考】段）按既有知识生成，不阻塞',
   '',
   '【多轮扩充规则】',
   '- 第一轮：输出完整九章框架 + 关键实现细节（宁可详尽，不可缺章）',
   '- 后续轮次（用户补充/修改后继续优化）：**每一轮都必须输出完整九章规格**（不得输出精简版、摘要或仅回应补充），在保持已确认设计不变的前提下，将补充内容融入对应章节并细化展开（如新增机制 → 展开其数据结构与算法）；不推翻已确认决策，除非用户明确要求改变',
+  '- 每一轮都必须结合新一轮【网络参考】重新审视相关章节（检索到的新信息 → 修订对应章节）',
   '',
   '【方案自评判定】（输出九章规格后必须追加以下自评块，不改变九章框架；以【方案自评】开头，按一~四逐项输出）',
   '一、一致性核对：用户已明确需求逐条是否都有章节覆盖？缺项列出。',
@@ -403,6 +411,22 @@ const DOC_ANALYSIS_PROMPT = [
   '{session}',
   '"""',
 ].join('\n');
+
+const WEBSEARCH_PLAN_PROMPT = [
+  '你负责为一个「项目/游戏开发规格生成」流程规划网络检索主题。给定用户的最新想法、此前各轮已检索主题与要点摘要、场景判定，输出 2~3 个**差异化**检索主题（避开已检索主题），供后续逐个搜索并注入【网络参考】。',
+  '',
+  '【输入】',
+  '- 用户最新想法：{text}',
+  '- 已获取网络要点（此前轮次检索结果摘要，含已检索主题清单）：{memo}',
+  '- 场景判定：{scenario}',
+  '',
+  '【输出要求】',
+  '- 输出 2~3 个检索主题，覆盖用户想法中最需要业界参考的方面（技术方案/同类实现/素材与资源来源/市场参考等）',
+  '- 与已检索主题不重复；若已有要点已覆盖充分，可只输出 1 个最关键缺口主题',
+  '- 每个主题给出：query（可直接用于搜索的中文短语，≤20 字）+ note（一句检索目的）',
+  '- 仅输出 JSON，格式：{"topics":[{"query":"…","note":"…"}]}',
+  '- 除该 JSON 外不得输出任何内容（无解释、无前言、无代码块标记）',
+].join('\n');
 // ==PROMPTS-END==
 
 // ==PURE-BEGIN==  (unit-testable pure functions; keep free of ctx/harness/pending/module-state)
@@ -451,7 +475,13 @@ const CONTENT_FALLBACK_SCAN = 5;
 // v2.7.0（一键发布 · 网络检索）：超时/条数/注入预算
 const WEB_SEARCH_TIMEOUT_MS = 10000;
 const WEB_SEARCH_MAX_RESULTS = 3;
-const WEB_REF_MAX = 800;
+const WEB_REF_MAX = 1600;
+// v3.0p（publish 多步检索）：检索主题规划调用预算 + 跨轮要点记忆上限
+const WEB_PLAN_TIMEOUT_MS = 10000;
+const WEB_PLAN_MAX_TOKENS = 400;
+const WEB_PLAN_OUTPUT_LIMIT = 800;
+const WEB_MEMO_MAX = 600;
+const WEB_MEMO_TOPICS_MAX = 12;
 const KEYWORD_LIMIT = 8;
 const SNIPPET_BUDGET = 800;
 const CONTEXT_PROGRESS_MAX = 800;
@@ -1561,6 +1591,28 @@ function parseDocsAnalysis(raw) {
   const hasProjectMap = obj.hasProjectMap === true || obj.hasProjectMap === 'true' || obj.hasProjectMap === 1 || obj.hasProjectMap === '1';
   return { relatedDocs, hasProjectMap, codePaths, reason: typeof obj.reason === 'string' ? obj.reason.slice(0, 100) : '' };
 }
+
+// v3.0p（publish 多步检索）：检索主题规划 JSON 容错解析
+// （{topics:[{query,note}]}，2~3 个差异化检索主题）——同 parseDocsAnalysis 模式。
+function parseSearchPlan(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  s = s.slice(start, end + 1);
+  let obj;
+  try { obj = JSON.parse(s); } catch (e) { return null; }
+  if (!obj || typeof obj !== 'object') return null;
+  const topics = Array.isArray(obj.topics) ? obj.topics.map((t) => ({
+    query: String(t && t.query || '').trim().slice(0, 40),
+    note: String(t && t.note || '').slice(0, 120),
+  })).filter((t) => t.query !== '') : [];
+  if (topics.length === 0) return null;
+  return { topics: topics.slice(0, 3) };
+}
 // ==PURE-END==
 
 // ================= V2 上下文感知优化 · 运行时（阶段 A/B/C） =================
@@ -1773,6 +1825,9 @@ async function buildV2ContextBlock(services, sessionId, text, cfg, onStage) {
   // ===== 模式管道（base/lite：phaseB='none' 无检索 → 空模式块）=====
   let modeBlock = '';
   let modeLog = 'none';
+  // v3.0p（publish 多步检索）：web 段结果透出（跨轮记忆用；无检索时为空）
+  let webTopics = [];
+  let webMemoText = '';
   if (row.phaseC === 'inject') {
     // 历史 + 阶段A + 阶段B
     let events = [];
@@ -1822,53 +1877,78 @@ async function buildV2ContextBlock(services, sessionId, text, cfg, onStage) {
     // 改动方向构造检索词，经 ctx.web 搜索同类项目结构参考，注入模式块（预算余量内）。
     // 独立超时/降级：搜索失败/服务缺失 → 跳过，不阻断规格生成。
     let webLog = 'none';
-    let query = '';
     if (cfg.mode === 'publish' && budget > 0) {
       mark(STAGE_FILES); // 复用 files 阶段标记（检索类）
-      // 检索词先构造（不依赖 web 可用性；delta 为记忆链改动方向）
-      query = buildWebQuery(text, keywords, services.delta || null);
-      // v2.8.0（一键发布 · 场景路由）：检索词场景化——按会话缓存判定的场景追加方向词
-      // （game → 游戏实现；software → 软件架构；generic 不追加）
-      if (services.scenario === 'game') query = (query ? query + ' 游戏实现' : '游戏实现');
-      else if (services.scenario === 'software') query = (query ? query + ' 软件架构' : '软件架构');
+      // v3.0p（publish 多步检索）：跨轮要点回注——历史【已获取网络参考】前置（预算内），
+      // 让模型「记住」此前检索到的信息，只补新缺口（配合 publishWebMemo 会话级记忆）
+      if (services.webMemo) {
+        const memoBlock = '【已获取网络参考】\n' + String(services.webMemo).slice(0, WEB_MEMO_MAX);
+        modeBlock = modeBlock ? modeBlock + '\n\n' + memoBlock : memoBlock;
+      }
+      // v3.0p（publish 多步检索）：LLM 规划的差异化主题逐主题搜索（services.webPlan 非空时）；
+      // 无规划 / 规划失败 → 降级旧单 query 路径（buildWebQuery + 场景方向词，行为不变）
       const web = services.web;
+      const planQueries = Array.isArray(services.webPlan) && services.webPlan.length > 0
+        ? services.webPlan.map((t) => String(t && t.query || '').trim()).filter((q) => q !== '').slice(0, 3)
+        : [];
+      const queries = planQueries.length > 0 ? planQueries : [null];
+      const topicLogs = [];
       if (web && typeof web.search === 'function') {
-        let timedOut = false;
-        const timer = services.timer.timeout(() => { timedOut = true; }, WEB_SEARCH_TIMEOUT_MS);
-        try {
-          const res = await web.search({ query, maxResults: WEB_SEARCH_MAX_RESULTS });
-          if (!timedOut && res && Array.isArray(res.sources) && res.sources.length > 0) {
-            const lines = res.sources.slice(0, WEB_SEARCH_MAX_RESULTS).map((s) => {
-              const title = s && s.title ? String(s.title) : '';
-              const url = s && s.url ? String(s.url) : '';
-              const summary = s && s.summary ? String(s.summary).slice(0, 200) : '';
-              return '- ' + title + (url ? ' (' + url + ')' : '') + (summary ? '\n  ' + summary : '');
-            }).join('\n');
-            const webBlock = '【网络参考】\n' + lines.slice(0, Math.min(WEB_REF_MAX, Math.max(0, budget - modeBlock.length)));
-            if (webBlock.length > 20) {
-              modeBlock = modeBlock ? modeBlock + '\n\n' + webBlock : webBlock;
-              webLog = 'web=1 sources=' + res.sources.length + ' chars=' + webBlock.length;
-            } else {
-              webLog = 'web=0';
-            }
-          } else {
-            webLog = 'web=0' + (timedOut ? ' timeout' : '');
+        const refParts = [];
+        const memoParts = [];
+        for (const q of queries) {
+          let query = q;
+          if (query === null) {
+            query = buildWebQuery(text, keywords, services.delta || null);
+            if (services.scenario === 'game') query = (query ? query + ' 游戏实现' : '游戏实现');
+            else if (services.scenario === 'software') query = (query ? query + ' 软件架构' : '软件架构');
           }
-        } catch (e) {
-          webLog = 'web=failed';
-        } finally {
-          timer();
+          let timedOut = false;
+          const timer = services.timer.timeout(() => { timedOut = true; }, WEB_SEARCH_TIMEOUT_MS);
+          try {
+            const res = await web.search({ query, maxResults: WEB_SEARCH_MAX_RESULTS });
+            if (!timedOut && res && Array.isArray(res.sources) && res.sources.length > 0) {
+              const lines = res.sources.slice(0, WEB_SEARCH_MAX_RESULTS).map((s) => {
+                const title = s && s.title ? String(s.title) : '';
+                const url = s && s.url ? String(s.url) : '';
+                const summary = s && s.summary ? String(s.summary).slice(0, 200) : '';
+                return '- ' + title + (url ? ' (' + url + ')' : '') + (summary ? '\n  ' + summary : '');
+              }).join('\n');
+              refParts.push('### 检索主题：' + query + '\n' + lines);
+              memoParts.push('『' + query + '』：' + res.sources.slice(0, 2).map((s) => String(s && s.title || '') + (s && s.summary ? '——' + String(s.summary).slice(0, 60) : '')).join('；'));
+              topicLogs.push({ query, hits: res.sources.length });
+            } else {
+              topicLogs.push({ query, hits: timedOut ? -2 : 0 });
+            }
+          } catch (e) {
+            topicLogs.push({ query, hits: -1 });
+          } finally {
+            timer();
+          }
         }
+        const refText = refParts.join('\n\n');
+        if (refText) {
+          const webBlock = '【网络参考】\n' + refText.slice(0, Math.min(WEB_REF_MAX, Math.max(0, budget - modeBlock.length)));
+          if (webBlock.length > 20) {
+            modeBlock = modeBlock ? modeBlock + '\n\n' + webBlock : webBlock;
+            webLog = 'web=' + topicLogs.filter((t) => t.hits > 0).length + '/' + topicLogs.length + ' chars=' + webBlock.length;
+          } else {
+            webLog = 'web=0';
+          }
+        } else {
+          webLog = 'web=0';
+        }
+        webTopics = topicLogs;
+        webMemoText = memoParts.join('\n').slice(0, WEB_MEMO_MAX);
       } else {
         webLog = 'web=none';
       }
-      hlog('[enhance] v2 web ' + webLog + ' query=' + query.slice(0, 120));
-    }
-    modeLog = modeBlock === '' ? 'none' : (mode + ' files=' + files.length + ' events=' + eventsHits.length + (webLog !== 'none' ? ' ' + webLog : '') + ' chars=' + modeBlock.length);
+      hlog('[enhance] v2 web ' + webLog + ' queries=' + topicLogs.map((t) => t.query + ':' + t.hits).join('|').slice(0, 200));
+    }    modeLog = modeBlock === '' ? 'none' : (mode + ' files=' + files.length + ' events=' + eventsHits.length + (webLog !== 'none' ? ' ' + webLog : '') + ' chars=' + modeBlock.length);
   }
   // ===== 汇总（记忆链由 enhance 入口以多轮消息注入，不占文本块）=====
   mark(STAGE_CONTEXT);
-  return { block: modeBlock, log: modeBlock === '' ? 'none' : modeLog };
+  return { block: modeBlock, log: modeBlock === '' ? 'none' : modeLog, webTopics, webMemoText };
 }
 
 function selfState(reference) {
@@ -1907,6 +1987,11 @@ return {
     // 首轮判定写入、后续轮读取不重判（场景决定九章骨架，翻转会推翻已确认设计）；
     // 生命周期 = 插件进程，进程重启后缓存 miss → 用记忆链最早轮输入兜底判定（enhance 内判定源规则）
     const publishScenarioCache = new Map();
+    // v3.0p（publish 多步检索）：会话级网络检索记忆（sessionId → {topics[], memo}）。
+    // topics = 已检索主题（去重，≤WEB_MEMO_TOPICS_MAX）；memo = 已获取要点摘要（≤WEB_MEMO_MAX，
+    // 跨轮以【已获取网络参考】回注，让模型记住已查信息、只补新缺口）。
+    // 生命周期 = 插件进程（同 publishScenarioCache）。
+    const publishWebMemo = new Map();
 
     function requestKey(sessionId, seq) {
       return String(sessionId) + ':' + String(seq);
@@ -2491,6 +2576,45 @@ return {
       return { related: false, reason: 'judge-failed' };
     }
 
+
+    // ---- v3.0p（publish 多步检索）：LLM 检索主题规划（WEBSEARCH_PLAN_PROMPT 占位替换；
+    // 10s 超时；失败/解析失败 → null → retrieve 降级 buildWebQuery 单 query）----
+    async function planWebSearch(text, memoText, scenario, entry) {
+      if (llm === undefined || !entry) return null;
+      const system = WEBSEARCH_PLAN_PROMPT
+        .replace('{text}', String(text || ''))
+        .replace('{memo}', String(memoText || '（暂无）'))
+        .replace('{scenario}', String(scenario || 'generic'));
+      let timedOut = false;
+      const timer = ctx.timer.timeout(() => { timedOut = true; }, WEB_PLAN_TIMEOUT_MS);
+      try {
+        const stream = llm.stream({
+          provider: entry.provider,
+          model: entry.model,
+          ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+          maxTokens: WEB_PLAN_MAX_TOKENS,
+          system,
+          messages: [{
+            id: 'enhance-webplan',
+            role: 'user',
+            content: [{ type: 'text', text: '请输出检索主题规划。' }],
+            source: { kind: 'user' },
+          }],
+        });
+        const iterator = stream[Symbol.asyncIterator]();
+        const result = await collectStream(iterator, WEB_PLAN_OUTPUT_LIMIT);
+        if (!timedOut && result.kind === 'ok') {
+          const parsed = parseSearchPlan(result.text);
+          if (parsed) return parsed;
+        }
+        hlog('[enhance] v3p web-plan ' + (timedOut ? 'timeout' : 'unparsed'));
+      } catch (e) {
+        hlog('[enhance] v3p web-plan failed', e && e.message ? e.message : e);
+      } finally {
+        timer();
+      }
+      return null;
+    }
     // ---- v3.0（S3）：工作区文件检索（扩展名过滤 + 关键词排序 + 摘要；2s 超时降级）----
     const DOC_FILE_RE = /\.md$/i;
     const CODE_FILE_RE = /\.(?:js|ts|jsx|tsx|py|go|rs|java|cpp|c|h|cs|rb|php|sql|sh|vue|html|css|json|yaml|yml|toml)$/i;
@@ -2731,7 +2855,13 @@ return {
           }
         }
       } else if (row.kind === 'v2') {
-        // publish：保持旧 V2 管道（任务理解 + 文件/事件/网络检索；budget 语义不变）
+        // publish：v2 旧管道 + v3.0p 多步网络检索（LLM 规划主题 → 逐主题搜索 → 跨轮记忆回注）
+        const memoRec = publishWebMemo.get(sessionId);
+        const memoText = memoRec && memoRec.memo ? memoRec.memo : '';
+        const memoTopics = memoRec && Array.isArray(memoRec.topics) ? memoRec.topics : [];
+        const chain0 = state.chain && state.chain.length > 0 ? state.chain[0] : null;
+        const plan = await planWebSearch(text, memoText, state.scenario, chain0);
+        hlog('[enhance] v3p web-plan ' + (plan ? 'topics=' + plan.topics.map((t) => t.query).join('|') : 'none→legacy'));
         const v2 = await buildV2ContextBlock({
           llm: ctx.get('llm'),
           sessionQuery: ctx.get('sessionQuery'),
@@ -2742,9 +2872,18 @@ return {
           web: ctx.get('web'),
           delta: state.memDelta,
           scenario: state.scenario,
+          webPlan: plan ? plan.topics : null,
+          webMemo: memoText,
         }, sessionId, text, cfg, (st) => { rec.stage = st; });
         state.v2Block = v2.block;
         state.v2Log = v2.log;
+        // v3.0p：跨轮检索记忆更新——主题去重（≤WEB_MEMO_TOPICS_MAX）+ 要点摘要累积（≤WEB_MEMO_MAX）
+        if (v2.webTopics && v2.webTopics.length > 0) {
+          const merged = memoTopics.concat(v2.webTopics.map((t) => t.query)).filter((q, i, a) => q && a.indexOf(q) === i).slice(-WEB_MEMO_TOPICS_MAX);
+          const memo = (memoText ? memoText + '\n' : '') + (v2.webMemoText || '');
+          publishWebMemo.set(sessionId, { topics: merged, memo: memo.slice(0, WEB_MEMO_MAX) });
+          hlog('[enhance] v3p memo topics=' + merged.length + ' chars=' + memo.slice(0, WEB_MEMO_MAX).length);
+        }
       }
       // v2.6.1：记忆链注入同样需要防回显护栏（base/lite + 记忆时 v2Block 为空）
       if (state.v2Block !== '' || state.memoryActive) state.system = state.system + '\n\n' + CONTEXT_GUARD;

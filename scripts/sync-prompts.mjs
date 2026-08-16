@@ -39,6 +39,8 @@ const SOURCES = [
   // 模式重构 v2 修订：提示词开发意向判定 + 文档检索/项目地图合并分析（占位符运行时替换）
   { md: 'prompts/intent.md', name: 'DEV_INTENT_PROMPT' },
   { md: 'prompts/doc-analysis.md', name: 'DOC_ANALYSIS_PROMPT' },
+  // publish 多步检索（v3.0p）：检索主题规划提示词（占位符 {text}/{memo}/{scenario} 运行时替换）
+  { md: 'prompts/websearch.md', name: 'WEBSEARCH_PLAN_PROMPT' },
 ];
 
 // md 行 → JS 字符串数组元素（转义反斜杠与单引号；行尾空行 trim 掉）

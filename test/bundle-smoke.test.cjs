@@ -30,6 +30,7 @@ function boot(opts) {
       if (name === 'sessionQuery' && opts && opts.sessionQuery) return opts.sessionQuery;
       if (name === 'sandboxPolicy' && opts && opts.sandboxPolicy) return opts.sandboxPolicy;
       if (name === 'fs' && opts && opts.fs) return opts.fs;
+      if (name === 'web' && opts && opts.web) return opts.web;
       return undefined;
     },
     effect: () => {},
@@ -210,6 +211,16 @@ function mockLlmSmart(seen, opts) {
           { type: 'finish', reason: { kind: 'stop' } },
         ]);
       }
+      if (sys.includes('检索主题')) {
+        // v3.0p：publish 检索主题规划（WEBSEARCH_PLAN_PROMPT）
+        const topics = Array.isArray(o.topics) && o.topics.length > 0
+          ? o.topics
+          : [{ query: '登录功能实现', note: '查方案' }, { query: '开发方案', note: '查结构' }];
+        return streamOf([
+          { type: 'text-delta', text: JSON.stringify({ topics }) },
+          { type: 'finish', reason: { kind: 'stop' } },
+        ]);
+      }
       return streamOf([
         { type: 'text-delta', text: 'OK' },
         { type: 'finish', reason: { kind: 'stop' } },
@@ -372,8 +383,9 @@ test('SMK-11 smart non-dev-intent stops before workspace', async () => {
   assert.ok(!mainText.includes('【相关代码参考】'), 'no code reference when stopped');
 });
 
-// v3.0v2：publish 保持 v2 管道（任务分析 + 文件检索），无 smart 专属环节。
-test('SMK-12 publish keeps v2 pipeline (no smart tail)', async () => {
+// v3.0v2：publish 保持 v2 管道（任务分析 + 文件检索 + web 检索），无 smart 专属环节。
+// v3.0p：新增 web-plan（LLM 检索主题规划）调用；无 web 服务时降级不阻断。
+test('SMK-12 publish keeps v2 pipeline (no smart tail, web-plan present)', async () => {
   const seen = [];
   const { handlers } = boot({
     llm: mockLlmSmart(seen, { related: true }),
@@ -392,9 +404,94 @@ test('SMK-12 publish keeps v2 pipeline (no smart tail)', async () => {
     },
   });
   assert.equal(out.ok, true);
-  // 阶段 A（任务分析）→ 主调用；无 relevance/intent/docanalysis
-  assert.equal(seen.length, 2, 'task-analysis + main');
-  assert.ok(seen[0].system.includes('会话任务分析器'), 'call 0 = task analysis (v2 phase A)');
-  assert.ok(seen[1].system.includes('开发规格说明书'), 'publish system = 九章规格');
-  assert.ok(!seen[1].system.includes('调整方案'), 'publish 无 smart tail');
+  // web-plan（v3.0p 检索主题规划，retrieve 阶段先于 v2 管道）→ 阶段 A（任务分析）→ 主调用
+  assert.equal(seen.length, 3, 'web-plan + task-analysis + main');
+  assert.ok(seen[0].system.includes('检索主题'), 'call 0 = web search plan (v3.0p)');
+  assert.equal(seen[0].maxTokens, 400, 'web-plan 小预算');
+  assert.ok(seen[1].system.includes('会话任务分析器'), 'call 1 = task analysis (v2 phase A)');
+  assert.ok(seen[2].system.includes('生成提示词规格'), 'publish system = 九章规格（新形态）');
+  assert.ok(!seen[2].system.includes('调整方案'), 'publish 无 smart tail');
+});
+
+// v3.0p：web mock——记录 query，返回固定 sources。
+function mockWeb(calls) {
+  return {
+    search: async (params) => {
+      calls.push(params && params.query);
+      return {
+        sources: [
+          { title: '来源' + calls.length, url: 'https://example.com/' + calls.length, summary: '摘要内容' + calls.length },
+        ],
+      };
+    },
+  };
+}
+
+// v3.0p：publish 一轮内按 LLM 规划的多个主题逐次检索，参考注入主调用。
+test('SMK-13 publish multi-topic web search (v3.0p)', async () => {
+  const seen = [];
+  const webCalls = [];
+  const { handlers } = boot({
+    llm: mockLlmSmart(seen, { topics: [{ query: '体素渲染引擎', note: '查实现' }, { query: 'PBR 材质方案', note: '查方案' }] }),
+    sessionQuery: mockSessionQuery(),
+    sandboxPolicy: { workspaceRoot: 'root' },
+    fs: mockWorkspaceFs(),
+    web: mockWeb(webCalls),
+  });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '我想开发一个体素游戏',
+    config: {
+      mode: 'publish',
+      fallback: [{ provider: 'p', model: 'm' }],
+      params: { maxTokens: 2000, timeoutMs: 300000 },
+    },
+  });
+  assert.equal(out.ok, true);
+  // web-plan → 任务分析 → 主调用
+  assert.equal(seen.length, 3, 'web-plan + task-analysis + main');
+  // 每个规划主题各一次 web.search
+  assert.equal(webCalls.length, 2, 'one search per planned topic');
+  assert.equal(webCalls[0], '体素渲染引擎');
+  assert.equal(webCalls[1], 'PBR 材质方案');
+  // 参考注入主调用 user 消息（主题标题 + 来源）
+  const mainText = seen[2].messages[0].content[0].text;
+  assert.ok(mainText.includes('【网络参考】'), 'web reference injected');
+  assert.ok(mainText.includes('### 检索主题：体素渲染引擎'), 'topic header present');
+  assert.ok(mainText.includes('来源1'), 'source title present');
+});
+
+// v3.0p：跨轮记忆——第二轮 web-plan 收到上轮要点（memo），主调用收到【已获取网络参考】回注。
+test('SMK-14 publish memo cross-round reinjection (v3.0p)', async () => {
+  const seen = [];
+  const webCalls = [];
+  const { handlers } = boot({
+    llm: mockLlmSmart(seen, { topics: [{ query: '体素引擎', note: '查实现' }] }),
+    sessionQuery: mockSessionQuery(),
+    sandboxPolicy: { workspaceRoot: 'root' },
+    fs: mockWorkspaceFs(),
+    web: mockWeb(webCalls),
+  });
+  const base = {
+    sessionId: 's',
+    config: {
+      mode: 'publish',
+      fallback: [{ provider: 'p', model: 'm' }],
+      params: { maxTokens: 2000, timeoutMs: 300000 },
+    },
+  };
+  const r1 = await handlers.get('enhance')({ ...base, seq: 1, text: '我想开发一个体素游戏' });
+  assert.equal(r1.ok, true);
+  const r2 = await handlers.get('enhance')({ ...base, seq: 2, text: '再补充一些细节' });
+  assert.equal(r2.ok, true);
+  // 两轮各 3 次调用（web-plan + task-analysis + main）
+  assert.equal(seen.length, 6, 'two rounds × 3 calls');
+  // 第二轮 web-plan（seen[3]）的 system 携带上轮检索到的要点摘要（memo 跨轮输入）
+  assert.ok(seen[3].system.includes('检索主题'), 'round-2 call 0 = web-plan');
+  assert.ok(seen[3].system.includes('来源1'), 'round-2 web-plan receives past memo');
+  // 第二轮主调用同时收到【已获取网络参考】（历史）与【网络参考】（当轮）
+  const main2 = seen[5].messages[0].content[0].text;
+  assert.ok(main2.includes('【已获取网络参考】'), 'round-2 main receives past memo block');
+  assert.ok(main2.includes('【网络参考】'), 'round-2 main also receives fresh refs');
 });

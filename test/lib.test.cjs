@@ -25,7 +25,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
   ;return { wrapUserText, wrapPublishText, stripScenarioEcho, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
     extractHistory, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
-    splitHistoryRounds, parseRelevance, parseIntent, parseDocsAnalysis,
+    splitHistoryRounds, parseRelevance, parseIntent, parseDocsAnalysis, parseSearchPlan,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
     buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages, filterDeltaForPublish,
     MEMORY_ROUNDS_MAX, MEMORY_CHAIN_BUDGET_MAX, MEMORY_DELTA_MAX,
@@ -50,6 +50,7 @@ const {
   parseRelevance,
   parseIntent,
   parseDocsAnalysis,
+  parseSearchPlan,
   RETRIEVE_TABLE,
   shouldIgnoreFile,
   rankFiles,
@@ -1117,4 +1118,24 @@ test('U65 parseDocsAnalysis JSON 容错解析（v3.0v2）', () => {
   // 路径清洗（去首尾斜杠）与上限
   const paths = parseDocsAnalysis('{"relatedDocs":[],"hasProjectMap":true,"codePaths":["/src/","a/b","c"],"reason":"r"}');
   assert.deepEqual(paths.codePaths, ['src', 'a/b', 'c']);
+});
+
+// v3.0p（publish 多步检索）：检索主题规划 JSON 容错解析契约。
+test('U66 parseSearchPlan JSON 容错解析（v3.0p）', () => {
+  const ok = parseSearchPlan('{"topics":[{"query":"体素引擎","note":"查实现"},{"query":"PBR 渲染","note":"查方案"}]}');
+  assert.equal(ok.topics.length, 2);
+  assert.equal(ok.topics[0].query, '体素引擎');
+  assert.equal(ok.topics[1].note, '查方案');
+  // fence 剥离 + 上限 3
+  const fenced = parseSearchPlan('```json\n{"topics":[{"query":"a","note":"1"},{"query":"b","note":"2"},{"query":"c","note":"3"},{"query":"d","note":"4"}]}\n```');
+  assert.equal(fenced.topics.length, 3);
+  assert.equal(fenced.topics[2].query, 'c');
+  // query 清洗与过滤（空 query 丢弃）
+  const filtered = parseSearchPlan('{"topics":[{"query":"  ","note":"x"},{"query":"y","note":""}]}');
+  assert.equal(filtered.topics.length, 1);
+  assert.equal(filtered.topics[0].query, 'y');
+  // 空 topics / 坏输入 → null（触发降级纯函数拼词）
+  assert.equal(parseSearchPlan('{"topics":[]}'), null);
+  assert.equal(parseSearchPlan('garbage'), null);
+  assert.equal(parseSearchPlan(null), null);
 });
