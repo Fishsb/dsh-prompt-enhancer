@@ -25,6 +25,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
   ;return { wrapUserText, wrapPublishText, stripScenarioEcho, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
     shouldInjectV2, extractHistory, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile, analyzeInputRules,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
+    splitHistoryRounds, parseRelevance,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
     buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages, filterDeltaForPublish,
     MEMORY_ROUNDS_MAX, MEMORY_CHAIN_BUDGET_MAX, MEMORY_DELTA_MAX,
@@ -47,6 +48,8 @@ const {
   extractKeywords,
   splitCnSegments,
   analyzeInputRules,
+  splitHistoryRounds,
+  parseRelevance,
   shouldIgnoreFile,
   rankFiles,
   snippetFromLines,
@@ -1072,4 +1075,48 @@ test('U45 ENV_PROBE_KEYS 探测计划（v2.7.1 收敛）', () => {
   assert.ok(ENV_PROBE_KEYS.find((e) => e.key === 'net').level === 'warn', 'net 为 warn（网络受限不阻断，仅提示）');
   const json = JSON.stringify(ENV_PROBE_KEYS);
   assert.ok(!/proxy|password|token|secret/i.test(json), '计划不含敏感字段');
+});
+
+// v3.0（模式重构）：会话轮次窗口切分契约——轮 = user 消息锚点及其后的 assistant 回复。
+test('U61 splitHistoryRounds 轮次窗口切分（v3.0）', () => {
+  const ev = [
+    { type: 'user', text: '第一轮输入' },
+    { type: 'assistant', text: '第一轮输出' },
+    { type: 'user', text: '第二轮输入' },
+    { type: 'assistant', text: '第二轮输出' },
+    { type: 'user', text: '第三轮输入' },
+    { type: 'assistant', text: '第三轮输出' },
+  ];
+  // 前 1 轮 = 最近一轮（第三轮）
+  assert.deepEqual(splitHistoryRounds(ev, 1, 1), ['[用户] 第三轮输入', '[助手] 第三轮输出']);
+  // 前 2 轮 = 第二、三轮
+  assert.deepEqual(splitHistoryRounds(ev, 1, 2), ['[用户] 第二轮输入', '[助手] 第二轮输出', '[用户] 第三轮输入', '[助手] 第三轮输出']);
+  // 第 3 至 5 轮 = 仅第一轮（可用轮数 clamp）
+  assert.deepEqual(splitHistoryRounds(ev, 3, 5), ['[用户] 第一轮输入', '[助手] 第一轮输出']);
+  // 第 6 至 10 轮 = 越界 → 空
+  assert.deepEqual(splitHistoryRounds(ev, 6, 10), []);
+  // 空输入
+  assert.deepEqual(splitHistoryRounds([], 1, 1), []);
+  // 无 user 锚点退化：按消息条数窗口
+  const noUser = [{ type: 'assistant', text: 'a' }, { type: 'assistant', text: 'b' }, { type: 'assistant', text: 'c' }];
+  assert.deepEqual(splitHistoryRounds(noUser, 1, 2), ['[助手] b', '[助手] c']);
+});
+
+// v3.0（模式重构）：关联判定 JSON 容错解析契约。
+test('U62 parseRelevance JSON 容错解析（v3.0）', () => {
+  assert.deepEqual(parseRelevance('{"related":true,"reason":"同一项目"}'), { related: true, reason: '同一项目' });
+  assert.deepEqual(parseRelevance('{"related":false,"reason":"无关闲聊"}'), { related: false, reason: '无关闲聊' });
+  // 代码块包裹
+  assert.deepEqual(parseRelevance('```json\n{"related": true, "reason": "参考"}\n```'), { related: true, reason: '参考' });
+  // 前后缀噪音
+  assert.deepEqual(parseRelevance('结果：{"related":true,"reason":"ok"}完毕'), { related: true, reason: 'ok' });
+  // 字符串布尔归一化
+  assert.deepEqual(parseRelevance('{"related":"true","reason":"x"}'), { related: true, reason: 'x' });
+  // 非法输入 → null
+  assert.equal(parseRelevance('not json'), null);
+  assert.equal(parseRelevance(''), null);
+  assert.equal(parseRelevance(null), null);
+  // 截断 reason
+  const long = parseRelevance('{"related":true,"reason":"' + '长'.repeat(120) + '"}');
+  assert.ok(long.reason.length <= 80, 'reason 截断到 80');
 });

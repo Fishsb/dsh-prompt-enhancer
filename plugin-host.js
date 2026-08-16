@@ -280,6 +280,36 @@ const SYSTEM_PUBLISH_PROMPT = [
   '锚点规则（防自嗨）：任一「用户明确需求未覆盖」或「九章缺章」→ 必须判【调整】。',
   '【自评段豁免条款】：自评段不受「不加解释/严禁回显」红线约束——允许概括引用用户需求点以核对覆盖，禁止逐字回显输入原文；其余正文仍严守红线。',
 ].join('\n');
+
+const RELEVANCE_PROMPT = [
+  '你是一个会话关联性判定器。判断给定的「历史会话片段」与「当前用户输入」是否相关。',
+  '',
+  '【关联的定义】',
+  '历史片段与当前输入涉及相同或直接相关的主题、任务、对象、技术或上下文，能够为优化当前输入提供有效参考——例如：同一项目的讨论、同一提示词的迭代过程、与当前输入直接相关的需求说明或技术背景。',
+  '',
+  '【不关联的定义】',
+  '历史片段与当前输入主题无关——例如：无关的闲聊、其他任务的讨论、与当前输入没有任何共同点的内容。',
+  '',
+  '【判定规则】',
+  '1. 只依据历史片段与当前输入的实际内容判断，不臆测不存在的信息。',
+  '2. 历史片段为空或仅剩截断残片时，判定为不关联。',
+  '3. 宁可漏判（不关联），不可错判（把无关内容当作参考）。',
+  '',
+  '【输出格式】',
+  '只输出一个 JSON 对象，不要输出任何其他内容：',
+  '{"related": true 或 false, "reason": "一句话中文理由（不超过 30 字）"}',
+  '',
+  '【输入】',
+  '历史会话片段：',
+  '"""',
+  '{history}',
+  '"""',
+  '',
+  '当前用户输入：',
+  '"""',
+  '{current}',
+  '"""',
+].join('\n');
 // ==PROMPTS-END==
 
 // ==PURE-BEGIN==  (unit-testable pure functions; keep free of ctx/harness/pending/module-state)
@@ -1366,6 +1396,53 @@ function mergeEnvPath(sysPath, userPath) {
   return out.join(';');
 }
 
+
+// ================= v3.0 模式重构 · 会话轮次窗口与关联判定 =================
+
+// 会话轮次窗口切分：events 时间序（extractHistory 输出 [{type:'user'|'assistant', text}]），
+// 以 user 消息为轮锚点（轮 = 一个 user 消息及其后的 assistant 回复）；fromRound/toRound
+// 1-based（1 = 最近一轮）。返回窗口内消息文本（[用户]/[助手] 前缀）；窗口越界/无锚点
+// 时按可用轮数 clamp，不可用 → []。
+function splitHistoryRounds(events, fromRound, toRound) {
+  const list = Array.isArray(events) ? events.filter((e) => e && typeof e.text === 'string') : [];
+  if (list.length === 0) return [];
+  const from = Number.isInteger(fromRound) && fromRound >= 1 ? fromRound : 1;
+  const to = Number.isInteger(toRound) && toRound >= from ? toRound : from;
+  const anchors = [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].type === 'user') anchors.push(i);
+  }
+  const fmt = (e) => (e.type === 'user' ? '[用户] ' : '[助手] ') + e.text;
+  if (anchors.length === 0) {
+    const start = Math.max(0, list.length - to);
+    const end = Math.max(start, list.length - from + 1);
+    return list.slice(start, end).map(fmt);
+  }
+  if (from > anchors.length) return [];
+  const toEff = Math.min(to, anchors.length);
+  const startIdx = anchors[toEff - 1];
+  const endIdx = from === 1 ? list.length : anchors[from - 2];
+  if (endIdx <= startIdx) return [];
+  return list.slice(startIdx, endIdx).map(fmt);
+}
+
+// 关联判定 JSON 容错解析（{related, reason}）——剥离 json 代码块与前后缀噪音，
+// related 归一化（true/'true'/1 → true）；不可解析 → null（调用方按不相关降级）。
+function parseRelevance(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  s = s.slice(start, end + 1);
+  let obj;
+  try { obj = JSON.parse(s); } catch (e) { return null; }
+  if (!obj || typeof obj !== 'object') return null;
+  const related = obj.related === true || obj.related === 'true' || obj.related === 1 || obj.related === '1';
+  return { related, reason: typeof obj.reason === 'string' ? obj.reason.slice(0, 80) : '' };
+}
 // ==PURE-END==
 
 // ================= V2 上下文感知优化 · 运行时（阶段 A/B/C） =================

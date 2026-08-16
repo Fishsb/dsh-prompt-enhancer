@@ -72,6 +72,7 @@
 - **M2 深化：enhance 流程管道化**：`enhance-handlers.js` chunk 内置 bundle 内 Pipeline（契约同 `src/host/pipeline.js`），enhance 主流程拆为 analyze/retrieve/assemble/llm 四 stage 注册式执行——新增增强模式/检索源 = 注册 stage handler 而非修改主流程；逐段搬运行为等价（快路径/超时计时/错误边界/进度轮询不变，产物 diff 仅限 enhance 区段）；新增 `test/bundle-smoke.test.cjs`（首个生成 bundle 直接测试：RPC 注册冒烟 + GUARD/NO_LLM/NO_RECORD 快路径），测试 91 → 95 — 架构治理
 - **fix(M3)：enhance RPC 校验契约修正**（实测暴露）：`lib/rpc-schema.cjs` 与 `src/host/rpc-schema.js` 的 enhance schema 误用不存在的 `draft` 字段（client 实际传 `text`，host handler 读 `args.text`）→ 全部 enhance 请求被校验层 400 拦截；改为 `required: ['sessionId', 'text']` 并对齐 client payload；新增 SMK-05 校验层契约测试 + PROTO-02 同步，测试 95 → 96 — 架构治理
 - **fix：reasoning 链节 maxTokens 自动放宽**（实测确证）：opencode-go 通道在 `reasoningEffort`（思考等级）下，思考过程消耗输出预算——配置的 maxTokens=2000 在长输入 + effort=max 时耗尽 → 空流（EMPTY_RESPONSE，600 字草稿 19s 空 / 同请求 maxTokens=8000 25s 成功）；llm stage 对带 effort 的链节自动放宽到 ≥8000（publish 不设限同策略的保守版，无 effort 行为不变）；新增 SMK-06/07（mock llm 走通完整管道验证放宽/保持），测试 96 → 98 — 架构治理
+- **模式体系重构 S1（基础设施）**：新增 `prompts/relevance.md`（会话关联性判定提示词事实源 → `RELEVANCE_PROMPT`，占位符 `{history}/{current}` 运行时替换）；`sync-prompts.mjs` 同步目标改 `src/host/app.js`（M1 退役后骨架为生成区源，避免被 build 覆盖）并修复生成区精确定位 + JSON 字符串转义写入；PURE 新增 `splitHistoryRounds`（会话轮次窗口切分，user 消息为轮锚点）与 `parseRelevance`（关联判定 JSON 容错解析）；单测 U61/U62，测试 98 → 100 — 架构治理
 
 ## [2.8.3] - 2026-08-16
 
