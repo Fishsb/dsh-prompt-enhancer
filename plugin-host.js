@@ -1595,6 +1595,60 @@ async function pingStream(llmService, entry, ref) {
   return { ok: true, latencyMs, ttftMs: sawFirst ? ttftMs : latencyMs, model: entry.model };
 }
 
+
+// ================= 模型历史统计聚合（2026-08-17 · 连通性测试预计耗时） =================
+// 从会话原始日志提取最后出现的 provider/model 路由（request/header 或 request/context）。
+function extractModelRouteFromEvents(events) {
+  let route = null;
+  if (!Array.isArray(events)) return route;
+  for (const ev of events) {
+    if (!ev || typeof ev !== 'object') continue;
+    if (ev.type === 'request/header' && ev.data && ev.data.header && ev.data.header.config) {
+      const c = ev.data.header.config;
+      if (c && typeof c.provider === 'string' && c.provider && typeof c.model === 'string' && c.model) {
+        route = { provider: c.provider, model: c.model };
+      }
+    } else if (ev.type === 'request/context' && ev.data && ev.data.provider && ev.data.model) {
+      route = { provider: String(ev.data.provider), model: String(ev.data.model) };
+    }
+  }
+  return route;
+}
+
+// 累加一个会话的 sessionStats/tokenUsage 投影值（缺失/异常字段按 0 跳过）。
+function accumulateProjectionStats(acc, projectionSnapshot) {
+  const values = projectionSnapshot && projectionSnapshot.values ? projectionSnapshot.values : {};
+  const s = values.sessionStats;
+  if (!s || typeof s !== 'object') return;
+  acc.ttftMs += Number(s.ttftMs) || 0;
+  acc.ttftSteps += Number(s.ttftSteps) || 0;
+  acc.decodeMs += Number(s.decodeMs) || 0;
+  acc.decodeTokens += Number(s.decodeTokens) || 0;
+  acc.sessions += 1;
+}
+
+// 聚合结果 → 平均 TTFT 与解码吞吐；无样本时对应字段为 null。
+function summarizeModelStats(acc) {
+  return {
+    sessions: acc.sessions,
+    ttftMs: acc.ttftSteps > 0 ? acc.ttftMs / acc.ttftSteps : null,
+    tokensPerSecond: acc.decodeMs > 0 ? acc.decodeTokens / (acc.decodeMs / 1000) : null,
+  };
+}
+
+// 基础模式默认模板预计耗时：输出 token 按输入字符数 /4 动态估算，最低 200 token。
+const BASE_EST_CHARS_PER_TOKEN = 4;
+const BASE_EST_MIN_OUTPUT_TOKENS = 200;
+function estimateBaseModeSeconds(ttftMs, tokensPerSecond, inputChars) {
+  if (typeof ttftMs !== 'number' || !Number.isFinite(ttftMs) ||
+      typeof tokensPerSecond !== 'number' || !Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) {
+    return null;
+  }
+  const chars = Number.isFinite(inputChars) && inputChars > 0 ? inputChars : 0;
+  const outputTokens = Math.max(BASE_EST_MIN_OUTPUT_TOKENS, Math.ceil(chars / BASE_EST_CHARS_PER_TOKEN));
+  return (ttftMs / 1000) + (outputTokens / tokensPerSecond);
+}
+
 // ================= v2.4.0 版本检测与一键更新 · 纯函数族 =================
 // 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
@@ -2476,6 +2530,69 @@ return {
       }
       hlog('[enhance] test provider=' + provider + ' model=' + model + (reasoningEffort ? ' effort=' + reasoningEffort : '') + ' → ' + (r.ok ? 'ok ' + r.latencyMs + 'ms' : r.code));
       return { ...r, ...(precheck && r.ok ? { precheck } : {}) };
+    });
+
+
+    // 2026-08-17（连通性测试预计耗时）：按模型名实时聚合 DSH 会话投影统计。
+    // 读 sessionQuery 全量会话原始日志做模型匹配（request/header → provider/model），
+    // 再用 sessionProjections.snapshot 取 sessionStats/tokenUsage；结果按 provider/model 缓存 60s。
+    const modelStatsCache = new Map();
+    const MODEL_STATS_TTL_MS = 60000;
+    async function resolveModelStats(provider, model) {
+      const key = provider + '/' + model;
+      const now = Date.now();
+      const hit = modelStatsCache.get(key);
+      if (hit && now - hit.at < MODEL_STATS_TTL_MS) return hit.value;
+      const sq = ctx.get('sessionQuery');
+      const proj = ctx.get('sessionProjections');
+      if (!sq || typeof sq.listSessions !== 'function' || !proj || typeof proj.snapshot !== 'function') {
+        return { ok: false, code: 'NO_STATS', message: 'session stats unavailable' };
+      }
+      const acc = { ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0, sessions: 0 };
+      try {
+        const records = await sq.listSessions();
+        for (const rec of records) {
+          const sid = rec && rec.header && rec.header.id;
+          if (!sid) continue;
+          let snap;
+          try {
+            snap = await sq.readSession(sid);
+          } catch (e) {
+            continue;
+          }
+          const route = extractModelRouteFromEvents(snap && snap.events);
+          if (!route || route.provider !== provider || route.model !== model) continue;
+          try {
+            const sessionLike = { seq: (snap.events || []).length, events: snap.events || [] };
+            const pval = proj.snapshot(sessionLike);
+            accumulateProjectionStats(acc, pval);
+          } catch (e) {
+            continue;
+          }
+        }
+      } catch (e) {
+        herr('[enhance] models/stats failed', e);
+        return { ok: false, code: 'STATS_FAILED', message: String(e && e.message ? e.message : e) };
+      }
+      const value = { ok: true, ...summarizeModelStats(acc) };
+      modelStatsCache.set(key, { at: now, value });
+      if (modelStatsCache.size > 200) {
+        for (const [k, v] of modelStatsCache) {
+          if (now - v.at >= MODEL_STATS_TTL_MS) modelStatsCache.delete(k);
+        }
+      }
+      return value;
+    }
+
+    harness.handle('models/stats', async (args) => {
+      const provider = args && typeof args.provider === 'string' ? args.provider : '';
+      const model = args && typeof args.model === 'string' ? args.model : '';
+      const inputChars = args && typeof args.inputChars === 'number' && Number.isFinite(args.inputChars) ? args.inputChars : 0;
+      if (!provider || !model) return { ok: false, code: 'BAD_ARGS', message: 'provider and model required' };
+      const stats = await resolveModelStats(provider, model);
+      if (!stats.ok) return stats;
+      const estimatedBaseSeconds = estimateBaseModeSeconds(stats.ttftMs, stats.tokensPerSecond, inputChars);
+      return { ...stats, estimatedBaseSeconds };
     });
 
     harness.handle('plugins/inventory', async (args) => {

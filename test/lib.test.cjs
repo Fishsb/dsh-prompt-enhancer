@@ -25,6 +25,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
   ;return { wrapUserText, wrapPublishText, stripScenarioEcho, cleanOutput, friendlyMessage, validateConfig, resolveTemplateSystem, collectStream, buildTryChain,
     extractHistory, extractHistoryConclusions, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile,
     pickReachableIndex, probeCacheGet, probeCacheSet, WATCHDOG_TIMEOUT_MS, PROBE_TIMEOUT_MS, PROBE_CACHE_TTL_MS,
+    extractModelRouteFromEvents, accumulateProjectionStats, summarizeModelStats, estimateBaseModeSeconds,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
     splitHistoryRounds, parseRelevance, parseIntent, parseDocsAnalysis, parseSearchPlan,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
@@ -54,6 +55,10 @@ const {
   WATCHDOG_TIMEOUT_MS,
   PROBE_TIMEOUT_MS,
   PROBE_CACHE_TTL_MS,
+  extractModelRouteFromEvents,
+  accumulateProjectionStats,
+  summarizeModelStats,
+  estimateBaseModeSeconds,
   extractKeywords,
   splitCnSegments,
   splitHistoryRounds,
@@ -1283,6 +1288,31 @@ test('U67 collectStream onFirst 回调（v3.1.3）', async () => {
   assert.equal(calls2, 0, '空流不触发 onFirst');
   assert.equal(r2.kind, 'cancelled');
 });
+
+// 2026-08-17（连通性测试预计耗时）：模型历史统计聚合 + 基础模式预计耗时纯函数契约。
+test('U68 model stats aggregation / base estimate (2026-08-17)', () => {
+  const events = [
+    { type: 'request/header', data: { header: { config: { provider: 'p', model: 'm' } } } },
+    { type: 'request/context', data: { provider: 'p2', model: 'm2' } },
+  ];
+  assert.deepEqual(extractModelRouteFromEvents(events), { provider: 'p2', model: 'm2' }, '最后出现的路由覆盖');
+  assert.deepEqual(extractModelRouteFromEvents([...events, { type: 'request/header', data: { header: { config: { provider: 'p', model: 'm' } } } }]), { provider: 'p', model: 'm' }, '后续 header 覆盖为最后路由');
+  assert.equal(extractModelRouteFromEvents([]), null, '空日志无路由');
+  assert.equal(extractModelRouteFromEvents(null), null, '非数组安全');
+
+  const acc = { ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0, sessions: 0 };
+  accumulateProjectionStats(acc, { values: { sessionStats: { ttftMs: 1800, ttftSteps: 2, decodeMs: 2000, decodeTokens: 300 } } });
+  assert.equal(acc.sessions, 1, '匹配会话计数 +1');
+  const sum = summarizeModelStats(acc);
+  assert.equal(sum.ttftMs, 900, 'TTFT 均值');
+  assert.equal(sum.tokensPerSecond, 150, '解码吞吐');
+
+  assert.equal(estimateBaseModeSeconds(1000, 200, 0), 2, '空输入按最低 200 token');
+  assert.equal(estimateBaseModeSeconds(1000, 200, 400), 2, '低于下限仍按 200 token');
+  assert.equal(estimateBaseModeSeconds(1000, 200, 1600), 3, '1600 字符 → 400 token');
+  assert.equal(estimateBaseModeSeconds(null, 200, 400), null, '无 TTFT → null');
+});
+
 
 // v3.0（模式重构）：关联判定 JSON 容错解析契约。
 test('U62 parseRelevance JSON 容错解析（v3.0）', () => {

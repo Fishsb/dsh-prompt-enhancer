@@ -472,6 +472,16 @@ function subscribeConfig(fn) {
   return () => { configState.listeners.delete(fn); };
 }
 
+
+// 2026-08-17（连通性测试预计耗时）：当前输入框草稿全局同步——设置页测试连通性
+// 需要按输入长度动态估算“基础模式默认模板”输出量。
+let lastDraft = '';
+function setLastDraft(text) {
+  lastDraft = typeof text === 'string' ? text : '';
+}
+function getLastDraft() {
+  return lastDraft;
+}
 loadConfigFromStorage();
 
 const ZH = {
@@ -673,6 +683,8 @@ const ZH = {
   cfgTestOk: '✓ 可用 · {ms}ms',
   cfgTestTtft: '（TTFT {ms}ms）',
   cfgTestFail: '✗ {msg}',
+  cfgTestEstimate: '基础模式默认模板预计约 {time}（历史 TTFT {ttft} · {tps} tok/s）',
+  cfgTestEstimateNoData: '暂无该模型历史统计',
   cfgAddFallback: '＋ 添加模型',
   cfgRestoreDefaults: '恢复默认',
   cfgCustomName: '显示名',
@@ -929,6 +941,8 @@ const EN = {
   cfgTestOk: '✓ OK · {ms}ms',
   cfgTestTtft: '（TTFT {ms}ms）',
   cfgTestFail: '✗ {msg}',
+  cfgTestEstimate: 'Base default template est. {time} (hist TTFT {ttft} · {tps} tok/s)',
+  cfgTestEstimateNoData: 'No historical stats for this model',
   cfgAddFallback: '+ Add model',
   cfgRestoreDefaults: 'Restore defaults',
   cfgCustomName: 'Display name',
@@ -1231,6 +1245,9 @@ function EnhanceButton(props) {
   const [, setVersion] = React.useState(0);
   const draftRef = React.useState({ current: draft })[0];
   draftRef.current = draft;
+
+  // 2026-08-17（连通性测试预计耗时）：同步当前草稿长度到全局，供设置页测试连通性读取。
+  React.useEffect(() => { setLastDraft(draft); }, [draft]);
 
   React.useEffect(() => subscribe(sessionId, () => setVersion((v) => v + 1)), [sessionId]);
 
@@ -2592,21 +2609,46 @@ function ModelMainSection(props) {
     setTestState(null);
   };
   // v23（D4）：单点测试——点某行 ⛓ → 结果区集中显示该行测试；行内不注入结果
+  // v3.1.4（预计耗时）：测试成功后并行读取该模型的 DSH 历史统计，按当前输入长度估算基础模式默认模板耗时。
+  const fmtEstSeconds = (sec) => {
+    if (typeof sec !== 'number' || !Number.isFinite(sec)) return '';
+    if (sec < 60) return (Math.round(sec * 10) / 10) + 's';
+    const whole = Math.round(sec);
+    return Math.floor(whole / 60) + 'm' + (whole % 60) + 's';
+  };
+  const fmtTps = (n) => {
+    if (typeof n !== 'number' || !Number.isFinite(n)) return '';
+    return n >= 10 ? String(Math.round(n)) : String(Math.round(n * 10) / 10);
+  };
   const runTest = (index, entry) => {
     if (!entry || !entry.provider || !entry.model) return;
-    setTestState({ key: entry.provider + '/' + entry.model, index, entry, phase: 'testing', result: null });
+    const key = entry.provider + '/' + entry.model;
+    setTestState({ key, index, entry, phase: 'testing', result: null });
     host.call('models/test', { provider: entry.provider, model: entry.model }).then((res) => {
       const r = res && typeof res === 'object' ? res : {};
       setTestState({
+        key,
         index,
         entry,
         phase: 'done',
         result: r.ok
-          ? { ok: true, latencyMs: r.latencyMs, ttftMs: r.ttftMs }
+          ? { ok: true, latencyMs: r.latencyMs, ttftMs: r.ttftMs, statsLoading: true }
           : { ok: false, message: r.message || r.code || '' },
       });
+      if (!r.ok) return;
+      const inputChars = (getLastDraft() || '').length;
+      host.call('models/stats', { provider: entry.provider, model: entry.model, inputChars }).then((sr) => {
+        const s = sr && typeof sr === 'object' ? sr : {};
+        setTestState((prev) => prev && prev.key === key
+          ? { ...prev, result: { ...prev.result, statsLoading: false, estimate: s.ok ? s.estimatedBaseSeconds : null, statsUnavailable: !s.ok, stats: s.ok ? { ttftMs: s.ttftMs, tokensPerSecond: s.tokensPerSecond } : undefined } }
+          : prev);
+      }).catch(() => {
+        setTestState((prev) => prev && prev.key === key
+          ? { ...prev, result: { ...prev.result, statsLoading: false, statsUnavailable: true } }
+          : prev);
+      });
     }).catch(() => {
-      setTestState({ index, entry, phase: 'done', result: { ok: false, message: t('errNETWORK') } });
+      setTestState({ key, index, entry, phase: 'done', result: { ok: false, message: t('errNETWORK') } });
     });
   };
 
@@ -2628,7 +2670,19 @@ function ModelMainSection(props) {
       if (testState.phase === 'testing') {
         resultNode = React.createElement('span', { className: 'dsh-plg-muted' }, t('cfgTesting'));
       } else if (testState.result && testState.result.ok) {
-        resultNode = React.createElement('span', { className: 'dsh-plg-test-ok' }, t('cfgTestOk').replace('{ms}', String(testState.result.latencyMs)));
+        const parts = [];
+        parts.push(React.createElement('span', { className: 'dsh-plg-test-ok' }, t('cfgTestOk').replace('{ms}', String(testState.result.latencyMs))));
+        if (typeof testState.result.ttftMs === 'number') {
+          parts.push(React.createElement('span', { className: 'dsh-plg-test-ttft' }, t('cfgTestTtft').replace('{ms}', String(testState.result.ttftMs))));
+        }
+        if (testState.result.statsLoading === true) {
+          parts.push(React.createElement('span', { className: 'dsh-plg-muted' }, t('cfgTesting')));
+        } else if (typeof testState.result.estimate === 'number' && Number.isFinite(testState.result.estimate)) {
+          parts.push(React.createElement('span', { className: 'dsh-plg-test-est' }, t('cfgTestEstimate').replace('{time}', fmtEstSeconds(testState.result.estimate)).replace('{ttft}', fmtEstSeconds(testState.result.stats && testState.result.stats.ttftMs)).replace('{tps}', fmtTps(testState.result.stats && testState.result.stats.tokensPerSecond))));
+        } else if (testState.result.statsUnavailable === true) {
+          parts.push(React.createElement('span', { className: 'dsh-plg-muted' }, t('cfgTestEstimateNoData')));
+        }
+        resultNode = React.createElement(React.Fragment, null, ...parts);
       } else {
         resultNode = React.createElement('span', { className: 'dsh-plg-test-fail' }, t('cfgTestFail').replace('{msg}', (testState.result && testState.result.message) || ''));
       }
