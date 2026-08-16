@@ -66,3 +66,20 @@ test('SMK-04 enhance/progress returns NO_RECORD for unknown request', async () =
   const out = await handlers.get('enhance/progress')({ sessionId: 'missing', seq: 42 });
   assert.deepEqual(out, { ok: false, code: 'NO_RECORD' });
 });
+
+// M3 fix：校验层 schema 必须与真实 client payload 形状对齐——client 调 enhance 传
+// {sessionId, seq, text, config, mode}（helpers.js），handler 读 args.text；
+// 此前 schema 误用 draft 字段导致全部 enhance 请求被 400 拦截（lib/index.cjs 分发前校验）。
+test('SMK-05 RPC schema accepts real client payload shapes', () => {
+  const { validateRpcArgs } = require('../lib/rpc-schema.cjs');
+  // 真实 client 形状（helpers.js enhance 调用）
+  assert.equal(validateRpcArgs('enhance', { sessionId: 's', seq: 1, text: 'draft body', config: {}, mode: 'base' }).ok, true);
+  // 真实 client 形状（updater-card doCheck）
+  assert.equal(validateRpcArgs('update/check', { repo: 'Fishsb/dsh-prompt-enhancer', sessionId: 's', tagsPayload: '[]', releasePayload: '{}' }).ok, true);
+  // 真实 client 形状（model-main runTest）
+  assert.equal(validateRpcArgs('models/test', { provider: 'p', model: 'm' }).ok, true);
+  // 真实 client 形状（plugins-section act）
+  assert.equal(validateRpcArgs('plugins/run', { sessionId: 's', pluginId: 'p', packageId: 'x', mode: 'run' }).ok, true);
+  // 防回归：缺 text 应被拒
+  assert.equal(validateRpcArgs('enhance', { sessionId: 's', draft: 'x' }).ok, false);
+});

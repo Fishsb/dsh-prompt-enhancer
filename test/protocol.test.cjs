@@ -14,7 +14,8 @@ test('PROTO-01 protocol version and method registry', () => {
 });
 
 test('PROTO-02 rpc schema validates required args', () => {
-  assert.equal(validateRpcArgs('enhance', { sessionId: 's', draft: 'd' }).ok, true);
+  // fix(M3)：enhance 契约 = client payload 的 text 字段（draft 为误用字段）
+  assert.equal(validateRpcArgs('enhance', { sessionId: 's', text: 'd' }).ok, true);
   assert.equal(validateRpcArgs('enhance', { sessionId: 's' }).ok, false);
   assert.equal(validateRpcArgs('models/test', { provider: 'p', model: 'm' }).ok, true);
   assert.equal(validateRpcArgs('models/test', { provider: 'p' }).ok, false);
