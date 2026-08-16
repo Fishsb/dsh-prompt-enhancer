@@ -464,10 +464,10 @@ const ZH = {
   updAhead: '本地已领先',
   updUnknown: '状态未知',
   updDir: '目标目录',
-  updPull: '一键拉取更新',
-  // v2.9.x（按钮拆分·用户指令）：一键拉取更新（合并原「一键更新」= 执行器 apply restart:false）+ 端口重启（执行器 restart）
+  updPull: '一键更新',
+  // v2.9.x（按钮拆分·用户指令）：一键更新（执行器 apply restart:false，原「一键拉取更新」合并「一键更新」改名）+ 端口重启（执行器 restart）
   updPortRestart: '端口重启',
-  updPullApplyConfirm: '确认拉取更新？',
+  updPullApplyConfirm: '确认更新？',
   updInstalled: '✓ 已安装，请点击「端口重启」生效',
   updInstalledShort: '已安装',
   updPulling: '拉取中…',
@@ -689,10 +689,10 @@ const EN = {
   updAhead: 'Local is ahead',
   updUnknown: 'Unknown',
   updDir: 'Target directory',
-  updPull: 'Pull update',
-  // v2.9.x (button split): one-click pull & install (executor apply restart:false) + port restart (executor restart)
+  updPull: 'Update',
+  // v2.9.x (button split): one-click update (executor apply restart:false; renamed from pull & install) + port restart (executor restart)
   updPortRestart: 'Restart port',
-  updPullApplyConfirm: 'Confirm pull & install?',
+  updPullApplyConfirm: 'Confirm update?',
   updInstalled: '✓ Installed — click "Restart port" to apply',
   updInstalledShort: 'Installed',
   updPulling: 'Pulling…',
@@ -1398,7 +1398,7 @@ function UpdaterCard(props) {
   const [envChecking, setEnvChecking] = React.useState(false);
   const [envError, setEnvError] = React.useState(null);
   // v2.9.x（按钮拆分）：idle|confirm|applying|installed|restarting|done|rolledback；
-  // action 区分当前动作（apply=一键拉取更新 / restart=端口重启）
+  // action 区分当前动作（apply=一键更新 / restart=端口重启）
   const [applyPhase, setApplyPhase] = React.useState('idle');
   const [action, setAction] = React.useState(null);
   const [applyErr, setApplyErr] = React.useState(null);
