@@ -24,13 +24,13 @@ DeepSeek Harness (DSH) 提示词增强插件：输入模糊提示词 → 一键�
 ### 方式一：一条命令（推荐）
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.1.2
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.1.3
 ```
 
 安装后重启 DSH（`dsh web`），输入框工具行出现 ✨ 按钮即安装成功。
 
 > 前提：本机已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，且 `pnpm` 在 PATH 中（`npm i -g pnpm` 或 `corepack enable`）。
-> `#v3.1.2` 为版本锁定（可换成任意 [Release tag](https://github.com/Fishsb/dsh-prompt-enhancer/releases)），避免装到未发布的主分支。
+> `#v3.1.3` 为版本锁定（可换成任意 [Release tag](https://github.com/Fishsb/dsh-prompt-enhancer/releases)），避免装到未发布的主分支。
 > 若 pnpm 提示需要授权构建（`allowBuilds`），把提示的包 key 加进 `~/.dsh/profiles/web/pnpm-workspace.yaml` 的 `allowBuilds` 后重跑即可。
 
 更新 / 卸载：
@@ -41,15 +41,15 @@ dsh plugin --profile web remove dsh-prompt-enhancer
 ```
 
 > **卸载后必须重启 DSH**（`dsh web`）才从运行中移除——`remove` 只清理磁盘安装（package.json / node_modules / 层列表），host 半部仍在服务进程、client 半部仍在页面中加载；若重复执行 remove 提示 `no such dependency found`，即表示插件已卸载。
-> 更新注意：tag 锁定安装（`github:...#v3.1.2`）时 `update` 不会跨 tag 升级——升级请用 `dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#<新tag>`。
+> 更新注意：tag 锁定安装（`github:...#v3.1.3`）时 `update` 不会跨 tag 升级——升级请用 `dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#<新tag>`。
 > 卸载不会清除浏览器端的插件配置（localStorage `dsh.enhance.config.v2`），重装后配置仍保留。
 
 ### 方式二：下载安装包离线安装
 
-从 [Releases 页面](https://github.com/Fishsb/dsh-prompt-enhancer/releases) 下载 `dsh-prompt-enhancer-<版本>.tgz`（如 `dsh-prompt-enhancer-3.1.2.tgz`），然后安装：
+从 [Releases 页面](https://github.com/Fishsb/dsh-prompt-enhancer/releases) 下载 `dsh-prompt-enhancer-<版本>.tgz`（如 `dsh-prompt-enhancer-3.1.3.tgz`），然后安装：
 
 ```sh
-dsh plugin --profile web add ./dsh-prompt-enhancer-3.1.2.tgz
+dsh plugin --profile web add ./dsh-prompt-enhancer-3.1.3.tgz
 ```
 
 > 安装包为 pnpm 打包的完整产物（含预构建 `lib/`），无需联网、无需构建授权；装完同样重启 `dsh web` 生效。

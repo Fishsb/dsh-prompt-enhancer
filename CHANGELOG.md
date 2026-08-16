@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [3.1.3] - 2026-08-17
+
 ### Fixed
 - **修复「恢复默认模型链」失效（日志诊断发现）**：`models/autochain` RPC handler 签名漏了 `args` 参数，但函数体引用了 `args.noCache`（v3.1.0 加 noCache 旁路时引入）——每次调用抛 `ReferenceError: args is not defined` 返回 `AUTOCHAIN_FAILED`，client「恢复默认」只能回退静态兜底链；补上 `async (args) =>` 签名，自适应默认链恢复可用 — [PEN-002]
 
@@ -281,6 +283,7 @@
 - 插件管理页版本检测卡片；按钮三态字体锚点对齐模型选择器（13px/500/20px）— [VU-001]
 
 [2.8.3]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.3
+[3.1.3]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.3
 [3.1.2]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.2
 [3.1.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.1
 [3.1.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.0
