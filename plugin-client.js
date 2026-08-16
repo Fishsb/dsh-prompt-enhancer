@@ -2637,16 +2637,25 @@ function ModelMainSection(props) {
       });
       if (!r.ok) return;
       const inputChars = (getLastDraft() || '').length;
-      host.call('models/stats', { provider: entry.provider, model: entry.model, inputChars }).then((sr) => {
+      const applyStats = (sr) => {
         const s = sr && typeof sr === 'object' ? sr : {};
         setTestState((prev) => prev && prev.key === key
           ? { ...prev, result: { ...prev.result, statsLoading: false, estimate: s.ok ? s.estimatedBaseSeconds : null, statsUnavailable: !s.ok, stats: s.ok ? { ttftMs: s.ttftMs, tokensPerSecond: s.tokensPerSecond } : undefined } }
           : prev);
-      }).catch(() => {
-        setTestState((prev) => prev && prev.key === key
-          ? { ...prev, result: { ...prev.result, statsLoading: false, statsUnavailable: true } }
-          : prev);
-      });
+      };
+      const statsP = host.call('models/stats', { provider: entry.provider, model: entry.model, inputChars });
+      if (timerSvc && typeof timerSvc.timeout === 'function') {
+        let dispose = null;
+        const timeoutP = new Promise((resolve) => { dispose = timerSvc.timeout(() => resolve({ ok: false, code: 'STATS_TIMEOUT' }), 8000); });
+        Promise.race([statsP, timeoutP]).then((sr) => { if (dispose) dispose(); applyStats(sr); }).catch(() => {
+          if (dispose) dispose();
+          setTestState((prev) => prev && prev.key === key ? { ...prev, result: { ...prev.result, statsLoading: false, statsUnavailable: true } } : prev);
+        });
+      } else {
+        statsP.then(applyStats).catch(() => {
+          setTestState((prev) => prev && prev.key === key ? { ...prev, result: { ...prev.result, statsLoading: false, statsUnavailable: true } } : prev);
+        });
+      }
     }).catch(() => {
       setTestState({ key, index, entry, phase: 'done', result: { ok: false, message: t('errNETWORK') } });
     });

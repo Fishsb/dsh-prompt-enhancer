@@ -2534,15 +2534,38 @@ return {
 
 
     // 2026-08-17（连通性测试预计耗时）：按模型名实时聚合 DSH 会话投影统计。
-    // 读 sessionQuery 全量会话原始日志做模型匹配（request/header → provider/model），
-    // 再用 sessionProjections.snapshot 取 sessionStats/tokenUsage；结果按 provider/model 缓存 60s。
-    const modelStatsCache = new Map();
-    const MODEL_STATS_TTL_MS = 60000;
+    // 性能约束：持久化会话全量日志读取很重，不能每次/每个会话都 readSession。
+    // 策略：live 会话每次走内存（快）；persisted 会话首次最多扫描 SCAN_LIMIT 个，
+    // 命中后把 model route + projection 缓存，后续调用只聚合缓存，避免卡 UI。
+    const sessionModelCache = new Map();        // sid -> { route, at }
+    const sessionProjectionCache = new Map();   // sid -> { values, at }
+    const SESSION_MODEL_TTL_MS = 600000;        // persisted route 缓存 10 分钟
+    const SESSION_PROJECTION_TTL_MS = 600000;   // persisted projection 缓存 10 分钟
+    const MODEL_STATS_SCAN_LIMIT = 5;           // 单次调用最多新读多少个 persisted 会话
+
+    function cachedSessionModel(sid) {
+      const hit = sessionModelCache.get(sid);
+      if (hit && Date.now() - hit.at < SESSION_MODEL_TTL_MS) return hit.route;
+      return undefined;
+    }
+
+    async function loadPersistedSession(sq, proj, sid) {
+      const snap = await sq.readSession(sid);
+      const route = extractModelRouteFromEvents(snap && snap.events);
+      sessionModelCache.set(sid, { route, at: Date.now() });
+      let projection = null;
+      try {
+        const sessionLike = { seq: (snap.events || []).length, events: snap.events || [] };
+        const pval = proj.snapshot(sessionLike);
+        projection = pval && pval.values ? pval.values : {};
+        sessionProjectionCache.set(sid, { values: projection, at: Date.now() });
+      } catch (e) {
+        projection = null;
+      }
+      return { route, projection };
+    }
+
     async function resolveModelStats(provider, model) {
-      const key = provider + '/' + model;
-      const now = Date.now();
-      const hit = modelStatsCache.get(key);
-      if (hit && now - hit.at < MODEL_STATS_TTL_MS) return hit.value;
       const sq = ctx.get('sessionQuery');
       const proj = ctx.get('sessionProjections');
       if (!sq || typeof sq.listSessions !== 'function' || !proj || typeof proj.snapshot !== 'function') {
@@ -2551,37 +2574,52 @@ return {
       const acc = { ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0, sessions: 0 };
       try {
         const records = await sq.listSessions();
+        let scanBudget = MODEL_STATS_SCAN_LIMIT;
         for (const rec of records) {
           const sid = rec && rec.header && rec.header.id;
           if (!sid) continue;
-          let snap;
-          try {
-            snap = await sq.readSession(sid);
-          } catch (e) {
-            continue;
+          let route;
+          let projection;
+          if (rec.live === true) {
+            // live 会话：直接走内存 Session，不落持久化缓存
+            const sessions = ctx.get('sessions');
+            const live = sessions && typeof sessions.get === 'function' ? sessions.get(sid) : undefined;
+            if (!live) continue;
+            route = extractModelRouteFromEvents(live.events);
+            try {
+              const pval = proj.snapshot(live);
+              projection = pval && pval.values ? pval.values : {};
+            } catch (e) {
+              projection = null;
+            }
+          } else {
+            const cachedRoute = cachedSessionModel(sid);
+            if (cachedRoute !== undefined) {
+              route = cachedRoute;
+              const pc = sessionProjectionCache.get(sid);
+              if (pc && Date.now() - pc.at < SESSION_PROJECTION_TTL_MS) projection = pc.values;
+            } else if (scanBudget > 0) {
+              scanBudget -= 1;
+              try {
+                const loaded = await loadPersistedSession(sq, proj, sid);
+                route = loaded.route;
+                projection = loaded.projection;
+              } catch (e) {
+                route = null;
+                projection = null;
+              }
+            }
           }
-          const route = extractModelRouteFromEvents(snap && snap.events);
           if (!route || route.provider !== provider || route.model !== model) continue;
-          try {
-            const sessionLike = { seq: (snap.events || []).length, events: snap.events || [] };
-            const pval = proj.snapshot(sessionLike);
-            accumulateProjectionStats(acc, pval);
-          } catch (e) {
-            continue;
+          if (projection) {
+            accumulateProjectionStats(acc, { values: projection });
           }
         }
       } catch (e) {
         herr('[enhance] models/stats failed', e);
         return { ok: false, code: 'STATS_FAILED', message: String(e && e.message ? e.message : e) };
       }
-      const value = { ok: true, ...summarizeModelStats(acc) };
-      modelStatsCache.set(key, { at: now, value });
-      if (modelStatsCache.size > 200) {
-        for (const [k, v] of modelStatsCache) {
-          if (now - v.at >= MODEL_STATS_TTL_MS) modelStatsCache.delete(k);
-        }
-      }
-      return value;
+      return { ok: true, ...summarizeModelStats(acc) };
     }
 
     harness.handle('models/stats', async (args) => {
