@@ -240,9 +240,20 @@ function mockLlmSmart(seen, opts) {
   };
 }
 
-// v3.0 sessionQuery mock：2 轮历史（4 条消息事件）。
+// v3.0 sessionQuery mock：2 轮历史（4 条消息事件）。v3.1.3 起主路径走 readSurface
+// （原始事件，块级结构）；listEvents/filterEvents 保留为 readSurface 缺失时的兜底。
 function mockSessionQuery() {
   return {
+    readSurface: async () => ({
+      session: { id: 's' },
+      capturedThroughSeq: 4,
+      events: [
+        { type: 'user/message', seq: 1, data: { content: [{ type: 'text', text: '帮我优化提示词' }] } },
+        { type: 'assistant/message', seq: 2, data: { message: { content: [{ type: 'text', text: '好的' }, { type: 'reasoning', text: '思考过程' }, { type: 'tool-call', name: 'read', arguments: '{}' }] } } },
+        { type: 'user/message', seq: 3, data: { content: [{ type: 'text', text: '再优化一下' }] } },
+        { type: 'assistant/message', seq: 4, data: { message: { content: [{ type: 'text', text: '可以' }] } } },
+      ],
+    }),
     listEvents: async () => [
       { type: 'user/message', seq: 1 },
       { type: 'assistant/message', seq: 2 },

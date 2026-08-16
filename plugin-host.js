@@ -466,6 +466,9 @@ const V2_PROGRESS_OUTPUT_LIMIT = 2000;
 const V2_HISTORY_MAX_CHARS = 8000;
 const V2_HISTORY_LIMIT = 12;
 const V2_MSG_SEQ_SCAN = 16;
+// v3.1.3（用户需求·仅结论参考 / 轮次覆盖修正）：结论提取按轮数扫描上限（1 = 最近一轮，
+// 对齐 standard 最深窗口 [6,10]；旧 16 事件上限在会话 >8 轮时令 [6,10] 静默滑向旧轮）
+const V2_ROUNDS_SCAN_MAX = 10;
 const V2_MSG_TEXT_MAX = 1200;
 const V2_WORKSPACE_TIMEOUT_MS = 2000;
 const SCAN_FILE_LIST_MAX = 2000;
@@ -933,6 +936,53 @@ function extractHistory(events, limit) {
     if (text.startsWith('/')) continue;
     if (/^(\[工具|tool|function call)/i.test(text)) continue;
     out.push({ type: role, text: text.slice(0, V2_MSG_TEXT_MAX) });
+  }
+  return out.reverse();
+}
+
+// v3.1.3（用户需求·仅结论参考）：块级「结论提取」——入参为 sessionQuery.readSurface 的
+// 原始事件（保留 content 块结构；listEvents 记录无文本、filterEvents 文档文本为预拼接
+// 语义文本，二者都无法做块级过滤）。只取 user/assistant 消息的 text 块（显式结论/正文），
+// 丢弃 reasoning（思考过程）、tool-call（工具名+参数 JSON）、tool-result（工具输出）块，
+// 并丢弃 user 消息内 <system-reminder> 系统注入块；输出形状与 extractHistory 一致
+// （[{type:'user'|'assistant', text}]，时间序），下游 splitHistoryRounds/judge 零改动。
+// 轮次覆盖：按 V2_ROUNDS_SCAN_MAX（10）轮向后扫描，覆盖 standard 最深窗口 [6,10]；
+// 每条目 ≤V2_MSG_TEXT_MAX 截断；超出历史 → 窗口判定自然 miss（不注入）。
+function extractHistoryConclusions(events) {
+  const arr = Array.isArray(events) ? events : [];
+  const out = [];
+  const isInjection = (b) => /^<system-reminder>/i.test(String((b && b.text) || '').trim());
+  const textOf = (blocks) => {
+    const parts = [];
+    for (const b of blocks || []) {
+      if (!b || typeof b !== 'object') continue;
+      if (b.type !== 'text') continue;          // 丢弃 reasoning/tool-call/tool-result 等
+      if (isInjection(b)) continue;             // 丢弃系统注入块
+      const t = String(b.text || '').trim();
+      if (t !== '') parts.push(t);
+    }
+    return parts.join('\n');
+  };
+  let userSeen = 0;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const ev = arr[i];
+    if (!ev || typeof ev !== 'object') continue;
+    const type = String(ev.type || '').toLowerCase();
+    if (type === 'user/message') {
+      if (userSeen >= V2_ROUNDS_SCAN_MAX) break;
+      userSeen++;
+    } else if (type !== 'assistant/message') {
+      continue;
+    } else if (userSeen >= V2_ROUNDS_SCAN_MAX) {
+      break;
+    }
+    const content = type === 'user/message'
+      ? (ev.data && ev.data.content)
+      : (ev.data && ev.data.message && ev.data.message.content);
+    const text = textOf(content).trim();
+    if (text === '') continue;
+    if (text.startsWith('/')) continue;
+    out.push({ type: type === 'user/message' ? 'user' : 'assistant', text: text.slice(0, V2_MSG_TEXT_MAX) });
   }
   return out.reverse();
 }
@@ -1844,25 +1894,29 @@ async function buildV2ContextBlock(services, sessionId, text, cfg, onStage) {
     if (sq && typeof sq.listEvents === 'function' && typeof sq.filterEvents === 'function') {
       try {
         mark(STAGE_HISTORY);
-        const records = await sq.listEvents(sessionId);
-        // 尾部反向找最近的消息事件 seq（listEvents 升序，无文本；seq 用于 filterEvents 范围过滤）
-        const msgSeqs = [];
-        for (let i = records.length - 1; i >= 0 && msgSeqs.length < V2_MSG_SEQ_SCAN; i--) {
-          const r = records[i];
-          const t = String(r && r.type || '');
-          if (t === 'user/message' || t === 'assistant/message') msgSeqs.push(r && r.seq);
-        }
-        if (msgSeqs.length > 0) {
-          const minSeq = msgSeqs[msgSeqs.length - 1];
-          const docs = await sq.filterEvents(sessionId, [{ kind: 'seq', from: minSeq }]);
-          events = extractHistory(docs, V2_HISTORY_LIMIT);
-          historyText = events.map((e) => (e.type === 'user' ? '[用户] ' : '[助手] ') + e.text).join('\n');
-          hlog('[enhance] v2 history raw=' + records.length + ' msgSeqs=' + msgSeqs.length + ' minSeq=' + minSeq + ' docs=' + (docs ? docs.length : 'null') + ' events=' + events.length + ' chars=' + historyText.length + ' firstType=' + (events.length ? events[0].type : '-'));
+        // v3.1.3（用户需求·仅结论参考）：同 v3 路径——readSurface 块级结论提取，旧路径兜底
+        if (typeof sq.readSurface === 'function') {
+          const surface = await sq.readSurface(sessionId);
+          events = extractHistoryConclusions(surface && surface.events);
         } else {
-          hlog('[enhance] v2 history raw=' + records.length + ' msgSeqs=0 tailTypes=' + JSON.stringify(records.slice(-3).map((e) => e && e.type)));
+          const records = await sq.listEvents(sessionId);
+          // 尾部反向找最近的消息事件 seq（listEvents 升序，无文本；seq 用于 filterEvents 范围过滤）
+          const msgSeqs = [];
+          for (let i = records.length - 1; i >= 0 && msgSeqs.length < V2_MSG_SEQ_SCAN; i--) {
+            const r = records[i];
+            const t = String(r && r.type || '');
+            if (t === 'user/message' || t === 'assistant/message') msgSeqs.push(r && r.seq);
+          }
+          if (msgSeqs.length > 0) {
+            const minSeq = msgSeqs[msgSeqs.length - 1];
+            const docs = await sq.filterEvents(sessionId, [{ kind: 'seq', from: minSeq }]);
+            events = extractHistory(docs, V2_HISTORY_LIMIT);
+          }
         }
+        historyText = events.map((e) => (e.type === 'user' ? '[用户] ' : '[助手] ') + e.text).join('\n');
+        hlog('[enhance] v2 history events=' + events.length + ' chars=' + historyText.length + (typeof sq.readSurface === 'function' ? ' conclusion-only' : ''));
       } catch (e) {
-        hlog('[enhance] v2 listEvents/filterEvents failed', e && e.message ? e.message : e);
+        hlog('[enhance] v2 history failed', e && e.message ? e.message : e);
       }
     } else {
       hlog('[enhance] v2 sessionQuery unavailable');
@@ -2560,6 +2614,16 @@ return {
       let histTimedOut = false;
       const histTimer = ctx.timer.timeout(() => { histTimedOut = true; }, V2_SEARCH_EVENTS_TIMEOUT_MS);
       try {
+        // v3.1.3（用户需求·仅结论参考）：优先 readSurface（完整事件，保留 content 块结构）
+        // → 结论提取（仅 text 块，丢弃思考/工具调用/系统注入）；旧 listEvents+filterEvents
+        // 路径的文档文本为预拼接语义文本（含工具参数），仅作 readSurface 缺失时的兜底。
+        if (typeof sq.readSurface === 'function') {
+          const surface = await sq.readSurface(sessionId);
+          if (histTimedOut) { hlog('[enhance] v3 history timeout'); return []; }
+          const events = extractHistoryConclusions(surface && surface.events);
+          hlog('[enhance] v3 history events=' + events.length + ' conclusion-only');
+          return events;
+        }
         const records = await sq.listEvents(sessionId);
         const msgSeqs = [];
         for (let i = records.length - 1; i >= 0 && msgSeqs.length < V2_MSG_SEQ_SCAN; i--) {

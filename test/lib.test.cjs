@@ -23,7 +23,7 @@ const grabConst = (name) => {
 const defaultsBlock = [grabConst('DEFAULT_TIMEOUT_MS'), grabConst('DEFAULT_MAX_TOKENS'), grabConst('DEFAULT_OUTPUT_LIMIT')].join('\n');
 const pureFn = new Function(defaultsBlock + '\n' + pureText + `
   ;return { wrapUserText, wrapPublishText, stripScenarioEcho, cleanOutput, friendlyMessage, validateConfig, collectStream, buildTryChain,
-    extractHistory, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile,
+    extractHistory, extractHistoryConclusions, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
     splitHistoryRounds, parseRelevance, parseIntent, parseDocsAnalysis, parseSearchPlan,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
@@ -43,6 +43,7 @@ const {
   collectStream,
   buildTryChain,
   extractHistory,
+  extractHistoryConclusions,
   inferFocusRules,
   extractKeywords,
   splitCnSegments,
@@ -1058,6 +1059,79 @@ test('U61 splitHistoryRounds 轮次窗口切分（v3.0）', () => {
   // 无 user 锚点退化：按消息条数窗口
   const noUser = [{ type: 'assistant', text: 'a' }, { type: 'assistant', text: 'b' }, { type: 'assistant', text: 'c' }];
   assert.deepEqual(splitHistoryRounds(noUser, 1, 2), ['[助手] b', '[助手] c']);
+});
+
+// v3.1.3（用户需求·仅结论参考）：块级结论提取——只取 user/assistant 消息的 text 块，
+// 丢弃 reasoning/tool-call/tool-result 块与 <system-reminder> 系统注入块；输出形状与
+// extractHistory 一致（[{type, text}]，时间序）。
+test('U64 extractHistoryConclusions 仅结论提取（丢弃思考/工具调用/系统注入）', () => {
+  const events = [
+    { type: 'user/message', seq: 1, data: { content: [
+      { type: 'text', text: '<system-reminder>\n技能目录注入内容…' },
+      { type: 'text', text: '帮我优化提示词' },
+    ] } },
+    { type: 'assistant/message', seq: 2, data: { message: { content: [
+      { type: 'reasoning', text: '思考过程…' },
+      { type: 'tool-call', name: 'pwsh', arguments: '{"command":"ls"}' },
+      { type: 'tool-result', content: [{ type: 'text', text: '工具输出…' }] },
+      { type: 'text', text: '结论：已按需求优化' },
+    ] } } },
+    { type: 'tool/result', seq: 3, data: { message: { content: [{ type: 'text', text: '独立工具结果…' }] } } },
+    { type: 'user/message', seq: 4, data: { content: [{ type: 'text', text: '再优化' }] } },
+    { type: 'assistant/message', seq: 5, data: { message: { content: [{ type: 'text', text: '可以' }] } } },
+  ];
+  const h = extractHistoryConclusions(events);
+  assert.equal(h.length, 4, 'tool/result 事件与空文本消息被过滤');
+  assert.deepEqual(h[0], { type: 'user', text: '帮我优化提示词' }, 'system-reminder 块被剥除');
+  assert.deepEqual(h[1], { type: 'assistant', text: '结论：已按需求优化' }, 'reasoning/tool-call/tool-result 块被剥除');
+  assert.deepEqual(h[2], { type: 'user', text: '再优化' });
+  assert.deepEqual(h[3], { type: 'assistant', text: '可以' });
+  const joined = h.map((e) => e.text).join('\n');
+  assert.ok(!joined.includes('思考过程'), 'reasoning 块不注入');
+  assert.ok(!joined.includes('pwsh'), 'tool-call 名称/参数不注入');
+  assert.ok(!joined.includes('工具输出'), 'tool-result 内容不注入');
+  assert.ok(!joined.includes('system-reminder'), '系统注入块不注入');
+  // 空输入 / 非数组
+  assert.deepEqual(extractHistoryConclusions([]), []);
+  assert.deepEqual(extractHistoryConclusions(null), []);
+});
+
+// v3.1.3（轮次覆盖修正）：按 V2_ROUNDS_SCAN_MAX=10 轮向后扫描，12 轮会话 [6,10] 窗口
+// 语义正确（旧 V2_MSG_SEQ_SCAN=16 事件上限只够 ~8 轮，[6,10] 会静默滑向旧轮）。
+test('U65 extractHistoryConclusions 轮次覆盖（12 轮会话 [6,10] 不滑动）', () => {
+  const events = [];
+  for (let r = 1; r <= 12; r++) {
+    events.push({ type: 'user/message', seq: r * 2 - 1, data: { content: [{ type: 'text', text: '第' + r + '轮输入' }] } });
+    events.push({ type: 'assistant/message', seq: r * 2, data: { message: { content: [{ type: 'text', text: '第' + r + '轮输出' }] } } });
+  }
+  const h = extractHistoryConclusions(events);
+  // 只保留最近 10 轮（第 3-12 轮）
+  assert.equal(h.length, 20, '10 轮 × 2 条');
+  assert.equal(h[0].text, '第3轮输入');
+  assert.equal(h[h.length - 1].text, '第12轮输出');
+  // [6,10]（6/10 = 从最近往旧的轮序）→ 第 3-7 轮（第 10 到第 6 个最近轮）
+  const win = splitHistoryRounds(h, 6, 10);
+  assert.ok(win.includes('[用户] 第3轮输入') && win.includes('[助手] 第7轮输出'), '覆盖第 3-7 轮');
+  assert.ok(!win.some((l) => l.includes('第8轮')), '不含更新的轮次');
+  assert.ok(!win.some((l) => l.includes('第2轮')), '不含更旧的轮次');
+  // [1,2] = 最近两轮（第 11-12 轮）
+  const win12 = splitHistoryRounds(h, 1, 2);
+  assert.ok(win12.includes('[用户] 第11轮输入') && win12.includes('[助手] 第12轮输出'));
+});
+
+// v3.1.3：纯系统注入 user 消息（仅 <system-reminder> 块）不产生轮锚点。
+test('U65b extractHistoryConclusions 纯注入 user 消息不产生锚点', () => {
+  const events = [
+    { type: 'user/message', seq: 1, data: { content: [{ type: 'text', text: '<system-reminder>\n仅系统注入内容' }] } },
+    { type: 'user/message', seq: 2, data: { content: [{ type: 'text', text: '真实请求' }] } },
+    { type: 'assistant/message', seq: 3, data: { message: { content: [{ type: 'text', text: '答复' }] } } },
+  ];
+  const h = extractHistoryConclusions(events);
+  assert.deepEqual(h, [
+    { type: 'user', text: '真实请求' },
+    { type: 'assistant', text: '答复' },
+  ]);
+  assert.equal(splitHistoryRounds(h, 1, 1).length, 2, '仅真实请求锚定一轮');
 });
 
 // v3.0（模式重构）：关联判定 JSON 容错解析契约。

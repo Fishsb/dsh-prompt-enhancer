@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Changed
+- **历史会话参考仅注入「结论信息」（用户需求）**：lite/standard/smart 的「相关会话参考」与 publish 的 v2 历史段此前把会话事件预拼接文本整段代入——**工具调用名 + 参数 JSON（含命令全文/文件内容）占注入文本的 85-92%**（实测 f535f8ac 会话窗口 [1,2]：text 2654 字符 vs tool-call 29813 字符）。修复：历史提取改走 `sessionQuery.readSurface`（原始事件，保留 content 块结构）→ 新增块级 `extractHistoryConclusions` 只取 user/assistant 消息的 `text` 块（显式结论/正文），丢弃 reasoning（思考过程）、tool-call（工具名+参数）、tool-result（工具输出）块，并剥除 user 消息内 `<system-reminder>` 系统注入块；readSurface 缺失时回退旧路径。实测同会话窗口 [1,2] 注入变为纯结论（工具参数 0 残留）— [PEN-001]
+- **会话轮次覆盖修正（审查发现）**：旧 `V2_MSG_SEQ_SCAN=16` 事件上限只够 ~8 轮，会话 >8 轮时 standard 的 [6,10] 窗口会静默滑向最旧可用轮（20 轮会话实际判 13-16 轮）；现按 `V2_ROUNDS_SCAN_MAX=10` 轮向后扫描（1 = 最近一轮，对齐最深窗口 [6,10]），窗口语义恢复正确；单测 U64/U65/U65b + smoke readSurface mock，115/115 — [PEN-001]
+
 ## [3.1.2] - 2026-08-16
 
 ### Fixed
