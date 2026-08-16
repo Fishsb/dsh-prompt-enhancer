@@ -5,6 +5,11 @@
 
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
+## [Unreleased]
+
+### Changed
+- **工作区文档清理（用户指令）**：① 删除 5 个历史版本快照目录（`dsh-prompt-enhancer-v2.4.5/2.4.8/2.5.1/2.7.0/2.8.3`，本地归档备份，git tag 已有完整备份）与旧工作副本目录（`prompt-enhancer-release - 提示词增强脚本`）；② 删除旧版本发布说明 `release-notes/v2.4.0–v2.8.3`（22 个，保留 3.0.0；完整说明见 GitHub Releases 页）；③ 删除已完成使命的开发方案文档 `docs/internal/architecture-refactor-plan.md`（M0-M6 已全部落地）与 `docs/internal/方案-publish路由与自评.md`（已被 v3.0p 取代）；保留 `.internal/` 排障经验沉淀、`CONTRIBUTING.md`、模块结构说明、项目地图与 devref — 架构治理
+
 ## [3.0.0] - 2026-08-16
 
 ### Changed
