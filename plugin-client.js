@@ -767,7 +767,7 @@ const ZH = {
   cfgRestoreDefaults: '恢复默认',
   cfgCustomName: '显示名',
   cfgAddCustom: '＋ 添加',
-  cfgFallbackNote: '按顺序逐一尝试，失败则用下一条（可增删改序，每条可设思考）',
+  cfgFallbackNote: '按顺序逐一尝试，失败则用下一条，可增删改序',
   cfgCustomNote: '仅限已有 provider 路由下的模型 ID；添加后自动连通性测试',
   cfgOrderNote: '仅影响模型下拉与候选的展示顺序',
   cfgInherited: '已继承当前使用模型（含推理等级）',
@@ -778,7 +778,7 @@ const ZH = {
   // F3（配置卫生）：新版本配置保护
   cfgNewerVersion: '当前配置由更新版本的插件创建，本版本暂以默认配置运行；你的配置未被改动',
   // F8（配置卫生）：恢复默认语义
-  cfgRestoreNote: '「恢复默认」仅重置模型链为官方两个模型（1 Flash、2 Pro），不清除自定义模板、优化参数与记忆设置',
+  cfgRestoreNote: '「恢复默认」重置模型链为官方模型配置，不清除自定义模板、优化参数与记忆设置',
   // v2.2（§0.2/§6.6）：模式体系文案（MODE_OPTIONS hint 由 cfgModeHint 提供）
   cfgMode: '优化模式',
   cfgMemory: '记忆功能',
@@ -1051,7 +1051,7 @@ const EN = {
   cfgRestoreDefaults: 'Restore defaults',
   cfgCustomName: 'Display name',
   cfgAddCustom: '+ Add',
-  cfgFallbackNote: 'Tried in order; the next entry is used when one fails (reorderable; per-entry thinking settings)',
+  cfgFallbackNote: 'Tried in order; the next entry is used when one fails; entries can be added, removed or reordered',
   cfgCustomNote: 'Model IDs under existing provider routes only; connectivity is tested on add',
   cfgOrderNote: 'Affects dropdown and candidate display order only',
   cfgInherited: 'Inherited from the current model (incl. reasoning level)',
@@ -1062,7 +1062,7 @@ const EN = {
   // F3 (config hygiene): newer-version config protection
   cfgNewerVersion: 'This configuration was created by a newer plugin version; running with defaults for now — your stored configuration is untouched',
   // F8 (config hygiene): restore-defaults semantics
-  cfgRestoreNote: '"Restore defaults" resets the model chain to the two official models (1 Flash, 2 Pro); templates, parameters and memory are kept',
+  cfgRestoreNote: '"Restore defaults" resets the model chain to the official model config; custom templates, parameters and memory settings are kept',
   // v2.0.0（C3）：引擎与上下文配置文案
   cfgEngine: 'Engine',
   cfgMode: 'Mode',
