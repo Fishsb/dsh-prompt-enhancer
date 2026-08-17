@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Changed
+- **恢复默认/首次安装 = 官方两个模型（用户需求）**：新增 `DEFAULT_MODEL_CHAIN`（官方两模型：1 Flash、2 Pro）——「恢复默认」按钮与 fresh install 首次安装都填官方两模型（不再走 autochain 自适应解析）；**非运行时兜底**——模型可删除可改，增强时模型链为空仍报 `NO_MODEL`（不自动使用，上一轮「删内置兜底链」语义保留，BUILTIN_CHAIN 不恢复）— [PEN-002]
 - **删除内置兜底链 BUILTIN_CHAIN（用户需求·完全按模型配置顺序）**：增强不再自动用内置 DeepSeek 官方模型兜底——① `buildTryChain` 去掉 adaptive 补足分支，模型链完全按用户配置顺序尝试；② 模型链为空时增强报 `NO_MODEL`「未配置模型，请在设置中添加模型」（host friendlyMessage + client errorKey + i18n zh/en）；③ 「恢复默认」不再填内置链（autochain 失败清空，由用户配置）；④ fresh install 不再静态补齐内置链（autochain 失败留空）；⑤ 删除 `constants.js` BUILTIN_CHAIN 定义；测试断言更新（空链 → 空链）。实测：空链增强返回 `code=NO_MODEL` ✅ — [PEN-002]
 - **会话历史显式内容提取上限调大（用户需求）**：`V2_MSG_TEXT_MAX` 1200 → **2400**——rounds 检索提取的会话历史单条消息不再轻易截断（覆盖长回复/表格，显式内容更完整）；最终注入量仍由上下文预算（roundsChars）控制 — [PEN-003]
 - **rounds 模式补「读取会话」步骤（用户需求·审查其他模式）**：lite/standard/smart 的会话历史读取（fetchSessionHistory）补 `setProgress(STAGE_HISTORY)` 进度点（与 publish 一致）——真实使用有会话历史时显示「读取会话 → 判定 1/1（或 1/3）→ …」；测试环境无真实会话历史故判定步骤不触发（正常）；base 无检索直发。审查结论：五模式步骤完整 — [PEN-001]

@@ -129,6 +129,12 @@ const CONFIG_DEFAULTS = {
 };
 // v20 曾内置兜底链硬编码 DeepSeek 官方（fresh install 补足与「恢复默认」）；
 // 2026-08-18（用户需求·删内置兜底链）：已删除——完全按模型配置顺序，空配置报无模型
+// v3.2（用户需求）：恢复默认 / 首次安装的默认模型链 = 官方两个模型（1 Flash、2 Pro）。
+// 注意：非运行时兜底——增强时模型链为空仍报 NO_MODEL（不自动使用）；模型可删除可改。
+const DEFAULT_MODEL_CHAIN = [
+  { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+  { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+];
 // v2.2（§4.3/§6.6）：模式选项单点（4 模式，记忆模式已删除——记忆为独立开关）
 // v2.3（§7.2）：short = 模式短标签（idle 按钮内显示；i18n modeShort* 键优先，此字段为回退）
 const MODE_OPTIONS = [
@@ -2780,15 +2786,9 @@ function ModelMainSection(props) {
     if (testState && removed && testState.key === removed.provider + '/' + removed.model) setTestState(null);
   };
   const restore = () => {
-    // 恢复默认 → 自适应链（host 解析当前环境默认模型）；失败 → 清空（2026-08-18 删内置兜底链，不再用 BUILTIN_CHAIN）
-    // F8（配置卫生）：noCache 绕过 60s TTL——恢复默认始终取最新自适应链
-    host.call('models/autochain', { noCache: true }).then((auto) => {
-      const a = auto && typeof auto === 'object' && Array.isArray(auto.chain) && auto.chain.length > 0
-        ? auto.chain : [];
-      saveFallback(a.map((b) => ({ provider: b.provider, model: b.model })));
-    }).catch(() => {
-      saveFallback([]);
-    });
+    // v3.2（用户需求）：恢复默认 → 官方两个模型（1 Flash、2 Pro），可删除可改；
+    // 不再走 autochain（恢复默认的语义 = 官方默认链）；增强时链为空仍报 NO_MODEL（非兜底）
+    saveFallback(DEFAULT_MODEL_CHAIN.map((b) => ({ provider: b.provider, model: b.model })));
     setTestState(null);
   };
   // v23（D4）：单点测试——点某行 ⛓ → 结果区集中显示该行测试；行内不注入结果
@@ -3144,15 +3144,10 @@ function ModelConfigTab(props) {
               }
               return chain;
             };
-            // 优先自适应链（browser 环境限制，改从 host 解析）
-            // 2026-08-18（用户需求·删内置兜底链）：autochain 失败不再静态链补齐，留空由用户配置
-            host.call('models/autochain').then((auto) => {
-              const a = auto && typeof auto === 'object' && Array.isArray(auto.chain) ? auto.chain : [];
-              chain = fill(a.map((x) => ({ provider: x.provider, model: x.model })));
-              if (chain.length > 0) { saveConfig({ fallback: chain }); configState.fresh = false; setInherited(true); }
-            }).catch(() => {
-              if (chain.length > 0) { saveConfig({ fallback: chain }); configState.fresh = false; setInherited(true); }
-            });
+            // v3.2（用户需求）：首次安装默认模型链 = 官方两个模型（1 Flash、2 Pro），可删除可改；
+            // 不再走 autochain；增强时链为空仍报 NO_MODEL（非兜底）
+            chain = fill(DEFAULT_MODEL_CHAIN.map((x) => ({ provider: x.provider, model: x.model })));
+            if (chain.length > 0) { saveConfig({ fallback: chain }); configState.fresh = false; setInherited(true); }
           }).catch(() => {});
         }
       } else {
