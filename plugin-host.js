@@ -1532,23 +1532,27 @@ function parseTaskProgress(raw) {
 }
 // ================= V2 纯函数族结束 =================
 
-// v17：1-token 连通性探测（计时 TTFT/总耗时；ref.current 供外部超时 abort）
+// v17.3：200-token 连通性探测（实测 TTFT + 吞吐；usage 优先，缺失按字符/4 估算）
 async function pingStream(llmService, entry, ref) {
   const startedAt = Date.now();
   let ttftMs = -1;
   let sawFirst = false;
+  let firstTokenAt = null;
+  let finishedAt = null;
+  let outputChars = 0;
+  let usageOutputTokens = null;
   let stream;
   try {
     stream = llmService.stream({
       provider: entry.provider,
       model: entry.model,
       ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
-      maxTokens: 16,
-      system: 'You are a connectivity probe. Reply with OK.',
+      maxTokens: 200,
+      system: 'You are a connectivity probe. Reply with a short continuous text output.',
       messages: [{
         id: 'enhance-ping',
         role: 'user',
-        content: [{ type: 'text', text: 'Reply with the single word OK' }],
+        content: [{ type: 'text', text: 'Reply with a short continuous text output.' }],
         source: { kind: 'user' },
       }],
     });
@@ -1563,26 +1567,52 @@ async function pingStream(llmService, entry, ref) {
       const next = await iterator.next();
       if (next.done) break;
       const chunk = next.value;
-      if (!sawFirst && (chunk.type === 'text-delta' || (chunk.type === 'block-end' && chunk.block.type === 'text'))) {
+      if (chunk.type === 'text-delta') {
+        if (!sawFirst) {
+          sawFirst = true;
+          ttftMs = Date.now() - startedAt;
+          firstTokenAt = Date.now();
+        }
+        outputChars += typeof chunk.text === 'string' ? chunk.text.length : 0;
+      } else if (!sawFirst && chunk.type === 'block-end' && chunk.block && chunk.block.type === 'text') {
         sawFirst = true;
         ttftMs = Date.now() - startedAt;
+        firstTokenAt = Date.now();
+      }
+      if (chunk.type === 'usage' && chunk.usage && typeof chunk.usage.outputTokens === 'number') {
+        usageOutputTokens = chunk.usage.outputTokens;
       }
       if (chunk.type === 'finish') {
         finish = chunk.reason;
+        finishedAt = Date.now();
         break;
       }
     }
   } catch (e) {
     return { ok: false, code: 'ABORTED', message: 'probe aborted' };
   }
-  const latencyMs = Date.now() - startedAt;
+  const endAt = finishedAt || Date.now();
+  const latencyMs = endAt - startedAt;
+  const decodeMs = sawFirst ? Math.max(0, endAt - firstTokenAt) : null;
+  const outputTokens = usageOutputTokens != null ? usageOutputTokens : Math.round(outputChars / 4);
+  const tokensPerSecond = decodeMs != null && decodeMs > 0 ? outputTokens / (decodeMs / 1000) : null;
+  const base = {
+    ok: true,
+    latencyMs,
+    ttftMs: sawFirst ? ttftMs : latencyMs,
+    model: entry.model,
+    outputChars,
+    outputTokens,
+    decodeMs,
+    tokensPerSecond,
+  };
   // 容错：部分网关对极短请求直接结束流不发 finish——收到过文本即视为连通
   if (!finish) {
-    if (sawFirst) return { ok: true, latencyMs, ttftMs, model: entry.model };
+    if (sawFirst) return base;
     return { ok: false, code: 'EMPTY_RESPONSE', message: 'probe returned no output' };
   }
   if (finish.kind === 'stop') {
-    return { ok: true, latencyMs, ttftMs: sawFirst ? ttftMs : latencyMs, model: entry.model };
+    return base;
   }
   if (finish.kind === 'aborted' || (finish.kind === 'error' && finish.failure && finish.failure.code === 'ABORTED')) {
     return { ok: false, code: 'ABORTED', message: 'probe aborted' };
@@ -1592,8 +1622,9 @@ async function pingStream(llmService, entry, ref) {
     return { ok: false, code, message: friendlyMessage(finish.failure) };
   }
   // v17.2：其余 finish（length/content-filter/tool-calls 等）——端点已响应即视为连通（探测目标是可达性）
-  return { ok: true, latencyMs, ttftMs: sawFirst ? ttftMs : latencyMs, model: entry.model };
+  return base;
 }
+
 
 
 // ================= 模型历史统计聚合（2026-08-17 · 连通性测试预计耗时） =================
@@ -2495,6 +2526,7 @@ return {
       const provider = args && typeof args.provider === 'string' ? args.provider : '';
       const model = args && typeof args.model === 'string' ? args.model : '';
       const reasoningEffort = args && typeof args.reasoningEffort === 'string' && args.reasoningEffort !== '' ? args.reasoningEffort : undefined;
+      const inputChars = args && typeof args.inputChars === 'number' && Number.isFinite(args.inputChars) ? args.inputChars : 0;
       const llmService = ctx.get('llm');
       if (!llmService || typeof llmService.stream !== 'function') {
         return { ok: false, code: 'NO_LLM', message: 'llm service unavailable' };
@@ -2529,6 +2561,9 @@ return {
         return { ok: false, code: 'TIMEOUT', message: friendlyMessage({ code: 'TIMEOUT' }) };
       }
       hlog('[enhance] test provider=' + provider + ' model=' + model + (reasoningEffort ? ' effort=' + reasoningEffort : '') + ' → ' + (r.ok ? 'ok ' + r.latencyMs + 'ms' : r.code));
+      if (r.ok && typeof r.tokensPerSecond === 'number' && Number.isFinite(r.tokensPerSecond) && typeof r.ttftMs === 'number' && Number.isFinite(r.ttftMs)) {
+        r.estimatedBaseSeconds = estimateBaseModeSeconds(r.ttftMs, r.tokensPerSecond, inputChars);
+      }
       return { ...r, ...(precheck && r.ok ? { precheck } : {}) };
     });
 

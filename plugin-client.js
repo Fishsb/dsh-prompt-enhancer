@@ -2624,18 +2624,27 @@ function ModelMainSection(props) {
     if (!entry || !entry.provider || !entry.model) return;
     const key = entry.provider + '/' + entry.model;
     setTestState({ key, index, entry, phase: 'testing', result: null });
-    host.call('models/test', { provider: entry.provider, model: entry.model }).then((res) => {
+    host.call('models/test', { provider: entry.provider, model: entry.model, inputChars: (getLastDraft() || '').length }).then((res) => {
       const r = res && typeof res === 'object' ? res : {};
+      const liveEstimate = r.ok && typeof r.estimatedBaseSeconds === 'number' && Number.isFinite(r.estimatedBaseSeconds) ? r.estimatedBaseSeconds : null;
       setTestState({
         key,
         index,
         entry,
         phase: 'done',
         result: r.ok
-          ? { ok: true, latencyMs: r.latencyMs, ttftMs: r.ttftMs, statsLoading: true }
+          ? {
+              ok: true,
+              latencyMs: r.latencyMs,
+              ttftMs: r.ttftMs,
+              estimate: liveEstimate,
+              stats: liveEstimate ? { ttftMs: r.ttftMs, tokensPerSecond: r.tokensPerSecond } : undefined,
+              statsLoading: !liveEstimate,
+              statsUnavailable: false,
+            }
           : { ok: false, message: r.message || r.code || '' },
       });
-      if (!r.ok) return;
+      if (!r.ok || liveEstimate !== null) return;
       const inputChars = (getLastDraft() || '').length;
       const applyStats = (sr) => {
         const s = sr && typeof sr === 'object' ? sr : {};
