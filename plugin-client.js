@@ -958,8 +958,7 @@ const EN = {
   cfgNewerVersion: 'This configuration was created by a newer plugin version; running with defaults for now — your stored configuration is untouched',
   // F8 (config hygiene): restore-defaults semantics
   cfgRestoreNote: '"Restore defaults" resets the model chain to the official model config; custom templates, parameters and memory settings are kept',
-  // v2.0.0（C3）：引擎与上下文配置文案
-  cfgEngine: 'Engine',
+  // v2.0.0（C3）：上下文配置文案
   cfgMode: 'Mode',
   cfgMemory: 'Memory',
   cfgMemoryNote: 'When on, rounds accumulate into a memory chain replayed in later optimizations; when off, memory is never read or written. Sending a message clears the chain.',

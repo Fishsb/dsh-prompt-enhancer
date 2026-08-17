@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Changed
+- **复查补充：删除 en-only 死键 `cfgEngine`（审计遗漏）**：EN 段 `cfgEngine`（'Engine'）无 zh 对应、全项目 0 引用（首次清理按 zh 键集扫描漏掉 en-only 键）。删除后 zh/en 键数平衡（209/209）；复查确认无其他遗漏（死函数/常量/导出/组件/样式/模板/测试全部干净）— [PEN-002]
 - **删除 `main` 死配置字段（用户指令·不维护老用户迁移）**：顶层 `main`（provider/model/reasoning）从配置体系彻底移除——① config-schema.js：CONFIG_DEFAULTS/validateConfig/migrateLegacyConfig 的 main 处理删除（v1 平铺 provider/model 不再迁移）② pure.js validateConfig：main 解析段 + 输出 `provider/model/reasoningEffort` 字段删除（host 从未消费，只用 fallback 模型链；`effortOf` 保留——fallback 条目级使用）③ client state.js：cloneDefaults/sanitizeV2/migrateFromV1 的 main 处理删除 + `migrateMainIntoChain` 函数及 2 处调用删除 ④ constants.js CONFIG_DEFAULTS.main 删除 ⑤ 测试更新（CFG-03、validateConfig 平铺/边界断言、battery canon/canonSchema 去 main）。全量测试 129/129 — [PEN-002]
 - **死代码/死配置全量清理（用户指令·审计后清理）**：① i18n 死键 38 个 ×2（zh/en）删除——旧版 UI 遗留（upd* 14 / sec* 6 / cfgReasoning* 4 / cfgTestEstimate* 3 / cfgCustom* 4 / cfgNav·cfgProvider·cfgModel / cfgTemplateBuiltin·Custom·Note / cfgEmptyModels / navPlugins / pluginsApprove / titleEmpty），全部为删功能后未清的文案 ② pure.js 死常量 2 个删除（`INJECT_FILE_TOP_N`、`RELEVANCE_WINDOW_MAX_CHARS`，定义后从未引用）③ logger.js 死导出 `LEVELS` 删除 ④ helpers.js 死函数 `readSeen` 删除（关联的 clearSeen/seenKey/SEEN_KEY_PREFIX 为活保留）。构建产物验证死代码清零；全量测试 129/129 — [PEN-002]
 - **设置导航 label 前加 ✨ 图标（用户需求·与输入框优化按钮一致）**：settings.section 导航「提示词增强」label 前拼 `'✨ '`（与输入框优化按钮 EnhanceButton 的 dsh-enh-icon 图标一致）— [VU-001]
