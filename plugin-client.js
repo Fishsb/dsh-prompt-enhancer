@@ -143,6 +143,50 @@ const MODE_OPTIONS = [
   { value: 'publish', label: '一键发布', short: '发布', hint: '输入粗略想法（如"想开发一个纸牌游戏"）→ 自动规划 2~3 个检索主题 + 多步网络检索 + 工作区参考，一键生成完善、边界明确的生成提示词规格（九章：目标与角色/范围边界/技术架构/核心要求/场景内容/交互/扩展/交付限制/验收清单）；检索要点跨轮记忆，多轮补充逐步细化（记忆强制开启；上下文预算需 > 0 才启用检索）' },
 ];
 const MODE_VALUES = MODE_OPTIONS.map((m) => m.value);
+// v3.1.8（用户需求·预算真正生效 + 每模式独立档位）：每模式上下文预算可用档位（与 host pure.js
+// MODE_BUDGET_OPTIONS 一致）——client 下拉按此渲染、切换模式时校正 budgetChars；base 无上下文检索仅 0。
+const MODE_BUDGET_OPTIONS = {
+  base: [0],
+  lite: [0, 2000, 4000],
+  standard: [0, 2000, 4000, 8000],
+  smart: [0, 2000, 4000, 8000, 16000],
+  publish: [0, 4000, 8000, 16000, 32000],
+};
+// v3.1.8（实测驱动·用户指令 2026-08-18）：超时/Token/字符每模式档位——基于 4 模式 × 3 次真实增强实测
+// （默认模板 T1、不带思考）：base avg 2.6s / lite 5.7s / standard 2.2s / smart 6.7s（最大 9.8s）；
+// 输出 156–336 字符（≈40–85 token）。档位 = 0（无限制）/ 标准档（默认，实测×余量+模板语义保真上限）
+// / 思考档（开启思考预留）/ 复杂档（复杂模板预留）。smart 管道含检索/判定/工作区调用 → 更高标准档。
+const MODE_TIMEOUT_OPTIONS = {
+  base: [0, 30000, 60000, 120000],
+  lite: [0, 30000, 60000, 120000],
+  standard: [0, 30000, 60000, 120000],
+  smart: [0, 60000, 120000, 240000],
+  publish: [0, 60000, 120000, 240000],
+};
+const MODE_MAXTOKENS_OPTIONS = {
+  base: [0, 2000, 4000, 8000],
+  lite: [0, 2000, 4000, 8000],
+  standard: [0, 2000, 4000, 8000],
+  smart: [0, 4000, 8000, 16000],
+  publish: [0, 4000, 8000, 16000],
+};
+const MODE_OUTPUTLIMIT_OPTIONS = {
+  base: [0, 8000, 16000, 32000],
+  lite: [0, 8000, 16000, 32000],
+  standard: [0, 8000, 16000, 32000],
+  smart: [0, 16000, 32000, 50000],
+  publish: [0, 16000, 32000, 50000],
+};
+// v3.1.8（切换模式重置默认）：每模式默认档位（标准档）——与 host pure.js MODE_PARAMS_DEFAULT /
+// MODE_BUDGET_DEFAULT 一致；切换模式时 client 将 params + budgetChars 重置到该模式默认。
+const MODE_PARAMS_DEFAULT = {
+  base: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
+  lite: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
+  standard: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
+  smart: { timeoutMs: 60000, maxTokens: 4000, outputLimit: 16000 },
+  publish: { timeoutMs: 60000, maxTokens: 4000, outputLimit: 16000 },
+};
+const MODE_BUDGET_DEFAULT = { base: 0, lite: 2000, standard: 4000, smart: 4000, publish: 4000 };
 // v2.3（§7.2）：模式短标签解析——i18n 键（modeShort+Cap）优先（EN 正确），MODE_OPTIONS.short 回退
 function modeShortLabel(t, mode) {
   const key = 'modeShort' + (mode ? mode.charAt(0).toUpperCase() + mode.slice(1) : '');
@@ -151,13 +195,22 @@ function modeShortLabel(t, mode) {
   const row = MODE_OPTIONS.find((m) => m.value === mode);
   return row && row.short ? row.short : '';
 }
+// v3.1.7（用户反馈·设置页模式下拉不跟随语言）：模式全称解析——i18n 键（modeLabel+Cap）优先，
+// MODE_OPTIONS.label 回退（label 字段保留中文兜底，i18n 缺失时仍可显示）
+function modeLabel(t, mode) {
+  const key = 'modeLabel' + (mode ? mode.charAt(0).toUpperCase() + mode.slice(1) : '');
+  const localized = t(key);
+  if (localized !== key) return localized;
+  const row = MODE_OPTIONS.find((m) => m.value === mode);
+  return row && row.label ? row.label : '';
+}
 // 已优化标记键（§2.4）：localStorage 按会话布尔标记（区分首次与 reload；仅记忆开启期打标）
 const SEEN_KEY_PREFIX = 'dsh.enhance.seen.';
 // v2.6.1（记忆链）：发送前迭代记忆最多保留轮数（与 host MEMORY_ROUNDS_MAX 一致）
 const MEMORY_ROUNDS_MAX = 4;
-// 模板体系扩展（2026-08-17）：内置模板键（T1=default 现有默认 / T2=supplement 增量补充完善 /
-// T3=dev 增量完善·开发向）+ 自定义模板容量/长度上限（与 host PURE 常量一致）
-const TEMPLATE_BUILTIN_KEYS = ['default', 'supplement', 'dev'];
+// 模板体系扩展（2026-08-18 修订）：内置模板键（T1=default 默认模板·只清晰化重述不扩展 /
+// T2=increment 增量模板·保守补充未说的大逻辑/信息，每模式方向不同）+ 自定义模板容量/长度上限（与 host PURE 常量一致）
+const TEMPLATE_BUILTIN_KEYS = ['default', 'increment'];
 const TEMPLATE_CUSTOM_MAX = 10;
 const TEMPLATE_TEXT_MAX = 4000;
 const TEMPLATE_NAME_MAX = 40;
@@ -309,8 +362,7 @@ function sanitizeV2(parsed) {
   }
   // v2.2（§6.4）：记忆开关——mode='memory' 显式选择优先，autoMemory 并入；缺省 false
   v.memory = parsed.mode === 'memory' || parsed.autoMemory === true || parsed.memory === true;
-  // v2.8.2（用户需求）：一键发布模式记忆默认开启且不可关闭
-  if (v.mode === 'publish') v.memory = true;
+  // v2.8.2 曾强制一键发布记忆开启且不可关闭；2026-08-18（用户指令）取消——记忆跟随开关，publish 不例外
   // v2.4.0（方案 §4）：updater 白名单校验（repo 格式 + 长度；targetDir 长度），旧配置缺字段 → 默认
   const u = parsed.updater && typeof parsed.updater === 'object' ? parsed.updater : {};
   if (typeof u.repo === 'string' && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(u.repo) && u.repo.length <= 100) v.updater.repo = u.repo;
@@ -613,9 +665,14 @@ const ZH = {
   updRestartSettling: '服务已停止，等待稳定',
   updRestartRound: '第 {n} 次重启：停止+启动',
   updRestartNotListening: '端口未就绪，准备重试',
-  updApplyRetry: '第 {n} 次重启未恢复，执行器自动重试中…',
+  // v3.1.6（用户反馈·文案误导）：attempt=1 时 round 1 正在执行（健康探测最长 20s）并未失败，
+  // 旧文案「第 N 次重启未恢复」让用户误以为第一次失败——改为中性「正在尝试第 N 次重启」，
+  // 轮次更新保留；真正失败（failed 终态 / 5 轮全败）才显示失败文案
+  updApplyRetry: '正在尝试第 {n} 次重启（服务启动中，最长 20 秒）…',
   updApplyRestartFailed: '5 次重启均未恢复——请手动执行 net start dsh-web 后刷新',
-  updApplyExecutorDown: '更新执行器不可用——请确认插件为 bundle 安装（端口 3081）',
+  // v3.1.6（用户反馈·文案误导）：bundle 安装但执行器未拉起/中途不可达时，旧文案
+  // 「请确认插件为 bundle 安装」会让用户误以为是安装问题——改为准确提示自动重试结果
+  updApplyExecutorDown: '更新执行器未能启动（端口 3081）——已自动重试仍失败，请刷新页面后重试；若仍失败请重启 dsh-web 服务',
   // v2.9.x（一键更新不重启·修复）：旧执行器无 restart:false 支持，阻止执行并提示重启 dsh-web
   updExecutorTooOld: '更新执行器版本过旧（v{v}），不支持「只安装不重启」——请重启 dsh-web 完成执行器升级（≥0.1.7）后重试',
   updCheckFirst: '请先点击「检测版本」确认有新版本后再更新',
@@ -637,16 +694,15 @@ const ZH = {
   // v2.4.7（每模式独立）：label 带当前模式名；hint 说明独立与回退语义
   cfgTemplateTextFor: '自定义模板内容（当前模式：{mode}）',
   cfgTemplateNote: '每个模式独立保存一份；当前模式未填内容时自动使用内置模板。',
-  // 模板体系扩展（2026-08-17）：每模式 3 个内置模板 + 多自定义模板
+  // 模板体系扩展（2026-08-18 修订）：每模式 2 个内置模板 + 多自定义模板
   tplDefault: '默认模板',
-  tplSupplement: '增量补充完善',
-  tplDev: '增量完善（开发向）',
+  tplIncrement: '增量模板',
   tplCustom: '自定义：{name}',
   tplAddCustom: '+ 新建自定义模板',
   tplRemoveCustom: '删除该模板',
   tplName: '模板名称',
   tplNamePlaceholder: '模板名称（≤40 字符）',
-  tplNote: '每个模式可选 3 个内置模板（默认 / 增量补充完善 / 增量完善·开发向）或自定义模板；自定义模板按模式独立保存、可添加多个（各 ≤4000 字符），当前选中项将用于优化。',
+  tplNote: '每个模式可选 2 个内置模板——默认模板（只把语句描述得更清晰，不扩展）或增量模板（理解语句实际要执行的任务，保守补充没说的、缺失会导致执行模型误判的大逻辑与信息）；或自定义模板。自定义模板按模式独立保存、可添加多个（各 ≤4000 字符），当前选中项将用于优化。',
   cfgSaved: '✓ 已保存',
   // v2.7.0：保存校验状态（转圈/失败）
   cfgSaving: '保存中…',
@@ -707,7 +763,6 @@ const ZH = {
   // F8（配置卫生）：恢复默认语义
   cfgRestoreNote: '「恢复默认」仅重置模型链（自适应当前可用模型），不清除自定义模板、优化参数与记忆设置',
   // v2.2（§0.2/§6.6）：模式体系文案（MODE_OPTIONS hint 由 cfgModeHint 提供）
-  cfgPublishMemoryLocked: '一键发布模式记忆强制开启（多轮扩充需要），不可关闭',
   cfgMode: '优化模式',
   cfgMemory: '记忆功能',
   cfgMemoryNote: '开启后，多轮「优化→修改→再优化」累积为记忆链（持续记忆：固定保留最近 4 轮输入与输出，滚动更新；发送消息即清空记忆链（持续记忆仅限发送前一轮优化内的会话）；仅手动清空输入框不清除——内容删除可能表示方向调整；仅撤回弹出最后一轮），每轮再优化以多轮对话形式代入全部轮次，并感知你对上一轮结果的修改方向（新增/删除）；首次自动走轻量模式；关闭后完全不再读取/写入',
@@ -719,14 +774,22 @@ const ZH = {
   cfgModeHintPublish: '输入粗略想法（如"想开发一个纸牌游戏"）→ 网络检索同类项目结构 + 工作区参考，一键生成完整可实施的开发规格（九章：目标/核心循环/数值/数据结构/机制/交互/技术方案/实施路线/验收清单）；多轮补充可逐步细化（记忆强制开启；上下文预算需 > 0 才启用检索）',
   cfgContextBudget: '上下文预算',
   cfgContextBudget0: '0（关闭注入）',
-  cfgContextNote: 'V2 按任务进度与提示词主题检索工作区相关文件后注入优化参考；预算 0 = 不注入（等价基础优化）',
-  cfgPublishNoLimit: '发布模式不设输出限制：输出 Token 上限/字符上限自动放开（provider 默认上限），超时自动 ≥240s——以上三项对本模式不生效（仅影响其他模式）；上下文预算仍生效（> 0 才启用检索）',
+  // v3.1.7（用户需求·参数无限制）：下拉框「无限制」选项文案（超时/Token/字符=0；上下文预算=16000 档）
+  cfgUnlimited: '无限制',
+  // v3.1.8（预算真正生效·每模式独立档位）：说明各模式档位范围与「预算越大注入越多」语义
+  cfgContextNote: '上下文预算控制本模式可注入的参考量：0 = 不注入（等价基础直发）；档位随模式而异（轻量 0–4000 / 标准 0–8000 / 专家 0–16000 / 发布 0–32000）；预算越大，会话/文档检索范围与注入内容越多',
   // v2.3（§7.2/§7.3）：模式短标签 + 步骤进度文案 + 记忆开关
   modeShortBase: '基础',
   modeShortLite: '轻量',
   modeShortStandard: '标准',
   modeShortSmart: '专家',
   modeShortPublish: '发布',
+  // v3.1.7（用户反馈·设置页模式下拉不跟随语言）：模式全称（设置页「优化模式」下拉选项）
+  modeLabelBase: '基础模式',
+  modeLabelLite: '轻量模式',
+  modeLabelStandard: '标准模式',
+  modeLabelSmart: '专家模式',
+  modeLabelPublish: '一键发布',
   stagePrepare: '准备中…',
   stageHistory: '读取会话…',
   stageAnalyze: '分析任务…',
@@ -876,9 +939,9 @@ const EN = {
   updRestartSettling: 'Service stopped, waiting for stability',
   updRestartRound: 'Restart attempt {n}: stop+start',
   updRestartNotListening: 'Port not ready, about to retry',
-  updApplyRetry: 'Attempt {n} did not recover — executor auto-retrying…',
+  updApplyRetry: 'Attempt {n} in progress (service starting, up to 20s)…',
   updApplyRestartFailed: 'Still down after 5 attempts — run `net start dsh-web` manually, then refresh',
-  updApplyExecutorDown: 'Update executor unavailable — ensure bundle install (port 3081)',
+  updApplyExecutorDown: 'Update executor failed to start (port 3081) — auto-retried; refresh the page and retry, or restart the dsh-web service',
   // v2.9.x (install-without-restart fix): old executor lacks restart:false — block and ask to restart dsh web
   updExecutorTooOld: 'Update executor is too old (v{v}) and does not support install-without-restart — restart dsh web to upgrade the executor (≥0.1.7), then retry',
   updCheckFirst: 'Run "Check version" first to confirm a new version before updating',
@@ -900,16 +963,15 @@ const EN = {
   // v2.4.7（per-mode）：label 带当前模式名；hint 说明独立与回退语义
   cfgTemplateTextFor: 'Custom template text (current mode: {mode})',
   cfgTemplateNote: 'Each mode keeps its own copy; when the current mode has no custom text, the built-in template is used.',
-  // Template system extension (2026-08-17): 3 built-in templates per mode + multiple custom templates
+  // Template system extension (2026-08-18 rev): 2 built-in templates per mode + multiple custom templates
   tplDefault: 'Default template',
-  tplSupplement: 'Incremental supplement',
-  tplDev: 'Incremental refine (dev)',
+  tplIncrement: 'Increment template',
   tplCustom: 'Custom: {name}',
   tplAddCustom: '+ New custom template',
   tplRemoveCustom: 'Delete template',
   tplName: 'Template name',
   tplNamePlaceholder: 'Template name (≤40 chars)',
-  tplNote: 'Each mode can pick one of 3 built-in templates (default / incremental supplement / incremental refine for developers) or a custom template; custom templates are saved per mode and can be added multiple times (≤4000 chars each). The current selection is used for optimization.',
+  tplNote: 'Each mode can pick one of 2 built-in templates — default (only restates the statement more clearly, no expansion) or increment (understands the task the statement actually intends, and conservatively supplements the big-logic/information it omitted that would otherwise mislead the executing model); or a custom template. Custom templates are saved per mode and can be added multiple times (≤4000 chars each). The current selection is used for optimization.',
   cfgSaved: '✓ Saved',
   // v2.7.0：保存校验状态（转圈/失败）
   cfgSaving: 'Saving…',
@@ -971,7 +1033,6 @@ const EN = {
   cfgRestoreNote: '"Restore defaults" only resets the model chain (adaptive to currently available models); custom templates, parameters and memory settings are kept',
   // v2.0.0（C3）：引擎与上下文配置文案
   cfgEngine: 'Engine',
-  cfgPublishMemoryLocked: 'Memory is forced ON in Publish mode (needed for iterative expansion) and cannot be disabled.',
   cfgMode: 'Mode',
   cfgMemory: 'Memory',
   cfgMemoryNote: 'When on, iterative rounds (optimize → edit → re-optimize) accumulate into a memory chain (persistent memory: fixed window of the latest 4 input/output pairs, rolling; sending the message clears the memory chain (persistent memory covers only the pre-send iteration); manually clearing the composer does NOT clear it — deleting content may signal a direction change; only Undo drops the last round). Each re-optimization replays the chain as a multi-turn conversation and senses your edit direction (added/removed); first run falls back to Lite automatically; when off, memory is never read or written',
@@ -983,14 +1044,21 @@ const EN = {
   cfgModeHintPublish: 'Feed a rough idea (e.g. "I want to make a card game") → web-search similar project structures + workspace references, generate a complete implementable dev spec in one click (9 chapters: goal/core loop/numbers/data/mechanics/UI/tech/roadmap/acceptance); iterative refinements keep improving it (memory forced ON; context budget must be > 0 to enable retrieval)',
   cfgContextBudget: 'Context budget',
   cfgContextBudget0: '0 (no injection)',
-  cfgContextNote: 'V2 analyzes task progress and retrieves relevant workspace files before optimizing; budget 0 = no injection (equivalent to basic)',
-  cfgPublishNoLimit: 'Publish mode has no output limits: token/character caps are released (provider default) and timeout is auto ≥240s — these three options do not apply to publish mode (they only affect other modes); context budget still applies (> 0 enables retrieval)',
+  cfgUnlimited: 'Unlimited',
+  // v3.1.8（预算真正生效·每模式独立档位）：说明各模式档位范围与「预算越大注入越多」语义
+  cfgContextNote: 'Context budget controls how much reference this mode may inject: 0 = no injection (same as basic); options vary by mode (lite 0–4000 / standard 0–8000 / smart 0–16000 / publish 0–32000); higher budget = wider session/doc search and more injection',
   // v2.3（§7.2/§7.3）：模式短标签 + 步骤进度文案 + 记忆开关
   modeShortBase: 'Basic',
   modeShortLite: 'Lite',
   modeShortStandard: 'Standard',
   modeShortSmart: 'Expert',
   modeShortPublish: 'Publish',
+  // v3.1.7（用户反馈·设置页模式下拉不跟随语言）：模式全称（设置页「优化模式」下拉选项）
+  modeLabelBase: 'Basic mode',
+  modeLabelLite: 'Lite mode',
+  modeLabelStandard: 'Standard mode',
+  modeLabelSmart: 'Expert mode',
+  modeLabelPublish: 'Publish',
   stagePrepare: 'Preparing…',
   stageHistory: 'Reading history…',
   stageAnalyze: 'Analyzing task…',
@@ -1115,9 +1183,11 @@ function splitCommand(draft) {
   return { prefix: '', body: draft };
 }
 
-// v2.2（§6.3/§6.5）：实际模式判定——纯模式选择 + 记忆开关/首次兜底（dirty/auto 已删除）。
+// v2.2（§6.3/§6.5）：实际模式判定——纯模式选择 + 记忆链携带。
 // v2.6.1（记忆链）：返回 { mode, seed, memory }；memory = { rounds: s.memoryRounds }（供 host
-// 以真多轮消息注入）；记忆开 + 无链 + 无标记（真正首次）→ 轻量兜底。
+// 以真多轮消息注入）。
+// 2026-08-18（用户指令）：取消「记忆开 + 首次 → 轻量兜底」——记忆只负责携带 rounds 链，
+// 优化模式始终按用户选择执行（base/lite/standard/smart/publish 均不兜底）。
 function resolveActualMode(sessionId, cfg) {
   const s = storeFor(sessionId);
   let mode = cfg.mode;
@@ -1127,12 +1197,8 @@ function resolveActualMode(sessionId, cfg) {
     if (s.memoryRounds && s.memoryRounds.length > 0) {
       // 记忆开 + 有记忆链 → 当前模式 + rounds 链（host 真多轮注入）
       memory = { rounds: s.memoryRounds };
-    } else if (!readSeen(sessionId)) {
-      // 记忆开 + 无记忆 + 无标记（真正首次）→ 轻量兜底（任何模式），完成后建记忆
-      mode = 'lite';
-      seed = true;
     }
-    // 记忆开 + 无记忆 + 有标记（reload）→ 当前模式原样（不强制轻量）
+    // 记忆开 + 无记忆链 → 当前模式原样执行（无 rounds 注入，不兜底轻量）
   }
   return { mode, seed, memory };
 }
@@ -1596,7 +1662,7 @@ function restartStageText(t, message) {
   if (/settling/.test(msg)) return t('updRestartSettling');
   if (/not listening/.test(msg)) return t('updRestartNotListening');
   if (/round/i.test(msg)) {
-    const m = /rounds+(d+)/i.exec(msg);
+    const m = /round\s+(\d+)/i.exec(msg);
     return t('updRestartRound').replace('{n}', m ? m[1] : '?');
   }
   return msg !== '' ? msg : t('updApplyRestarting').replace('{round}', '?').replace('{sec}', '10');
@@ -1722,11 +1788,19 @@ function UpdaterCard(props) {
     return p;
   };
   // 公共前置：环境检测（block 级拦截）→ executorEnsure（拉起/版本对齐）→ 返回执行器端口
+  // v3.1.6（用户指令·执行器独立化）：更新执行器是独立端口（3081）的独立功能——
+  // 除影响**执行器自身链路执行**的检查（exec-port 端口可用、tools 重启工具）外，
+  // 服务相关检查（service/svc-type/svc-bin）不再 block 一键更新——apply 为 staged
+  // 下载+校验、零端口操作、不依赖服务状态；真正安装重启时执行器内部自行校验报错
+  // （STOP_FAILED 等）。服务相关项仍展示在环境检测结果里（warn 提示），不阻止执行器使用。
+  const EXECUTOR_LINK_BLOCKS = ['exec-port', 'tools'];
   const ensureExecutor = () => {
     return host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
       const er = envRes && typeof envRes === 'object' ? envRes : {};
-      if (er.ok === true && Array.isArray(er.blockMissing) && er.blockMissing.length > 0) {
-        const names = er.blockMissing
+      const blockMissing = (er.ok === true && Array.isArray(er.blockMissing))
+        ? er.blockMissing.filter((k) => EXECUTOR_LINK_BLOCKS.includes(k)) : [];
+      if (er.ok === true && blockMissing.length > 0) {
+        const names = blockMissing
           .map((k) => { const def = ENV_ITEMS.find((i) => i.key === k); return def ? t(def.label) : k; })
           .join('、');
         setApplyErr(t('updApplyBlocked') + ' ' + names);
@@ -1806,33 +1880,60 @@ function UpdaterCard(props) {
           return;
         }
         // restarting：阶段文案 + 轮次 + 秒级倒计时 + 已用秒——每秒更新
-        setApplyErr(null);
+        // v3.1.5（用户反馈·重试提示轮次不更新）：不再每 tick setApplyErr(null) 清空红色提示
+        // （旧逻辑只在 10s 倒计时归零瞬间 flash 一次，下一秒又被清掉 → 用户看到的总是「第 1 次」）；
+        // 改为每次轮询**持续显示当前轮次**的重试提示（跟随执行器 s.attempt），轮次递增立即可见。
+        // attempt=0（stopping/settling 阶段，尚未开始 stop+start 重试）不显示红色，避免「第 1 次」误报过早。
         setApplyPhase('restarting');
-        const round = s.attempt || 1;
-        setRestartRound(round);
-        localLeft -= 1;
-        if (localLeft <= 0) {
-          // 每轮倒计时结束反馈（执行器内部自动重试，这里仅展示进度）
+        const round = s.attempt || 0;
+        setRestartRound(Math.max(1, round));
+        if (round >= 1) {
+          // 执行器已在重试（attempt≥1 即 stop+start 已开始）→ 红色提示持续显示当前轮次
           setApplyErr(t('updApplyRetry').replace('{n}', String(round)));
-          localLeft = 10;
+        } else {
+          setApplyErr(null);
         }
+        localLeft -= 1;
+        if (localLeft <= 0) localLeft = 10;
         setRestartLeft(localLeft);
-        setApplyStatus(restartStageText(t, s.message) + '（第 ' + round + ' 次 · 剩余 ' + localLeft + ' 秒 · 已用 ' + elapsed + 's）');
+        setApplyStatus(restartStageText(t, s.message) + (round >= 1 ? '（第 ' + round + ' 次 · 剩余 ' + localLeft + ' 秒 · 已用 ' + elapsed + 's）' : '（已用 ' + elapsed + 's）'));
         setTimeout(tick, 1000);
       }).catch(() => {
         // 执行器暂时不可达（重启窗口或执行器被重建）——连续失败 15 次才终止
         failCount += 1;
         if (failCount >= 15) {
-          setApplyErr(t('updApplyExecutorDown'));
-          setApplyStatus(null);
-          setApplyPhase('idle');
+          // v3.1.6（用户反馈·执行器中途不可达误报）：报错前最后一次尝试——经 host
+          // executorEnsure 重新拉起执行器；拉起成功则重发 restart（进度可能已丢失）
+          // 并重置失败计数继续轮询，只有拉起失败才报错终止
+          setApplyErr(null);
+          const installTag = result && result.remoteTag ? result.remoteTag : '';
+          host.call('update/executorEnsure', { port }).then((en) => {
+            if (en && en.ok === true) {
+              return executor.call('restart', { serviceName, profile, tag: installTag, port }, port);
+            }
+            return Promise.resolve(null);
+          }).then((rr) => {
+            if (rr && rr.ok === true) {
+              failCount = 0;
+              setApplyErr(null);
+              setTimeout(tick, 1000);
+              return;
+            }
+            setApplyErr(t('updApplyExecutorDown'));
+            setApplyStatus(null);
+            setApplyPhase('idle');
+          }).catch(() => {
+            setApplyErr(t('updApplyExecutorDown'));
+            setApplyStatus(null);
+            setApplyPhase('idle');
+          });
           return;
         }
+        // v3.1.5（用户反馈·重试提示轮次不更新）：执行器暂不可达时也持续显示重试提示，
+        // 不再等倒计时归零才 flash
+        setApplyErr(t('updApplyRetry').replace('{n}', String('?')));
         localLeft -= 1;
-        if (localLeft <= 0) {
-          setApplyErr(t('updApplyRetry').replace('{n}', String('?')));
-          localLeft = 10;
-        }
+        if (localLeft <= 0) localLeft = 10;
         setRestartLeft(localLeft);
         setTimeout(tick, 1000);
       });
@@ -1920,14 +2021,37 @@ function UpdaterCard(props) {
     // 一键更新（apply restart:false）已停服，host 侧 envcheck/executorEnsure 必然失败，
     // 旧实现走 ensureExecutor 会被外层 catch 误报「更新执行器不可用——请确认插件为
     // bundle 安装」；执行器是独立进程（3081），直连 ping/restart 即可完成重启
+    // v3.1.5（用户反馈·执行器未拉起时误报）：先直连 ping；未运行则尝试 host
+    // executorEnsure 自动拉起（服务存活时有效）——拉起成功后继续；host 也不可达
+    // （服务已停且执行器未运行，异常场景）才报「执行器不可用」
     const port = executorPort();
     // 带新版本 tag（一键更新已下载 staging）→ 需要执行器 ≥0.1.8（restart 承载安装）；
     // 纯重启（无 tag）不设版本门槛
     const installTag = result && result.remoteTag ? result.remoteTag : '';
-    executor.call('ping', {}, port).then((p) => {
+    const tryPing = () => executor.call('ping', {}, port);
+    // v3.1.6（用户反馈·执行器未拉起时仍误报）：executorEnsure 拉起执行器需 2-5s
+    // （schtasks 创建计划任务 + 进程启动 + ping 轮询），且前端 RPC 可能瞬时失败——
+    // 最多重试 3 次（间隔 1s），大幅提高「执行器未运行」场景的拉起成功率
+    const ensureThenPing = (attempt) => {
+      const n = attempt || 1;
+      return host.call('update/executorEnsure', { port }).then((en) => {
+        if (en && en.ok === true) return tryPing();
+        if (n >= 3) return Promise.resolve(null);
+        return new Promise((res) => setTimeout(() => res(ensureThenPing(n + 1)), 1000));
+      }).catch(() => {
+        if (n >= 3) return Promise.resolve(null);
+        return new Promise((res) => setTimeout(() => res(ensureThenPing(n + 1)), 1000));
+      });
+    };
+    tryPing().then((p0) => {
+      if (p0 && p0.ok === true) return p0;
+      // 执行器未运行 → 尝试 host executorEnsure 自动拉起（服务存活时有效；服务已停时 host 不可达 → null）
+      return ensureThenPing(1);
+    }).then((p) => {
       if (!p || p.ok !== true) {
-        // 执行器确实不可达（未以 bundle 安装/未拉起）——提示原文语义正确
+        // 执行器确实不可达（未以 bundle 安装/未拉起）——v3.1.6 补清残留阶段文案
         setApplyErr(t('updApplyExecutorDown'));
+        setApplyStatus(null);
         setApplyPhase('idle');
         setAction(null);
         return;
@@ -1945,6 +2069,7 @@ function UpdaterCard(props) {
       pollExecutorStatus(port);
     }).catch(() => {
       setApplyErr(t('updApplyExecutorDown'));
+      setApplyStatus(null);
       setApplyPhase('idle');
       setAction(null);
     });
@@ -2274,8 +2399,15 @@ function MarqueeSelect(props) {
           }, label),
         ),
       ),
+      // v3.1.7（用户反馈·下拉箭头点击不弹出·修正）：箭头移入 trigger 内 + CSS pointer-events:auto。
+      // **注意不能给箭头绑 onClick toggle**——箭头在 trigger 内，点击箭头会同时触发：①箭头自身
+      // onClick toggle、②事件冒泡到 trigger onClick toggle → 两次 toggle = 状态不变（弹不出来）。
+      // 正确做法：箭头只靠 pointer-events:auto 接收点击 → 事件冒泡到 trigger → onClick toggle 一次。
+      React.createElement('span', {
+        className: 'dsh-plg-mselect-arrow',
+        'aria-hidden': true,
+      }),
     ),
-    React.createElement('span', { className: 'dsh-plg-mselect-arrow', 'aria-hidden': true }),
     open
       ? React.createElement('ul', {
           className: 'dsh-plg-mselect-list',
@@ -2527,10 +2659,6 @@ function PluginsSection(props) {
       : null,
   );
 }
-
-const TIMEOUT_OPTIONS = [10000, 30000, 60000, 120000];
-const MAXTOKENS_OPTIONS = [500, 1000, 2000, 4000];
-const OUTPUTLIMIT_OPTIONS = [2000, 4000, 8000, 16000];
 
 // v16：可折叠区块（点击标题展开/收起，默认收起；行尾摘要 + 行首 chevron）
 function CollapsibleSection(props) {
@@ -3020,13 +3148,23 @@ function ParamsTab(props) {
   const cfg = configState.value;
   const save = (patch) => { saveConfig(patch); };
   const onNumber = (key) => (e) => save({ params: { ...cfg.params, [key]: Number(e.target.value) } });
-  const selectProps = (key, options) => ({ className: 'dsh-plg-select', value: String(cfg.params[key]), onChange: onNumber(key), children: options });
+  // v3.1.8（每模式档位）：取当前模式的超时/Token/字符档位表（publish 置灰但档位仍取同档，
+  // host 硬覆盖不设限）；显示值就近校正（旧配置值不在新档位时按不超过的最大档显示，不实际改配置）
+  const modeTimeoutOptions = MODE_TIMEOUT_OPTIONS[cfg.mode] || MODE_TIMEOUT_OPTIONS.base;
+  const modeMaxTokensOptions = MODE_MAXTOKENS_OPTIONS[cfg.mode] || MODE_MAXTOKENS_OPTIONS.base;
+  const modeOutputLimitOptions = MODE_OUTPUTLIMIT_OPTIONS[cfg.mode] || MODE_OUTPUTLIMIT_OPTIONS.base;
+  const clampParamDisplay = (value, opts) => {
+    if (opts.includes(value)) return String(value);
+    const pick = opts.filter((v) => v <= value).pop();
+    return String(typeof pick === 'number' ? pick : opts[0]);
+  };
   // v2.4.7（每模式独立自定义模板 + 默认预填）+ v2.5.3 修复：
   // 切到「自定义模板」且当前优化模式无内容时 → host template/default 取该模式默认预填；
   // 索引键 = cfg.mode（优化模式 base/lite/standard/smart），非 cfg.template.mode（模板模式 custom/builtin）——
   // v2.5.2 及以前误用 template.mode 索引 texts/defaults（恒 undefined），预填与显示全部失效。
-  // 模板体系扩展（2026-08-17）：每模式 3 个内置模板（default=现有默认 / supplement=增量补充完善 /
-  // dev=增量完善·开发向）+ 每模式多自定义模板——选中键 template.pick[mode]（default/supplement/dev/custom:<index>）；
+  // 模板体系扩展（2026-08-18 修订）：每模式 2 个内置模板（default=默认模板·只清晰化重述 /
+  // increment=增量模板·保守补充未说的大逻辑/信息）+ 每模式多自定义模板——选中键 template.pick[mode]
+  // （default/increment/custom:<index>；旧 supplement/dev 键自动迁移为 increment）；
   // 新建自定义模板时以当前选中模板文本预填（内置文本经 template/default RPC catalog 惰性拉取）。
   const pickValue = (cfg.template.pick && cfg.template.pick[cfg.mode]) || 'default';
   const customAll = (cfg.template.custom && typeof cfg.template.custom === 'object') ? cfg.template.custom : {};
@@ -3071,11 +3209,9 @@ function ParamsTab(props) {
   };
   const curText = curEntry ? curEntry.text : '';
   const curLabel = t('cfgTemplateTextFor').replace('{mode}', modeShortLabel(t, cfg.mode));
-  // v2.8.0（实测修正）：发布模式不设输出限制（host 硬覆盖）——三项参数置灰的依据
-  const isPublishMode = cfg.mode === 'publish';
-  // v2.8.2（用户需求）：一键发布模式记忆默认开启且不可关闭
-  const memoryLocked = isPublishMode;
-  const memoryValue = memoryLocked ? true : cfg.memory;
+  // v2.8.0 曾发布模式三项参数置灰（host 硬覆盖）；2026-08-18（用户指令）取消——publish 参数可调
+  // v2.8.2 曾一键发布记忆强制开启且不可关闭；2026-08-18（用户指令）取消——记忆跟随开关，publish 不例外
+  const memoryValue = cfg.memory;
   return React.createElement(React.Fragment, null,
     // v2.2（§6.6）：优化模式下拉（4 模式，记忆模式已删除）
     // v2.4.6（布局）：优化模式与模板合并为同一行双字段（两控件均属「优化行为」配置、
@@ -3090,10 +3226,18 @@ function ParamsTab(props) {
           value: cfg.mode,
           onChange: (e) => {
             const next = e.target.value;
-            // v2.8.2：切到一键发布时同步把记忆置为开启
-            save(next === 'publish' ? { mode: next, memory: true } : { mode: next });
+            // v3.1.8（实测驱动·用户指令）：切换模式 → **自动重置到该模式默认档位**（标准档）——
+            // params（超时/Token/字符）与 budgetChars 全部重置为该模式默认（MODE_PARAMS_DEFAULT /
+            // MODE_BUDGET_DEFAULT），替代上一版「就近校正」；用户切换后看到的就是该模式推荐默认。
+            const pd = MODE_PARAMS_DEFAULT[next] || MODE_PARAMS_DEFAULT.base;
+            const context = { ...(cfg.context || {}), budgetChars: (MODE_BUDGET_DEFAULT[next] !== undefined ? MODE_BUDGET_DEFAULT[next] : 0) };
+            const params = { ...(cfg.params || {}), timeoutMs: pd.timeoutMs, maxTokens: pd.maxTokens, outputLimit: pd.outputLimit };
+            // v2.8.2 曾切到一键发布时同步强制记忆开启；2026-08-18（用户指令）取消——记忆跟随开关
+            save({ mode: next, context, params });
           },
-          children: MODE_OPTIONS.map((m) => React.createElement('option', { key: m.value, value: m.value }, m.label)),
+          // v3.1.7（用户反馈·设置页模式下拉不跟随语言）：选项文字改用 modeLabel(t) 翻译
+          // （modeLabel* i18n 键优先，MODE_OPTIONS.label 中文回退）——语言切换即时生效
+          children: MODE_OPTIONS.map((m) => React.createElement('option', { key: m.value, value: m.value }, modeLabel(t, m.value))),
         }),
       ),
       React.createElement('div', { className: 'dsh-plg-field' },
@@ -3120,8 +3264,7 @@ function ParamsTab(props) {
         'aria-describedby': ids.memoryHint,
         className: 'dsh-plg-select dsh-plg-select-thinking',
         value: memoryValue ? 'on' : 'off',
-        disabled: memoryLocked,
-        onChange: (e) => { if (!memoryLocked) save({ memory: e.target.value === 'on' }); },
+        onChange: (e) => { save({ memory: e.target.value === 'on' }); },
         children: [
           React.createElement('option', { key: 'on', value: 'on' }, t('cfgReasoningOn')),
           React.createElement('option', { key: 'off', value: 'off' }, t('cfgReasoningOff')),
@@ -3129,8 +3272,8 @@ function ParamsTab(props) {
       }),
     ),
     React.createElement('p', { id: ids.memoryHint, className: 'dsh-plg-hint' }, t('cfgMemoryNote')),
-    memoryLocked ? React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgPublishMemoryLocked')) : null,
-    // 预算下拉（全模式可见；0 = 不注入）
+    // 预算下拉（全模式可见；0 = 不注入；档位随模式而异——MODE_BUDGET_OPTIONS 与 host 一致，
+    // 每模式最大档显示「无限制」；base 仅 0 档 = 关闭注入）
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.budget }, t('cfgContextBudget')),
       React.createElement(MarqueeSelect, {
@@ -3139,28 +3282,45 @@ function ParamsTab(props) {
         className: 'dsh-plg-select',
         value: String(cfg.context.budgetChars),
         onChange: (e) => save({ context: { ...cfg.context, budgetChars: Number(e.target.value) } }),
-        children: [0, 2000, 4000, 8000].map((v) => React.createElement('option', { key: String(v), value: String(v) }, v === 0 ? t('cfgContextBudget0') : String(v))),
+        // v3.1.8（用户需求·预算真正生效 + 每模式独立档位）：按当前模式档位渲染；最大档显示「无限制」
+        children: (MODE_BUDGET_OPTIONS[cfg.mode] || MODE_BUDGET_OPTIONS.base).map((v, i, arr) =>
+          React.createElement('option', { key: String(v), value: String(v) },
+            v === 0 ? t('cfgContextBudget0') : (i === arr.length - 1 ? t('cfgUnlimited') : String(v)))),
       }),
     ),
     React.createElement('p', { id: ids.budgetHint, className: 'dsh-plg-hint' }, t('cfgContextNote')),
-    // v2.8.0（实测修正）：发布模式「不设输出限制」为 host 硬覆盖（超时 ≥240s、maxTokens 省略、
-    // outputLimit=0）——超时/输出 Token 上限/输出字符上限三项对本模式不生效；置灰 + 说明，
-    // 避免「调整后状态没有更新」的误导（此前可编辑但实际无效）
+    // v3.1.8（每模式档位）：超时/Token/字符按当前模式档位渲染；2026-08-18（用户指令）取消 publish
+    // 硬覆盖置灰——publish 三项参数可调（默认档 60s/4k/16k 按实测覆盖）；smart 常带 effort host 自动 ≥120s
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.timeout }, t('cfgTimeout')),
-      React.createElement(MarqueeSelect, Object.assign({ id: ids.timeout, className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('timeoutMs', TIMEOUT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, (v / 1000) + 's'))))),
+      React.createElement(MarqueeSelect, {
+        id: ids.timeout,
+        className: 'dsh-plg-select',
+        value: clampParamDisplay(cfg.params.timeoutMs, modeTimeoutOptions),
+        onChange: onNumber('timeoutMs'),
+        children: modeTimeoutOptions.map((v) => React.createElement('option', { key: v, value: String(v) }, v === 0 ? t('cfgUnlimited') : (v / 1000) + 's')),
+      }),
     ),
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.maxTokens }, t('cfgMaxTokens')),
-      React.createElement(MarqueeSelect, Object.assign({ id: ids.maxTokens, className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('maxTokens', MAXTOKENS_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v)))))),
+      React.createElement(MarqueeSelect, {
+        id: ids.maxTokens,
+        className: 'dsh-plg-select',
+        value: clampParamDisplay(cfg.params.maxTokens, modeMaxTokensOptions),
+        onChange: onNumber('maxTokens'),
+        children: modeMaxTokensOptions.map((v) => React.createElement('option', { key: v, value: String(v) }, v === 0 ? t('cfgUnlimited') : String(v))),
+      }),
     ),
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label', htmlFor: ids.outputLimit }, t('cfgOutputLimit')),
-      React.createElement(MarqueeSelect, Object.assign({ id: ids.outputLimit, className: 'dsh-plg-select', disabled: isPublishMode }, selectProps('outputLimit', OUTPUTLIMIT_OPTIONS.map((v) => React.createElement('option', { key: v, value: String(v) }, String(v)))))),
+      React.createElement(MarqueeSelect, {
+        id: ids.outputLimit,
+        className: 'dsh-plg-select',
+        value: clampParamDisplay(cfg.params.outputLimit, modeOutputLimitOptions),
+        onChange: onNumber('outputLimit'),
+        children: modeOutputLimitOptions.map((v) => React.createElement('option', { key: v, value: String(v) }, v === 0 ? t('cfgUnlimited') : String(v))),
+      }),
     ),
-    isPublishMode
-      ? React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgPublishNoLimit'))
-      : null,
     // 模板体系扩展（2026-08-17）：模板选择已并入上方下拉（每模式独立）；下方为自定义模板编辑区
     //（选中 custom:<index> 时显示 名称+内容+删除）+「新建自定义模板」按钮（可添加多个）
     React.createElement('div', { className: 'dsh-plg-col' },
@@ -3352,7 +3512,9 @@ const CSS = [
   '.dsh-plg-select{flex:1;min-width:0;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:5px 28px 5px 12px}',
   '.dsh-plg-select:focus-visible{outline:none;border-color:var(--dsw-alias-brand-primary)}',
   // v2.8.4（下拉选项溢出动效）：闭合态与打开态悬停选项超长时均自动滚动
-  '.dsh-plg-mselect{position:relative;display:inline-flex;align-items:center;cursor:pointer;box-sizing:border-box}',
+  // v3.1.7（用户反馈·双击选中内容）：下拉框与弹窗内容禁止文本选中——root user-select:none
+  // 继承到 trigger 显示文字与弹窗选项（含 -webkit- 前缀兼容 WebView2/Chromium）
+  '.dsh-plg-mselect{position:relative;display:inline-flex;align-items:center;cursor:pointer;box-sizing:border-box;user-select:none;-webkit-user-select:none}',
   '.dsh-plg-mselect:focus-within{border-color:var(--dsw-alias-brand-primary)}',
   '.dsh-plg-mselect[data-disabled="true"]{opacity:.6;cursor:default}',
   '.dsh-plg-mselect-trigger{display:flex;align-items:center;width:100%;min-width:0;min-height:20px;padding:0;border:0;background:transparent;font:inherit;color:inherit;text-align:left;cursor:pointer;box-sizing:border-box}',
@@ -3362,7 +3524,9 @@ const CSS = [
   '.dsh-plg-mselect-text-inner{display:inline-block;width:max-content;max-width:none;white-space:nowrap;vertical-align:top}',
   '.dsh-plg-mselect-text-marquee .dsh-plg-mselect-text-inner{animation:dsh-mselect-marquee 6s linear infinite}',
   '@keyframes dsh-mselect-marquee{0%,8%{transform:translateX(0)}46%{transform:translateX(calc(-1 * var(--dsh-mselect-distance)))}54%{transform:translateX(calc(-1 * var(--dsh-mselect-distance)))}92%,100%{transform:translateX(0)}}',
-  '.dsh-plg-mselect-arrow{position:absolute;right:12px;top:50%;width:12px;height:12px;transform:translateY(-50%);pointer-events:none;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:12px;text-align:center}',
+  // v3.1.7（用户反馈·下拉箭头点击不弹出·双保险）：pointer-events 从 none 改 auto + cursor:pointer——
+  // 箭头自身可接收点击（事件冒泡到 trigger），不依赖 pointer-events:none 的穿透行为（无痕/新加载下更可靠）
+  '.dsh-plg-mselect-arrow{position:absolute;right:12px;top:50%;width:12px;height:12px;transform:translateY(-50%);pointer-events:auto;cursor:pointer;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:12px;text-align:center}',
   '.dsh-plg-mselect-arrow::before{content:"▾"}',
   '.dsh-plg-mselect-list{position:absolute;top:calc(100% + 4px);left:0;z-index:100;min-width:100%;max-width:min(92vw,420px);max-height:240px;overflow-y:auto;margin:0;padding:4px;list-style:none;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12)}',
   '.dsh-plg-mselect-list li{display:block;min-height:24px;padding:3px 8px;border-radius:6px;font-size:13px;line-height:20px;overflow:hidden;cursor:pointer;box-sizing:border-box}',

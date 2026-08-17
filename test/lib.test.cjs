@@ -33,6 +33,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     MEMORY_ROUNDS_MAX, MEMORY_CHAIN_BUDGET_MAX, MEMORY_DELTA_MAX,
     TEMPLATE_CUSTOM_MAX, TEMPLATE_TEXT_MAX, TEMPLATE_NAME_MAX,
     MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE, RETRIEVE_TABLE,
+    MODE_BUDGET_OPTIONS, MODE_BUDGET_DEFAULT, BUDGET_RETRIEVE_TABLE, resolveRetrieveBudget,
     STAGE_SEQUENCE, STAGE_LABELS,
     PLUGIN_VERSION, UPDATE_MANIFEST, parseVersion, compareVersions, versionStatus,
     normalizeRepo, isValidTag, pickMaxTag, parseTagsPayload, validateManifestFiles, defaultDirFor,
@@ -95,6 +96,10 @@ const {
   MODE_TABLE,
   BUDGET_OPTIONS,
   BUDGET_WORKSPACE_TABLE,
+  MODE_BUDGET_OPTIONS,
+  MODE_BUDGET_DEFAULT,
+  BUDGET_RETRIEVE_TABLE,
+  resolveRetrieveBudget,
   STAGE_SEQUENCE,
   STAGE_LABELS,
   PLUGIN_VERSION,
@@ -317,10 +322,10 @@ test('buildTryChain 链为空 → 用自适应/内置链补足', () => {
 // ================= v2.0.0（V2 上下文感知）单测 =================
 
 test('U1 validateConfig mode/context 解析', () => {
-  // 缺省 → base / 4000（v2.1：engine 字段废弃，缺省 mode=base）
+  // v3.1.8（预算真正生效）：缺省 mode=base 无上下文检索 → 默认预算 0（此前被全局 4000 覆盖）
   const d = validateConfig({});
   assert.equal(d.mode, 'base');
-  assert.equal(d.context.budgetChars, 4000);
+  assert.equal(d.context.budgetChars, 0);
   assert.equal(d.context.workspace.maxFiles, 3);
   // 旧 engine v2 + basic → standard（迁移）
   const v2 = validateConfig({ engine: 'v2', context: { mode: 'basic', budgetChars: 2000, workspace: { maxFiles: 5, depth: 3 } } });
@@ -332,7 +337,7 @@ test('U1 validateConfig mode/context 解析', () => {
   // 非法回退（v2.1：mode 迁移——非法 engine/mode 一律 base；预算/workspace 回退默认）
   const bad = validateConfig({ engine: 'v3', context: { mode: 'turbo', budgetChars: 999, workspace: { maxFiles: 99, depth: 99 } } });
   assert.equal(bad.mode, 'base');
-  assert.equal(bad.context.budgetChars, 4000);
+  assert.equal(bad.context.budgetChars, 0);
   assert.equal(bad.context.workspace.maxFiles, 3);
   assert.equal(bad.context.workspace.depth, 2);
   // v2.2：autoMemory 字段已删除 → 记忆开关缺省 false
@@ -357,10 +362,39 @@ test('U19 MODE_TABLE 完整性 + parseMode 迁移（v2.7.0 五模式）', () => 
   assert.equal(parseMode(undefined, 'v1', 'smart'), 'base');
   assert.equal(parseMode(undefined, undefined, undefined), 'base');
   assert.equal(parseMode('turbo', undefined, undefined), 'base');
-  // parseBudgetChars 白名单
-  assert.equal(parseBudgetChars(8000), 8000);
-  assert.equal(parseBudgetChars(999), 4000);
-  assert.equal(parseBudgetChars(undefined), 4000);
+  // v3.1.8（预算真正生效·每模式独立档位）：parseBudgetChars 按模式档位校验、非法/越界回退该模式默认
+  assert.equal(parseBudgetChars(8000, 'standard'), 8000);
+  assert.equal(parseBudgetChars(8000, 'lite'), 2000, 'lite 无 8000 档 → 回退 lite 默认 2000');
+  assert.equal(parseBudgetChars(999, 'standard'), 4000, '非法档 → 回退 standard 默认 4000');
+  assert.equal(parseBudgetChars(undefined, 'standard'), 4000);
+  assert.equal(parseBudgetChars(undefined, 'base'), 0, 'base 默认 0（无检索）');
+  assert.equal(parseBudgetChars(32000, 'publish'), 32000, 'publish 最大档 32000');
+  // 每模式档位表：全模式齐全、档位单调递增、均在全局候选池内
+  assert.deepEqual(Object.keys(MODE_BUDGET_OPTIONS).sort(), ['base', 'lite', 'publish', 'smart', 'standard']);
+  for (const [k, opts] of Object.entries(MODE_BUDGET_OPTIONS)) {
+    assert.ok(Array.isArray(opts) && opts.length > 0, k + ' 档位非空');
+    assert.ok(opts.every((v) => BUDGET_OPTIONS.includes(v)), k + ' 档位在候选池');
+    assert.ok(opts.every((v, i) => i === 0 || v > opts[i - 1]), k + ' 档位递增');
+  }
+  // v3.1.8：rounds 模式预算 → 检索注入参数（取不超过预算的最大档）
+  assert.deepEqual(resolveRetrieveBudget('lite', 2000), { budget: 2000, roundsChars: 1200, smartDocs: 2, smartDepth: 2, smartChars: 1500, smartCodeChars: 1200 });
+  assert.deepEqual(resolveRetrieveBudget('standard', 4000), { budget: 4000, roundsChars: 2400, smartDocs: 3, smartDepth: 2, smartChars: 3000, smartCodeChars: 2400 });
+  assert.deepEqual(resolveRetrieveBudget('smart', 16000), { budget: 16000, roundsChars: 9600, smartDocs: 8, smartDepth: 4, smartChars: 8000, smartCodeChars: 8000 });
+  assert.deepEqual(resolveRetrieveBudget('standard', 0), { budget: 0, roundsChars: 0, smartDocs: 0, smartDepth: 0, smartChars: 0, smartCodeChars: 0 }, 'budget 0 = 不注入');
+  assert.deepEqual(resolveRetrieveBudget('base', 16000), { budget: 0, roundsChars: 0, smartDocs: 0, smartDepth: 0, smartChars: 0, smartCodeChars: 0 }, 'base 恒无检索');
+  // v3.1.8（实测驱动·用户指令）：validateConfig 按模式默认 params（标准档）——未显式设置时用该模式默认
+  assert.equal(validateConfig({ mode: 'smart' }).timeoutMs, 60000, 'smart 默认超时 60s');
+  assert.equal(validateConfig({ mode: 'smart' }).maxTokens, 4000, 'smart 默认 Token 4000');
+  assert.equal(validateConfig({ mode: 'smart' }).outputLimit, 16000, 'smart 默认字符 16000');
+  assert.equal(validateConfig({ mode: 'lite' }).timeoutMs, 30000, 'lite 默认超时 30s');
+  assert.equal(validateConfig({ mode: 'lite' }).maxTokens, 2000, 'lite 默认 Token 2000');
+  assert.equal(validateConfig({ mode: 'base' }).outputLimit, 8000, 'base 默认字符 8000');
+  assert.equal(validateConfig({ mode: 'publish' }).timeoutMs, 60000, 'publish 默认超时 60s（2026-08-18 实测 avg 44.3s max 51.1s）');
+  // 显式设置（含 0 无限制）优先于模式默认
+  const exp = validateConfig({ mode: 'smart', params: { timeoutMs: 0, maxTokens: 0, outputLimit: 0 } });
+  assert.equal(exp.timeoutMs, 0, '显式 0 无限制优先');
+  assert.equal(exp.maxTokens, 0);
+  assert.equal(exp.outputLimit, 0);
 });
 
 test('U20 resolveScanLimit 联动查表（§0.2/§4.1）', () => {
@@ -368,13 +402,17 @@ test('U20 resolveScanLimit 联动查表（§0.2/§4.1）', () => {
   assert.deepEqual(resolveScanLimit('smart', 4000), { budget: 4000, maxFiles: 3, depth: 2 });
   assert.deepEqual(resolveScanLimit('smart', 8000), { budget: 8000, maxFiles: 6, depth: 3 });
   assert.deepEqual(resolveScanLimit('smart', 2000), { budget: 2000, maxFiles: 2, depth: 1 });
+  // v3.1.7（用户需求·上下文预算无限制）：新增 16000 档（最大扫描 10/4）
+  assert.deepEqual(resolveScanLimit('smart', 16000), { budget: 16000, maxFiles: 10, depth: 4 });
   // fixed（标准等）：固定 3/2
   assert.deepEqual(resolveScanLimit('standard', 8000), { maxFiles: 3, depth: 2 });
   // 未知模式（memory 已删除）→ 默认表行（base）fixed 3/2
   assert.deepEqual(resolveScanLimit('turbo', 4000), { maxFiles: 3, depth: 2 });
   // 联动表全档位覆盖
-  assert.equal(BUDGET_WORKSPACE_TABLE.length, 4);
+  assert.equal(BUDGET_WORKSPACE_TABLE.length, 6);
   for (const e of BUDGET_WORKSPACE_TABLE) assert.ok(BUDGET_OPTIONS.includes(e.budget));
+  // v3.1.8（预算真正生效）：publish 最大档 32000（14/5）
+  assert.deepEqual(resolveScanLimit('smart', 32000), { budget: 32000, maxFiles: 14, depth: 5 });
 });
 
 test('U21 buildMemoryChainBlock 记忆链预算分配与防回显（v2.6.1）', () => {
@@ -935,11 +973,12 @@ test('U40 prompts 外置一致性（v2.4.6）：生成区 = prompts/*.md 逐行�
   assert.equal(extractConst('SYSTEM_PROMPT'), mdOf('system.md'), 'SYSTEM_PROMPT 应与 prompts/system.md 一致');
   assert.equal(extractConst('TASK_ANALYSIS_PROMPT'), mdOf('task-analysis.md'), 'TASK_ANALYSIS_PROMPT 应与 prompts/task-analysis.md 一致');
   assert.equal(extractConst('CONTEXT_GUARD'), mdOf('context-guard.md'), 'CONTEXT_GUARD 应与 prompts/context-guard.md 一致');
-  // 模板体系扩展（2026-08-17）：T2/T3 内置模板事实源（system-* 四模式共用；publish-* 独立）
-  assert.equal(extractConst('SYSTEM_SUPPLEMENT_PROMPT'), mdOf('system-supplement.md'), 'SYSTEM_SUPPLEMENT_PROMPT 应与 prompts/system-supplement.md 一致');
-  assert.equal(extractConst('SYSTEM_DEV_PROMPT'), mdOf('system-dev.md'), 'SYSTEM_DEV_PROMPT 应与 prompts/system-dev.md 一致');
-  assert.equal(extractConst('SYSTEM_PUBLISH_SUPPLEMENT_PROMPT'), mdOf('publish-supplement.md'), 'SYSTEM_PUBLISH_SUPPLEMENT_PROMPT 应与 prompts/publish-supplement.md 一致');
-  assert.equal(extractConst('SYSTEM_PUBLISH_DEV_PROMPT'), mdOf('publish-dev.md'), 'SYSTEM_PUBLISH_DEV_PROMPT 应与 prompts/publish-dev.md 一致');
+  // 模板体系扩展（2026-08-18 修订）：T2 增量模板事实源——每模式专属（base/lite/standard/smart/publish）
+  assert.equal(extractConst('SYSTEM_INCREMENT_PROMPT'), mdOf('increment.md'), 'SYSTEM_INCREMENT_PROMPT 应与 prompts/increment.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_LITE_PROMPT'), mdOf('increment-lite.md'), 'SYSTEM_INCREMENT_LITE_PROMPT 应与 prompts/increment-lite.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_STANDARD_PROMPT'), mdOf('increment-standard.md'), 'SYSTEM_INCREMENT_STANDARD_PROMPT 应与 prompts/increment-standard.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_SMART_PROMPT'), mdOf('increment-smart.md'), 'SYSTEM_INCREMENT_SMART_PROMPT 应与 prompts/increment-smart.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_PUBLISH_PROMPT'), mdOf('increment-publish.md'), 'SYSTEM_INCREMENT_PUBLISH_PROMPT 应与 prompts/increment-publish.md 一致');
   assert.equal(extractConst('CONTINUE_PROMPT'), mdOf('continue.md'), 'CONTINUE_PROMPT 应与 prompts/continue.md 一致');
 });
 
@@ -952,7 +991,7 @@ test('U40b 参考吸收规则存在于全部参考相关 prompt（2026-08-17）'
   const guard = readPrompt('context-guard.md');
   assert.ok(guard.includes('吸收进优化后的提示词'), 'context-guard 应要求吸收参考明确需求');
   assert.ok(guard.includes('禁止逐字复述'), 'context-guard 应禁止逐字复述参考');
-  for (const f of ['system.md', 'system-supplement.md']) {
+  for (const f of ['system.md', 'increment.md', 'increment-lite.md', 'increment-standard.md', 'increment-smart.md']) {
     const text = readPrompt(f);
     assert.ok(text.includes('参考'), f + ' 应包含参考使用规则');
     assert.ok(text.includes('吸收进优化结果') || text.includes('吸收进完善后的提示词'), f + ' 应包含吸收参考需求');
@@ -960,7 +999,141 @@ test('U40b 参考吸收规则存在于全部参考相关 prompt（2026-08-17）'
   const pub = readPrompt('publish.md');
   assert.ok(pub.includes('参考'), 'publish.md 应包含参考使用规则');
   assert.ok(pub.includes('吸收进对应章节'), 'publish.md 应包含吸收参考需求');
+  const pubInc = readPrompt('increment-publish.md');
+  assert.ok(pubInc.includes('参考'), 'increment-publish.md 应包含参考使用规则');
+  assert.ok(pubInc.includes('吸收进对应章节'), 'increment-publish.md 应包含吸收参考需求');
   assert.ok(src.includes('吸收进优化后的提示词'), 'plugin-host.js CONTEXT_GUARD 应与 prompts/context-guard.md 同步');
+});
+
+// v3.1.8（用户指令·每模式默认模板按场景定制）：模式专属默认模板契约——
+// ① 生成区含 SYSTEM_LITE/STANDARD/SMART 常量；② 各自含模式专属段；③ 全部含语义重构方法（用户例子）。
+test('U39b 模式专属默认模板契约（v3.1.8）', () => {
+  const { readFileSync } = require('node:fs');
+  const { join } = require('node:path');
+  const readPrompt = (file) => readFileSync(join(__dirname, '..', 'prompts', file), 'utf8');
+  const extractConst = (name) => {
+    const m = src.match(new RegExp('const\\s+' + name + '\\s*=\\s*\\[([\\s\\S]*?)\\n\\];'));
+    assert.ok(m, name + ' array not found in generated block');
+    return new Function('return [' + m[1] + '].join(\'\\n\');')();
+  };
+  const lite = extractConst('SYSTEM_LITE_PROMPT');
+  const standard = extractConst('SYSTEM_STANDARD_PROMPT');
+  const smart = extractConst('SYSTEM_SMART_PROMPT');
+  const sys = extractConst('SYSTEM_PROMPT');
+  // ① 生成区与 md 同步（U40 机制已覆盖；此处抽查专属段存在）
+  assert.ok(lite.includes('上轮参考处理'), 'lite 模板应含【上轮参考处理】专属段');
+  assert.ok(standard.includes('多轮脉络处理'), 'standard 模板应含【多轮脉络处理】专属段');
+  assert.ok(smart.includes('项目事实优先'), 'smart 模板应含【项目事实优先】专属段');
+  // ② 全部模板含语义重构方法（五步法，论文支撑：VisualPrompter 原子拆解 / RiOT 保留防漂移 /
+  // Sem-DPO 保真自检 / paraphrase 综述保真优先）+ 用户示例（执行器独立）
+  for (const [name, text] of [['SYSTEM_PROMPT', sys], ['SYSTEM_LITE_PROMPT', lite], ['SYSTEM_STANDARD_PROMPT', standard], ['SYSTEM_SMART_PROMPT', smart]]) {
+    assert.ok(text.includes('语义重构'), name + ' 应含【语义重构】方法');
+    assert.ok(text.includes('原子拆解'), name + ' 应含五步法一（原子拆解）');
+    assert.ok(text.includes('不可删集合'), name + ' 应含五步法二（要素盘点/不可删集合）');
+    assert.ok(text.includes('保真自检'), name + ' 应含五步法五（保真自检防漂移）');
+    assert.ok(text.includes('保真优先'), name + ' 应含保真优先原则');
+    assert.ok(text.includes('更新执行器是单独的一个功能'), name + ' 应含用户语义重构示例（执行器独立）');
+  }
+  // ③ 专属模板仍保留语义保真底线（与 U39 同契约）
+  for (const [name, text] of [['SYSTEM_LITE_PROMPT', lite], ['SYSTEM_STANDARD_PROMPT', standard], ['SYSTEM_SMART_PROMPT', smart]]) {
+    assert.ok(text.includes('语义等价是底线'), name + ' 应保留语义等价底线');
+    assert.ok(text.includes('不得歪曲、臆造、遗漏原文任何已明确的信息'), name + ' 应保留禁臆造');
+  }
+  // ④ BUILTIN_TEMPLATES 已按模式指向专属模板（plugin-host.js 生成物）——T1 默认 + T2 增量均每模式专属
+  assert.ok(src.includes('base: [SYSTEM_PROMPT, SYSTEM_INCREMENT_PROMPT]'), 'BUILTIN_TEMPLATES base 应指向通用默认 + 通用增量');
+  assert.ok(src.includes('lite: [SYSTEM_LITE_PROMPT, SYSTEM_INCREMENT_LITE_PROMPT]'), 'BUILTIN_TEMPLATES lite 应指向 SYSTEM_LITE_PROMPT + 专属增量');
+  assert.ok(src.includes('standard: [SYSTEM_STANDARD_PROMPT, SYSTEM_INCREMENT_STANDARD_PROMPT]'), 'BUILTIN_TEMPLATES standard 应指向 SYSTEM_STANDARD_PROMPT + 专属增量');
+  assert.ok(src.includes('smart: [SYSTEM_SMART_PROMPT, SYSTEM_INCREMENT_SMART_PROMPT]'), 'BUILTIN_TEMPLATES smart 应指向 SYSTEM_SMART_PROMPT + 专属增量');
+  assert.ok(src.includes('publish: [SYSTEM_PUBLISH_PROMPT, SYSTEM_INCREMENT_PUBLISH_PROMPT]'), 'BUILTIN_TEMPLATES publish 应指向 SYSTEM_PUBLISH_PROMPT + 专属增量');
+  // ⑤ 五步法强化按模式差异化（用户指令：每模式方向/场景不同 → 强化调整不同）
+  assert.ok(lite.includes('上轮已确认决策'), 'lite 五步法应含「上轮已确认决策」强化（延续场景）');
+  assert.ok(lite.includes('上轮延续强化'), 'lite 五步法标题应标注上轮延续强化');
+  assert.ok(standard.includes('禁入集合'), 'standard 五步法应含「禁入集合」（多轮脉络：识别已否决方向）');
+  assert.ok(standard.includes('多轮脉络强化'), 'standard 五步法标题应标注多轮脉络强化');
+  assert.ok(smart.includes('工程概念'), 'smart 五步法应含「工程概念」映射（开发向）');
+  assert.ok(smart.includes('项目文档/代码确认的事实'), 'smart 五步法不可删集合应含项目事实');
+  assert.ok(smart.includes('开发向强化'), 'smart 五步法标题应标注开发向强化');
+  // base 为通用五步法（纯输入场景，无需模式专属强化）
+  assert.ok(!sys.includes('上轮延续强化') && !sys.includes('多轮脉络强化') && !sys.includes('开发向强化'), 'base 保持通用五步法');
+});
+
+// 2026-08-18（用户指令·每模式增量模板按场景定制 + 保守增量）：增量模板契约——
+// ① 与默认模板分工（默认只清晰化重述不扩展；增量理解任务意图 + 保守补充未说的大逻辑/信息）；
+// ② 保守红线（只补大逻辑/信息、不补细节、不盲目扩充任务范围、不臆造）；
+// ③ 每模式增量方向不同（lite 上轮延续 / standard 多轮演进+禁入集合 / smart 开发向 / publish 九章规格）。
+test('U39c 每模式增量模板契约（保守增量 + 方向差异化，2026-08-18）', () => {
+  const { readFileSync } = require('node:fs');
+  const { join } = require('node:path');
+  const readPrompt = (file) => readFileSync(join(__dirname, '..', 'prompts', file), 'utf8');
+  const inc = readPrompt('increment.md');
+  const incLite = readPrompt('increment-lite.md');
+  const incStandard = readPrompt('increment-standard.md');
+  const incSmart = readPrompt('increment-smart.md');
+  const incPub = readPrompt('increment-publish.md');
+  const pub = readPrompt('publish.md');
+  const sys = readPrompt('system.md');
+  const liteSys = readPrompt('system-lite.md');
+  const standardSys = readPrompt('system-standard.md');
+  const smartSys = readPrompt('system-smart.md');
+  // ① 全部增量模板：与默认分工 + 任务意图判断 + 保守增量红线
+  for (const [name, text] of [['increment.md', inc], ['increment-lite.md', incLite], ['increment-standard.md', incStandard], ['increment-smart.md', incSmart]]) {
+    assert.ok(text.includes('与默认模板的分工'), name + ' 应含【与默认模板的分工】');
+    assert.ok(text.includes('不扩展'), name + ' 应明确默认模板不扩展');
+    assert.ok(text.includes('任务意图判断'), name + ' 应含【任务意图判断】');
+    assert.ok(text.includes('大逻辑与信息'), name + ' 应补「大逻辑与信息」');
+    assert.ok(text.includes('不盲目扩充任务范围'), name + ' 应禁止盲目扩充任务范围');
+    assert.ok(text.includes('不补细节'), name + ' 应禁止补细节');
+    assert.ok(text.includes('如无特别说明/默认') || text.includes('「默认」'), name + ' 未明确处应用「默认」措辞标注');
+  }
+  // publish 增量：九章规格场景——分工/保守红线（「不补细节数值」等价于不补细节），默认模板语义为展开规格
+  assert.ok(incPub.includes('与默认模板的分工'), 'increment-publish.md 应含【与默认模板的分工】');
+  assert.ok(incPub.includes('任务意图判断'), 'increment-publish.md 应含【任务意图判断】');
+  assert.ok(incPub.includes('大逻辑与信息'), 'increment-publish.md 应补「大逻辑与信息」');
+  assert.ok(incPub.includes('不补细节数值'), 'increment-publish.md 应禁止补细节数值');
+  assert.ok(incPub.includes('不引入原文未提的新方向'), 'increment-publish.md 应禁止扩范围');
+  // ② 每模式方向差异化（用户指令：使用场景不同 → 增量方向不同）
+  assert.ok(incLite.includes('上轮参考处理') && incLite.includes('上轮延续视角'), 'lite 增量应含「上轮参考处理/上轮延续视角」');
+  assert.ok(incLite.includes('不得以提问、征询、列出选项让用户确认'), 'lite 增量应禁止反问/征询');
+  assert.ok(incLite.includes('来源可回溯'), 'lite 增量应含来源可回溯（防幻觉）');
+  assert.ok(incLite.includes('上轮延续判别示例'), 'lite 增量应含【上轮延续判别示例】');
+  assert.ok(liteSys.includes('来源可回溯'), 'system-lite.md（lite 默认）应含来源可回溯');
+  assert.ok(incStandard.includes('多轮脉络处理') && incStandard.includes('禁入集合'), 'standard 增量应含「多轮脉络处理/禁入集合」');
+  assert.ok(incStandard.includes('不得以提问、征询、列出选项让用户确认'), 'standard 增量应禁止反问/征询');
+  assert.ok(incStandard.includes('来源可回溯'), 'standard 增量应含来源可回溯（防幻觉）');
+  assert.ok(incStandard.includes('多轮演进判别示例'), 'standard 增量应含【多轮演进判别示例】');
+  assert.ok(standardSys.includes('来源可回溯'), 'system-standard.md（standard 默认）应含来源可回溯');
+  assert.ok(incSmart.includes('项目事实优先') && incSmart.includes('开发向'), 'smart 增量应含「项目事实优先/开发向」');
+  assert.ok(incSmart.includes('不得以提问、征询、列出选项让用户确认'), 'smart 增量应禁止反问/征询（实测跑偏修正）');
+  assert.ok(incSmart.includes('来源可回溯'), 'smart 增量应含来源可回溯（防幻觉）');
+  assert.ok(incSmart.includes('开发向判别示例'), 'smart 增量应含【开发向判别示例】');
+  assert.ok(smartSys.includes('来源可回溯'), 'system-smart.md（smart 默认）应含来源可回溯');
+  assert.ok(incPub.includes('九章') && incPub.includes('方案自评') && incPub.includes('保守性核对'), 'publish 增量应含九章结构 + 保守性自评');
+  // ②b publish 两版方法论强化（用户指令·IEEE 29148/GDD/INCOSE/ReqInOne 检索驱动 + 用户示例）
+  // 默认模板：需求表述纪律 + 设计支柱 + 来源追溯 + 逐章生成聚焦 + 验收追溯 + 用户示例
+  assert.ok(pub.includes('需求表述纪律'), 'publish.md 应含【需求表述纪律】（IEEE 29148/INCOSE）');
+  assert.ok(pub.includes('设计支柱'), 'publish.md 第一章应含设计支柱（GDD Pillars）');
+  assert.ok(pub.includes('来源追溯'), 'publish.md 应含来源追溯（Trace-to-Source 防幻觉）');
+  assert.ok(pub.includes('逐章生成聚焦'), 'publish.md 应含【逐章生成聚焦】（ReqInOne 逐章思想）');
+  assert.ok(pub.includes('验收追溯'), 'publish.md 方案自评应含验收追溯（Chain-of-Verification）');
+  assert.ok(pub.includes('更新执行器是单独的一个功能'), 'publish.md 应含用户示例（执行器独立·口语→结构化规格）');
+  // 增量模板：保守增量判别示例 + 来源追溯 + 保留核对 + 需求表述纪律
+  assert.ok(incPub.includes('保守增量判别示例'), 'increment-publish.md 应含【保守增量判别示例】（示范补什么/不补什么）');
+  assert.ok(incPub.includes('来源追溯'), 'increment-publish.md 应含来源追溯（防幻觉）');
+  assert.ok(incPub.includes('保留核对'), 'increment-publish.md 应含【保留核对】（保留已确认设计）');
+  assert.ok(incPub.includes('需求表述纪律'), 'increment-publish.md 应含需求表述纪律');
+  assert.ok(incPub.includes('让界面更美观'), 'increment-publish.md 应含口语约束提炼范式（用户认可示例）');
+  // base 为通用增量（无模式专属段）
+  assert.ok(!inc.includes('上轮参考处理') && !inc.includes('多轮脉络处理') && !inc.includes('项目事实优先'), 'base 增量保持通用（无模式专属段）');
+  // ②c base 两版优化（2026-08-18·publish 方法论推广 + smart 跑偏教训）
+  assert.ok(inc.includes('不得以提问、征询、列出选项让用户确认'), 'base 增量应禁止反问/征询（smart 跑偏教训推广）');
+  assert.ok(inc.includes('来源可回溯'), 'base 增量应含来源可回溯（防幻觉）');
+  assert.ok(inc.includes('保守增量判别示例'), 'base 增量应含【保守增量判别示例】');
+  assert.ok(sys.includes('来源可回溯'), 'system.md（base 默认）应含来源可回溯（Trace-to-Source 强化）');
+  // ③ 全部增量模板保留语义保真底线
+  for (const [name, text] of [['increment.md', inc], ['increment-lite.md', incLite], ['increment-standard.md', incStandard], ['increment-smart.md', incSmart]]) {
+    assert.ok(text.includes('语义等价是底线'), name + ' 应保留语义等价底线');
+    assert.ok(text.includes('不得歪曲、臆造、遗漏原文任何已明确的信息'), name + ' 应保留禁臆造');
+  }
 });
 
 
@@ -999,16 +1172,18 @@ test('U41 template.texts 每模式解析/迁移/超长忽略（v2.4.7）', () =>
   assert.equal(v2.templateMode, 'custom', 'v2 结构 template.mode 应解析');
   assert.equal(v2.templateTexts.base, 'v2文本', 'v2 结构 template.text 应迁移到全部模式');
   assert.equal(v2.templateTexts.smart, 'v2文本', 'v2 结构 template.text 应迁移到全部模式');
-  // ⑧ 模板体系扩展（2026-08-17）：pick/custom 新结构解析——选中键 + 多自定义模板列表
+  // ⑧ 模板体系扩展（2026-08-18 修订）：pick/custom 新结构解析——选中键（increment/custom:N）+ 多自定义模板列表；
+  // 旧内置键 supplement/dev（2026-08-17 时期）统一迁移为 increment
   const newTpl = validateConfig({
     template: {
       mode: 'builtin',
-      pick: { base: 'supplement', smart: 'dev', publish: 'custom:1' },
+      pick: { base: 'increment', smart: 'supplement', lite: 'dev', publish: 'custom:1' },
       custom: { publish: [{ name: '甲', text: 'A' }, { name: '乙', text: 'B' }] },
     },
   });
-  assert.equal(newTpl.templatePick.base, 'supplement', 'pick supplement 应解析');
-  assert.equal(newTpl.templatePick.smart, 'dev', 'pick dev 应解析');
+  assert.equal(newTpl.templatePick.base, 'increment', 'pick increment 应解析');
+  assert.equal(newTpl.templatePick.smart, 'increment', '旧 pick supplement 应迁移为 increment');
+  assert.equal(newTpl.templatePick.lite, 'increment', '旧 pick dev 应迁移为 increment');
   assert.equal(newTpl.templatePick.publish, 'custom:1', 'pick custom:1 应解析（列表内索引）');
   assert.equal(newTpl.templateCustom.publish.length, 2, 'custom 列表应解析');
   assert.equal(newTpl.templateCustom.publish[1].name, '乙', 'custom 条目 name 应解析');
@@ -1033,23 +1208,25 @@ test('U41 template.texts 每模式解析/迁移/超长忽略（v2.4.7）', () =>
   assert.equal(noMigrate.templateCustom.base.length, 0, '已有 pick 时不迁移 texts');
 });
 
-// 模板体系扩展（2026-08-17）：每模式选中模板解析契约——T1 现有默认保持不变，T2/T3 内置增量模板，
-// custom:N 自定义列表条目，legacy 旧配置兼容，非法/越界/空文本一律回退 T1。
-test('U57 resolveTemplateSystem 模板选中解析（default/supplement/dev/custom/legacy）', () => {
-  const B = { base: ['T1', 'T2', 'T3'], publish: ['P1', 'P2', 'P3'] };
+// 模板体系扩展（2026-08-18 修订）：每模式选中模板解析契约——T1 现有默认保持不变，T2 增量模板
+// （旧内置键 supplement/dev 均按 increment 处理 → list[1]），custom:N 自定义列表条目，
+// legacy 旧配置兼容，非法/越界/空文本一律回退 T1。
+test('U57 resolveTemplateSystem 模板选中解析（default/increment/custom/legacy）', () => {
+  const B = { base: ['T1', 'T2'], publish: ['P1', 'P2'] };
   // ① 缺省 / default → T1（模板1=现有默认，行为不变）
   assert.equal(resolveTemplateSystem({ templatePick: {}, templateCustom: {} }, 'base', B), 'T1');
   assert.equal(resolveTemplateSystem({ templatePick: { base: 'default' } }, 'base', B), 'T1');
-  // ② supplement / dev → T2 / T3
+  // ② increment → T2；旧 supplement / dev → 同按 increment 处理（list[1]）
+  assert.equal(resolveTemplateSystem({ templatePick: { base: 'increment' } }, 'base', B), 'T2');
   assert.equal(resolveTemplateSystem({ templatePick: { base: 'supplement' } }, 'base', B), 'T2');
-  assert.equal(resolveTemplateSystem({ templatePick: { base: 'dev' } }, 'base', B), 'T3');
+  assert.equal(resolveTemplateSystem({ templatePick: { base: 'dev' } }, 'base', B), 'T2');
   // ③ custom:<index> → 自定义条目文本；越界/空文本回退 T1
   const cfg = { templatePick: { base: 'custom:1' }, templateCustom: { base: [{ name: 'a', text: 'C0' }, { name: 'b', text: 'C1' }] } };
   assert.equal(resolveTemplateSystem(cfg, 'base', B), 'C1');
   assert.equal(resolveTemplateSystem({ templatePick: { base: 'custom:9' }, templateCustom: { base: [{ text: 'C0' }] } }, 'base', B), 'T1');
   assert.equal(resolveTemplateSystem({ templatePick: { base: 'custom:0' }, templateCustom: { base: [{ text: '' }] } }, 'base', B), 'T1');
-  // ④ publish 模式走独立内置数组
-  assert.equal(resolveTemplateSystem({ templatePick: { publish: 'dev' } }, 'publish', B), 'P3');
+  // ④ publish 模式走独立内置数组（旧 dev 键 → list[1]）
+  assert.equal(resolveTemplateSystem({ templatePick: { publish: 'dev' } }, 'publish', B), 'P2');
   // ⑤ legacy：无 pick 且 templateMode==='custom' → texts 文本；builtin → T1
   assert.equal(resolveTemplateSystem({ templateMode: 'custom', templateTexts: { base: '旧自定义' } }, 'base', B), '旧自定义');
   assert.equal(resolveTemplateSystem({ templateMode: 'builtin', templateTexts: { base: '旧自定义' } }, 'base', B), 'T1');

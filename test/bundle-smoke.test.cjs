@@ -429,7 +429,7 @@ test('SMK-10 smart full flow: intent + doc-analysis + code reference', async () 
   assert.equal(seen[1].maxTokens, 400, 'intent judge 小预算');
   assert.ok(seen[2].system.includes('项目文档分析器'), 'call 2 = doc-analysis judge (B+C merged)');
   // SMART_TAIL 仅在进入第三步时注入 system
-  assert.ok(seen[3].system.includes('调整方案'), 'smart tail injected when third step entered');
+  assert.ok(seen[3].system.includes('请在完成提示词优化后，额外输出【调整方案】'), 'smart tail injected when third step entered');
   // 文档 + 代码参考注入 messages
   const mainText = seen[3].messages[0].content[0].text;
   assert.ok(mainText.includes('【项目文档参考】'), 'doc reference injected');
@@ -460,7 +460,7 @@ test('SMK-11 smart non-dev-intent stops before workspace', async () => {
   assert.ok(seen[1].system.includes('意图判定器'), 'call 1 = dev-intent judge');
   assert.ok(!seen[2].system.includes('项目文档分析器'), 'no doc-analysis when non-dev-intent');
   // 无 SMART_TAIL、无文档/代码参考
-  assert.ok(!seen[2].system.includes('调整方案'), 'no smart tail when stopped');
+  assert.ok(!seen[2].system.includes('请在完成提示词优化后，额外输出【调整方案】'), 'no smart tail when stopped');
   const mainText = seen[2].messages[0].content[0].text;
   assert.ok(!mainText.includes('【项目文档参考】'), 'no doc reference when stopped');
   assert.ok(!mainText.includes('【相关代码参考】'), 'no code reference when stopped');
@@ -492,8 +492,8 @@ test('SMK-12 publish keeps v2 pipeline (no smart tail, web-plan present)', async
   assert.ok(seen[0].system.includes('检索主题'), 'call 0 = web search plan (v3.0p)');
   assert.equal(seen[0].maxTokens, 400, 'web-plan 小预算');
   assert.ok(seen[1].system.includes('会话任务分析器'), 'call 1 = task analysis (v2 phase A)');
-  assert.ok(seen[2].system.includes('生成提示词规格'), 'publish system = 九章规格（新形态）');
-  assert.ok(!seen[2].system.includes('调整方案'), 'publish 无 smart tail');
+  assert.ok(seen[2].system.includes('需求规格'), 'publish system = 九章需求规格（IEEE 29148/GDD 优化形态）');
+  assert.ok(!seen[2].system.includes('请在完成提示词优化后，额外输出【调整方案】'), 'publish 无 smart tail');
 });
 
 // v3.0p：web mock——记录 query，返回固定 sources。

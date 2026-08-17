@@ -29,15 +29,22 @@ const END = '// ==PROMPTS-END==';
 
 const SOURCES = [
   { md: 'prompts/system.md', name: 'SYSTEM_PROMPT' },
+  // v3.1.8（用户指令·每模式默认模板按场景定制）：lite/standard/smart 专属默认模板——
+  // 在通用语义重构骨架（system.md）上增加模式专属段（上轮参考处理 / 多轮脉络处理 / 项目事实优先）
+  { md: 'prompts/system-lite.md', name: 'SYSTEM_LITE_PROMPT' },
+  { md: 'prompts/system-standard.md', name: 'SYSTEM_STANDARD_PROMPT' },
+  { md: 'prompts/system-smart.md', name: 'SYSTEM_SMART_PROMPT' },
   { md: 'prompts/task-analysis.md', name: 'TASK_ANALYSIS_PROMPT' },
   { md: 'prompts/context-guard.md', name: 'CONTEXT_GUARD' },
   { md: 'prompts/publish.md', name: 'SYSTEM_PUBLISH_PROMPT' },
-  // 模板体系扩展（2026-08-17）：每模式 3 个内置模板——T2 增量补充完善 / T3 增量完善（开发向）
-  //（base/lite/standard/smart 共用 system-*；publish 单独 publish-*，保留九章规格目标）
-  { md: 'prompts/system-supplement.md', name: 'SYSTEM_SUPPLEMENT_PROMPT' },
-  { md: 'prompts/system-dev.md', name: 'SYSTEM_DEV_PROMPT' },
-  { md: 'prompts/publish-supplement.md', name: 'SYSTEM_PUBLISH_SUPPLEMENT_PROMPT' },
-  { md: 'prompts/publish-dev.md', name: 'SYSTEM_PUBLISH_DEV_PROMPT' },
+  // 模板体系扩展（2026-08-18 修订）：每模式 2 个内置模板——T1 默认（只清晰化重述、不扩展）/
+  // T2 增量（保守增量：理解任务意图 + 只补「未说的大逻辑/信息」，防执行模型误判；每模式方向不同）
+  // ——原 T2 增量补充完善/T3 增量完善（开发向）共享模板已按模式收敛为各模式专属增量模板
+  { md: 'prompts/increment.md', name: 'SYSTEM_INCREMENT_PROMPT' },
+  { md: 'prompts/increment-lite.md', name: 'SYSTEM_INCREMENT_LITE_PROMPT' },
+  { md: 'prompts/increment-standard.md', name: 'SYSTEM_INCREMENT_STANDARD_PROMPT' },
+  { md: 'prompts/increment-smart.md', name: 'SYSTEM_INCREMENT_SMART_PROMPT' },
+  { md: 'prompts/increment-publish.md', name: 'SYSTEM_INCREMENT_PUBLISH_PROMPT' },
   // 模式重构（2026-08-16）：会话关联性判定提示词（占位符 {history}/{current} 运行时替换）
   { md: 'prompts/relevance.md', name: 'RELEVANCE_PROMPT' },
   // 模式重构 S3：smart 专业词汇优化段（追加到 smart 模式 system）

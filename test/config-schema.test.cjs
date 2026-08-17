@@ -32,19 +32,21 @@ test('CFG-04 cloneDefaults returns fresh copy', () => {
   assert.equal(b.mode, 'base');
 });
 
-// 模板体系扩展（2026-08-17）：每模式 3 个内置模板 + 多自定义模板的 schema 白名单契约
-test('CFG-05 template.pick/custom 白名单解析（默认/supplement/dev/custom:N）', () => {
+// 模板体系扩展（2026-08-18 修订）：每模式 2 个内置模板 + 多自定义模板的 schema 白名单契约
+// （旧内置键 supplement/dev 统一迁移为 increment）
+test('CFG-05 template.pick/custom 白名单解析（默认/increment/custom:N + 旧键迁移）', () => {
   const r = validateConfig({
     version: 2,
     template: {
       mode: 'builtin',
-      pick: { base: 'supplement', smart: 'dev', publish: 'custom:1' },
+      pick: { base: 'increment', smart: 'supplement', lite: 'dev', publish: 'custom:1' },
       custom: { publish: [{ name: '甲', text: 'A' }, { name: '乙', text: 'B' }] },
     },
   });
   assert.equal(r.ok, true);
-  assert.equal(r.value.template.pick.base, 'supplement');
-  assert.equal(r.value.template.pick.smart, 'dev');
+  assert.equal(r.value.template.pick.base, 'increment');
+  assert.equal(r.value.template.pick.smart, 'increment', '旧 supplement 应迁移为 increment');
+  assert.equal(r.value.template.pick.lite, 'increment', '旧 dev 应迁移为 increment');
   assert.equal(r.value.template.pick.publish, 'custom:1');
   assert.equal(r.value.template.custom.publish.length, 2);
   assert.equal(r.value.template.custom.publish[1].text, 'B');
@@ -76,4 +78,18 @@ test('CFG-05 template.pick/custom 白名单解析（默认/supplement/dev/custom
   const noMigrate = validateConfig({ version: 2, template: { mode: 'custom', texts: { base: '旧' }, pick: { base: 'default' } } });
   assert.equal(noMigrate.value.template.pick.base, 'default');
   assert.equal(noMigrate.value.template.custom.base.length, 0);
+});
+
+test('CFG-06 params 无限制（0）允许（v3.1.7 用户需求）', () => {
+  // timeoutMs/maxTokens/outputLimit = 0 → 无限制（不设超时 / provider 默认上限 / 不截断）
+  const r = validateConfig({ params: { timeoutMs: 0, maxTokens: 0, outputLimit: 0 } });
+  assert.equal(r.ok, true);
+  assert.equal(r.value.params.timeoutMs, 0);
+  assert.equal(r.value.params.maxTokens, 0);
+  assert.equal(r.value.params.outputLimit, 0);
+  // 非法值（负数 / 超范围）仍回退默认
+  const bad = validateConfig({ params: { timeoutMs: -1, maxTokens: 99999, outputLimit: -5 } });
+  assert.equal(bad.value.params.timeoutMs, 30000);
+  assert.equal(bad.value.params.maxTokens, 2000);
+  assert.equal(bad.value.params.outputLimit, 8000);
 });
