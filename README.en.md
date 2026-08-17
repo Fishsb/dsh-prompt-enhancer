@@ -11,7 +11,7 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 
 - **One-click enhance** — the ✨ button triggers an independent LLM call and replaces the draft in place; continue refining, undo anytime, or cancel while enhancing
 - **5 optimization modes** — Basic (direct) / Lite (local rules) / Standard (rules + retrieval) / Expert (task analysis + full retrieval) / One-click Publish (complete dev-spec generator)
-- **Memory switch** — when on, iterative rounds accumulate into a memory chain (latest 4 pairs, rolling); when off, nothing is read or written
+- **Memory switch** — when on, pre-send rounds (optimize → edit → re-optimize) accumulate into a memory chain the next round replays and senses your edit direction; sending the message clears it; when off, nothing is read or written
 - **Model chain** — try multiple models in order, reorder, toggle thinking, run inline connectivity tests
 - **i18n** — follows the DSH interface language (中文 / English)
 
