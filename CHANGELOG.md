@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Changed
+- **修复优化按钮步骤进度从未显示（用户反馈·prog 覆盖 bug）**：`enhance-button` 进度文案生成中 `let prog = t('enhancing')` 把进度**对象**覆盖成**字符串**，导致 `prog.stage/detailKey/elapsedMs` 判断全部失效——各阶段步骤进度（正在分析/检索/搜索 2/3…）与模型序号从未显示，按钮恒定「优化中」。修复：分离 `st`（进度对象·判断用）与 `progText`（文案·显示用），llm 阶段显示「{n} 优化中」/「{n} 正在重试」，其余 stage 保留 detail 模板。实测（smart）：判定开发意向 → 分析项目文档 → 1 优化中 Ns ✅ — [PEN-001]
 - **优化按钮提示精简（用户需求）**：llm 阶段「优化中」→「{n} 优化中」（n = 当前尝试模型序号，失败切换递增 1→2→3，用户可判断是模型配置问题）；重试精简为「{n} 正在重试」（原「模型 {n} 优化中 · 正在重试」过长）；成功态「✓ 已优化，可撤回」→「可撤回」（result/resultFallback 统一）；新增 `enhancingModel`/`enhancingRetryModel` i18n（中/英）— [PEN-001]
 - **开启思考模型红色耗时提醒（用户需求）**：模型配置栏任一模型开启「思考开关」后，配置栏最下面显示红色提醒「高推理强度会极大增加优化所需时间（思考模式耗时可数倍于普通模式），请按需选择强度」（`cfgReasoningWarn` i18n + `.dsh-plg-reasoning-warn` 红色警示样式，`fallback.some(reasoning.enabled)` 触发）— [PEN-002]
 - **插件管理模块自动版本检测（用户需求）**：打开设置页「插件管理」板块时自动执行一次版本检测（UpdaterCard 挂载 useEffect 触发 doCheck；React tab 切换重挂载则每次进入自动检查，checking 防重入；手动按钮保留）— [VU-001]

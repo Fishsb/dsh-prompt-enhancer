@@ -1442,34 +1442,39 @@ function EnhanceButton(props) {
   if (phase === 'enhancing') {
     // v3.0r（细粒度进度反馈）：进度文案优先级 detailKey 模板 > stage 文案 > 默认「优化中…」；
     // 末尾追加已用秒数（如「正在搜索 2/3：体素引擎 · 8s」），任何时刻都有动态变化
-    let prog = t('enhancing');
-    if (prog) {
-      if (prog.stage) {
+    // 2026-08-18 修复：此前 `let prog = t('enhancing')` 把进度对象覆盖成字符串，
+    // 导致 prog.stage/detailKey/elapsedMs 判断全部失效——步骤进度从未显示（含模型序号）。
+    // 现分离：st = 进度对象（判断用），progText = 文案（显示用）。
+    let progText = t('enhancing');
+    const st = prog;
+    if (st) {
+      if (st.stage) {
         // 2026-08-18（用户需求）：llm 阶段显示「N 优化中」——N = 当前尝试的模型序号（step），
         // 失败切换模型时序号递增（1→2→3），用户能判断是模型配置问题而非插件问题
-        if (prog.stage === 'llm' && prog.step > 0) {
-          // 重试（模型切换）时明确标注「正在重试」，其余显示「N 优化中」
-          prog = (prog.detailKey === 'retry' ? t('enhancingRetryModel') : t('enhancingModel')).replace('{n}', String(prog.step));
+        if (st.stage === 'llm' && st.step > 0) {
+          // 重试（模型切换）时显示「N 正在重试」，其余显示「N 优化中」
+          progText = (st.detailKey === 'retry' ? t('enhancingRetryModel') : t('enhancingModel')).replace('{n}', String(st.step));
         } else {
-          const key = 'stage' + prog.stage.charAt(0).toUpperCase() + prog.stage.slice(1);
+          const key = 'stage' + st.stage.charAt(0).toUpperCase() + st.stage.slice(1);
           const localized = t(key);
-          if (localized !== key) prog = localized;
+          if (localized !== key) progText = localized;
         }
       }
-      if (prog.detailKey) {
-        const dkey = 'stageDetail' + prog.detailKey.charAt(0).toUpperCase() + prog.detailKey.slice(1);
+      // llm 阶段已显示模型序号（含重试标记），跳过 detailKey 覆盖；其余 stage 保留 detail 模板
+      if (st.detailKey && st.stage !== 'llm') {
+        const dkey = 'stageDetail' + st.detailKey.charAt(0).toUpperCase() + st.detailKey.slice(1);
         let tmpl = t(dkey);
         if (tmpl !== dkey) {
-          const a = prog.detailArgs || {};
+          const a = st.detailArgs || {};
           tmpl = tmpl
             .replace('{current}', String(a.current != null ? a.current : ''))
             .replace('{total}', String(a.total != null ? a.total : ''))
             .replace('{query}', String(a.query != null ? a.query : ''));
-          prog = tmpl;
+          progText = tmpl;
         }
       }
-      if (prog.elapsedMs > 0) {
-        prog = prog + ' ' + Math.round(prog.elapsedMs / 1000) + 's';
+      if (st.elapsedMs > 0) {
+        progText = progText + ' ' + Math.round(st.elapsedMs / 1000) + 's';
       }
     }
     onClick = () => cancelEnhance(sessionId, inputActions);
@@ -1487,7 +1492,7 @@ function EnhanceButton(props) {
       // v2.3.3（§7.10）：hover 闪烁修复——progress 文档流占位（宽度恒定），
       // cancel absolute 覆盖其上，hover 只切 opacity（无尺寸抖动）
       React.createElement('span', { className: 'dsh-enh-status', 'aria-hidden': true },
-        React.createElement('span', { className: 'dsh-enh-progress' }, prog),
+        React.createElement('span', { className: 'dsh-enh-progress' }, progText),
         React.createElement('span', { className: 'dsh-enh-cancel' }, t('cancel')),
       ),
     );
