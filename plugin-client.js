@@ -1763,6 +1763,13 @@ function UpdaterCard(props) {
     });
   };
 
+  // 2026-08-18（用户需求）：打开插件管理模块时自动执行一次版本检测
+  //（组件挂载即触发；React tab 切换若重挂载则每次进入都自动检查，checking 保护防重入）
+  React.useEffect(() => {
+    doCheck();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // v2.5.0：环境检测（只读；host 60s 缓存）；v2.7.0：带执行器端口供 exec-port 检查
   const doEnvCheck = () => {
     if (envChecking) return;
