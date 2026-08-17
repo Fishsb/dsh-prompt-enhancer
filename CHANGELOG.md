@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Changed
+- **死代码/死配置全量清理（用户指令·审计后清理）**：① i18n 死键 38 个 ×2（zh/en）删除——旧版 UI 遗留（upd* 14 / sec* 6 / cfgReasoning* 4 / cfgTestEstimate* 3 / cfgCustom* 4 / cfgNav·cfgProvider·cfgModel / cfgTemplateBuiltin·Custom·Note / cfgEmptyModels / navPlugins / pluginsApprove / titleEmpty），全部为删功能后未清的文案（`main` 配置字段保留——旧 v1 迁移兼容层）② pure.js 死常量 2 个删除（`INJECT_FILE_TOP_N`、`RELEVANCE_WINDOW_MAX_CHARS`，定义后从未引用）③ logger.js 死导出 `LEVELS` 删除 ④ helpers.js 死函数 `readSeen` 删除（关联的 clearSeen/seenKey/SEEN_KEY_PREFIX 为活保留）。构建产物验证死代码清零；全量测试 129/129 — [PEN-002]
 - **设置导航 label 前加 ✨ 图标（用户需求·与输入框优化按钮一致）**：settings.section 导航「提示词增强」label 前拼 `'✨ '`（与输入框优化按钮 EnhanceButton 的 dsh-enh-icon 图标一致）— [VU-001]
 - **设置界面导航名改名（用户需求）**：`navModelPlugins`「模型与插件」→「**提示词增强**」（en：Models & plugins → **Prompt Enhancer**）；同步页面标题、tablist aria-label 与设置导航 label — [VU-001]
 - **模型配置栏提示文案微调（用户指定表述）**：`cfgRestoreNote` →「「恢复默认」重置模型链为官方模型配置，不清除自定义模板、优化参数与记忆设置」（去掉「仅」与「1 Flash、2 Pro」细节）；`cfgFallbackNote` →「按顺序逐一尝试，失败则用下一条，可增删改序」（去掉「每条可设思考」）。en 同步 — [PEN-002]

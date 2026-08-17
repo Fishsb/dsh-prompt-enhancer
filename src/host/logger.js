@@ -5,7 +5,6 @@
  * Emits one JSON object per line to stdout/stderr. Keeps a small ring for
  * in-memory tailing (can be wired into diagnostics service later).
  */
-const LEVELS = ['debug', 'info', 'warn', 'error'];
 
 function createLogger(options) {
   const ring = [];
@@ -36,4 +35,4 @@ function createLogger(options) {
   };
 }
 
-module.exports = { createLogger, LEVELS };
+module.exports = { createLogger };

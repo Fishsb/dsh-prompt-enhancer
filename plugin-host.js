@@ -1036,7 +1036,6 @@ const PROBE_CACHE_TTL_MS = 30000;
 const V2_MSG_TEXT_MAX = 2400;
 const V2_WORKSPACE_TIMEOUT_MS = 2000;
 const SCAN_FILE_LIST_MAX = 2000;
-const INJECT_FILE_TOP_N = 3;
 // v2.7.0（检索质量修复）：名称匹配 0 命中时的内容兜底扫描文件数上限
 const CONTENT_FALLBACK_SCAN = 5;
 // v2.7.0（一键发布 · 网络检索）：超时/条数/注入预算
@@ -2403,7 +2402,6 @@ const RETRIEVE_TABLE = {
 const RELEVANCE_TIMEOUT_MS = 10000;
 const RELEVANCE_MAX_TOKENS = 400;
 const RELEVANCE_OUTPUT_LIMIT = 800;
-const RELEVANCE_WINDOW_MAX_CHARS = 2400;
 
 // v3.0（模式重构 S3）：开发环境判定 JSON 容错解析（{isDevEnv, reason}）——同 parseRelevance 模式。
 // v3.0v2（修订）：提示词开发意向判定 JSON 容错解析（{isDevIntent, reason}）。
