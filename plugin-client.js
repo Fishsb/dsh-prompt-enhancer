@@ -1468,9 +1468,13 @@ function EnhanceButton(props) {
         let tmpl = t(dkey);
         if (tmpl !== dkey) {
           const a = st.detailArgs || {};
+          // 2026-08-18（用户需求·publish 细化）：{current}/{total} 优先取 detailArgs，
+          // 缺失时回退 progress 的 step/total（buildV2ContextBlock mark 只传 step/total，judge 传 null）
+          const cur = a.current != null ? a.current : st.step;
+          const tot = a.total != null ? a.total : st.total;
           tmpl = tmpl
-            .replace('{current}', String(a.current != null ? a.current : ''))
-            .replace('{total}', String(a.total != null ? a.total : ''))
+            .replace('{current}', String(cur != null ? cur : ''))
+            .replace('{total}', String(tot != null ? tot : ''))
             .replace('{query}', String(a.query != null ? a.query : ''));
           progText = tmpl;
         }
