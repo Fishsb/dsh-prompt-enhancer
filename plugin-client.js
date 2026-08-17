@@ -572,6 +572,8 @@ const ZH = {
   errUNKNOWN: '优化失败',
   navPlugins: '插件管理',
   pluginsEmpty: '还没有定义任何插件',
+  // 2026-08-18（用户需求）：插件管理板块项目地址跳转链接（版本检测与更新下方）
+  cfgProjectLink: '项目地址：GitHub · Fishsb/dsh-prompt-enhancer ↗',
   pluginsLoadFailed: '读取插件清单失败',
   pluginsRunning: '运行中',
   pluginsStopped: '已停止',
@@ -846,6 +848,8 @@ const EN = {
   errUNKNOWN: 'Optimize failed',
   navPlugins: 'Cordis plugins',
   pluginsEmpty: 'No plugins defined yet',
+  // 2026-08-18（用户需求）：插件管理板块项目地址跳转链接（版本检测与更新下方）
+  cfgProjectLink: 'Project: GitHub · Fishsb/dsh-prompt-enhancer ↗',
   pluginsLoadFailed: 'Reading the plugin inventory failed',
   pluginsRunning: 'Running',
   pluginsStopped: 'Stopped',
@@ -2640,6 +2644,10 @@ function PluginsSection(props) {
   return React.createElement('div', { className: 'dsh-plg-root' },
     // v2.4.0（方案 §4）：版本检测与更新卡片（置于插件清单上方，与清单状态无关）
     React.createElement(UpdaterCard, props),
+    // 2026-08-18（用户需求）：项目地址跳转链接——版本检测与更新下方另起一行
+    React.createElement('div', { className: 'dsh-plg-project-link' },
+      React.createElement('a', { href: 'https://github.com/Fishsb/dsh-prompt-enhancer', target: '_blank', rel: 'noreferrer' }, t('cfgProjectLink')),
+    ),
     error ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, error) : null,
     content,
     logsOpen
@@ -3549,6 +3557,10 @@ const CSS = [
   '.dsh-plg-btn-primary{background:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}',
   '.dsh-plg-btn-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover);border-color:var(--dsw-alias-button-primary-hover)}',
   '.dsh-plg-hint{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;margin:0}',
+  // 2026-08-18（用户需求）：项目地址跳转链接（版本检测与更新下方）
+  '.dsh-plg-project-link{margin-top:4px;font-size:12px;line-height:18px}',
+  '.dsh-plg-project-link a{color:var(--dsw-alias-brand-primary);text-decoration:underline;cursor:pointer;word-break:break-all}',
+  '.dsh-plg-project-link a:hover{opacity:.85}',
   '.dsh-plg-saved{color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:16px}',
   // v2.7.0：保存状态机样式（转圈复用 dsh-enh-spin；saved/failed 状态色）
   '.dsh-plg-save{display:flex;align-items:center;gap:6px;font-size:12px;line-height:16px;margin-top:8px}',
