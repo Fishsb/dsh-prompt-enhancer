@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Changed
+- **删除内置兜底链 BUILTIN_CHAIN（用户需求·完全按模型配置顺序）**：增强不再自动用内置 DeepSeek 官方模型兜底——① `buildTryChain` 去掉 adaptive 补足分支，模型链完全按用户配置顺序尝试；② 模型链为空时增强报 `NO_MODEL`「未配置模型，请在设置中添加模型」（host friendlyMessage + client errorKey + i18n zh/en）；③ 「恢复默认」不再填内置链（autochain 失败清空，由用户配置）；④ fresh install 不再静态补齐内置链（autochain 失败留空）；⑤ 删除 `constants.js` BUILTIN_CHAIN 定义；测试断言更新（空链 → 空链）。实测：空链增强返回 `code=NO_MODEL` ✅ — [PEN-002]
 - **会话历史显式内容提取上限调大（用户需求）**：`V2_MSG_TEXT_MAX` 1200 → **2400**——rounds 检索提取的会话历史单条消息不再轻易截断（覆盖长回复/表格，显式内容更完整）；最终注入量仍由上下文预算（roundsChars）控制 — [PEN-003]
 - **rounds 模式补「读取会话」步骤（用户需求·审查其他模式）**：lite/standard/smart 的会话历史读取（fetchSessionHistory）补 `setProgress(STAGE_HISTORY)` 进度点（与 publish 一致）——真实使用有会话历史时显示「读取会话 → 判定 1/1（或 1/3）→ …」；测试环境无真实会话历史故判定步骤不触发（正常）；base 无检索直发。审查结论：五模式步骤完整 — [PEN-001]
 - **publish 步骤细化 + 进度数字修复（用户需求）**：实测 publish 原仅 3 步且「搜索 /」数字为空——根因 buildV2ContextBlock mark 的 step/total 未进 detailArgs，按钮模板 {current}/{total} 取 detailArgs 为空。修复：按钮替换 {current}/{total} 优先 detailArgs、缺失回退 progress 的 step/total（judge/search 数字恢复）。实测 publish：规划检索 1s → 读取会话 2s → 搜索 2/3 3s → 1 优化中 4s ✅（步骤细化、数字正确）；全部文案 ≤6 字 — [PEN-001]

@@ -127,11 +127,8 @@ const CONFIG_DEFAULTS = {
   // v2.4.0（方案 §4）：版本检测与更新配置（repo 空 = 默认仓库；targetDir 空 = 使用 defaultDir）
   updater: { repo: '', targetDir: '' },
 };
-// v20：内置兜底链硬编码指向 DeepSeek 官方模型（fresh install 补足与「恢复默认」）
-const BUILTIN_CHAIN = [
-  { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-  { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
-];
+// v20 曾内置兜底链硬编码 DeepSeek 官方（fresh install 补足与「恢复默认」）；
+// 2026-08-18（用户需求·删内置兜底链）：已删除——完全按模型配置顺序，空配置报无模型
 // v2.2（§4.3/§6.6）：模式选项单点（4 模式，记忆模式已删除——记忆为独立开关）
 // v2.3（§7.2）：short = 模式短标签（idle 按钮内显示；i18n modeShort* 键优先，此字段为回退）
 const MODE_OPTIONS = [
@@ -561,6 +558,8 @@ const ZH = {
   cancel: '取消',
   errGUARD: '空输入或斜杠命令不支持优化',
   errNO_LLM: 'LLM 服务不可用',
+  // 2026-08-18（用户需求·删内置兜底链）：未配置模型时明确提示
+  errNO_MODEL: '未配置模型，请在设置中添加模型',
   errUNKNOWN_MODEL: '优化模型不可用（不在服务目录中）',
   errNO_ADAPTER: 'LLM 提供方未启用',
   errINVALID_CREDENTIAL: 'API 密钥无效或缺失',
@@ -843,6 +842,8 @@ const EN = {
   cancel: 'Cancel',
   errGUARD: 'Empty input or slash command is not supported',
   errNO_LLM: 'LLM service unavailable',
+  // 2026-08-18（用户需求·删内置兜底链）：未配置模型时明确提示
+  errNO_MODEL: 'No model configured; add models in settings',
   errUNKNOWN_MODEL: 'Optimize model unavailable (not in the catalog)',
   errNO_ADAPTER: 'LLM provider not enabled',
   errINVALID_CREDENTIAL: 'Invalid or missing API key',
@@ -1108,6 +1109,7 @@ function errorKey(code) {
   const map = {
     GUARD: 'errGUARD',
     NO_LLM: 'errNO_LLM',
+    NO_MODEL: 'errNO_MODEL',
     UNKNOWN_MODEL: 'errUNKNOWN_MODEL',
     NO_ADAPTER: 'errNO_ADAPTER',
     INVALID_CREDENTIAL: 'errINVALID_CREDENTIAL',
@@ -2778,14 +2780,14 @@ function ModelMainSection(props) {
     if (testState && removed && testState.key === removed.provider + '/' + removed.model) setTestState(null);
   };
   const restore = () => {
-    // 恢复默认 → 优先自适应链（host 解析当前环境默认模型），失败才用静态链
+    // 恢复默认 → 自适应链（host 解析当前环境默认模型）；失败 → 清空（2026-08-18 删内置兜底链，不再用 BUILTIN_CHAIN）
     // F8（配置卫生）：noCache 绕过 60s TTL——恢复默认始终取最新自适应链
     host.call('models/autochain', { noCache: true }).then((auto) => {
       const a = auto && typeof auto === 'object' && Array.isArray(auto.chain) && auto.chain.length > 0
-        ? auto.chain : BUILTIN_CHAIN;
+        ? auto.chain : [];
       saveFallback(a.map((b) => ({ provider: b.provider, model: b.model })));
     }).catch(() => {
-      saveFallback(BUILTIN_CHAIN.map((b) => ({ ...b })));
+      saveFallback([]);
     });
     setTestState(null);
   };
@@ -3143,13 +3145,12 @@ function ModelConfigTab(props) {
               return chain;
             };
             // 优先自适应链（browser 环境限制，改从 host 解析）
+            // 2026-08-18（用户需求·删内置兜底链）：autochain 失败不再静态链补齐，留空由用户配置
             host.call('models/autochain').then((auto) => {
-              const a = auto && typeof auto === 'object' && Array.isArray(auto.chain) ? auto.chain : BUILTIN_CHAIN;
+              const a = auto && typeof auto === 'object' && Array.isArray(auto.chain) ? auto.chain : [];
               chain = fill(a.map((x) => ({ provider: x.provider, model: x.model })));
               if (chain.length > 0) { saveConfig({ fallback: chain }); configState.fresh = false; setInherited(true); }
             }).catch(() => {
-              // autochain 失败 → 静态链补齐（尽量先保证有模型链）
-              chain = fill(BUILTIN_CHAIN);
               if (chain.length > 0) { saveConfig({ fallback: chain }); configState.fresh = false; setInherited(true); }
             });
           }).catch(() => {});

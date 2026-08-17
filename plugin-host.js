@@ -1307,6 +1307,7 @@ function friendlyMessage(failure) {
     case 'OUTPUT_TOO_LONG': return 'optimization exceeds length limit';
     case 'TIMEOUT': return 'request timed out, original text restored';
     case 'ABORTED': return 'request cancelled';
+    case 'NO_MODEL': return 'no model configured, add models in settings';
     case 'ALL_MODELS_UNAVAILABLE': return 'all models unavailable, check model config and retry';
     default: return failure && failure.message ? failure.message : 'optimize failed';
   }
@@ -1549,7 +1550,9 @@ async function collectStream(iterator, outputLimit, onFirst) {
 
 // v23（D6）：模型链构建——按 cfg.fallback 顺序逐一尝试（去重）；
 // 链为空时才用自适应/内置链补足；不再有 main 优先概念。
-function buildTryChain(fallback, adaptive) {
+// 2026-08-18（用户需求·删内置兜底链）：模型链完全按用户配置顺序；配置为空 → 空链
+//（不再 adaptive/BUILTIN 补足），enhance 报无模型
+function buildTryChain(fallback) {
   const chain = [];
   for (const item of fallback || []) {
     if (!item || typeof item !== 'object') continue;
@@ -1561,13 +1564,6 @@ function buildTryChain(fallback, adaptive) {
     const entry = { provider, model };
     if (item.reasoningEffort) entry.reasoningEffort = item.reasoningEffort;
     chain.push(entry);
-  }
-  if (chain.length === 0) {
-    for (const d of adaptive || []) {
-      if (!d || typeof d.provider !== 'string' || typeof d.model !== 'string') continue;
-      if (chain.some((e) => e.provider === d.provider && e.model === d.model)) continue;
-      chain.push({ ...d });
-    }
   }
   return chain;
 }
@@ -3467,8 +3463,8 @@ return {
       if (args && typeof args.mode === 'string' && MODE_KEYS.includes(args.mode)) cfg.mode = args.mode;
       // v2.8.2 曾一键发布记忆强制开启；2026-08-18（用户指令）取消——记忆跟随开关，publish 不例外
       // v23（D6）：模型链 = cfg.fallback 按序（每条独立 reasoningEffort）；
-      // 链为空 → 自适应解析当前环境默认链（不再区分 main/fallback）
-      const chain = buildTryChain(cfg.fallback, await resolveAdaptiveChain(ctx.get('llm'), ctx.get('agentDefaultModel')));
+      // 2026-08-18（用户需求·删内置兜底链）：完全按用户配置顺序——链为空 → 空链（不自适应/BUILTIN 补足），llm 阶段报无模型
+      const chain = buildTryChain(cfg.fallback);
       // 模板体系扩展（2026-08-18 修订）：每模式 2 个内置模板（default=默认模板·只清晰化重述 /
       // increment=增量模板·保守补充未说的大逻辑/信息，每模式方向不同）+ 每模式多自定义模板
       // （pick=custom:<index>）；解析见 pure.js resolveTemplateSystem——旧配置（无 pick）自动迁移
@@ -4040,6 +4036,11 @@ return {
       const maxTokens = state.maxTokens;
       const outputLimit = state.outputLimit;
       let lastFailure = null;
+      // 2026-08-18（用户需求·删内置兜底链）：模型链为空 → 明确报「未配置模型」（不自适应补足）
+      if (chain.length === 0) {
+        state.result = { ok: false, code: 'NO_MODEL', message: friendlyMessage({ code: 'NO_MODEL' }) };
+        return state;
+      }
       for (let i = 0; i < chain.length; i++) {
         const entry = chain[i];
         if (rec.cancelled || rec.timedOut) {

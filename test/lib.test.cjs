@@ -303,17 +303,12 @@ test('buildTryChain 按链顺序尝试（含去重与 reasoningEffort）', () =>
   assert.deepEqual(chain[1], { provider: 'p2', model: 'm2', reasoningEffort: 'high' });
 });
 
-test('buildTryChain 链为空 → 用自适应/内置链补足', () => {
-  const adaptive = [
-    { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-    { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
-  ];
-  const chain = buildTryChain([], adaptive);
-  assert.deepEqual(chain, adaptive);
+test('buildTryChain 链为空 → 空链（2026-08-18 删内置兜底链，不再 adaptive 补足）', () => {
+  const chain = buildTryChain([]);
+  assert.deepEqual(chain, [], '空配置 → 空链（enhance 报无模型）');
   // 无效条目过滤
   const mixed = buildTryChain(
     [{ provider: '', model: 'x' }, null, { provider: '  ', model: 'y' }, { provider: 'p', model: 'm' }],
-    adaptive,
   );
   assert.equal(mixed.length, 1);
   assert.deepEqual(mixed[0], { provider: 'p', model: 'm' });
