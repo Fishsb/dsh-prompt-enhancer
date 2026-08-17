@@ -3722,7 +3722,8 @@ return {
         name: 'settings.section',
         id: 'model-plugins',
         order: 25,
-        label: () => (locale && typeof locale.bind === 'function' ? locale.bind('enhance')('navModelPlugins') : ZH.navModelPlugins),
+        // 2026-08-18（用户需求）：导航 label 前加 ✨（与输入框优化按钮图标一致）
+        label: () => '✨ ' + (locale && typeof locale.bind === 'function' ? locale.bind('enhance')('navModelPlugins') : ZH.navModelPlugins),
         locale: 'enhance',
       },
       ModelPluginsSection,
