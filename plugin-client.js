@@ -541,6 +541,7 @@ const ZH = {
   enhancing: '优化中',
   // 2026-08-18（用户需求）：llm 阶段显示正在优化的模型序号（失败切换递增）
   enhancingModel: '{n} 优化中',
+  enhancingRetryModel: '模型 {n} 优化中 · 正在重试',
   result: '✓ 已优化，可撤回',
   resultFallback: '✓ {model} 优化，可撤回',
   titleIdle: '一键优化提示词（独立 LLM 调用）',
@@ -821,6 +822,7 @@ const EN = {
   enhancing: 'Optimizing',
   // 2026-08-18（用户需求）：llm 阶段显示正在优化的模型序号（失败切换递增）
   enhancingModel: 'Model {n} optimizing',
+  enhancingRetryModel: 'Model {n} optimizing · retrying',
   result: '✓ Optimized · Undo',
   resultFallback: '✓ Optimized with {model} · Undo',
   titleIdle: 'Optimize the prompt with an independent LLM call',
@@ -1446,7 +1448,8 @@ function EnhanceButton(props) {
         // 2026-08-18（用户需求）：llm 阶段显示「N 优化中」——N = 当前尝试的模型序号（step），
         // 失败切换模型时序号递增（1→2→3），用户能判断是模型配置问题而非插件问题
         if (prog.stage === 'llm' && prog.step > 0) {
-          prog = t('enhancingModel').replace('{n}', String(prog.step));
+          // 重试（模型切换）时明确标注「正在重试」，其余显示「N 优化中」
+          prog = (prog.detailKey === 'retry' ? t('enhancingRetryModel') : t('enhancingModel')).replace('{n}', String(prog.step));
         } else {
           const key = 'stage' + prog.stage.charAt(0).toUpperCase() + prog.stage.slice(1);
           const localized = t(key);
