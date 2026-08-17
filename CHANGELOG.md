@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Changed
+- **优化按钮全部提醒精简到 4~6 字（用户需求）**：stage/stageDetail 文案统一压缩——stage 键（准备中/读取会话/分析任务/检索文件/检索会话/组装上下文/模型调用中）；detail 键保留进度数字去冗余（「判定 {current}/{total}」「判定意向」「分析文档」「检索代码」「规划检索」「搜索 {current}/{total}」「扫描工作区」「重试 {current}/{total}」「连通 {current}/{total}」，Search 去 query）；en 同步短词 — [PEN-001]
 - **修复优化按钮步骤进度从未显示（用户反馈·prog 覆盖 bug）**：`enhance-button` 进度文案生成中 `let prog = t('enhancing')` 把进度**对象**覆盖成**字符串**，导致 `prog.stage/detailKey/elapsedMs` 判断全部失效——各阶段步骤进度（正在分析/检索/搜索 2/3…）与模型序号从未显示，按钮恒定「优化中」。修复：分离 `st`（进度对象·判断用）与 `progText`（文案·显示用），llm 阶段显示「{n} 优化中」/「{n} 正在重试」，其余 stage 保留 detail 模板。实测（smart）：判定开发意向 → 分析项目文档 → 1 优化中 Ns ✅ — [PEN-001]
 - **优化按钮提示精简（用户需求）**：llm 阶段「优化中」→「{n} 优化中」（n = 当前尝试模型序号，失败切换递增 1→2→3，用户可判断是模型配置问题）；重试精简为「{n} 正在重试」（原「模型 {n} 优化中 · 正在重试」过长）；成功态「✓ 已优化，可撤回」→「可撤回」（result/resultFallback 统一）；新增 `enhancingModel`/`enhancingRetryModel` i18n（中/英）— [PEN-001]
 - **开启思考模型红色耗时提醒（用户需求）**：模型配置栏任一模型开启「思考开关」后，配置栏最下面显示红色提醒「高推理强度会极大增加优化所需时间（思考模式耗时可数倍于普通模式），请按需选择强度」（`cfgReasoningWarn` i18n + `.dsh-plg-reasoning-warn` 红色警示样式，`fallback.some(reasoning.enabled)` 触发）— [PEN-002]
