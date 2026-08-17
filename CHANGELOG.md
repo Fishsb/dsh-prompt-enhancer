@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Changed
+- **rounds 模式补「读取会话」步骤（用户需求·审查其他模式）**：lite/standard/smart 的会话历史读取（fetchSessionHistory）补 `setProgress(STAGE_HISTORY)` 进度点（与 publish 一致）——真实使用有会话历史时显示「读取会话 → 判定 1/1（或 1/3）→ …」；测试环境无真实会话历史故判定步骤不触发（正常）；base 无检索直发。审查结论：五模式步骤完整 — [PEN-001]
 - **publish 步骤细化 + 进度数字修复（用户需求）**：实测 publish 原仅 3 步且「搜索 /」数字为空——根因 buildV2ContextBlock mark 的 step/total 未进 detailArgs，按钮模板 {current}/{total} 取 detailArgs 为空。修复：按钮替换 {current}/{total} 优先 detailArgs、缺失回退 progress 的 step/total（judge/search 数字恢复）。实测 publish：规划检索 1s → 读取会话 2s → 搜索 2/3 3s → 1 优化中 4s ✅（步骤细化、数字正确）；全部文案 ≤6 字 — [PEN-001]
 - **每模式步骤进度补充（用户需求·分析各模式步骤）**：梳理各模式增强管道步骤——base 直发（无检索，直接模型调用）/ lite·standard 会话关联判定（逐窗口）/ smart 关联判定→开发意向→文档分析→代码检索 / publish 检索主题规划→多主题网络搜索。补充缺失进度点：analyze 阶段开始上报「分析任务」、assemble 阶段上报「组装上下文」（host enhance-handlers 补 `setProgress`）；实测（smart）：判定意向 → 分析文档 → 1 优化中 ✅；base 无检索故直接模型调用（正常）— [PEN-001]
 - **优化按钮全部提醒精简到 4~6 字（用户需求）**：stage/stageDetail 文案统一压缩——stage 键（准备中/读取会话/分析任务/检索文件/检索会话/组装上下文/模型调用中）；detail 键保留进度数字去冗余（「判定 {current}/{total}」「判定意向」「分析文档」「检索代码」「规划检索」「搜索 {current}/{total}」「扫描工作区」「重试 {current}/{total}」「连通 {current}/{total}」，Search 去 query）；en 同步短词 — [PEN-001]

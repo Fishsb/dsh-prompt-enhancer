@@ -3880,6 +3880,8 @@ return {
         if (rbudget.roundsChars > 0) {
           // v3.0：会话轮次窗口关联检索——逐窗口 LLM 判定，命中即停并注入参考；
           // 窗口越界（历史不足）跳过；全不中 → 无参考（不阻断主流程）。
+          // 2026-08-18（用户需求·步骤补充）：rounds 模式补「读取会话」进度（与 publish 一致）
+          if (state.rec) setProgress(state.rec, STAGE_HISTORY);
           const events = await fetchSessionHistory(sessionId);
           const chain0 = state.chain && state.chain.length > 0 ? state.chain[0] : null;
           for (let wi = 0; wi < row.windows.length; wi++) {
