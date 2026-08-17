@@ -1314,14 +1314,11 @@ function friendlyMessage(failure) {
 
 function validateConfig(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
-  // v18：v2 结构（main/fallback/customModels/order/params/template）；兼容 v1 平铺字段
-  const main = src.main && typeof src.main === 'object' ? src.main : src;
+  // v18：v2 结构（fallback/customModels/order/params/template）；兼容 v1 平铺字段
+  // 2026-08-18（用户指令）：main 死配置字段删除（不维护老用户迁移）——host 只用 fallback 模型链
   const p = src.params && typeof src.params === 'object' ? src.params : src;
   const t = src.template && typeof src.template === 'object' ? src.template : src;
   const out = {
-    provider: '',
-    model: '',
-    reasoningEffort: '',
     fallback: [],
     customModels: [],
     order: [],
@@ -1340,10 +1337,8 @@ function validateConfig(raw) {
     context: { mode: 'smart', budgetChars: DEFAULT_BUDGET, workspace: { maxFiles: 3, depth: 2 } },
     memory: DEFAULT_MEMORY,
   };
-  if (typeof main.provider === 'string' && main.provider.trim() !== '') out.provider = main.provider.trim();
-  if (typeof main.model === 'string' && main.model.trim() !== '') out.model = main.model.trim();
+  // fallback 条目 reasoning effort 提取（条目级，非 main）
   const effortOf = (obj) => (obj && typeof obj === 'object' && obj.enabled === true && typeof obj.effort === 'string' && obj.effort.trim() !== '' && obj.effort.trim().length <= 32) ? obj.effort.trim() : '';
-  out.reasoningEffort = effortOf(main.reasoning) || (typeof main.reasoningEffort === 'string' && main.reasoningEffort.trim() !== '' && main.reasoningEffort.trim().length <= 32 ? main.reasoningEffort.trim() : '');
   // fallback（独立配置项；数组顺序 = 尝试顺序；每条可带 reasoning）
   if (Array.isArray(src.fallback)) {
     for (const item of src.fallback.slice(0, 8)) {

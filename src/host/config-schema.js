@@ -8,7 +8,6 @@
  */
 const CONFIG_DEFAULTS = {
   version: 2,
-  main: { provider: '', model: '', reasoning: { enabled: false, effort: '' } },
   fallback: [],
   customModels: [],
   order: [],
@@ -83,17 +82,10 @@ function validateConfig(raw) {
     if (raw.context.mode !== undefined) value.context.mode = raw.context.mode;
   }
 
-  // F4（配置卫生·语义对齐）：main/fallback/customModels/order/template/updater 白名单——
-  // 镜像运行时 PURE validateConfig + client sanitizeV2（main 支持 v1 平铺、fallback 去重/上限 8/
+  // F4（配置卫生·语义对齐）：fallback/customModels/order/template/updater 白名单——
+  // 镜像运行时 PURE validateConfig + client sanitizeV2（fallback 去重/上限 8/
   // 条目级校验、effort ≤32、texts 按 MODES 白名单、touched 白名单）。防止脚手架接入运行时后清空模型链。
-  const mainSrc = raw.main && typeof raw.main === 'object' ? raw.main : raw;
-  if (typeof mainSrc.provider === 'string' && mainSrc.provider.trim() !== '') value.main.provider = mainSrc.provider.trim();
-  if (typeof mainSrc.model === 'string' && mainSrc.model.trim() !== '') value.main.model = mainSrc.model.trim();
-  const mainEffort = (mainSrc.reasoning && typeof mainSrc.reasoning === 'object' && mainSrc.reasoning.enabled === true &&
-      typeof mainSrc.reasoning.effort === 'string' && mainSrc.reasoning.effort.trim() !== '' && mainSrc.reasoning.effort.trim().length <= 32)
-    ? mainSrc.reasoning.effort.trim()
-    : (typeof mainSrc.reasoningEffort === 'string' && mainSrc.reasoningEffort.trim() !== '' && mainSrc.reasoningEffort.trim().length <= 32 ? mainSrc.reasoningEffort.trim() : '');
-  if (mainEffort) value.main.reasoning = { enabled: true, effort: mainEffort };
+  // 2026-08-18（用户指令）：main 死配置字段删除（host 只用 fallback 模型链，不维护老用户迁移）
   if (Array.isArray(raw.fallback)) {
     for (const item of raw.fallback.slice(0, 8)) {
       if (!item || typeof item !== 'object') continue;
@@ -203,9 +195,7 @@ function migrateLegacyConfig(parsed) {
   if (!parsed || typeof parsed !== 'object') return cloneDefaults();
   const out = cloneDefaults();
 
-  // v1 flat fields -> v2 structure
-  if (parsed.provider) out.main.provider = String(parsed.provider);
-  if (parsed.model) out.main.model = String(parsed.model);
+  // v1 flat fields -> v2 structure（2026-08-18：v1 provider/model 不再迁移——main 死配置字段删除）
   // F4（配置卫生）：fallback 条目级校验（去重/上限 8/条目形状），不再原样透传
   if (parsed.fallback && Array.isArray(parsed.fallback)) {
     for (const item of parsed.fallback.slice(0, 8)) {
@@ -226,7 +216,6 @@ function migrateLegacyConfig(parsed) {
   if (parsed.memory !== undefined) out.memory = parsed.memory === true;
 
   // v2 passthrough
-  if (parsed.main && typeof parsed.main === 'object') out.main = { ...out.main, ...parsed.main };
   if (parsed.params && typeof parsed.params === 'object') out.params = { ...out.params, ...parsed.params };
   if (parsed.template && typeof parsed.template === 'object') out.template = { ...out.template, ...parsed.template };
   if (parsed.context && typeof parsed.context === 'object') out.context = { ...out.context, ...parsed.context };

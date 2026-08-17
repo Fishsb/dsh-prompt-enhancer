@@ -103,7 +103,6 @@ const CONFIG_KEY = 'dsh.enhance.config.v2';
 const CONFIG_KEY_V1 = 'dsh.enhance.config.v1';
 const CONFIG_DEFAULTS = {
   version: 2,
-  main: { provider: '', model: '', reasoning: { enabled: false, effort: '' } },
   fallback: [],
   customModels: [],
   order: [],
@@ -229,7 +228,6 @@ const configState = { value: { ...CONFIG_DEFAULTS }, listeners: new Set(), fresh
 function cloneDefaults() {
   return {
     version: 2,
-    main: { provider: '', model: '', reasoning: { enabled: false, effort: '' } },
     fallback: [],
     customModels: [],
     order: [],
@@ -251,13 +249,6 @@ function cloneDefaults() {
 
 function sanitizeV2(parsed) {
   const v = cloneDefaults();
-  const m = parsed.main && typeof parsed.main === 'object' ? parsed.main : {};
-  if (typeof m.provider === 'string' && m.provider) v.main.provider = m.provider;
-  if (typeof m.model === 'string' && m.model) v.main.model = m.model;
-  if (m.reasoning && typeof m.reasoning === 'object') {
-    if (m.reasoning.enabled === true) v.main.reasoning.enabled = true;
-    if (typeof m.reasoning.effort === 'string' && m.reasoning.effort && m.reasoning.effort.length <= 32) v.main.reasoning.effort = m.reasoning.effort;
-  }
   if (Array.isArray(parsed.fallback)) {
     for (const item of parsed.fallback.slice(0, 8)) {
       if (!item || typeof item !== 'object' || typeof item.provider !== 'string' || typeof item.model !== 'string') continue;
@@ -373,29 +364,9 @@ function sanitizeV2(parsed) {
   return v;
 }
 
-// v23（D7）：老 v2 `main` → 模型链首条迁移（链中已含该组合则不重复；迁移后清空 main 供 UI 忽略）
-function migrateMainIntoChain(cfg) {
-  const m = cfg.main && typeof cfg.main === 'object' ? cfg.main : null;
-  if (m && typeof m.provider === 'string' && m.provider && typeof m.model === 'string' && m.model) {
-    if (!cfg.fallback.some((x) => x.provider === m.provider && x.model === m.model)) {
-      const entry = { provider: m.provider, model: m.model };
-      if (m.reasoning && typeof m.reasoning === 'object' && m.reasoning.enabled === true && typeof m.reasoning.effort === 'string' && m.reasoning.effort) {
-        entry.reasoning = { enabled: true, effort: m.reasoning.effort };
-      }
-      cfg.fallback = [entry].concat(cfg.fallback || []);
-    }
-  }
-  cfg.main = { provider: '', model: '', reasoning: { enabled: false, effort: '' } };
-  return cfg;
-}
-
 function migrateFromV1(parsed) {
   const v = cloneDefaults();
-  if (typeof parsed.provider === 'string' && parsed.provider) v.main.provider = parsed.provider;
-  if (typeof parsed.model === 'string' && parsed.model) v.main.model = parsed.model;
-  if (typeof parsed.reasoningEffort === 'string' && parsed.reasoningEffort) {
-    v.main.reasoning = { enabled: true, effort: parsed.reasoningEffort.slice(0, 32) };
-  }
+  // 2026-08-18（用户指令）：v1 平铺 provider/model 不再迁移（main 死配置字段删除，不维护老用户）
   if (Number.isInteger(parsed.timeoutMs) && parsed.timeoutMs >= 1000 && parsed.timeoutMs <= 300000) v.params.timeoutMs = parsed.timeoutMs;
   if (Number.isInteger(parsed.maxTokens) && parsed.maxTokens >= 100 && parsed.maxTokens <= 16000) v.params.maxTokens = parsed.maxTokens;
   if (Number.isInteger(parsed.outputLimit) && parsed.outputLimit >= 500 && parsed.outputLimit <= 50000) v.params.outputLimit = parsed.outputLimit;
@@ -423,8 +394,8 @@ function loadConfigFromStorage() {
           configState.unsupported = true;
           return;
         }
-        // v23（D7）：老 v2 main → 链首条迁移（写回，此后 main 置空不再使用）
-        configState.value = migrateMainIntoChain(sanitizeV2(parsed));
+        // 2026-08-18（用户指令）：main 死配置字段删除，不再迁移
+        configState.value = sanitizeV2(parsed);
         configState.fresh = false;
         try { localStorage.setItem(CONFIG_KEY, JSON.stringify(configState.value)); } catch (e) { /* 忽略 */ }
         return;
@@ -434,7 +405,7 @@ function loadConfigFromStorage() {
     if (rawV1) {
       const parsed = JSON.parse(rawV1);
       if (parsed && typeof parsed === 'object') {
-        configState.value = migrateMainIntoChain(migrateFromV1(parsed));
+        configState.value = migrateFromV1(parsed);
         configState.fresh = false;
         try {
           localStorage.setItem(CONFIG_KEY, JSON.stringify(configState.value));

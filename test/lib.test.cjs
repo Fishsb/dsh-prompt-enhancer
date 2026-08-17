@@ -185,30 +185,24 @@ test('friendlyMessage 错误码→可读英文文案', () => {
 });
 
 test('validateConfig 兼容 v1 平铺 + v2 结构', () => {
-  // v1 平铺
+  // v1 平铺（2026-08-18：provider/model/reasoningEffort 输出已删——main 死配置字段；v1 迁移不再保留）
   const v1 = validateConfig({ provider: 'p1', model: 'm1', reasoningEffort: 'max', timeoutMs: 60000, templateMode: 'custom', templateText: 'x' });
-  assert.equal(v1.provider, 'p1');
-  assert.equal(v1.model, 'm1');
-  assert.equal(v1.reasoningEffort, 'max');
   assert.equal(v1.timeoutMs, 60000);
   assert.equal(v1.templateMode, 'custom');
-  // v2 结构（main.reasoning.enabled + effort）
+  // v2 结构（main 输入被忽略；fallback 正常）
   const v2 = validateConfig({ main: { provider: 'p2', model: 'm2', reasoning: { enabled: true, effort: 'high' } }, fallback: [{ provider: 'p2', model: 'fb1', reasoning: { enabled: true, effort: 'medium' } }] });
-  assert.equal(v2.provider, 'p2');
-  assert.equal(v2.reasoningEffort, 'high');
   assert.equal(v2.fallback.length, 1);
   assert.equal(v2.fallback[0].reasoningEffort, 'medium');
 });
 
 test('validateConfig 边界与默认回退', () => {
   // 非法数值回退默认
-  const c = validateConfig({ timeoutMs: -5, maxTokens: 999999999, outputLimit: 1, main: {} });
+  const c = validateConfig({ timeoutMs: -5, maxTokens: 999999999, outputLimit: 1 });
   assert.equal(c.timeoutMs, 30000);
   assert.equal(c.maxTokens, 2000);
   assert.equal(c.outputLimit, 8000);
   // 空对象 → 全默认
   const d = validateConfig({});
-  assert.equal(d.provider, '');
   assert.equal(d.fallback.length, 0);
 });
 
@@ -1584,7 +1578,7 @@ test('U-parity config-schema vs 运行时 validateConfig（F4 语义奇偶）', 
   const picks5 = (t) => ['base', 'lite', 'standard', 'smart', 'publish'].map((k) => (t && t[k]) || 'default');
   const customs5 = (t) => ['base', 'lite', 'standard', 'smart', 'publish'].map((k) => (Array.isArray(t && t[k]) ? t[k] : []).map((e) => ({ name: e.name || '', text: e.text || '' })));
   const canon = (r) => ({
-    main: r.provider && r.model ? { provider: r.provider, model: r.model, reasoningEffort: r.reasoningEffort || '' } : null,
+    // 2026-08-18（用户指令）：main 死配置字段删除（provider/model 不再从 validateConfig 输出）
     fallback: (r.fallback || []).map((e) => ({ provider: e.provider, model: e.model, reasoningEffort: e.reasoningEffort || '' })),
     customModels: (r.customModels || []).map((e) => ({ provider: e.provider, model: e.model, name: e.name || '' })),
     order: r.order || [],
@@ -1597,9 +1591,7 @@ test('U-parity config-schema vs 运行时 validateConfig（F4 语义奇偶）', 
     memory: r.memory,
   });
   const canonSchema = (s) => ({
-    main: s.main && s.main.provider && s.main.model
-      ? { provider: s.main.provider, model: s.main.model, reasoningEffort: s.main.reasoning && s.main.reasoning.enabled ? s.main.reasoning.effort : '' }
-      : null,
+    // 2026-08-18（用户指令）：main 死配置字段删除
     fallback: (s.fallback || []).map((e) => ({ provider: e.provider, model: e.model, reasoningEffort: e.reasoning && e.reasoning.enabled ? e.reasoning.effort : '' })),
     customModels: (s.customModels || []).map((e) => ({ provider: e.provider, model: e.model, name: e.name || '' })),
     order: s.order || [],

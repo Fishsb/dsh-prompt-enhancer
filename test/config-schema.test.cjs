@@ -19,8 +19,7 @@ test('CFG-02 validateConfig rejects invalid mode', () => {
 
 test('CFG-03 migrateLegacyConfig maps v1 fields', () => {
   const out = migrateLegacyConfig({ provider: 'p', model: 'm', mode: 'lite', memory: true });
-  assert.equal(out.main.provider, 'p');
-  assert.equal(out.main.model, 'm');
+  // 2026-08-18（用户指令）：main 死配置字段删除——v1 provider/model 不再迁移
   assert.equal(out.mode, 'lite');
   assert.equal(out.memory, true);
 });
