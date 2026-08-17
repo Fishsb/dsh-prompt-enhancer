@@ -1032,7 +1032,8 @@ const V2_ROUNDS_SCAN_MAX = 10;
 const WATCHDOG_TIMEOUT_MS = 5000;
 const PROBE_TIMEOUT_MS = 3000;
 const PROBE_CACHE_TTL_MS = 30000;
-const V2_MSG_TEXT_MAX = 1200;
+// 2026-08-18（用户需求）：会话历史显式内容提取上限 1200 → 2400（覆盖长回复/表格，避免截断显式内容）
+const V2_MSG_TEXT_MAX = 2400;
 const V2_WORKSPACE_TIMEOUT_MS = 2000;
 const SCAN_FILE_LIST_MAX = 2000;
 const INJECT_FILE_TOP_N = 3;
