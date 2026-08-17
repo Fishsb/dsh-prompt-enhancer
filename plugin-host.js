@@ -3459,6 +3459,8 @@ return {
       const args = state.args;
       const sessionId = state.sessionId;
       const text = state.text;
+      // 2026-08-18（用户需求·每模式步骤补充）：analyze 阶段开始即上报进度「分析任务」
+      if (state.rec) setProgress(state.rec, STAGE_ANALYZE);
       const cfg = validateConfig(args && args.config);
       // v2.1（§2.2）：client 已判定实际模式（显式/auto/seed），请求 mode 覆盖解析值
       if (args && typeof args.mode === 'string' && MODE_KEYS.includes(args.mode)) cfg.mode = args.mode;
@@ -3980,6 +3982,8 @@ return {
       const sessionId = state.sessionId;
       const seq = state.seq;
       const text = state.text;
+      // 2026-08-18（用户需求·每模式步骤补充）：assemble 阶段开始即上报进度「组装上下文」
+      if (state.rec) setProgress(state.rec, STAGE_CONTEXT);
       const cfg = state.cfg;
       const chain = state.chain;
       const system = state.system;
