@@ -11,7 +11,7 @@
 - **连通性测试新增「基础模式默认模板预计耗时」（用户需求）**：测试连通性成功后，结果区展示实测连通耗时，并展示该模型历史 TTFT/tok/s 与「基础模式默认模板预计耗时」；预计耗时按当前输入长度动态估算输出 token（字符数 / 4，最低 200 token），历史数据实时读取 DSH 会话投影统计并**只按模型名匹配**（不区分 provider 路由）；无匹配历史数据时明确提示。新增 `models/stats` RPC 与 U68 单测 — [PEN-004]
 
 ### Fixed
-- **连通性测试历史统计卡「测试中…」（用户实测）**：`models/stats` 原先逐个 `readSession` 全量历史日志导致 30s+ 超时；改为 live 会话走内存、persisted 会话有界扫描（单次最多 20 个）并缓存 route/projection，客户端另加 8s 超时兜底，不再无限等待 — [PEN-004]
+- **连通性测试历史统计卡「测试中…」（用户实测）**：`models/stats` 原先逐个 `readSession` 全量历史日志导致 30s+ 超时；改为 live 会话走内存、persisted 会话有界扫描（单次最多 5 个，用户确认足够）并缓存 route/projection，客户端另加 8s 超时兜底，不再无限等待 — [PEN-004]
 - **「暂无该模型历史统计」误报（用户实测）**：此前按 provider+model 完全匹配，provider 路由别名不同（如 deepseek-official vs opencode）时同模型也判无数据；现改为**只按模型名匹配** — [PEN-004]
 - **移除重复的「（TTFT xxxms）」展示（用户反馈）**：连通性测试本身的耗时即首 token 延迟，不再单独重复显示 TTFT — [PEN-004]
 

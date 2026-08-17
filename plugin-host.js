@@ -2542,7 +2542,7 @@ return {
     const sessionProjectionCache = new Map();   // sid -> { values, at }
     const SESSION_MODEL_TTL_MS = 600000;        // persisted route 缓存 10 分钟
     const SESSION_PROJECTION_TTL_MS = 600000;   // persisted projection 缓存 10 分钟
-    const MODEL_STATS_SCAN_LIMIT = 20;          // 单次调用最多新读多少个 persisted 会话（有界防卡，覆盖更多历史）
+    const MODEL_STATS_SCAN_LIMIT = 5;           // 单次调用最多新读多少个 persisted 会话（5 个足够命中同模型历史，避免冷启动超时）
 
     function cachedSessionModel(sid) {
       const hit = sessionModelCache.get(sid);
