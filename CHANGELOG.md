@@ -9,11 +9,13 @@
 
 ### Changed
 - **连通性测试新增「基础模式默认模板预计耗时」（用户需求）**：测试连通性成功后，结果区展示实测连通耗时，并展示该模型历史 TTFT/tok/s 与「基础模式默认模板预计耗时」；预计耗时按当前输入长度动态估算输出 token（字符数 / 4，最低 200 token），历史数据实时读取 DSH 会话投影统计并**只按模型名匹配**（不区分 provider 路由）；无匹配历史数据时明确提示。新增 `models/stats` RPC 与 U68 单测 — [PEN-004]
+- **README 展示页重构为平衡派（用户指令）**：对标同生态高星插件展示格式，将 README.md / README.en.md 从原文档式结构重写为精炼展示页（功能亮点 → 安装 → 使用 → 效果展示 → 配置 → 文档）；删除冗长的隐私 / 兼容性大段文字，改为「一句话 + 链接 `docs/compatibility-matrix.md`」；替换 v2.4.3 残留旧截图 `settings-v2.4.3.png` 为用户提供的当前模型配置页（`settings-models.png`）与优化参数页（`settings-params.png`）并排展示；中英文对称 — [FLOW-PROMPT-ENHANCE]
 
 ### Fixed
 - **连通性测试历史统计卡「测试中…」（用户实测）**：`models/stats` 原先逐个 `readSession` 全量历史日志导致 30s+ 超时；改为 live 会话走内存、persisted 会话有界扫描（单次最多 5 个，用户确认足够）并缓存 route/projection，客户端另加 8s 超时兜底，不再无限等待 — [PEN-004]
 - **「暂无该模型历史统计」误报（用户实测）**：此前按 provider+model 完全匹配，provider 路由别名不同（如 deepseek-official vs opencode）时同模型也判无数据；现改为**只按模型名匹配** — [PEN-004]
 - **移除重复的「（TTFT xxxms）」展示（用户反馈）**：连通性测试本身的耗时即首 token 延迟，不再单独重复显示 TTFT — [PEN-004]
+- **README 记忆功能描述修正（用户指出）**：原展示页记忆开关沿用 v2.x 废弃规则「记忆链最近 4 轮滚动保留、发送不清除」，与最新行为不符；对齐 CHANGELOG [3.0.0]（发送消息即清空记忆链，仅发送前优化轮次内累积）与 [3.1.3]（继续优化基于本轮改动直接优化、跳过检索），更新中英文 README 记忆开关说明 — [FLOW-PROMPT-ENHANCE]
 
 ## [3.1.3] - 2026-08-17
 
