@@ -742,6 +742,11 @@ const ZH = {
   cfgReasoningLevel: '思考等级',
   cfgReasoningOn: '开',
   cfgReasoningOff: '关',
+  // 2026-08-18（用户需求）：模型行操作 hover 提示（思考开关/上移/下移/删除）
+  selThinking: '启用/关闭该模型思考能力',
+  rowUp: '上移（优先级更高）',
+  rowDown: '下移（优先级更低）',
+  rowRemove: '删除该模型',
   // 2026-08-18（用户需求）：开启思考后的耗时提醒（模型配置栏底部红色展示）
   cfgReasoningWarn: '⚠ 高推理强度会极大增加优化所需时间（思考模式耗时可数倍于普通模式），请按需选择强度。',
   cfgNoReasoning: '该模型不支持思考能力',
@@ -1021,6 +1026,11 @@ const EN = {
   cfgReasoningLevel: 'Reasoning level',
   cfgReasoningOn: 'On',
   cfgReasoningOff: 'Off',
+  // 2026-08-18（用户需求）：模型行操作 hover 提示（思考开关/上移/下移/删除）
+  selThinking: 'Enable/disable model thinking',
+  rowUp: 'Move up (higher priority)',
+  rowDown: 'Move down (lower priority)',
+  rowRemove: 'Remove this model',
   // 2026-08-18（用户需求）：开启思考后的耗时提醒（模型配置栏底部红色展示）
   cfgReasoningWarn: '⚠ High reasoning effort greatly increases optimization time (thinking can take several times longer); choose effort accordingly.',
   cfgNoReasoning: 'This model does not support thinking',
@@ -2430,6 +2440,8 @@ function MarqueeSelect(props) {
       'aria-haspopup': 'listbox',
       'aria-label': props['aria-label'],
       'aria-describedby': props['aria-describedby'],
+      // 2026-08-18（用户需求）：下拉框 hover 提示（如思考开关）——title 透传给 trigger
+      title: props.title,
       className: 'dsh-plg-mselect-trigger',
       onClick: toggle,
       onKeyDown: onTriggerKeyDown,
@@ -2936,7 +2948,7 @@ function ModelMainSection(props) {
             type: 'button',
             className: 'dsh-plg-btn dsh-plg-btn-icononly',
             onClick: () => setTestState(null),
-            title: '✕',
+            title: t('dismiss'),
             'aria-label': t('dismiss'),
           }, '✕'),
         ),
@@ -3058,6 +3070,8 @@ function FallbackRow(props) {
       ? React.createElement(React.Fragment, null,
           React.createElement(MarqueeSelect, {
             className: 'dsh-plg-select dsh-plg-select-thinking',
+            // 2026-08-18（用户需求）：思考开关 hover 提示（简要介绍）
+            title: t('selThinking'),
             value: effortOn ? 'on' : 'off',
             onChange: (e) => {
               const next = e.target.value === 'on';
@@ -3084,9 +3098,9 @@ function FallbackRow(props) {
       title: t('cfgTest'),
       'aria-label': t('cfgTest'),
     }, testing ? '…' : '⛓'),
-    React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', disabled: index === 0, onClick: () => onMove(-1), title: '↑' }, '↑'),
-    React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', disabled: index === count - 1, onClick: () => onMove(1), title: '↓' }, '↓'),
-    React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', onClick: onRemove, title: '✕' }, '✕'),
+    React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', disabled: index === 0, onClick: () => onMove(-1), title: t('rowUp'), 'aria-label': t('rowUp') }, '↑'),
+    React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', disabled: index === count - 1, onClick: () => onMove(1), title: t('rowDown'), 'aria-label': t('rowDown') }, '↓'),
+    React.createElement('button', { type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly', onClick: onRemove, title: t('rowRemove'), 'aria-label': t('rowRemove') }, '✕'),
   );
 }
 // 模型配置 tab（v18：helpers + fresh install 继承 + 四区块）
