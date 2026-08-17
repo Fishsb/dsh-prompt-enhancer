@@ -712,7 +712,7 @@ const ZH = {
   tplRemoveCustom: '删除该模板',
   tplName: '模板名称',
   tplNamePlaceholder: '模板名称（≤40 字符）',
-  tplNote: '每个模式可选 2 个内置模板——默认模板（只把语句描述得更清晰，不扩展）或增量模板（理解语句实际要执行的任务，保守补充没说的、缺失会导致执行模型误判的大逻辑与信息）；或自定义模板。自定义模板按模式独立保存、可添加多个（各 ≤4000 字符），当前选中项将用于优化。',
+  tplNote: '每模式可选内置「默认」（只重述不扩展）或「增量」（保守补充缺失的大逻辑）；或自定义模板（≤4000 字符）。',
   cfgSaved: '✓ 已保存',
   // v2.7.0：保存校验状态（转圈/失败）
   cfgSaving: '保存中…',
@@ -720,7 +720,7 @@ const ZH = {
   cfgLoadFailed: '加载模型列表失败',
   cfgEmptyModels: '该提供方暂无可用模型',
   cfgNoProvider: '未配置 LLM 提供方',
-  cfgHint: '配置保存在本地浏览器（localStorage），仅对当前实例生效；主题请使用 Harness 原生外观设置。',
+  cfgHint: '配置保存在本地浏览器（localStorage），仅对当前实例生效。',
   cfgLogs: '诊断日志',
   cfgLogsEmpty: '暂无日志（执行优化后生成）',
   navModelPlugins: '模型与插件',
@@ -773,23 +773,23 @@ const ZH = {
   // F3（配置卫生）：新版本配置保护
   cfgNewerVersion: '当前配置由更新版本的插件创建，本版本暂以默认配置运行；你的配置未被改动',
   // F8（配置卫生）：恢复默认语义
-  cfgRestoreNote: '「恢复默认」仅重置模型链（自适应当前可用模型），不清除自定义模板、优化参数与记忆设置',
+  cfgRestoreNote: '「恢复默认」仅重置模型链为官方两个模型（1 Flash、2 Pro），不清除自定义模板、优化参数与记忆设置',
   // v2.2（§0.2/§6.6）：模式体系文案（MODE_OPTIONS hint 由 cfgModeHint 提供）
   cfgMode: '优化模式',
   cfgMemory: '记忆功能',
-  cfgMemoryNote: '开启后，多轮「优化→修改→再优化」累积为记忆链（持续记忆：固定保留最近 4 轮输入与输出，滚动更新；发送消息即清空记忆链（持续记忆仅限发送前一轮优化内的会话）；仅手动清空输入框不清除——内容删除可能表示方向调整；仅撤回弹出最后一轮），每轮再优化以多轮对话形式代入全部轮次，并感知你对上一轮结果的修改方向（新增/删除）；首次自动走轻量模式；关闭后完全不再读取/写入',
+  cfgMemoryNote: '开启后，多轮优化累积为记忆链并代入后续优化；关闭后不再读取/写入。发送消息会清空记忆链。',
   cfgModeHintBase: '直发优化，不读取任何上下文，全体系最快最省',
-  cfgModeHintLite: '本地规则分析输入要素（目标/约束/格式/示例），缺失项保守提示明确化；不注入任何外部上下文',
+  cfgModeHintLite: '本地规则分析输入要素，缺失项保守提示明确化；不注入外部上下文',
   cfgModeHintStandard: '规则理解 + 工作区文件与会话事件检索注入，零额外 LLM 成本',
   cfgModeHintSmart: 'LLM 分析任务进度 + 全量检索注入，上下文理解最准',
   // v2.7.0（一键发布）：网络检索 + 工作区检索 + 九章规格生成
-  cfgModeHintPublish: '输入粗略想法（如"想开发一个纸牌游戏"）→ 网络检索同类项目结构 + 工作区参考，一键生成完整可实施的开发规格（九章：目标/核心循环/数值/数据结构/机制/交互/技术方案/实施路线/验收清单）；多轮补充可逐步细化（记忆强制开启；上下文预算需 > 0 才启用检索）',
+  cfgModeHintPublish: '粗略想法 → 检索同类项目 + 工作区参考，一键生成完整开发规格（九章）；多轮补充可逐步细化（上下文预算需 > 0 才启用检索）',
   cfgContextBudget: '上下文预算',
   cfgContextBudget0: '0（关闭注入）',
   // v3.1.7（用户需求·参数无限制）：下拉框「无限制」选项文案（超时/Token/字符=0；上下文预算=16000 档）
   cfgUnlimited: '无限制',
   // v3.1.8（预算真正生效·每模式独立档位）：说明各模式档位范围与「预算越大注入越多」语义
-  cfgContextNote: '上下文预算控制本模式可注入的参考量：0 = 不注入（等价基础直发）；档位随模式而异（轻量 0–4000 / 标准 0–8000 / 专家 0–16000 / 发布 0–32000）；预算越大，会话/文档检索范围与注入内容越多',
+  cfgContextNote: '上下文预算控制本模式可注入的参考量：0 = 不注入；预算越大，会话/文档检索范围越广',
   // v2.3（§7.2/§7.3）：模式短标签 + 步骤进度文案 + 记忆开关
   modeShortBase: '基础',
   modeShortLite: '轻量',
@@ -991,7 +991,7 @@ const EN = {
   tplRemoveCustom: 'Delete template',
   tplName: 'Template name',
   tplNamePlaceholder: 'Template name (≤40 chars)',
-  tplNote: 'Each mode can pick one of 2 built-in templates — default (only restates the statement more clearly, no expansion) or increment (understands the task the statement actually intends, and conservatively supplements the big-logic/information it omitted that would otherwise mislead the executing model); or a custom template. Custom templates are saved per mode and can be added multiple times (≤4000 chars each). The current selection is used for optimization.',
+  tplNote: 'Each mode picks built-in Default (restates only) or Increment (conservatively fills missing big logic); or a custom template (≤4000 chars).',
   cfgSaved: '✓ Saved',
   // v2.7.0：保存校验状态（转圈/失败）
   cfgSaving: 'Saving…',
@@ -999,7 +999,7 @@ const EN = {
   cfgLoadFailed: 'Failed to load models',
   cfgEmptyModels: 'No models available for this provider',
   cfgNoProvider: 'No LLM provider configured',
-  cfgHint: 'Preferences are stored locally in this browser (localStorage) and apply to this instance only. Theme is handled by the native Harness appearance settings.',
+  cfgHint: 'Settings are stored locally (localStorage) and apply to this instance only.',
   cfgLogs: 'Diagnostics log',
   cfgLogsEmpty: 'No logs yet (they appear after optimizations)',
   navModelPlugins: 'Models & plugins',
@@ -1052,23 +1052,23 @@ const EN = {
   // F3 (config hygiene): newer-version config protection
   cfgNewerVersion: 'This configuration was created by a newer plugin version; running with defaults for now — your stored configuration is untouched',
   // F8 (config hygiene): restore-defaults semantics
-  cfgRestoreNote: '"Restore defaults" only resets the model chain (adaptive to currently available models); custom templates, parameters and memory settings are kept',
+  cfgRestoreNote: '"Restore defaults" resets the model chain to the two official models (1 Flash, 2 Pro); templates, parameters and memory are kept',
   // v2.0.0（C3）：引擎与上下文配置文案
   cfgEngine: 'Engine',
   cfgMode: 'Mode',
   cfgMemory: 'Memory',
-  cfgMemoryNote: 'When on, iterative rounds (optimize → edit → re-optimize) accumulate into a memory chain (persistent memory: fixed window of the latest 4 input/output pairs, rolling; sending the message clears the memory chain (persistent memory covers only the pre-send iteration); manually clearing the composer does NOT clear it — deleting content may signal a direction change; only Undo drops the last round). Each re-optimization replays the chain as a multi-turn conversation and senses your edit direction (added/removed); first run falls back to Lite automatically; when off, memory is never read or written',
+  cfgMemoryNote: 'When on, rounds accumulate into a memory chain replayed in later optimizations; when off, memory is never read or written. Sending a message clears the chain.',
   cfgModeHintBase: 'Direct optimization, no context, fastest',
-  cfgModeHintLite: 'Local rule analysis of the input (goal/constraints/format/example); missing elements are clarified conservatively only when inferable; no external context is injected',
+  cfgModeHintLite: 'Local rule analysis of the input; missing elements are clarified conservatively; no external context',
   cfgModeHintStandard: 'Rule understanding + file & session retrieval, no extra LLM call',
   cfgModeHintSmart: 'LLM task analysis + full retrieval, best understanding',
   // v2.7.0（一键发布）：网络检索 + 工作区检索 + 九章规格生成
-  cfgModeHintPublish: 'Feed a rough idea (e.g. "I want to make a card game") → web-search similar project structures + workspace references, generate a complete implementable dev spec in one click (9 chapters: goal/core loop/numbers/data/mechanics/UI/tech/roadmap/acceptance); iterative refinements keep improving it (memory forced ON; context budget must be > 0 to enable retrieval)',
+  cfgModeHintPublish: 'Rough idea → web-search similar projects + workspace refs, generate a full 9-chapter dev spec in one click; refine iteratively (context budget must be > 0 for retrieval)',
   cfgContextBudget: 'Context budget',
   cfgContextBudget0: '0 (no injection)',
   cfgUnlimited: 'Unlimited',
   // v3.1.8（预算真正生效·每模式独立档位）：说明各模式档位范围与「预算越大注入越多」语义
-  cfgContextNote: 'Context budget controls how much reference this mode may inject: 0 = no injection (same as basic); options vary by mode (lite 0–4000 / standard 0–8000 / smart 0–16000 / publish 0–32000); higher budget = wider session/doc search and more injection',
+  cfgContextNote: 'Context budget controls how much reference may be injected: 0 = none; higher = wider session/doc retrieval',
   // v2.3（§7.2/§7.3）：模式短标签 + 步骤进度文案 + 记忆开关
   modeShortBase: 'Basic',
   modeShortLite: 'Lite',
