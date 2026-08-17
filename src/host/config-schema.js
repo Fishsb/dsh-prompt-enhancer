@@ -13,7 +13,7 @@ const CONFIG_DEFAULTS = {
   customModels: [],
   order: [],
   params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
-  // 模板体系扩展（2026-08-17）：pick=每模式选中键（default/supplement/dev/custom:<index>）；
+  // 模板体系扩展（2026-08-18 修订）：pick=每模式选中键（default/increment/custom:<index>）；
   // custom=每模式多自定义模板列表 [{name,text}]（各 ≤4000、≤10 条）
   template: {
     mode: 'builtin',
@@ -30,6 +30,17 @@ const CONFIG_DEFAULTS = {
 };
 
 const MODES = ['base', 'lite', 'standard', 'smart', 'publish'];
+
+// v3.1.8（实测驱动·用户指令）：每模式默认 params（标准档）——镜像运行时 PURE MODE_PARAMS_DEFAULT。
+// 2026-08-18 实测（4 模式 × 3 次，默认模板 T1、不带思考）：耗时 ≤10s、输出 156–336 字符；
+// smart 管道含检索/判定/工作区调用 → 标准档更高。
+const MODE_PARAMS_DEFAULT = {
+  base: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
+  lite: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
+  standard: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
+  smart: { timeoutMs: 60000, maxTokens: 4000, outputLimit: 16000 },
+  publish: { timeoutMs: 60000, maxTokens: 4000, outputLimit: 16000 },
+};
 
 function cloneDefaults() {
   return JSON.parse(JSON.stringify(CONFIG_DEFAULTS));
@@ -53,14 +64,19 @@ function validateConfig(raw) {
     else value.memory = raw.memory;
   }
   if (raw.mode === 'memory') value.memory = true;
-  // F4（语义对齐）：一键发布模式记忆强制开启（镜像运行时 v2.8.2 host 兜底）
-  if (value.mode === 'publish') value.memory = true;
+  // v2.8.2 曾一键发布记忆强制开启（镜像运行时）；2026-08-18（用户指令）取消——记忆跟随开关
 
   // F4（语义对齐）：params 解析镜像运行时——v2 结构（params.*）与 v1 平铺（顶层 timeoutMs/maxTokens/outputLimit）双兼容
+  // v3.1.7（用户需求·参数无限制）：timeoutMs=0 / maxTokens=0 / outputLimit=0 = 无限制（不设超时 / provider 默认上限 / 不截断）
   const p = raw.params && typeof raw.params === 'object' ? raw.params : raw;
-  if (p.timeoutMs !== undefined) value.params.timeoutMs = Number.isInteger(p.timeoutMs) && p.timeoutMs >= 1000 && p.timeoutMs <= 300000 ? p.timeoutMs : value.params.timeoutMs;
-  if (p.maxTokens !== undefined) value.params.maxTokens = Number.isInteger(p.maxTokens) && p.maxTokens >= 100 && p.maxTokens <= 16000 ? p.maxTokens : value.params.maxTokens;
-  if (p.outputLimit !== undefined) value.params.outputLimit = Number.isInteger(p.outputLimit) && p.outputLimit >= 500 && p.outputLimit <= 50000 ? p.outputLimit : value.params.outputLimit;
+  if (p.timeoutMs !== undefined) value.params.timeoutMs = (p.timeoutMs === 0) || (Number.isInteger(p.timeoutMs) && p.timeoutMs >= 1000 && p.timeoutMs <= 300000) ? p.timeoutMs : value.params.timeoutMs;
+  if (p.maxTokens !== undefined) value.params.maxTokens = (p.maxTokens === 0) || (Number.isInteger(p.maxTokens) && p.maxTokens >= 100 && p.maxTokens <= 16000) ? p.maxTokens : value.params.maxTokens;
+  if (p.outputLimit !== undefined) value.params.outputLimit = (p.outputLimit === 0) || (Number.isInteger(p.outputLimit) && p.outputLimit >= 500 && p.outputLimit <= 50000) ? p.outputLimit : value.params.outputLimit;
+  // v3.1.8（实测驱动·用户指令）：未显式设置的项用该模式默认（标准档）——镜像运行时 validateConfig
+  const pd = MODE_PARAMS_DEFAULT[value.mode] || MODE_PARAMS_DEFAULT.base;
+  if (p.timeoutMs === undefined) value.params.timeoutMs = pd.timeoutMs;
+  if (p.maxTokens === undefined) value.params.maxTokens = pd.maxTokens;
+  if (p.outputLimit === undefined) value.params.outputLimit = pd.outputLimit;
 
   if (raw.context && typeof raw.context === 'object') {
     if (raw.context.budgetChars !== undefined) value.context.budgetChars = raw.context.budgetChars;
@@ -136,9 +152,10 @@ function validateConfig(raw) {
       if (typeof key === 'string' && MODES.includes(key) && !value.template.touched.includes(key)) value.template.touched.push(key);
     }
   }
-  // 模板体系扩展（2026-08-17）：pick/custom 解析镜像运行时 PURE validateConfig——pick 白名单
-  // default/supplement/dev/custom:<index>（index 越界回退 default）；custom 每模式 ≤10 条、
-  // 每条 {name(≤40), text(≤4000)}；旧配置（无 pick 字段）且 mode==='custom' 时 texts 非空 → 迁为 custom:0。
+  // 模板体系扩展（2026-08-18 修订）：pick/custom 解析镜像运行时 PURE validateConfig——pick 白名单
+  // default/increment/custom:<index>（index 越界回退 default）；旧内置键 supplement/dev（2026-08-17
+  // 每模式 3 模板时期）统一迁为 increment；custom 每模式 ≤10 条、每条 {name(≤40), text(≤4000)}；
+  // 旧配置（无 pick 字段）且 mode==='custom' 时 texts 非空 → 迁为 custom:0。
   const TEMPLATE_CUSTOM_MAX = 10;
   const TEMPLATE_TEXT_MAX = 4000;
   const TEMPLATE_NAME_MAX = 40;
@@ -166,7 +183,7 @@ function validateConfig(raw) {
   } else if (hasNewPick) {
     for (const key of MODES) {
       const p = typeof tSrc.pick[key] === 'string' ? tSrc.pick[key] : '';
-      if (p === 'supplement' || p === 'dev') value.template.pick[key] = p;
+      if (p === 'increment' || p === 'supplement' || p === 'dev') value.template.pick[key] = 'increment';
       else if (p.indexOf('custom:') === 0) {
         const idx = parseInt(p.slice(7), 10);
         if (Number.isInteger(idx) && idx >= 0 && idx < value.template.custom[key].length) value.template.pick[key] = 'custom:' + idx;
