@@ -734,6 +734,8 @@ const ZH = {
   cfgReasoningLevel: '思考等级',
   cfgReasoningOn: '开',
   cfgReasoningOff: '关',
+  // 2026-08-18（用户需求）：开启思考后的耗时提醒（模型配置栏底部红色展示）
+  cfgReasoningWarn: '⚠ 高推理强度会极大增加优化所需时间（思考模式耗时可数倍于普通模式），请按需选择强度。',
   cfgNoReasoning: '该模型不支持思考能力',
   cfgResolveFailed: '读取模型能力失败',
   cfgTest: '测试连通性',
@@ -1005,6 +1007,8 @@ const EN = {
   cfgReasoningLevel: 'Reasoning level',
   cfgReasoningOn: 'On',
   cfgReasoningOff: 'Off',
+  // 2026-08-18（用户需求）：开启思考后的耗时提醒（模型配置栏底部红色展示）
+  cfgReasoningWarn: '⚠ High reasoning effort greatly increases optimization time (thinking can take several times longer); choose effort accordingly.',
   cfgNoReasoning: 'This model does not support thinking',
   cfgResolveFailed: 'Failed to read model capabilities',
   cfgTest: 'Test connectivity',
@@ -2940,6 +2944,10 @@ function ModelMainSection(props) {
       ),
       React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgRestoreNote')),
       React.createElement('p', { className: 'dsh-plg-hint' }, t('cfgFallbackNote')),
+      // 2026-08-18（用户需求）：任一模型开启思考 → 模型配置栏最下面红色提醒高推理强度耗时
+      fallback.some((e) => e && e.reasoning && e.reasoning.enabled === true)
+        ? React.createElement('p', { className: 'dsh-plg-reasoning-warn' }, t('cfgReasoningWarn'))
+        : null,
     );
   }
   return React.createElement(CollapsibleSection, { title: t('secMain'), summary }, body);
@@ -3569,6 +3577,8 @@ const CSS = [
   '.dsh-plg-project-link a{color:var(--dsw-alias-brand-primary);text-decoration:underline;cursor:pointer;word-break:break-all}',
   '.dsh-plg-project-link a:hover{opacity:.85}',
   '.dsh-plg-saved{color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:16px}',
+  // 2026-08-18（用户需求）：开启思考的耗时提醒（模型配置栏底部，红色警示）
+  '.dsh-plg-reasoning-warn{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:18px;margin:4px 0 0;font-weight:600}',
   // v2.7.0：保存状态机样式（转圈复用 dsh-enh-spin；saved/failed 状态色）
   '.dsh-plg-save{display:flex;align-items:center;gap:6px;font-size:12px;line-height:16px;margin-top:8px}',
   '.dsh-plg-save-ok{color:var(--dsw-alias-state-success-primary)}',

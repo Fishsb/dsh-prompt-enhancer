@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Changed
+- **开启思考模型红色耗时提醒（用户需求）**：模型配置栏任一模型开启「思考开关」后，配置栏最下面显示红色提醒「高推理强度会极大增加优化所需时间（思考模式耗时可数倍于普通模式），请按需选择强度」（`cfgReasoningWarn` i18n + `.dsh-plg-reasoning-warn` 红色警示样式，`fallback.some(reasoning.enabled)` 触发）— [PEN-002]
 - **插件管理模块自动版本检测（用户需求）**：打开设置页「插件管理」板块时自动执行一次版本检测（UpdaterCard 挂载 useEffect 触发 doCheck；React tab 切换重挂载则每次进入自动检查，checking 防重入；手动按钮保留）— [VU-001]
 - **插件管理板块加项目地址跳转链接（用户需求）**：设置页「插件管理」板块「版本检测与更新」卡片下方另起一行，新增项目地址链接（GitHub · Fishsb/dsh-prompt-enhancer，新标签页打开，品牌色下划线可点样式）；新增 `cfgProjectLink` i18n 键（中/英）+ `.dsh-plg-project-link` 样式 — [VU-001]
 - **取消记忆兜底 + publish 参数强制（用户指令）**：① **记忆开关不再兜底轻量模式**——原「记忆开 + 无记忆 + 首次 → 强制轻量模式」取消（client resolveActualMode），记忆只负责携带 rounds 链，优化模式始终按用户选择执行（base/lite/standard/smart/publish 均不兜底）；② **一键发布四项限制取消**——原 publish 记忆强制开启（client state.js / host pure.js / config-schema 三处）、超时强制 ≥240s、maxTokens 强制 0、outputLimit 强制 0（host enhance-handlers 参数强制）全部取消：publish 记忆/超时/Token 上限/字符上限均可调（默认档 60s/4k/16k 按上一轮实测覆盖），UI 置灰移除（params-tab memoryLocked + 三下拉 disabled + 切 publish 强制记忆）、i18n 死键 cfgPublishMemoryLocked 删除。实测验证：publish 配置 memory:false/maxTokens=4000/outputLimit=16000 生效（日志 ctx=none、参数用配置值），9292 字符输出不截断。129/129 — [PEN-002]/[PEN-003]
