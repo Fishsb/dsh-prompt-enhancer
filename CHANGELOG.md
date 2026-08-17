@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Changed
+- **设置界面导航名改名（用户需求）**：`navModelPlugins`「模型与插件」→「**提示词增强**」（en：Models & plugins → **Prompt Enhancer**）；同步页面标题、tablist aria-label 与设置导航 label — [VU-001]
 - **模型配置栏提示文案微调（用户指定表述）**：`cfgRestoreNote` →「「恢复默认」重置模型链为官方模型配置，不清除自定义模板、优化参数与记忆设置」（去掉「仅」与「1 Flash、2 Pro」细节）；`cfgFallbackNote` →「按顺序逐一尝试，失败则用下一条，可增删改序」（去掉「每条可设思考」）。en 同步 — [PEN-002]
 - **模型行操作 hover 提示（用户需求·类似测试连通性按钮提示）**：MarqueeSelect 组件透传 `title` 给 trigger；模型配置栏**思考开关**加 hover 提示「启用/关闭该模型思考能力」（`selThinking`）；模型行末尾 **↑↓✕ 三按钮** title 从无意义字符改为「上移（优先级更高）/ 下移（优先级更低）/ 删除该模型」（`rowUp`/`rowDown`/`rowRemove`）；测试结果区 ✕ 关闭按钮 title 对齐 `dismiss`。i18n 新增 4 键（中/英）— [PEN-002]
 - **设置界面提示文案精简排版（用户需求·优化参数介绍太详细）**：params-tab 超长介绍全部压缩到一句话要点——`cfgMemoryNote` 181→40 字（保留核心：开启累积记忆链/关闭不读写/发送清空）；`tplNote` 132→42 字（默认只重述/增量补大逻辑/自定义 ≤4000）；`cfgModeHintPublish` 131→45 字（**顺带修正过时信息：去掉已取消的「记忆强制开启」**）；`cfgContextNote` 112→40 字（去档位数值表，下拉本身可见）；`cfgHint` 55→28 字（去主题提示）；`cfgModeHintLite` 45→29 字。另修正 `cfgRestoreNote` 过时语义（「自适应当前可用模型」→「官方两个模型（1 Flash、2 Pro）」，与上一轮恢复默认改动一致）。en 同步精简 — [PEN-002]

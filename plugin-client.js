@@ -723,7 +723,7 @@ const ZH = {
   cfgHint: '配置保存在本地浏览器（localStorage），仅对当前实例生效。',
   cfgLogs: '诊断日志',
   cfgLogsEmpty: '暂无日志（执行优化后生成）',
-  navModelPlugins: '模型与插件',
+  navModelPlugins: '提示词增强',
   // 2026-08-16（方案「设置界面样式与交互对齐官方」）：设置页 section 简介
   secPluginsIntro: '模型链、优化参数与插件管理的统一设置入口，修改即时保存。',
   tabModels: '模型配置',
@@ -1007,7 +1007,7 @@ const EN = {
   cfgHint: 'Settings are stored locally (localStorage) and apply to this instance only.',
   cfgLogs: 'Diagnostics log',
   cfgLogsEmpty: 'No logs yet (they appear after optimizations)',
-  navModelPlugins: 'Models & plugins',
+  navModelPlugins: 'Prompt Enhancer',
   // 2026-08-16（方案「设置界面样式与交互对齐官方」）：设置页 section 简介
   secPluginsIntro: 'Model chain, optimization parameters, and plugin management in one place; changes save immediately.',
   tabModels: 'Models',
