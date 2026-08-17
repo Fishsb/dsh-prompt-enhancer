@@ -8,7 +8,7 @@
 ## [Unreleased]
 
 ### Changed
-- **优化按钮显示正在优化的模型序号（用户需求）**：llm 阶段「优化中」改为「{n} 优化中」（n = 当前尝试的模型序号，来自 enhance/progress 的 step）——失败切换模型时序号递增（1→2→3），用户可据此判断是模型配置问题而非插件问题；其余 stage 文案不变；新增 `enhancingModel` i18n 键（中/英）— [PEN-001]
+- **优化按钮提示精简（用户需求）**：llm 阶段「优化中」→「{n} 优化中」（n = 当前尝试模型序号，失败切换递增 1→2→3，用户可判断是模型配置问题）；重试精简为「{n} 正在重试」（原「模型 {n} 优化中 · 正在重试」过长）；成功态「✓ 已优化，可撤回」→「可撤回」（result/resultFallback 统一）；新增 `enhancingModel`/`enhancingRetryModel` i18n（中/英）— [PEN-001]
 - **开启思考模型红色耗时提醒（用户需求）**：模型配置栏任一模型开启「思考开关」后，配置栏最下面显示红色提醒「高推理强度会极大增加优化所需时间（思考模式耗时可数倍于普通模式），请按需选择强度」（`cfgReasoningWarn` i18n + `.dsh-plg-reasoning-warn` 红色警示样式，`fallback.some(reasoning.enabled)` 触发）— [PEN-002]
 - **插件管理模块自动版本检测（用户需求）**：打开设置页「插件管理」板块时自动执行一次版本检测（UpdaterCard 挂载 useEffect 触发 doCheck；React tab 切换重挂载则每次进入自动检查，checking 防重入；手动按钮保留）— [VU-001]
 - **插件管理板块加项目地址跳转链接（用户需求）**：设置页「插件管理」板块「版本检测与更新」卡片下方另起一行，新增项目地址链接（GitHub · Fishsb/dsh-prompt-enhancer，新标签页打开，品牌色下划线可点样式）；新增 `cfgProjectLink` i18n 键（中/英）+ `.dsh-plg-project-link` 样式 — [VU-001]

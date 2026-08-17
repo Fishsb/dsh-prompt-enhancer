@@ -539,11 +539,11 @@ loadConfigFromStorage();
 const ZH = {
   enhanceButton: '优化',
   enhancing: '优化中',
-  // 2026-08-18（用户需求）：llm 阶段显示正在优化的模型序号（失败切换递增）
+  // 2026-08-18（用户需求）：llm 阶段显示正在优化的模型序号；重试精简（从 2 起「N 正在重试」）
   enhancingModel: '{n} 优化中',
-  enhancingRetryModel: '模型 {n} 优化中 · 正在重试',
-  result: '✓ 已优化，可撤回',
-  resultFallback: '✓ {model} 优化，可撤回',
+  enhancingRetryModel: '{n} 正在重试',
+  result: '可撤回',
+  resultFallback: '可撤回',
   titleIdle: '一键优化提示词（独立 LLM 调用）',
   // v2.6.2（继续优化）：已优化过一轮后修改草稿的按钮文字与提示
   btnContinue: '继续优化',
@@ -820,11 +820,11 @@ const ZH = {
 const EN = {
   enhanceButton: 'Optimize',
   enhancing: 'Optimizing',
-  // 2026-08-18（用户需求）：llm 阶段显示正在优化的模型序号（失败切换递增）
+  // 2026-08-18（用户需求）：llm 阶段显示正在优化的模型序号；重试精简
   enhancingModel: 'Model {n} optimizing',
-  enhancingRetryModel: 'Model {n} optimizing · retrying',
-  result: '✓ Optimized · Undo',
-  resultFallback: '✓ Optimized with {model} · Undo',
+  enhancingRetryModel: 'Retrying {n}',
+  result: 'Undo',
+  resultFallback: 'Undo',
   titleIdle: 'Optimize the prompt with an independent LLM call',
   // v2.6.2（继续优化）：已优化过一轮后修改草稿的按钮文字与提示
   btnContinue: 'Continue',
