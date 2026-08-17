@@ -685,6 +685,11 @@ const ZH = {
   cfgTestFail: '✗ {msg}',
   cfgTestEstimate: '基础模式默认模板预计约 {time}（历史 TTFT {ttft} · {tps} tok/s）',
   cfgTestEstimateNoData: '暂无该模型历史统计',
+  cfgMeasureLive: '实测：首 token {ttft} · {tps} tok/s · 预计约 {time}',
+  cfgMeasureLiveOk: '实测：可用',
+  cfgMeasureLiveFail: '实测：{msg}',
+  cfgMeasureHist: '历史：首 token {ttft} · {tps} tok/s · 预计约 {time}',
+  cfgMeasureHistEmpty: '历史：暂无有效历史数据',
   cfgAddFallback: '＋ 添加模型',
   cfgRestoreDefaults: '恢复默认',
   cfgCustomName: '显示名',
@@ -943,6 +948,11 @@ const EN = {
   cfgTestFail: '✗ {msg}',
   cfgTestEstimate: 'Base default template est. {time} (hist TTFT {ttft} · {tps} tok/s)',
   cfgTestEstimateNoData: 'No historical stats for this model',
+  cfgMeasureLive: 'Live: TTFT {ttft} · {tps} tok/s · est. {time}',
+  cfgMeasureLiveOk: 'Live: OK',
+  cfgMeasureLiveFail: 'Live: {msg}',
+  cfgMeasureHist: 'Hist: TTFT {ttft} · {tps} tok/s · est. {time}',
+  cfgMeasureHistEmpty: 'Hist: no valid data',
   cfgAddFallback: '+ Add model',
   cfgRestoreDefaults: 'Restore defaults',
   cfgCustomName: 'Display name',
@@ -2623,51 +2633,49 @@ function ModelMainSection(props) {
   const runTest = (index, entry) => {
     if (!entry || !entry.provider || !entry.model) return;
     const key = entry.provider + '/' + entry.model;
-    setTestState({ key, index, entry, phase: 'testing', result: null });
-    host.call('models/test', { provider: entry.provider, model: entry.model, inputChars: (getLastDraft() || '').length }).then((res) => {
+    const inputChars = (getLastDraft() || '').length;
+    setTestState({ key, index, entry, phase: 'testing', result: null, live: null, hist: { loading: true } });
+
+    // 实测：本次测试测量
+    host.call('models/test', { provider: entry.provider, model: entry.model, inputChars }).then((res) => {
       const r = res && typeof res === 'object' ? res : {};
-      const liveEstimate = r.ok && typeof r.estimatedBaseSeconds === 'number' && Number.isFinite(r.estimatedBaseSeconds) ? r.estimatedBaseSeconds : null;
-      setTestState({
-        key,
-        index,
-        entry,
-        phase: 'done',
-        result: r.ok
-          ? {
-              ok: true,
-              latencyMs: r.latencyMs,
-              ttftMs: r.ttftMs,
-              estimate: liveEstimate,
-              stats: liveEstimate ? { ttftMs: r.ttftMs, tokensPerSecond: r.tokensPerSecond } : undefined,
-              statsLoading: !liveEstimate,
-              statsUnavailable: false,
-            }
-          : { ok: false, message: r.message || r.code || '' },
-      });
-      if (!r.ok || liveEstimate !== null) return;
-      const inputChars = (getLastDraft() || '').length;
-      const applyStats = (sr) => {
-        const s = sr && typeof sr === 'object' ? sr : {};
-        setTestState((prev) => prev && prev.key === key
-          ? { ...prev, result: { ...prev.result, statsLoading: false, estimate: s.ok ? s.estimatedBaseSeconds : null, statsUnavailable: !s.ok || typeof s.estimatedBaseSeconds !== 'number' || !Number.isFinite(s.estimatedBaseSeconds), stats: s.ok ? { ttftMs: s.ttftMs, tokensPerSecond: s.tokensPerSecond } : undefined } }
-          : prev);
-      };
-      const statsP = host.call('models/stats', { provider: entry.provider, model: entry.model, inputChars });
-      if (timerSvc && typeof timerSvc.timeout === 'function') {
-        let dispose = null;
-        const timeoutP = new Promise((resolve) => { dispose = timerSvc.timeout(() => resolve({ ok: false, code: 'STATS_TIMEOUT' }), 8000); });
-        Promise.race([statsP, timeoutP]).then((sr) => { if (dispose) dispose(); applyStats(sr); }).catch(() => {
-          if (dispose) dispose();
-          setTestState((prev) => prev && prev.key === key ? { ...prev, result: { ...prev.result, statsLoading: false, statsUnavailable: true } } : prev);
-        });
-      } else {
-        statsP.then(applyStats).catch(() => {
-          setTestState((prev) => prev && prev.key === key ? { ...prev, result: { ...prev.result, statsLoading: false, statsUnavailable: true } } : prev);
-        });
-      }
+      setTestState((prev) => (prev && prev.key === key
+        ? {
+            ...prev,
+            phase: 'done',
+            result: r.ok ? { ok: true, latencyMs: r.latencyMs } : { ok: false, message: r.message || r.code || '' },
+            live: r.ok && Number.isFinite(r.estimatedBaseSeconds)
+              ? { ok: true, ttftMs: r.ttftMs, tokensPerSecond: r.tokensPerSecond, estimate: r.estimatedBaseSeconds }
+              : (r.ok ? { ok: true } : { ok: false, message: r.message || r.code || '' }),
+          }
+        : prev));
     }).catch(() => {
-      setTestState({ key, index, entry, phase: 'done', result: { ok: false, message: t('errNETWORK') } });
+      setTestState((prev) => (prev && prev.key === key
+        ? { ...prev, phase: 'done', result: { ok: false, message: t('errNETWORK') }, live: { ok: false, message: t('errNETWORK') } }
+        : prev));
     });
+
+    // 历史：始终读取，与实测分开标注
+    const applyHist = (sr) => {
+      const s = sr && typeof sr === 'object' ? sr : {};
+      const valid = s.ok && typeof s.estimatedBaseSeconds === 'number' && Number.isFinite(s.estimatedBaseSeconds);
+      setTestState((prev) => (prev && prev.key === key
+        ? { ...prev, hist: valid ? { value: { ttftMs: s.ttftMs, tokensPerSecond: s.tokensPerSecond, estimate: s.estimatedBaseSeconds }, unavailable: false } : { value: null, unavailable: true } }
+        : prev));
+    };
+    const histP = host.call('models/stats', { provider: entry.provider, model: entry.model, inputChars });
+    if (timerSvc && typeof timerSvc.timeout === 'function') {
+      let dispose = null;
+      const timeoutP = new Promise((resolve) => { dispose = timerSvc.timeout(() => resolve({ ok: false, code: 'STATS_TIMEOUT' }), 8000); });
+      Promise.race([histP, timeoutP]).then((sr) => { if (dispose) dispose(); applyHist(sr); }).catch(() => {
+        if (dispose) dispose();
+        setTestState((prev) => (prev && prev.key === key ? { ...prev, hist: { value: null, unavailable: true } } : prev));
+      });
+    } else {
+      histP.then(applyHist).catch(() => {
+        setTestState((prev) => (prev && prev.key === key ? { ...prev, hist: { value: null, unavailable: true } } : prev));
+      });
+    }
   };
 
   // v23：摘要 = 模型数 + 按序尝试（不再有「主模型」指向）
@@ -2687,19 +2695,33 @@ function ModelMainSection(props) {
       let resultNode;
       if (testState.phase === 'testing') {
         resultNode = React.createElement('span', { className: 'dsh-plg-muted' }, t('cfgTesting'));
-      } else if (testState.result && testState.result.ok) {
-        const parts = [];
-        parts.push(React.createElement('span', { className: 'dsh-plg-test-ok' }, t('cfgTestOk').replace('{ms}', String(testState.result.latencyMs))));
-        if (testState.result.statsLoading === true) {
-          parts.push(React.createElement('span', { className: 'dsh-plg-muted' }, t('cfgTesting')));
-        } else if (typeof testState.result.estimate === 'number' && Number.isFinite(testState.result.estimate)) {
-          parts.push(React.createElement('span', { className: 'dsh-plg-test-est' }, t('cfgTestEstimate').replace('{time}', fmtEstSeconds(testState.result.estimate)).replace('{ttft}', fmtEstSeconds(testState.result.stats && testState.result.stats.ttftMs)).replace('{tps}', fmtTps(testState.result.stats && testState.result.stats.tokensPerSecond))));
-        } else if (testState.result.statsUnavailable === true) {
-          parts.push(React.createElement('span', { className: 'dsh-plg-muted' }, t('cfgTestEstimateNoData')));
-        }
-        resultNode = React.createElement(React.Fragment, null, ...parts);
       } else {
-        resultNode = React.createElement('span', { className: 'dsh-plg-test-fail' }, t('cfgTestFail').replace('{msg}', (testState.result && testState.result.message) || ''));
+        const parts = [];
+        const result = testState.result || {};
+        const live = testState.live;
+        const hist = testState.hist || { loading: true };
+        if (result.ok) {
+          parts.push(React.createElement('div', { className: 'dsh-plg-test-ok' }, t('cfgTestOk').replace('{ms}', String(result.latencyMs))));
+        } else {
+          parts.push(React.createElement('div', { className: 'dsh-plg-test-fail' }, t('cfgTestFail').replace('{msg}', result.message || (live && live.message) || '')));
+        }
+        if (live) {
+          if (live.ok && typeof live.estimate === 'number' && Number.isFinite(live.estimate)) {
+            parts.push(React.createElement('div', { className: 'dsh-plg-test-live' }, t('cfgMeasureLive').replace('{ttft}', fmtEstSeconds(live.ttftMs)).replace('{tps}', fmtTps(live.tokensPerSecond)).replace('{time}', fmtEstSeconds(live.estimate))));
+          } else if (live.ok) {
+            parts.push(React.createElement('div', { className: 'dsh-plg-test-live' }, t('cfgMeasureLiveOk')));
+          } else {
+            parts.push(React.createElement('div', { className: 'dsh-plg-test-live dsh-plg-test-fail' }, t('cfgMeasureLiveFail').replace('{msg}', live.message || '')));
+          }
+        }
+        if (hist.loading) {
+          parts.push(React.createElement('div', { className: 'dsh-plg-muted' }, t('cfgTesting')));
+        } else if (hist.value && typeof hist.value.estimate === 'number' && Number.isFinite(hist.value.estimate)) {
+          parts.push(React.createElement('div', { className: 'dsh-plg-test-hist' }, t('cfgMeasureHist').replace('{ttft}', fmtEstSeconds(hist.value.ttftMs)).replace('{tps}', fmtTps(hist.value.tokensPerSecond)).replace('{time}', fmtEstSeconds(hist.value.estimate))));
+        } else {
+          parts.push(React.createElement('div', { className: 'dsh-plg-muted' }, t('cfgMeasureHistEmpty')));
+        }
+        resultNode = React.createElement('div', { className: 'dsh-plg-testresults' }, ...parts);
       }
       testArea = React.createElement('div', { className: 'dsh-plg-testarea', role: 'status' },
         React.createElement('span', { className: 'dsh-plg-muted' }, label),
