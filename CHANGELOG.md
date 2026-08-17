@@ -16,6 +16,7 @@
 - **「暂无该模型历史统计」误报（用户实测）**：此前按 provider+model 完全匹配，provider 路由别名不同（如 deepseek-official vs opencode）时同模型也判无数据；现改为**只按模型名匹配** — [PEN-004]
 - **移除重复的「（TTFT xxxms）」展示（用户反馈）**：连通性测试本身的耗时即首 token 延迟，不再单独重复显示 TTFT — [PEN-004]
 - **README 记忆功能描述修正（用户指出）**：原展示页记忆开关沿用 v2.x 废弃规则「记忆链最近 4 轮滚动保留、发送不清除」，与最新行为不符；对齐 CHANGELOG [3.0.0]（发送消息即清空记忆链，仅发送前优化轮次内累积）与 [3.1.3]（继续优化基于本轮改动直接优化、跳过检索），更新中英文 README 记忆开关说明 — [FLOW-PROMPT-ENHANCE]
+- **README 轻量模式描述修正（全文核对发现）**：原展示页写「轻量（本地规则）」，与 v3.0 模式重构后行为不符——`enhance-handlers.js` 已移除 lite 规则检查、改为「前 1 轮会话关联参考」；更新中英文 README 模式说明为「轻量（结合上一轮对话参考）」/「Lite (previous-round context)」 — [FLOW-PROMPT-ENHANCE]
 
 ## [3.1.3] - 2026-08-17
 
