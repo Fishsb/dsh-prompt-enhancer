@@ -25,7 +25,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
   ;return { wrapUserText, wrapPublishText, stripScenarioEcho, cleanOutput, friendlyMessage, validateConfig, resolveTemplateSystem, collectStream, buildTryChain,
     extractHistory, extractHistoryConclusions, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile,
     pickReachableIndex, probeCacheGet, probeCacheSet, WATCHDOG_TIMEOUT_MS, PROBE_TIMEOUT_MS, PROBE_CACHE_TTL_MS,
-    extractModelRouteFromEvents, accumulateProjectionStats, summarizeModelStats, estimateBaseModeSeconds,
+    extractModelRouteFromEvents, accumulateProjectionStats, summarizeModelStats, estimateBaseModeSeconds, estimateLiteModeSeconds,
     rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
     splitHistoryRounds, parseRelevance, parseIntent, parseDocsAnalysis, parseSearchPlan,
     parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
@@ -59,6 +59,7 @@ const {
   accumulateProjectionStats,
   summarizeModelStats,
   estimateBaseModeSeconds,
+  estimateLiteModeSeconds,
   extractKeywords,
   splitCnSegments,
   splitHistoryRounds,
@@ -1311,6 +1312,13 @@ test('U68 model stats aggregation / base estimate (2026-08-17)', () => {
   assert.equal(estimateBaseModeSeconds(1000, 200, 400), 2, '低于下限仍按 200 token');
   assert.equal(estimateBaseModeSeconds(1000, 200, 1600), 3, '1600 字符 → 400 token');
   assert.equal(estimateBaseModeSeconds(null, 200, 400), null, '无 TTFT → null');
+
+  // 轻量模式（v3.1.6 口径修正）：lite = 基础优化 + 一次关联判定 LLM 调用
+  // （TTFT + RELEVANCE_MAX_TOKENS=400 / tps）——检索引入会话，预计更慢。
+  assert.equal(estimateLiteModeSeconds(1000, 200, 0), 5, '空输入：基础 2s + 判定 (1s + 400/200=2s) = 5s');
+  assert.equal(estimateLiteModeSeconds(1000, 200, 1600), 6, '1600 字符：基础 3s + 判定 3s = 6s');
+  assert.equal(estimateLiteModeSeconds(null, 200, 400), null, '无 TTFT → null');
+  assert.ok(estimateLiteModeSeconds(1000, 200, 1600) > estimateBaseModeSeconds(1000, 200, 1600), '同输入下轻量模式预计长于基础模式（多检索引入）');
 });
 
 

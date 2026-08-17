@@ -1532,7 +1532,12 @@ function parseTaskProgress(raw) {
 }
 // ================= V2 纯函数族结束 =================
 
-// v17.3：200-token 连通性探测（实测 TTFT + 吞吐；usage 优先，缺失按字符/4 估算）
+// v17.3：长文连通性探测（实测 TTFT + 吞吐；usage 优先，缺失按字符/4 估算）
+// v3.1.7（方案 2 · 用户确认）：探测从「short 200-token」改为「长文 ~1200-token」——
+// 此前 prompt 要求 short + maxTokens=200，模型只吐几个 token、decode 窗口仅 ~2ms，
+// tps = token/极短时间 被数学放大（实测虚高到 4500 tok/s，真实量级 75–267）。
+// 现要求写长文，decode 窗口拉到秒级，tps 才有意义；探测默认不传 reasoningEffort
+// （未开思考，TTFT 不含思考时间、更贴近纯生成速度）。
 async function pingStream(llmService, entry, ref) {
   const startedAt = Date.now();
   let ttftMs = -1;
@@ -1547,12 +1552,12 @@ async function pingStream(llmService, entry, ref) {
       provider: entry.provider,
       model: entry.model,
       ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
-      maxTokens: 200,
-      system: 'You are a connectivity probe. Reply with a short continuous text output.',
+      maxTokens: 1200,
+      system: 'You are a connectivity probe. Write a continuous plain-paragraph essay of about 800 words on any topic. Do not use markdown, headings, lists or bullet points; just plain flowing text.',
       messages: [{
         id: 'enhance-ping',
         role: 'user',
-        content: [{ type: 'text', text: 'Reply with a short continuous text output.' }],
+        content: [{ type: 'text', text: 'Write a continuous plain-paragraph essay of about 800 words on a topic of your choice. No headings, no lists — plain flowing prose only.' }],
         source: { kind: 'user' },
       }],
     });
@@ -1680,10 +1685,21 @@ function estimateBaseModeSeconds(ttftMs, tokensPerSecond, inputChars) {
   return (ttftMs / 1000) + (outputTokens / tokensPerSecond);
 }
 
+// 轻量模式预计耗时（v3.1.6 口径修正）：v3.0 模式重构后 lite = rounds 检索——
+// 读取最近 1 轮会话 + LLM 关联判定（RELEVANCE 调用，输出预算 RELEVANCE_MAX_TOKENS=400），
+// 命中则注入参考。因此相对基础模式**多一次关联判定 LLM 调用**（自身 TTFT + 判定输出吞吐），
+// 预计耗时更长；不再是 v3.1.5 的「输出更短→更快」错误口径。
+function estimateLiteModeSeconds(ttftMs, tokensPerSecond, inputChars) {
+  const base = estimateBaseModeSeconds(ttftMs, tokensPerSecond, inputChars);
+  if (base === null) return null;
+  const judgeSeconds = (ttftMs / 1000) + (RELEVANCE_MAX_TOKENS / tokensPerSecond);
+  return base + judgeSeconds;
+}
+
 // ================= v2.4.0 版本检测与一键更新 · 纯函数族 =================
 // 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
-const PLUGIN_VERSION = '3.1.3';
+const PLUGIN_VERSION = '3.1.4';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
 const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）
@@ -2544,12 +2560,14 @@ return {
       }
       const ref = { current: null };
       let timedOut = false;
+      // v3.1.7（方案 2）：探测改长文（~1200 token）后，真实吞吐 75–267 tok/s 需 4–16s + TTFT；
+      // 15s 超时不够，放宽到 30s（最慢档 75 tok/s × 1200 token ≈ 16s，留足余量）。
       const timer = ctx.timer.timeout(() => {
         timedOut = true;
         if (ref.current && typeof ref.current.return === 'function') {
           try { ref.current.return(); } catch (e) { /* 忽略 */ }
         }
-      }, 15000);
+      }, 30000);
       let r;
       try {
         r = await pingStream(llmService, entry, ref);
@@ -2563,6 +2581,7 @@ return {
       hlog('[enhance] test provider=' + provider + ' model=' + model + (reasoningEffort ? ' effort=' + reasoningEffort : '') + ' → ' + (r.ok ? 'ok ' + r.latencyMs + 'ms' : r.code));
       if (r.ok && typeof r.tokensPerSecond === 'number' && Number.isFinite(r.tokensPerSecond) && typeof r.ttftMs === 'number' && Number.isFinite(r.ttftMs)) {
         r.estimatedBaseSeconds = estimateBaseModeSeconds(r.ttftMs, r.tokensPerSecond, inputChars);
+        r.estimatedLiteSeconds = estimateLiteModeSeconds(r.ttftMs, r.tokensPerSecond, inputChars);
       }
       return { ...r, ...(precheck && r.ok ? { precheck } : {}) };
     });
@@ -2667,7 +2686,8 @@ return {
       const stats = await resolveModelStats(provider, model);
       if (!stats.ok) return stats;
       const estimatedBaseSeconds = estimateBaseModeSeconds(stats.ttftMs, stats.tokensPerSecond, inputChars);
-      return { ...stats, estimatedBaseSeconds };
+      const estimatedLiteSeconds = estimateLiteModeSeconds(stats.ttftMs, stats.tokensPerSecond, inputChars);
+      return { ...stats, estimatedBaseSeconds, estimatedLiteSeconds };
     });
 
     harness.handle('plugins/inventory', async (args) => {

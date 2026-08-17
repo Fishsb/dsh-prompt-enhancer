@@ -18,7 +18,7 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 ## 🚀 Install
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.1.3
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.1.4
 ```
 
 Restart DSH (`dsh web`) after installing — the ✨ button appears in the composer toolbar.

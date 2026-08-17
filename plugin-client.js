@@ -685,10 +685,10 @@ const ZH = {
   cfgTestFail: '✗ {msg}',
   cfgTestEstimate: '基础模式默认模板预计约 {time}（历史 TTFT {ttft} · {tps} tok/s）',
   cfgTestEstimateNoData: '暂无该模型历史统计',
-  cfgMeasureLive: '实测：首 token {ttft} · {tps} tok/s · 预计约 {time}',
+  cfgMeasureLive: '实测：首 token {ttft} · {tps} tok/s · 基础模式预计约 {base} · 轻量模式预计约 {lite}',
   cfgMeasureLiveOk: '实测：可用',
   cfgMeasureLiveFail: '实测：{msg}',
-  cfgMeasureHist: '历史：首 token {ttft} · {tps} tok/s · 预计约 {time}',
+  cfgMeasureHist: '历史：首 token {ttft} · {tps} tok/s · 基础模式预计约 {base} · 轻量模式预计约 {lite}',
   cfgMeasureHistEmpty: '历史：暂无有效历史数据',
   cfgAddFallback: '＋ 添加模型',
   cfgRestoreDefaults: '恢复默认',
@@ -948,10 +948,10 @@ const EN = {
   cfgTestFail: '✗ {msg}',
   cfgTestEstimate: 'Base default template est. {time} (hist TTFT {ttft} · {tps} tok/s)',
   cfgTestEstimateNoData: 'No historical stats for this model',
-  cfgMeasureLive: 'Live: TTFT {ttft} · {tps} tok/s · est. {time}',
+  cfgMeasureLive: 'Live: TTFT {ttft} · {tps} tok/s · base mode est. {base} · lite mode est. {lite}',
   cfgMeasureLiveOk: 'Live: OK',
   cfgMeasureLiveFail: 'Live: {msg}',
-  cfgMeasureHist: 'Hist: TTFT {ttft} · {tps} tok/s · est. {time}',
+  cfgMeasureHist: 'Hist: TTFT {ttft} · {tps} tok/s · base mode est. {base} · lite mode est. {lite}',
   cfgMeasureHistEmpty: 'Hist: no valid data',
   cfgAddFallback: '+ Add model',
   cfgRestoreDefaults: 'Restore defaults',
@@ -2620,15 +2620,26 @@ function ModelMainSection(props) {
   };
   // v23（D4）：单点测试——点某行 ⛓ → 结果区集中显示该行测试；行内不注入结果
   // v3.1.4（预计耗时）：测试成功后并行读取该模型的 DSH 历史统计，按当前输入长度估算基础模式默认模板耗时。
+  // v3.1.5（双模式参考）：同时展示基础模式（默认模板）与轻量模式两个预计耗时；lite 缺失时显示占位。
+  // v3.1.6（单位修复）：TTFT 是毫秒，独立用 fmtEstMs 格式化（此前误用 fmtEstSeconds 把毫秒当秒 → 离谱的 78m25s）。
   const fmtEstSeconds = (sec) => {
     if (typeof sec !== 'number' || !Number.isFinite(sec)) return '';
     if (sec < 60) return (Math.round(sec * 10) / 10) + 's';
     const whole = Math.round(sec);
     return Math.floor(whole / 60) + 'm' + (whole % 60) + 's';
   };
+  const fmtEstMs = (ms) => {
+    if (typeof ms !== 'number' || !Number.isFinite(ms)) return '';
+    if (ms < 1000) return Math.round(ms) + 'ms';
+    return fmtEstSeconds(ms / 1000);
+  };
   const fmtTps = (n) => {
     if (typeof n !== 'number' || !Number.isFinite(n)) return '';
     return n >= 10 ? String(Math.round(n)) : String(Math.round(n * 10) / 10);
+  };
+  const fmtModeSeconds = (sec) => {
+    const s = fmtEstSeconds(sec);
+    return s === '' ? '—' : s;
   };
   const runTest = (index, entry) => {
     if (!entry || !entry.provider || !entry.model) return;
@@ -2645,7 +2656,13 @@ function ModelMainSection(props) {
             phase: 'done',
             result: r.ok ? { ok: true, latencyMs: r.latencyMs } : { ok: false, message: r.message || r.code || '' },
             live: r.ok && Number.isFinite(r.estimatedBaseSeconds)
-              ? { ok: true, ttftMs: r.ttftMs, tokensPerSecond: r.tokensPerSecond, estimate: r.estimatedBaseSeconds }
+              ? {
+                  ok: true,
+                  ttftMs: r.ttftMs,
+                  tokensPerSecond: r.tokensPerSecond,
+                  estimateBase: r.estimatedBaseSeconds,
+                  estimateLite: Number.isFinite(r.estimatedLiteSeconds) ? r.estimatedLiteSeconds : null,
+                }
               : (r.ok ? { ok: true } : { ok: false, message: r.message || r.code || '' }),
           }
         : prev));
@@ -2660,7 +2677,20 @@ function ModelMainSection(props) {
       const s = sr && typeof sr === 'object' ? sr : {};
       const valid = s.ok && typeof s.estimatedBaseSeconds === 'number' && Number.isFinite(s.estimatedBaseSeconds);
       setTestState((prev) => (prev && prev.key === key
-        ? { ...prev, hist: valid ? { value: { ttftMs: s.ttftMs, tokensPerSecond: s.tokensPerSecond, estimate: s.estimatedBaseSeconds }, unavailable: false } : { value: null, unavailable: true } }
+        ? {
+            ...prev,
+            hist: valid
+              ? {
+                  value: {
+                    ttftMs: s.ttftMs,
+                    tokensPerSecond: s.tokensPerSecond,
+                    estimateBase: s.estimatedBaseSeconds,
+                    estimateLite: Number.isFinite(s.estimatedLiteSeconds) ? s.estimatedLiteSeconds : null,
+                  },
+                  unavailable: false,
+                }
+              : { value: null, unavailable: true },
+          }
         : prev));
     };
     const histP = host.call('models/stats', { provider: entry.provider, model: entry.model, inputChars });
@@ -2693,6 +2723,7 @@ function ModelMainSection(props) {
       const curIndex = fallback.findIndex((x) => x.provider === testState.entry.provider && x.model === testState.entry.model);
       const label = '测试 #' + String((curIndex >= 0 ? curIndex : testState.index) + 1) + ' · ' + (p && p.name ? p.name : testState.entry.provider) + ' / ' + testState.entry.model;
       let resultNode;
+      let headStatusNode = null;
       if (testState.phase === 'testing') {
         resultNode = React.createElement('span', { className: 'dsh-plg-muted' }, t('cfgTesting'));
       } else {
@@ -2700,14 +2731,15 @@ function ModelMainSection(props) {
         const result = testState.result || {};
         const live = testState.live;
         const hist = testState.hist || { loading: true };
+        // v3.1.8（布局）：✓ 可用/✗ 失败移入头部行（与「测试 #N」同行）；实测/历史各占一行。
         if (result.ok) {
-          parts.push(React.createElement('div', { className: 'dsh-plg-test-ok' }, t('cfgTestOk').replace('{ms}', String(result.latencyMs))));
+          headStatusNode = React.createElement('span', { className: 'dsh-plg-test-ok' }, t('cfgTestOk').replace('{ms}', String(result.latencyMs)));
         } else {
-          parts.push(React.createElement('div', { className: 'dsh-plg-test-fail' }, t('cfgTestFail').replace('{msg}', result.message || (live && live.message) || '')));
+          headStatusNode = React.createElement('span', { className: 'dsh-plg-test-fail' }, t('cfgTestFail').replace('{msg}', result.message || (live && live.message) || ''));
         }
         if (live) {
-          if (live.ok && typeof live.estimate === 'number' && Number.isFinite(live.estimate)) {
-            parts.push(React.createElement('div', { className: 'dsh-plg-test-live' }, t('cfgMeasureLive').replace('{ttft}', fmtEstSeconds(live.ttftMs)).replace('{tps}', fmtTps(live.tokensPerSecond)).replace('{time}', fmtEstSeconds(live.estimate))));
+          if (live.ok && typeof live.estimateBase === 'number' && Number.isFinite(live.estimateBase)) {
+            parts.push(React.createElement('div', { className: 'dsh-plg-test-live' }, t('cfgMeasureLive').replace('{ttft}', fmtEstMs(live.ttftMs)).replace('{tps}', fmtTps(live.tokensPerSecond)).replace('{base}', fmtEstSeconds(live.estimateBase)).replace('{lite}', fmtModeSeconds(live.estimateLite))));
           } else if (live.ok) {
             parts.push(React.createElement('div', { className: 'dsh-plg-test-live' }, t('cfgMeasureLiveOk')));
           } else {
@@ -2716,23 +2748,26 @@ function ModelMainSection(props) {
         }
         if (hist.loading) {
           parts.push(React.createElement('div', { className: 'dsh-plg-muted' }, t('cfgTesting')));
-        } else if (hist.value && typeof hist.value.estimate === 'number' && Number.isFinite(hist.value.estimate)) {
-          parts.push(React.createElement('div', { className: 'dsh-plg-test-hist' }, t('cfgMeasureHist').replace('{ttft}', fmtEstSeconds(hist.value.ttftMs)).replace('{tps}', fmtTps(hist.value.tokensPerSecond)).replace('{time}', fmtEstSeconds(hist.value.estimate))));
+        } else if (hist.value && typeof hist.value.estimateBase === 'number' && Number.isFinite(hist.value.estimateBase)) {
+          parts.push(React.createElement('div', { className: 'dsh-plg-test-hist' }, t('cfgMeasureHist').replace('{ttft}', fmtEstMs(hist.value.ttftMs)).replace('{tps}', fmtTps(hist.value.tokensPerSecond)).replace('{base}', fmtEstSeconds(hist.value.estimateBase)).replace('{lite}', fmtModeSeconds(hist.value.estimateLite))));
         } else {
           parts.push(React.createElement('div', { className: 'dsh-plg-muted' }, t('cfgMeasureHistEmpty')));
         }
         resultNode = React.createElement('div', { className: 'dsh-plg-testresults' }, ...parts);
       }
       testArea = React.createElement('div', { className: 'dsh-plg-testarea', role: 'status' },
-        React.createElement('span', { className: 'dsh-plg-muted' }, label),
+        React.createElement('div', { className: 'dsh-plg-testarea-head' },
+          React.createElement('span', { className: 'dsh-plg-testarea-title' }, label),
+          headStatusNode,
+          React.createElement('button', {
+            type: 'button',
+            className: 'dsh-plg-btn dsh-plg-btn-icononly',
+            onClick: () => setTestState(null),
+            title: '✕',
+            'aria-label': t('dismiss'),
+          }, '✕'),
+        ),
         resultNode,
-        React.createElement('button', {
-          type: 'button',
-          className: 'dsh-plg-btn dsh-plg-btn-icononly',
-          onClick: () => setTestState(null),
-          title: '✕',
-          'aria-label': t('dismiss'),
-        }, '✕'),
       );
     }
     body = React.createElement(React.Fragment, null,
@@ -3395,7 +3430,17 @@ const CSS = [
   '.dsh-plg-select-thinking{flex:0 0 auto;width:59px}',
   '.dsh-plg-select-level{flex:0 0 auto;width:72px}',
   // v23.1（D4）：测试结果集中单点区（链列表下方、操作按钮上方；空态隐藏）
-  '.dsh-plg-testarea{display:flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 10px;background:var(--dsw-alias-bg-layer-2)}',
+  // v3.1.5（双模式参考）：纵向布局——头部行独占一行，实测/历史结果逐行显示，字号与标题对齐（12px）。
+  // v3.1.8（布局）：✓ 可用/✗ 失败状态移入头部行（与「测试 #N」同行）；标题靠左、✕ 靠右。
+  '.dsh-plg-testarea{display:flex;flex-direction:column;gap:4px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 10px;background:var(--dsw-alias-bg-layer-2)}',
+  '.dsh-plg-testarea-head{display:flex;align-items:center;gap:8px}',
+  '.dsh-plg-testarea-title{font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+  '.dsh-plg-testarea-head .dsh-plg-test-ok{color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:16px;font-weight:600;white-space:nowrap;flex:none}',
+  '.dsh-plg-testarea-head .dsh-plg-test-fail{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:16px;font-weight:600;white-space:nowrap;flex:none}',
+  '.dsh-plg-testarea-head .dsh-plg-btn-icononly{margin-left:auto;flex:none}',
+  '.dsh-plg-testresults{display:flex;flex-direction:column;gap:2px}',
+  '.dsh-plg-test-live{font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
+  '.dsh-plg-test-hist{font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}',
   // v2.4.0（方案 §4）：版本检测与更新卡片样式
   '.dsh-plg-upd-outdated{color:var(--dsw-alias-state-warn-primary);font-size:12px;line-height:16px;font-weight:600}',
   // v2.7.0：更新未重启提醒横幅（警告黄底 + 命令 code）

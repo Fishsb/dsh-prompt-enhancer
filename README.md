@@ -18,7 +18,7 @@ DeepSeek Harness (DSH) 提示词增强插件：输入框写草稿 → 点击 ✨
 ## 🚀 安装
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.1.3
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.1.4
 ```
 
 安装后重启 DSH（`dsh web`），输入框工具行出现 ✨ 按钮即安装成功。

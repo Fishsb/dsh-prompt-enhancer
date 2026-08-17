@@ -7,8 +7,14 @@
 
 ## [Unreleased]
 
+## [3.1.4] - 2026-08-17
+
 ### Changed
 - **连通性测试新增「基础模式默认模板预计耗时」（用户需求）**：测试连通性成功后，结果区展示实测连通耗时，并**将「实测」与「历史」分开标注、两者都显式展示**（可换行）。实测来自本次 200-token 探测的 TTFT/吞吐（usage 优先/字符估算兜底）；历史数据只按模型名匹配（不区分 provider 路由）。预计耗时按当前输入长度动态估算输出 token（字符数 / 4，最低 200 token）；实测/历史任一缺失时分别明确提示。新增 `models/stats` RPC 与 U68 单测 — [PEN-004]
+- **连通性测试结果区展示优化（用户指令）**：实测/历史行不再与「测试 #N」标题同行——测试区改为纵向布局（标题 + ✕ 一行，实测、历史各占一行），且实测/历史字号与标题对齐（12px）；预计耗时显式标注**两个模式的时间参考**：`基础模式预计约 X`（默认模板，字符数 /4、最低 200 token）+ `轻量模式预计约 Y`（**按模式实际功能**——轻量模式含「检索引入会话」：读取最近 1 轮会话 + LLM 关联判定（RELEVANCE 调用，输出预算 400 token），相对基础模式多一次关联判定 LLM 调用（自身 TTFT + 判定输出吞吐），预计耗时更长）；host 新增 `estimatedLiteSeconds` 返回字段与 `estimateLiteModeSeconds` 纯函数，新增 U68b 单测；实测/历史任一缺失时轻量预计显示占位「—」 — [PEN-004]
+- **连通性测试 TTFT 显示单位修复（用户实测反馈）**：此前「首 token」误把毫秒当秒格式化——TTFT 4705ms 显示成 `78m25s`、5874ms 显示成 `97m54s`（离谱数据）。现新增 `fmtEstMs`（<1s 显示 `78ms`，≥1s 显示 `4.7s`），实测/历史行的 TTFT 均改用毫秒格式化 — [PEN-004]
+- **连通性测试探测改长文（方案 2 · 用户确认）**：此前探测 maxTokens=200 + prompt 要求「short text」，模型只吐几个 token、decode 窗口仅 ~2ms，tps = token/极短时间 被数学放大（实测虚高到 4500 tok/s，真实量级 75–267 tok/s）。现改为 maxTokens=1200 + 要求写 ~800 词纯散文长文，decode 窗口拉到秒级，tps 才有意义；探测保持「未开思考」口径（不传 reasoningEffort，TTFT 不含思考时间、更贴近纯生成速度）；`models/test` 超时 15s → 30s（最慢档 75 tok/s × 1200 token ≈ 16s 留余量）— [PEN-004]
+- **连通性测试结果区布局微调（用户指令）**：✓ 可用/✗ 失败状态移入头部行，与「测试 #N · 厂商 / 模型」同行（标题靠左、✕ 靠右），实测/历史仍各占一行；头部行内部元素 white-space:nowrap 防折行 — [PEN-004]
 - **README 展示页重构为平衡派（用户指令）**：对标同生态高星插件展示格式，将 README.md / README.en.md 从原文档式结构重写为精炼展示页（功能亮点 → 安装 → 使用 → 效果展示 → 配置 → 文档）；删除冗长的隐私 / 兼容性大段文字，改为「一句话 + 链接 `docs/compatibility-matrix.md`」；替换 v2.4.3 残留旧截图 `settings-v2.4.3.png` 为用户提供的当前模型配置页（`settings-models.png`）与优化参数页（`settings-params.png`）并排展示；中英文对称 — [FLOW-PROMPT-ENHANCE]
 
 ### Fixed
@@ -295,6 +301,7 @@
 - 插件管理页版本检测卡片；按钮三态字体锚点对齐模型选择器（13px/500/20px）— [VU-001]
 
 [2.8.3]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.3
+[3.1.4]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.4
 [3.1.3]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.3
 [3.1.2]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.2
 [3.1.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.1
