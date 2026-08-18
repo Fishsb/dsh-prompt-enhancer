@@ -623,7 +623,11 @@ const ZH = {
   envExecPortSame: '更新端口与服务端口相同——更新功能无法监听，请修改 updater.executorPort',
   envExecPortOccupied: '更新端口被其他进程占用——更新功能可能不可用，请释放或修改 updater.executorPort',
   envExecPortNoPort: '无法解析服务端口——无法确认更新端口独立',
-  updApplyConfirm: '确认重启服务？',
+  updApplyConfirm: '确认',
+  // v3.2（用户需求·桌面快捷方式 CLI 重启）：端口重启确认态「快捷」按钮 + 创建结果提示
+  updMakeShortcut: '快捷',
+  updShortcutOk: '已在桌面创建「重启DSH服务」快捷方式——以后网页打不开时双击它即可在命令行窗口重启服务',
+  updShortcutFail: '创建桌面快捷方式失败：{msg}',
   updApplying: '正在安装更新…（10–60 秒）',
   updApplyStaging: '正在下载更新资源…',
   updApplyEnvcheck: '正在检查环境…',
@@ -876,7 +880,11 @@ const EN = {
   envExecPortSame: 'Update port equals the service port — the updater cannot listen; change updater.executorPort',
   envExecPortOccupied: 'Update port is held by another process — the updater may be unavailable; free it or change updater.executorPort',
   envExecPortNoPort: 'Cannot resolve the service port — cannot confirm update-port independence',
-  updApplyConfirm: 'Confirm service restart?',
+  updApplyConfirm: 'Confirm',
+  // v3.2：桌面快捷方式 CLI 重启
+  updMakeShortcut: 'Shortcut',
+  updShortcutOk: 'Desktop shortcut "Restart DSH Service" created — double-click it (even when the web UI is down) to restart the service in a CLI window',
+  updShortcutFail: 'Failed to create desktop shortcut: {msg}',
   updApplying: 'Installing update… (10–60s)',
   updApplyStaging: 'Downloading update resources…',
   updApplyEnvcheck: 'Checking environment…',
@@ -1626,6 +1634,8 @@ function UpdaterCard(props) {
   const [envItems, setEnvItems] = React.useState(null);
   const [envChecking, setEnvChecking] = React.useState(false);
   const [envError, setEnvError] = React.useState(null);
+  // v3.2（用户需求·桌面快捷方式 CLI 重启）：确认态「快捷」按钮——创建桌面快捷方式
+  const [shortcutBusy, setShortcutBusy] = React.useState(false);
   // v2.9.x（按钮拆分）：idle|confirm|applying|installed|restarting|done|rolledback；
   // action 区分当前动作（apply=一键更新 / restart=端口重启）
   const [applyPhase, setApplyPhase] = React.useState('idle');
@@ -1911,6 +1921,25 @@ function UpdaterCard(props) {
   const cancelApply = () => {
     if (applyPhase === 'confirm') { setApplyPhase('idle'); setAction(null); }
   };
+  // v3.2（用户需求·桌面快捷方式 CLI 重启）：创建桌面快捷方式（host RPC 写 .cmd + .lnk）
+  const makeShortcut = () => {
+    if (shortcutBusy) return;
+    setShortcutBusy(true);
+    setApplyErr(null);
+    setApplyStatus(null);
+    host.call('update/makeShortcut', { serviceName, profile }).then((r) => {
+      const rr = r && typeof r === 'object' ? r : {};
+      if (rr.ok === true) {
+        setApplyStatus(t('updShortcutOk'));
+      } else {
+        setApplyErr(t('updShortcutFail').replace('{msg}', (rr.message || rr.code || '')));
+      }
+    }).catch(() => {
+      setApplyErr(t('updShortcutFail').replace('{msg}', 'host unreachable'));
+    }).then(() => {
+      setShortcutBusy(false);
+    });
+  };
 
   // 一键拉取更新：执行器 apply restart:false（下载 + 校验 + 停服 + 安装，不重启）
   const runPullApply = () => {
@@ -2167,6 +2196,15 @@ function UpdaterCard(props) {
         : applyPhase === 'restarting' ? t('updApplyRestarting').replace('{sec}', String(restartLeft)).replace('{round}', String(restartRound))
         : applyPhase === 'done' ? t('updApplyDone')
         : t('updPortRestart')),
+      // v3.2（用户需求）：端口重启确认态「快捷」按钮——创建桌面快捷方式（脱 Web CLI 重启）
+      applyPhase === 'confirm' && action === 'restart'
+        ? React.createElement('button', {
+            type: 'button',
+            className: 'dsh-plg-btn',
+            disabled: shortcutBusy,
+            onClick: makeShortcut,
+          }, shortcutBusy ? '…' : t('updMakeShortcut'))
+        : null,
       applyPhase === 'confirm'
         ? React.createElement('button', {
             type: 'button',
