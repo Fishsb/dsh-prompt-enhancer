@@ -1,6 +1,6 @@
 # dsh-prompt-enhancer
 
-DeepSeek Harness (DSH) 提示词增强插件：输入框写草稿 → 点击 ✨ → 独立 LLM 调用一键改写 → 直接替换输入内容，不满意可撤回。
+DeepSeek Harness (DSH) 插件，两大核心能力：**提示词增强**（输入框草稿 → ✨ 一键改写，不满意可撤回）与 **DSH 服务异常一键重启**（网页打不开也能命令行恢复）。
 
 [![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
 [![Release date](https://img.shields.io/github/release-date/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
@@ -36,74 +36,17 @@ dsh plugin --profile web remove dsh-prompt-enhancer
 
 ## 🔁 一键重启（独立功能）
 
-> 设计目标：**DSH 服务异常、网页打不开时，依然能一键恢复**——不依赖浏览器、不依赖 3080 端口。
-
-### 方式一：桌面快捷方式（推荐）
-
-安装后在插件设置「端口重启」确认态点击「**桌面**」按钮，即创建带鲸鱼图标的「重启DSH」快捷方式。以后双击它，命令行窗口会自动重启 DSH 服务并显示进度：
-
-```
-=== DSH 端口重启（CLI）===
-  服务: dsh-web  执行器端口: 3081
-[3s] stopping round 1 — 正在停止服务…
-[12s] restart round 2 — 端口未就绪，准备重试
-[18s] ✅ 服务已重启完成（healthy）
-```
-
-### 方式二：命令行直接调用
-
-**不生成快捷方式也能用**——核心是执行器的 CLI 模式，任何命令窗口（cmd / PowerShell / Git Bash）直接运行：
+DSH 服务异常、网页打不开时，仍可一键恢复——不依赖浏览器、不依赖 3080 端口。插件设置「端口重启」确认态点击「**桌面**」生成带鲸鱼图标的「重启DSH」快捷方式，双击即重启并显示进度；不生成快捷方式也能用，任意命令窗口直接调用：
 
 ```sh
 node "<DSH_HOME>\AppData\Local\dsh-prompt-enhancer\executor\0.1.11\lib\updater-host.cjs" --cli restart --service dsh-web --profile web
 ```
 
-参数（均有默认值）：
+支持 Windows（sc）/ Linux（systemctl）/ macOS（launchctl）服务化重启与进程级降级。
 
-| 参数 | 默认 | 作用 |
-|---|---|---|
-| `--service` | `dsh-web` | 服务名 |
-| `--profile` | `web` | DSH 配置档 |
-| `--executor-port` | `3081` | 重启执行器端口 |
+## 📦 库说明
 
-执行流程：优先调用**运行中的重启执行器**（SYSTEM 权限，有权控制服务）→ 轮询打印进度；执行器未运行则当前进程直接重启（如提示无权限，请以管理员身份运行窗口）。
-
-### 重启能力说明
-
-- **服务化部署**：Windows（`sc`/nssm）、Linux（`systemctl`）、macOS（`launchctl`）——由 `lib/platform-service.cjs` 统一管理
-- **进程级降级**：非服务化部署时，读 DSH 进程索引 → 结束旧进程 → 同参数拉起新进程 → 端口健康探测（参考社区 dsh-restart 生态）
-- **端口冲突自适应**：执行器端口被占用时自动 fallback 动态端口（`executor.port`），重启功能不受影响
-
-## 📦 库（模块）说明
-
-插件核心逻辑拆分为独立 Node 模块，可在其他工具/脚本中复用：
-
-| 模块 | 职责 | 可复用能力 |
-|---|---|---|
-| `lib/shortcut-win.cjs` | Windows 桌面快捷方式生成 | `makeShortcutWin()`——写临时 VBS → cscript 创建完整 .lnk（含 IDList + 鲸鱼图标）→ 返回路径/大小；`fixTargetUnicode()` 修补图标字段 |
-| `lib/shortcut-icon.cjs` | 快捷方式鲸鱼图标 | `shortcutIconBuffer()`——内嵌 base64 的 ICO（16/32/48/64，BITMAPINFOHEADER），由 `scripts/build-icon.cjs` 生成 |
-| `lib/updater-host.cjs` | 更新执行器 + CLI 重启 | CLI：`node updater-host.cjs --cli restart --service <svc>`；HTTP RPC：`ping` / `restart` / `status`（端口 3081） |
-| `lib/platform-service.cjs` | 跨平台服务管理 | `detectService` / `readPort` / `stopService` / `startService` / `isStopped` / `pid`——win32 sc/nssm、linux systemctl、darwin launchctl |
-| `lib/sys.cjs` | 环境与路径 | `EXECUTOR_ROOT` / `executorDir()` / `readExecutorPortFile()` / `probeEnv` |
-
-**示例：在其他 Node 脚本中直接生成「重启 DSH」快捷方式**
-
-```js
-const { makeShortcutWin } = require('dsh-prompt-enhancer/lib/shortcut-win.cjs');
-const os = require('node:os');
-const path = require('node:path');
-
-const iconPath = path.join(os.homedir(), 'AppData', 'Local', 'dsh-prompt-enhancer', 'executor', 'icons', 'deepseek.ico');
-const result = makeShortcutWin({
-  lnkPath: path.join(os.homedir(), 'Desktop', '重启DSH.lnk'),
-  target: 'C:\\Windows\\System32\\cmd.exe',
-  args: '/c "C:\\Users\\lk\\AppData\\Local\\dsh-prompt-enhancer\\executor\\cli\\restart-dsh.cmd"',
-  workingDir: os.homedir(),
-  iconPath,
-  iconPathEnv: '%USERPROFILE%\\AppData\\Local\\dsh-prompt-enhancer\\executor\\icons\\deepseek.ico',
-});
-console.log(result); // { ok: true, shortcutPath, size, ... }
-```
+核心逻辑拆分为独立 Node 模块，可复用：`lib/shortcut-win.cjs`（Windows 快捷方式生成）、`lib/updater-host.cjs`（CLI 重启 / 更新执行器）、`lib/platform-service.cjs`（跨平台服务管理）、`lib/sys.cjs`（环境与路径）。详见各模块头注释。
 
 ## 🎯 使用
 
