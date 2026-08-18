@@ -20,23 +20,24 @@ test('parseSystemdEnabled 解析 is-enabled', () => {
   assert.equal(ps.parseSystemdEnabled('', 1), false);
 });
 
-test('parseSystemdExecStartPort 解析 ExecStart --port', () => {
+test('parseSystemdExecStartPort 解析 ExecStart --port / Environment PORT', () => {
   const out = 'ExecStart={ path=/usr/bin/node ; argv[]=/usr/bin/node /opt/dsh/lib/bin.js web --port 3080 ; ignore_errors=no }';
   assert.equal(ps.parseSystemdExecStartPort(out), 3080);
   assert.equal(ps.parseSystemdExecStartPort('ExecStart={ path=/x }'), null);
 });
 
-test('parseSystemdMainPid 解析 MainPID', () => {
-  assert.equal(ps.parseSystemdMainPid('MainPID=1234\n'), 1234);
+test('parseSystemdMainPid 解析 MainPID（支持 --value 纯数字与 MainPID=N）', () => {
+  assert.equal(ps.parseSystemdMainPid('1234\n'), 1234); // --value 纯数字
+  assert.equal(ps.parseSystemdMainPid('MainPID=1234\n'), 1234); // 旧格式兼容
   assert.equal(ps.parseSystemdMainPid('MainPID=0\n'), null);
   assert.equal(ps.parseSystemdMainPid(''), null);
 });
 
-test('parseLaunchctlList 解析 launchctl list', () => {
-  // 运行中：label PID status
-  assert.deepEqual(ps.parseLaunchctlList('com.deepseek.dsh 4242 0\n', 0), { exists: true, running: true, pid: 4242 });
-  // 已加载未运行：PID 列 '-'
-  assert.deepEqual(ps.parseLaunchctlList('com.deepseek.dsh - 0\n', 0), { exists: true, running: false, pid: null });
+test('parseLaunchctlList 解析 launchctl list（官方格式 PID Status Label）', () => {
+  // 官方输出：`12783 0 com.example.myagent`（第一列 PID、第二列 Status 退出码、第三列 Label）
+  assert.deepEqual(ps.parseLaunchctlList('4242 0 com.deepseek.dsh\n', 0), { exists: true, running: true, pid: 4242 });
+  // 未运行：PID 列 '-'
+  assert.deepEqual(ps.parseLaunchctlList('- 0 com.deepseek.dsh\n', 0), { exists: true, running: false, pid: null });
   // 不存在：exit 非 0
   assert.deepEqual(ps.parseLaunchctlList('', 113), { exists: false, running: false, pid: null });
 });
@@ -151,6 +152,19 @@ test('linux.readPort：ExecStart --port', () => {
   } finally { restore(); }
 });
 
+test('linux.readPort：Environment=PORT 回退（无 --port 时）', () => {
+  const restore = withProbe((cmd, args) => {
+    if (args[0] === 'show') return { ok: true, status: 0, stdout: 'ExecStart={ path=/usr/bin/node ; argv[]=/usr/bin/node ... }\nEnvironment=PORT=8080\n', stderr: '' };
+    return { ok: false, status: 1, stdout: '', stderr: '' };
+  });
+  try {
+    const r = ps.linux.readPort('dsh', {});
+    assert.equal(r.ok, true);
+    assert.equal(r.port, 8080);
+    assert.equal(r.detail, 'systemd-env');
+  } finally { restore(); }
+});
+
 test('linux.pid / isStopped', () => {
   const restore = withProbe((cmd, args) => {
     if (args[0] === 'show') return { ok: true, status: 0, stdout: 'MainPID=5678\n', stderr: '' };
@@ -175,7 +189,7 @@ test('linux.stopService：权限失败 → PERMISSION 提示', () => {
 
 test('darwin.detectService / pid / isStopped', () => {
   const restore = withProbe((cmd, args) => {
-    if (args[0] === 'list') return { ok: true, status: 0, stdout: 'com.deepseek.dsh 4321 0\n', stderr: '' };
+    if (args[0] === 'list') return { ok: true, status: 0, stdout: '4321 0 com.deepseek.dsh\n', stderr: '' };
     return { ok: false, status: 1, stdout: '', stderr: '' };
   });
   try {
