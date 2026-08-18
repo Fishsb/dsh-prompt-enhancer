@@ -885,7 +885,7 @@ const EN = {
   // v3.2：桌面快捷方式 CLI 重启
   updMakeShortcut: 'Desktop',
   updShortcutTooltip: 'Create a desktop shortcut',
-  updShortcutOk: 'Desktop shortcut "Restart DSH Service" created (DeepSeek whale icon) — double-click it (even when the web UI is down) to restart the service in a CLI window',
+  updShortcutOk: 'Desktop shortcut "Restart DSH" created (DeepSeek whale icon) — double-click it (even when the web UI is down) to restart the service in a CLI window',
   updShortcutFail: 'Failed to create desktop shortcut: {msg}',
   updApplying: 'Installing update… (10–60s)',
   updApplyStaging: 'Downloading update resources…',
@@ -1923,13 +1923,15 @@ function UpdaterCard(props) {
   const cancelApply = () => {
     if (applyPhase === 'confirm') { setApplyPhase('idle'); setAction(null); }
   };
-  // v3.2（用户需求·桌面快捷方式 CLI 重启）：创建桌面快捷方式（host RPC 写 .cmd + .lnk）
+  // v3.2（用户需求·桌面快捷方式 CLI 重启）：创建桌面快捷方式（host RPC 写 .cmd + .lnk）。
+  // 快捷方式名跟随当前 UI 语言：t('updMakeShortcut') 中文「桌面」→ zh，英文「Desktop」→ en。
   const makeShortcut = () => {
     if (shortcutBusy) return;
     setShortcutBusy(true);
     setApplyErr(null);
     setApplyStatus(null);
-    host.call('update/makeShortcut', { serviceName, profile }).then((r) => {
+    const locale = t('updMakeShortcut') === '桌面' ? 'zh' : 'en';
+    host.call('update/makeShortcut', { serviceName, profile, locale }).then((r) => {
       const rr = r && typeof r === 'object' ? r : {};
       if (rr.ok === true) {
         setApplyStatus(t('updShortcutOk'));

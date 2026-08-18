@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Changed
+- **快捷方式名跟随 UI 语言（用户需求·中英双语）**：client 按当前语言传 `locale`（t('updMakeShortcut')==='桌面'→zh / else en）→ host 创建「**重启DSH.lnk**」（zh）/「**Restart DSH.lnk**」（en），旧名（重启DSH服务 / Restart DSH Service）自动删除避免重复；i18n `updShortcutOk` 文案双语同步。实测：zh/en 均创建正确 + 鲸鱼图标写入（iconApplied=true）— [PEN-002]
 - **快捷方式名改「重启DSH」（用户需求）**：makeShortcut 创建 `桌面\重启DSH.lnk`（原「重启DSH服务」删除避免重复）；i18n `updShortcutOk` 文案同步。实测：桌面只剩「重启DSH.lnk」、鲸鱼图标保留（iconApplied=true）— [PEN-002]
 - **桌面快捷方式图标实现改 Node 直接生成 .lnk（修复 SYSTEM 会话图标不写入）**：实测 WScript.Shell 在 SYSTEM 会话（DSH 服务进程）下**写 IconLocation 被静默忽略**（TargetPath 等正常、图标字段不落盘）——改为 `buildLnk()` **Node 按 Shell Link 二进制格式直接生成 .lnk**（Header + LinkInfo LocalBasePath + StringData 含 IconLocation + TerminalBlock），完全可控、跨环境一致；makeShortcut 读回 .lnk 验证图标（iconApplied 字段）。**实测 iconApplied=true**（此前 WScript.Shell 方案恒 false）— [PEN-002]
 - **桌面快捷方式图标 + 按钮文案优化（用户需求）**：① 快捷方式图标换 **DeepSeek 蓝色鲸鱼**——新增 `assets/deepseek.ico`（官方 favicon 下载入库），makeShortcut 时复制到 `EXECUTOR_ROOT/icons/deepseek.ico` → `.lnk` IconLocation（复制失败回退默认图标，不阻断）；② 端口重启确认态按钮文案「快捷」→「**桌面**」（i18n `updMakeShortcut`）；③ 按钮加悬停提示（title）「创建桌面快捷方式」（i18n 新增 `updShortcutTooltip` zh/en）；成功提示文案补充鲸鱼图标说明。全量测试 **152/152** — [PEN-002]
