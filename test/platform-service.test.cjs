@@ -67,6 +67,45 @@ test('backendFor 平台分发', () => {
   assert.equal(ps.backendFor('unknown'), null);
 });
 
+// ---------- 进程索引（进程级重启降级）----------
+test('readProcessIndex 解析 host 写的进程索引', () => {
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-idx-'));
+  try {
+    // execPath 用真实存在的 node
+    const execPath = process.execPath;
+    fs.writeFileSync(path.join(tmp, 'dsh-prompt-enhancer.json'), JSON.stringify({
+      pid: 12345, execPath, cwd: '/tmp/work', argv: ['lib/bin.js', 'web', '--port', '3080'], ts: Date.now(),
+    }), 'utf8');
+    const idx = ps.readProcessIndex(tmp);
+    assert.equal(idx.pid, 12345);
+    assert.equal(idx.execPath, execPath);
+    assert.equal(idx.cwd, '/tmp/work');
+    assert.deepEqual(idx.argv, ['lib/bin.js', 'web', '--port', '3080']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('readProcessIndex：execPath 不存在 / 缺 argv → null', () => {
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-idx2-'));
+  try {
+    fs.writeFileSync(path.join(tmp, 'dsh-prompt-enhancer.json'), JSON.stringify({ pid: 1, execPath: 'C:/definitely/not/exists/node.exe', argv: [] }), 'utf8');
+    assert.equal(ps.readProcessIndex(tmp), null);
+    fs.writeFileSync(path.join(tmp, 'dsh-prompt-enhancer.json'), JSON.stringify({ pid: 1, execPath: process.execPath }), 'utf8');
+    assert.equal(ps.readProcessIndex(tmp), null);
+    // 无文件
+    assert.equal(ps.readProcessIndex(tmp + '-nope'), null);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ---------- 后端逻辑（mock probe）----------
 // 用 __setProbe 替换命令执行实现，验证 backend 方法在典型命令输出下的行为。
 function withProbe(probeImpl) {
