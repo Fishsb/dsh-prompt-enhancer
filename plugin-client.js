@@ -624,9 +624,10 @@ const ZH = {
   envExecPortOccupied: '更新端口被其他进程占用——更新功能可能不可用，请释放或修改 updater.executorPort',
   envExecPortNoPort: '无法解析服务端口——无法确认更新端口独立',
   updApplyConfirm: '确认',
-  // v3.2（用户需求·桌面快捷方式 CLI 重启）：端口重启确认态「快捷」按钮 + 创建结果提示
-  updMakeShortcut: '快捷',
-  updShortcutOk: '已在桌面创建「重启DSH服务」快捷方式——以后网页打不开时双击它即可在命令行窗口重启服务',
+  // v3.2（用户需求·桌面快捷方式 CLI 重启）：端口重启确认态「桌面」按钮 + 悬停提示 + 创建结果提示
+  updMakeShortcut: '桌面',
+  updShortcutTooltip: '创建桌面快捷方式',
+  updShortcutOk: '已在桌面创建「重启DSH服务」快捷方式（DeepSeek 鲸鱼图标）——以后网页打不开时双击它即可在命令行窗口重启服务',
   updShortcutFail: '创建桌面快捷方式失败：{msg}',
   updApplying: '正在安装更新…（10–60 秒）',
   updApplyStaging: '正在下载更新资源…',
@@ -882,8 +883,9 @@ const EN = {
   envExecPortNoPort: 'Cannot resolve the service port — cannot confirm update-port independence',
   updApplyConfirm: 'Confirm',
   // v3.2：桌面快捷方式 CLI 重启
-  updMakeShortcut: 'Shortcut',
-  updShortcutOk: 'Desktop shortcut "Restart DSH Service" created — double-click it (even when the web UI is down) to restart the service in a CLI window',
+  updMakeShortcut: 'Desktop',
+  updShortcutTooltip: 'Create a desktop shortcut',
+  updShortcutOk: 'Desktop shortcut "Restart DSH Service" created (DeepSeek whale icon) — double-click it (even when the web UI is down) to restart the service in a CLI window',
   updShortcutFail: 'Failed to create desktop shortcut: {msg}',
   updApplying: 'Installing update… (10–60s)',
   updApplyStaging: 'Downloading update resources…',
@@ -2196,13 +2198,15 @@ function UpdaterCard(props) {
         : applyPhase === 'restarting' ? t('updApplyRestarting').replace('{sec}', String(restartLeft)).replace('{round}', String(restartRound))
         : applyPhase === 'done' ? t('updApplyDone')
         : t('updPortRestart')),
-      // v3.2（用户需求）：端口重启确认态「快捷」按钮——创建桌面快捷方式（脱 Web CLI 重启）
+      // v3.2（用户需求）：端口重启确认态「桌面」按钮——创建桌面快捷方式（脱 Web CLI 重启）；
+      // 悬停提示（title）说明用途
       applyPhase === 'confirm' && action === 'restart'
         ? React.createElement('button', {
             type: 'button',
             className: 'dsh-plg-btn',
             disabled: shortcutBusy,
             onClick: makeShortcut,
+            title: t('updShortcutTooltip'),
           }, shortcutBusy ? '…' : t('updMakeShortcut'))
         : null,
       applyPhase === 'confirm'
