@@ -2147,7 +2147,7 @@ function estimateLiteModeSeconds(ttftMs, tokensPerSecond, inputChars) {
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
 const PLUGIN_VERSION = '3.1.4';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
-const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
+const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）
 const UPDATE_CACHE_TTL_MS = 300000;
 

@@ -1558,7 +1558,7 @@ function stateKey(state) {
 // contents API 文件（base64 → atob 解码），host 只做解析/校验/写入（update/check、update/pull）。
 const UPDATER_DEFAULT_REPO = 'Fishsb/dsh-prompt-enhancer';
 // 与 host PURE UPDATE_MANIFEST 同步（host 侧 validateManifestFiles 为权威校验）
-const UPDATER_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'LICENSE', 'cordis.patch.yml'];
+const UPDATER_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'cordis.patch.yml'];
 const updaterContentsUrl = (repo, tag, file) => 'https://api.github.com/repos/' + repo + '/contents/' + file + '?ref=' + tag;
 const updaterTagsUrl = (repo) => 'https://api.github.com/repos/' + repo + '/tags?per_page=100';
 const updaterReleaseUrl = (repo) => 'https://api.github.com/repos/' + repo + '/releases/latest';

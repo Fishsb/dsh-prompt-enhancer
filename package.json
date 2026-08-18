@@ -10,8 +10,7 @@
     "plugin-client.js",
     "cordis.patch.yml",
     "README.md",
-    "README.en.md",
-    "LICENSE"
+    "README.en.md"
   ],
   "exports": {
     ".": "./lib/index.cjs",
@@ -47,6 +46,5 @@
     "plugin",
     "prompt-enhancer",
     "dsh-plugin"
-  ],
-  "license": "MIT"
+  ]
 }

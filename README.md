@@ -4,7 +4,6 @@ DeepSeek Harness (DSH) 提示词增强插件：输入框写草稿 → 点击 ✨
 
 [![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
 [![Release date](https://img.shields.io/github/release-date/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
-[![License](https://img.shields.io/github/license/Fishsb/dsh-prompt-enhancer)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer)
 
 ## ✨ 功能亮点
@@ -63,7 +62,3 @@ dsh plugin --profile web remove dsh-prompt-enhancer
 - [兼容性说明](docs/compatibility-matrix.md)
 
 > 隐私：插件不记录、不上报任何数据；增强结果来自外部 LLM，发送前请自行核对。
-
-## License
-
-[MIT](LICENSE)

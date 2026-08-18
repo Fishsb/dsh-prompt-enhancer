@@ -4,7 +4,6 @@ A prompt-enhancement plugin for [DeepSeek Harness](https://github.com/deepseek-a
 
 [![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
 [![Release date](https://img.shields.io/github/release-date/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
-[![License](https://img.shields.io/github/license/Fishsb/dsh-prompt-enhancer)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer)
 
 ## ✨ Highlights
@@ -63,7 +62,3 @@ Settings → "Models & plugins":
 - [Compatibility notes](docs/compatibility-matrix.md)
 
 > Privacy: the plugin records or reports nothing; enhanced results come from an external LLM — verify before sending.
-
-## License
-
-[MIT](LICENSE)
