@@ -234,3 +234,36 @@ test('win.readPort：nssm AppParameters --port', () => {
     assert.equal(r.detail, 'nssm');
   } finally { restore(); }
 });
+
+// ---------- darwin.startService（v3.2 bootstrap 优先，openclaw 竞态教训）----------
+test('darwin.startService：bootout 后 bootstrap 重新注册 + kickstart 启动', () => {
+  const calls = [];
+  const restore = withProbe((cmd, args) => {
+    calls.push(cmd + ' ' + args.join(' '));
+    if (cmd === 'launchctl' && args[0] === 'bootstrap') return { ok: true, status: 0, stdout: '', stderr: '' };
+    if (cmd === 'launchctl' && args[0] === 'kickstart') return { ok: true, status: 0, stdout: '', stderr: '' };
+    return { ok: false, status: 1, stdout: '', stderr: '' };
+  });
+  try {
+    const r = ps.darwin.startService('dsh', {});
+    assert.equal(r.ok, true);
+    assert.ok(calls.some((c) => c.includes('bootstrap')), '应优先 bootstrap 重新注册');
+    assert.ok(calls.some((c) => c.includes('kickstart')), 'bootstrap 后应 kickstart 启动');
+    assert.equal(r.detail.includes('bootstrapped'), true);
+  } finally { restore(); }
+});
+
+test('darwin.startService：已加载时 kickstart -k 快速重启（无 plist/bootstrap 时）', () => {
+  const calls = [];
+  const restore = withProbe((cmd, args) => {
+    calls.push(cmd + ' ' + args.join(' '));
+    if (cmd === 'launchctl' && args[0] === 'kickstart') return { ok: true, status: 0, stdout: '', stderr: '' };
+    return { ok: false, status: 1, stdout: '', stderr: '' };
+  });
+  try {
+    const r = ps.darwin.startService('dsh', {});
+    assert.equal(r.ok, true);
+    assert.ok(calls.some((c) => c.includes('kickstart -k')), '已加载时走 kickstart -k');
+    assert.equal(r.detail, 'kickstart -k');
+  } finally { restore(); }
+});
