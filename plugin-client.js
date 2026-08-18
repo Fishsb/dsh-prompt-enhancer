@@ -618,6 +618,8 @@ const ZH = {
   envToolUnreachable: '系统工具不可达（PATH 异常）——检查结果不可信，请检查系统环境',
   // v2.7.0（更新端口独立检查——显示名用「更新」口径，避免内部术语「执行器」）
   envExecPort: '更新端口独立',
+  // v3.2（动态端口 fallback）：端口冲突 → 执行器自动 fallback 动态端口（warn）
+  envExecPortDynamic: '更新端口被占用——执行器将自动使用动态端口，功能不受影响',
   envExecPortSame: '更新端口与服务端口相同——更新功能无法监听，请修改 updater.executorPort',
   envExecPortOccupied: '更新端口被其他进程占用——更新功能可能不可用，请释放或修改 updater.executorPort',
   envExecPortNoPort: '无法解析服务端口——无法确认更新端口独立',
@@ -869,6 +871,8 @@ const EN = {
   envToolUnreachable: 'System tools unreachable (PATH broken) — results unreliable, check the system environment',
   // v2.7.0（更新端口独立检查——显示名用「更新」口径，避免内部术语「执行器」）
   envExecPort: 'Update port independent',
+  // v3.2（动态端口 fallback）：端口冲突 → 执行器自动 fallback 动态端口（warn）
+  envExecPortDynamic: 'Update port is taken — the updater will use a dynamic port automatically; functionality unaffected',
   envExecPortSame: 'Update port equals the service port — the updater cannot listen; change updater.executorPort',
   envExecPortOccupied: 'Update port is held by another process — the updater may be unavailable; free it or change updater.executorPort',
   envExecPortNoPort: 'Cannot resolve the service port — cannot confirm update-port independence',
@@ -1593,6 +1597,8 @@ const ENV_DETAIL_TEXT = {
   'tool-unreachable': 'envToolUnreachable',
   'same-as-service': 'envExecPortSame',
   'exec-occupied': 'envExecPortOccupied',
+  // v3.2（动态端口 fallback）：端口冲突 → 执行器自动 fallback 动态端口（warn 提示）
+  'exec-dynamic': 'envExecPortDynamic',
   'no-port': 'envExecPortNoPort',
 };
 
@@ -1741,7 +1747,9 @@ function UpdaterCard(props) {
   // 服务相关检查（service/svc-type/svc-bin）不再 block 一键更新——apply 为 staged
   // 下载+校验、零端口操作、不依赖服务状态；真正安装重启时执行器内部自行校验报错
   // （STOP_FAILED 等）。服务相关项仍展示在环境检测结果里（warn 提示），不阻止执行器使用。
-  const EXECUTOR_LINK_BLOCKS = ['exec-port', 'tools'];
+  // v3.2（动态端口 fallback）：exec-port 端口冲突不再 block——执行器会自动 fallback
+  // 动态端口（listen 0 + executor.port），executorEnsure 返回真实端口；仅 tools 缺失阻断。
+  const EXECUTOR_LINK_BLOCKS = ['tools'];
   const ensureExecutor = () => {
     return host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
       const er = envRes && typeof envRes === 'object' ? envRes : {};
@@ -1857,7 +1865,9 @@ function UpdaterCard(props) {
           const installTag = result && result.remoteTag ? result.remoteTag : '';
           host.call('update/executorEnsure', { port }).then((en) => {
             if (en && en.ok === true) {
-              return executor.call('restart', { serviceName, profile, tag: installTag, port }, port);
+              // v3.2（动态端口 fallback）：重发 restart 用 executorEnsure 返回的真实端口
+              const ap = (en.port && en.port > 0) ? en.port : port;
+              return executor.call('restart', { serviceName, profile, tag: installTag, port: ap }, ap);
             }
             return Promise.resolve(null);
           }).then((rr) => {
@@ -1916,6 +1926,8 @@ function UpdaterCard(props) {
     setApplyPhase('applying');
     setApplyErr(null);
     setApplyStatus(null);
+    // v3.2（动态端口 fallback）：apply 完成后轮询用执行器实际端口（executorEnsure 返回）
+    let applyPort = executorPort();
     ensureExecutor().then((ensureRes) => {
       if (!ensureRes) return;
       const en = ensureRes && typeof ensureRes === 'object' ? ensureRes : {};
@@ -1925,6 +1937,7 @@ function UpdaterCard(props) {
         setAction(null);
         return null;
       }
+      applyPort = (en.port && en.port > 0) ? en.port : applyPort;
       // v3.1.x（职责划分·用户指令）：执行前校验执行器版本——仅下载/校验（staged 模式）
       // 需执行器 ≥0.1.8；过旧则阻止并提示重启 dsh-web 升级执行器
       return executor.call('ping', {}, en.port).then((p) => {
@@ -1948,7 +1961,7 @@ function UpdaterCard(props) {
         return;
       }
       setApplyStatus(t('updApplying'));
-      pollExecutorStatus(executorPort());
+      pollExecutorStatus(applyPort);
     }).catch(() => {
       setApplyErr(t('updApplyExecutorDown'));
       setApplyPhase('idle');
@@ -1973,6 +1986,10 @@ function UpdaterCard(props) {
     // executorEnsure 自动拉起（服务存活时有效）——拉起成功后继续；host 也不可达
     // （服务已停且执行器未运行，异常场景）才报「执行器不可用」
     const port = executorPort();
+    // v3.2（动态端口 fallback）：执行器实际端口可能 ≠ 配置端口（3081 被占用时执行器
+    // 自动 fallback 动态端口并写入 executor.port，executorEnsure 返回真实端口）。
+    // actualPort 在 tryPing/ensureThenPing 成功后确定，restart/poll 用它。
+    let actualPort = port;
     // 带新版本 tag（一键更新已下载 staging）→ 需要执行器 ≥0.1.8（restart 承载安装）；
     // 纯重启（无 tag）不设版本门槛
     const installTag = result && result.remoteTag ? result.remoteTag : '';
@@ -1983,7 +2000,11 @@ function UpdaterCard(props) {
     const ensureThenPing = (attempt) => {
       const n = attempt || 1;
       return host.call('update/executorEnsure', { port }).then((en) => {
-        if (en && en.ok === true) return tryPing();
+        if (en && en.ok === true) {
+          // 用 executorEnsure 返回的真实端口（动态 fallback 场景 port ≠ en.port）
+          actualPort = (en.port && en.port > 0) ? en.port : port;
+          return executor.call('ping', {}, actualPort);
+        }
         if (n >= 3) return Promise.resolve(null);
         return new Promise((res) => setTimeout(() => res(ensureThenPing(n + 1)), 1000));
       }).catch(() => {
@@ -2013,8 +2034,8 @@ function UpdaterCard(props) {
       }
       // 发送即返回（旧版挂起模式由轮询 status 接管进度展示）；带 tag 时执行器在
       // 停服窗口内安装 staging tarball 后重启（全部端口操作统一在此模块）
-      executor.call('restart', { serviceName, profile, tag: installTag, port }, port).then(() => {}).catch(() => {});
-      pollExecutorStatus(port);
+      executor.call('restart', { serviceName, profile, tag: installTag, port: actualPort }, actualPort).then(() => {}).catch(() => {});
+      pollExecutorStatus(actualPort);
     }).catch(() => {
       setApplyErr(t('updApplyExecutorDown'));
       setApplyStatus(null);

@@ -267,3 +267,27 @@ test('darwin.startService：已加载时 kickstart -k 快速重启（无 plist/b
     assert.equal(r.detail, 'kickstart -k');
   } finally { restore(); }
 });
+
+// ---------- v3.2 动态端口 fallback：readExecutorPortFile（注入路径）----------
+test('sys.readExecutorPortFile：有效端口文件解析', () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const sys = require('../lib/sys.cjs');
+  const tmp = path.join(os.tmpdir(), 'dsh-exec-port-test-' + Date.now());
+  fs.mkdirSync(tmp, { recursive: true });
+  try {
+    const portFile = path.join(tmp, 'executor.port');
+    fs.writeFileSync(portFile, JSON.stringify({ port: 43123, pid: 1234, ts: 100 }), 'utf8');
+    const r = sys.readExecutorPortFile(portFile);
+    assert.equal(r.port, 43123);
+    assert.equal(r.pid, 1234);
+    // 非法端口 → null（端口越界）
+    fs.writeFileSync(portFile, JSON.stringify({ port: 80 }), 'utf8');
+    assert.equal(sys.readExecutorPortFile(portFile), null);
+    // 非法 JSON / 文件缺失 → null
+    fs.writeFileSync(portFile, '{bad json', 'utf8');
+    assert.equal(sys.readExecutorPortFile(portFile), null);
+    assert.equal(sys.readExecutorPortFile(path.join(tmp, 'nope.json')), null);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
