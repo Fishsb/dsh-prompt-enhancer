@@ -836,6 +836,37 @@ const ZH = {
   stageDetailScan: '扫描工作区',
   stageDetailRetry: '重试 {current}/{total}',
   stageDetailProbe: '连通 {current}/{total}',
+  voiceSectionTitle: '🎙 语音识别',
+  voiceSectionSummary: '语音识别',
+  voiceAsrEngine: '识别引擎',
+  voiceAsrLocal: '本地',
+  voiceAsrCloud: '云端',
+  voiceCloudProtocol: '协议',
+  voiceCloudBaseUrl: '接口地址',
+  voiceCloudModel: '模型',
+  voiceCloudApiKey: 'API Key',
+  voiceCloudHint: '云端引擎：音频将上传至所配置的服务',
+  voiceRefineEnabled: '规整开关',
+  voiceRefineBaseUrl: '规整接口',
+  voiceRefineModel: '规整模型',
+  voiceRefineHint: '规整=去口水词（留空跳过；失败自动用原文）',
+  voiceStatusCheck: '检测状态',
+  voiceStatusChecking: '检测中…',
+  voiceStatusCloudReady: '云端已配置',
+  voiceStatusNoKey: '缺 API Key',
+  voiceStatusLocalNotReady: '本地引擎未启用（P2）',
+  voiceRecord: '开始录音',
+  voiceStop: '停止',
+  voiceRecognizing: '正在识别',
+  voicePendingEnhance: '已暂存',
+  voiceErrNoMic: '无麦克风权限',
+  voiceErrNoKey: '未配置 API Key',
+  voiceErrNetwork: '网络错误',
+  voiceErrTimeout: '识别超时',
+  voiceErrAudio: '音频无效',
+  voiceErrEmpty: '未识别到语音',
+  voicePrivacyHint: '音频将上传至所配置的云端服务',
+  voiceResultFilled: '已填入草稿',
   stageDone: '✓',
 };
 
@@ -1101,6 +1132,37 @@ const EN = {
   stageDetailScan: 'Scanning',
   stageDetailRetry: 'Retry {current}/{total}',
   stageDetailProbe: 'Probe {current}/{total}',
+  voiceSectionTitle: 'Voice Input',
+  voiceSectionSummary: 'Voice',
+  voiceAsrEngine: 'Engine',
+  voiceAsrLocal: 'Local',
+  voiceAsrCloud: 'Cloud',
+  voiceCloudProtocol: 'Protocol',
+  voiceCloudBaseUrl: 'Base URL',
+  voiceCloudModel: 'Model',
+  voiceCloudApiKey: 'API Key',
+  voiceCloudHint: 'Cloud engine: audio is uploaded to the configured service',
+  voiceRefineEnabled: 'Refine',
+  voiceRefineBaseUrl: 'Refine URL',
+  voiceRefineModel: 'Refine Model',
+  voiceRefineHint: 'Refine removes filler words (leave empty to skip; falls back to raw)',
+  voiceStatusCheck: 'Check',
+  voiceStatusChecking: 'Checking…',
+  voiceStatusCloudReady: 'Cloud ready',
+  voiceStatusNoKey: 'API key missing',
+  voiceStatusLocalNotReady: 'Local engine not enabled (P2)',
+  voiceRecord: 'Start recording',
+  voiceStop: 'Stop',
+  voiceRecognizing: 'Recognizing',
+  voicePendingEnhance: 'Pending',
+  voiceErrNoMic: 'No microphone permission',
+  voiceErrNoKey: 'API key not configured',
+  voiceErrNetwork: 'Network error',
+  voiceErrTimeout: 'Recognition timeout',
+  voiceErrAudio: 'Invalid audio',
+  voiceErrEmpty: 'No speech detected',
+  voicePrivacyHint: 'Audio is uploaded to the configured cloud service',
+  voiceResultFilled: 'Filled into draft',
   stageDone: '✓',
 };
 
@@ -1173,6 +1235,12 @@ function notify(sessionId) {
 }
 
 // v21（P1-3）：组件卸载且状态空闲时释放 store 条目，防止 sessionStores 无限增长（内存泄漏修复）
+// v3.2.5（语音模块）：只读查询——供 voice 填入时序防护（不共享内部状态、不调用功能）。
+function isEnhancing(sessionId) {
+  const s = sessionStores.get(sessionId);
+  return !!(s && s.phase === 'enhancing');
+}
+
 function releaseStoreIfIdle(sessionId) {
   const s = sessionStores.get(sessionId);
   if (!s) return;
@@ -3363,6 +3431,8 @@ function ModelConfigTab(props) {
     inherited ? React.createElement('p', { className: 'dsh-plg-note dsh-plg-inherit' }, t('cfgInherited')) : null,
     // v23：单一「模型配置」链区块（无主/兜之分；main 已迁移并忽略）
     React.createElement(ModelMainSection, { t: t, providers: providers, fallback: cfg.fallback, candidates: candidates, saveFallback: saveFallback }),
+    // v3.2.5（语音识别模块）：语音识别配置段落块（模型配置 tab 内）
+    React.createElement(VoiceSection, { t: t }),
   );
 }
 
@@ -3688,6 +3758,458 @@ function ModelPluginsSection(props) {
 function CordisBadgePlaceholder() {
   return null;
 }
+'use strict';
+
+// Last time updated: 2021-03-09 3:20:23 AM UTC
+
+// ________________
+// RecordRTC v5.6.2
+
+// Open-Sourced: https://github.com/muaz-khan/RecordRTC
+
+// --------------------------------------------------
+// Muaz Khan     - www.MuazKhan.com
+// MIT License   - www.WebRTC-Experiment.com/licence
+// --------------------------------------------------
+
+"use strict";function RecordRTC(mediaStream,config){function startRecording(config2){return config.disableLogs||console.log("RecordRTC version: ",self.version),config2&&(config=new RecordRTCConfiguration(mediaStream,config2)),config.disableLogs||console.log("started recording "+config.type+" stream."),mediaRecorder?(mediaRecorder.clearRecordedData(),mediaRecorder.record(),setState("recording"),self.recordingDuration&&handleRecordingDuration(),self):(initRecorder(function(){self.recordingDuration&&handleRecordingDuration()}),self)}function initRecorder(initCallback){initCallback&&(config.initCallback=function(){initCallback(),initCallback=config.initCallback=null});var Recorder=new GetRecorderType(mediaStream,config);mediaRecorder=new Recorder(mediaStream,config),mediaRecorder.record(),setState("recording"),config.disableLogs||console.log("Initialized recorderType:",mediaRecorder.constructor.name,"for output-type:",config.type)}function stopRecording(callback){function _callback(__blob){if(!mediaRecorder)return void("function"==typeof callback.call?callback.call(self,""):callback(""));Object.keys(mediaRecorder).forEach(function(key){"function"!=typeof mediaRecorder[key]&&(self[key]=mediaRecorder[key])});var blob=mediaRecorder.blob;if(!blob){if(!__blob)throw"Recording failed.";mediaRecorder.blob=blob=__blob}if(blob&&!config.disableLogs&&console.log(blob.type,"->",bytesToSize(blob.size)),callback){var url;try{url=URL.createObjectURL(blob)}catch(e){}"function"==typeof callback.call?callback.call(self,url):callback(url)}config.autoWriteToDisk&&getDataURL(function(dataURL){var parameter={};parameter[config.type+"Blob"]=dataURL,DiskStorage.Store(parameter)})}return callback=callback||function(){},mediaRecorder?"paused"===self.state?(self.resumeRecording(),void setTimeout(function(){stopRecording(callback)},1)):("recording"===self.state||config.disableLogs||console.warn('Recording state should be: "recording", however current state is: ',self.state),config.disableLogs||console.log("Stopped recording "+config.type+" stream."),"gif"!==config.type?mediaRecorder.stop(_callback):(mediaRecorder.stop(),_callback()),void setState("stopped")):void warningLog()}function pauseRecording(){return mediaRecorder?"recording"!==self.state?void(config.disableLogs||console.warn("Unable to pause the recording. Recording state: ",self.state)):(setState("paused"),mediaRecorder.pause(),void(config.disableLogs||console.log("Paused recording."))):void warningLog()}function resumeRecording(){return mediaRecorder?"paused"!==self.state?void(config.disableLogs||console.warn("Unable to resume the recording. Recording state: ",self.state)):(setState("recording"),mediaRecorder.resume(),void(config.disableLogs||console.log("Resumed recording."))):void warningLog()}function readFile(_blob){postMessage((new FileReaderSync).readAsDataURL(_blob))}function getDataURL(callback,_mediaRecorder){function processInWebWorker(_function){try{var blob=URL.createObjectURL(new Blob([_function.toString(),"this.onmessage =  function (eee) {"+_function.name+"(eee.data);}"],{type:"application/javascript"})),worker=new Worker(blob);return URL.revokeObjectURL(blob),worker}catch(e){}}if(!callback)throw"Pass a callback function over getDataURL.";var blob=_mediaRecorder?_mediaRecorder.blob:(mediaRecorder||{}).blob;if(!blob)return config.disableLogs||console.warn("Blob encoder did not finish its job yet."),void setTimeout(function(){getDataURL(callback,_mediaRecorder)},1e3);if("undefined"==typeof Worker||navigator.mozGetUserMedia){var reader=new FileReader;reader.readAsDataURL(blob),reader.onload=function(event){callback(event.target.result)}}else{var webWorker=processInWebWorker(readFile);webWorker.onmessage=function(event){callback(event.data)},webWorker.postMessage(blob)}}function handleRecordingDuration(counter){if(counter=counter||0,"paused"===self.state)return void setTimeout(function(){handleRecordingDuration(counter)},1e3);if("stopped"!==self.state){if(counter>=self.recordingDuration)return void stopRecording(self.onRecordingStopped);counter+=1e3,setTimeout(function(){handleRecordingDuration(counter)},1e3)}}function setState(state){self&&(self.state=state,"function"==typeof self.onStateChanged.call?self.onStateChanged.call(self,state):self.onStateChanged(state))}function warningLog(){config.disableLogs!==!0&&console.warn(WARNING)}if(!mediaStream)throw"First parameter is required.";config=config||{type:"video"},config=new RecordRTCConfiguration(mediaStream,config);var mediaRecorder,self=this,WARNING='It seems that recorder is destroyed or "startRecording" is not invoked for '+config.type+" recorder.",returnObject={startRecording:startRecording,stopRecording:stopRecording,pauseRecording:pauseRecording,resumeRecording:resumeRecording,initRecorder:initRecorder,setRecordingDuration:function(recordingDuration,callback){if("undefined"==typeof recordingDuration)throw"recordingDuration is required.";if("number"!=typeof recordingDuration)throw"recordingDuration must be a number.";return self.recordingDuration=recordingDuration,self.onRecordingStopped=callback||function(){},{onRecordingStopped:function(callback){self.onRecordingStopped=callback}}},clearRecordedData:function(){return mediaRecorder?(mediaRecorder.clearRecordedData(),void(config.disableLogs||console.log("Cleared old recorded data."))):void warningLog()},getBlob:function(){return mediaRecorder?mediaRecorder.blob:void warningLog()},getDataURL:getDataURL,toURL:function(){return mediaRecorder?URL.createObjectURL(mediaRecorder.blob):void warningLog()},getInternalRecorder:function(){return mediaRecorder},save:function(fileName){return mediaRecorder?void invokeSaveAsDialog(mediaRecorder.blob,fileName):void warningLog()},getFromDisk:function(callback){return mediaRecorder?void RecordRTC.getFromDisk(config.type,callback):void warningLog()},setAdvertisementArray:function(arrayOfWebPImages){config.advertisement=[];for(var length=arrayOfWebPImages.length,i=0;i<length;i++)config.advertisement.push({duration:i,image:arrayOfWebPImages[i]})},blob:null,bufferSize:0,sampleRate:0,buffer:null,reset:function(){"recording"!==self.state||config.disableLogs||console.warn("Stop an active recorder."),mediaRecorder&&"function"==typeof mediaRecorder.clearRecordedData&&mediaRecorder.clearRecordedData(),mediaRecorder=null,setState("inactive"),self.blob=null},onStateChanged:function(state){config.disableLogs||console.log("Recorder state changed:",state)},state:"inactive",getState:function(){return self.state},destroy:function(){var disableLogsCache=config.disableLogs;config={disableLogs:!0},self.reset(),setState("destroyed"),returnObject=self=null,Storage.AudioContextConstructor&&(Storage.AudioContextConstructor.close(),Storage.AudioContextConstructor=null),config.disableLogs=disableLogsCache,config.disableLogs||console.log("RecordRTC is destroyed.")},version:"5.6.2"};if(!this)return self=returnObject,returnObject;for(var prop in returnObject)this[prop]=returnObject[prop];return self=this,returnObject}function RecordRTCConfiguration(mediaStream,config){return config.recorderType||config.type||(config.audio&&config.video?config.type="video":config.audio&&!config.video&&(config.type="audio")),config.recorderType&&!config.type&&(config.recorderType===WhammyRecorder||config.recorderType===CanvasRecorder||"undefined"!=typeof WebAssemblyRecorder&&config.recorderType===WebAssemblyRecorder?config.type="video":config.recorderType===GifRecorder?config.type="gif":config.recorderType===StereoAudioRecorder?config.type="audio":config.recorderType===MediaStreamRecorder&&(getTracks(mediaStream,"audio").length&&getTracks(mediaStream,"video").length?config.type="video":!getTracks(mediaStream,"audio").length&&getTracks(mediaStream,"video").length?config.type="video":getTracks(mediaStream,"audio").length&&!getTracks(mediaStream,"video").length&&(config.type="audio"))),"undefined"!=typeof MediaStreamRecorder&&"undefined"!=typeof MediaRecorder&&"requestData"in MediaRecorder.prototype&&(config.mimeType||(config.mimeType="video/webm"),config.type||(config.type=config.mimeType.split("/")[0]),!config.bitsPerSecond),config.type||(config.mimeType&&(config.type=config.mimeType.split("/")[0]),config.type||(config.type="audio")),config}function GetRecorderType(mediaStream,config){var recorder;return(isChrome||isEdge||isOpera)&&(recorder=StereoAudioRecorder),"undefined"!=typeof MediaRecorder&&"requestData"in MediaRecorder.prototype&&!isChrome&&(recorder=MediaStreamRecorder),"video"===config.type&&(isChrome||isOpera)&&(recorder=WhammyRecorder,"undefined"!=typeof WebAssemblyRecorder&&"undefined"!=typeof ReadableStream&&(recorder=WebAssemblyRecorder)),"gif"===config.type&&(recorder=GifRecorder),"canvas"===config.type&&(recorder=CanvasRecorder),isMediaRecorderCompatible()&&recorder!==CanvasRecorder&&recorder!==GifRecorder&&"undefined"!=typeof MediaRecorder&&"requestData"in MediaRecorder.prototype&&(getTracks(mediaStream,"video").length||getTracks(mediaStream,"audio").length)&&("audio"===config.type?"function"==typeof MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported("audio/webm")&&(recorder=MediaStreamRecorder):"function"==typeof MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported("video/webm")&&(recorder=MediaStreamRecorder)),mediaStream instanceof Array&&mediaStream.length&&(recorder=MultiStreamRecorder),config.recorderType&&(recorder=config.recorderType),!config.disableLogs&&recorder&&recorder.name&&console.log("Using recorderType:",recorder.name||recorder.constructor.name),!recorder&&isSafari&&(recorder=MediaStreamRecorder),recorder}function MRecordRTC(mediaStream){this.addStream=function(_mediaStream){_mediaStream&&(mediaStream=_mediaStream)},this.mediaType={audio:!0,video:!0},this.startRecording=function(){var recorderType,mediaType=this.mediaType,mimeType=this.mimeType||{audio:null,video:null,gif:null};if("function"!=typeof mediaType.audio&&isMediaRecorderCompatible()&&!getTracks(mediaStream,"audio").length&&(mediaType.audio=!1),"function"!=typeof mediaType.video&&isMediaRecorderCompatible()&&!getTracks(mediaStream,"video").length&&(mediaType.video=!1),"function"!=typeof mediaType.gif&&isMediaRecorderCompatible()&&!getTracks(mediaStream,"video").length&&(mediaType.gif=!1),!mediaType.audio&&!mediaType.video&&!mediaType.gif)throw"MediaStream must have either audio or video tracks.";if(mediaType.audio&&(recorderType=null,"function"==typeof mediaType.audio&&(recorderType=mediaType.audio),this.audioRecorder=new RecordRTC(mediaStream,{type:"audio",bufferSize:this.bufferSize,sampleRate:this.sampleRate,numberOfAudioChannels:this.numberOfAudioChannels||2,disableLogs:this.disableLogs,recorderType:recorderType,mimeType:mimeType.audio,timeSlice:this.timeSlice,onTimeStamp:this.onTimeStamp}),mediaType.video||this.audioRecorder.startRecording()),mediaType.video){recorderType=null,"function"==typeof mediaType.video&&(recorderType=mediaType.video);var newStream=mediaStream;if(isMediaRecorderCompatible()&&mediaType.audio&&"function"==typeof mediaType.audio){var videoTrack=getTracks(mediaStream,"video")[0];isFirefox?(newStream=new MediaStream,newStream.addTrack(videoTrack),recorderType&&recorderType===WhammyRecorder&&(recorderType=MediaStreamRecorder)):(newStream=new MediaStream,newStream.addTrack(videoTrack))}this.videoRecorder=new RecordRTC(newStream,{type:"video",video:this.video,canvas:this.canvas,frameInterval:this.frameInterval||10,disableLogs:this.disableLogs,recorderType:recorderType,mimeType:mimeType.video,timeSlice:this.timeSlice,onTimeStamp:this.onTimeStamp,workerPath:this.workerPath,webAssemblyPath:this.webAssemblyPath,frameRate:this.frameRate,bitrate:this.bitrate}),mediaType.audio||this.videoRecorder.startRecording()}if(mediaType.audio&&mediaType.video){var self=this,isSingleRecorder=isMediaRecorderCompatible()===!0;mediaType.audio instanceof StereoAudioRecorder&&mediaType.video?isSingleRecorder=!1:mediaType.audio!==!0&&mediaType.video!==!0&&mediaType.audio!==mediaType.video&&(isSingleRecorder=!1),isSingleRecorder===!0?(self.audioRecorder=null,self.videoRecorder.startRecording()):self.videoRecorder.initRecorder(function(){self.audioRecorder.initRecorder(function(){self.videoRecorder.startRecording(),self.audioRecorder.startRecording()})})}mediaType.gif&&(recorderType=null,"function"==typeof mediaType.gif&&(recorderType=mediaType.gif),this.gifRecorder=new RecordRTC(mediaStream,{type:"gif",frameRate:this.frameRate||200,quality:this.quality||10,disableLogs:this.disableLogs,recorderType:recorderType,mimeType:mimeType.gif}),this.gifRecorder.startRecording())},this.stopRecording=function(callback){callback=callback||function(){},this.audioRecorder&&this.audioRecorder.stopRecording(function(blobURL){callback(blobURL,"audio")}),this.videoRecorder&&this.videoRecorder.stopRecording(function(blobURL){callback(blobURL,"video")}),this.gifRecorder&&this.gifRecorder.stopRecording(function(blobURL){callback(blobURL,"gif")})},this.pauseRecording=function(){this.audioRecorder&&this.audioRecorder.pauseRecording(),this.videoRecorder&&this.videoRecorder.pauseRecording(),this.gifRecorder&&this.gifRecorder.pauseRecording()},this.resumeRecording=function(){this.audioRecorder&&this.audioRecorder.resumeRecording(),this.videoRecorder&&this.videoRecorder.resumeRecording(),this.gifRecorder&&this.gifRecorder.resumeRecording()},this.getBlob=function(callback){var output={};return this.audioRecorder&&(output.audio=this.audioRecorder.getBlob()),this.videoRecorder&&(output.video=this.videoRecorder.getBlob()),this.gifRecorder&&(output.gif=this.gifRecorder.getBlob()),callback&&callback(output),output},this.destroy=function(){this.audioRecorder&&(this.audioRecorder.destroy(),this.audioRecorder=null),this.videoRecorder&&(this.videoRecorder.destroy(),this.videoRecorder=null),this.gifRecorder&&(this.gifRecorder.destroy(),this.gifRecorder=null)},this.getDataURL=function(callback){function getDataURL(blob,callback00){if("undefined"!=typeof Worker){var webWorker=processInWebWorker(function(_blob){postMessage((new FileReaderSync).readAsDataURL(_blob))});webWorker.onmessage=function(event){callback00(event.data)},webWorker.postMessage(blob)}else{var reader=new FileReader;reader.readAsDataURL(blob),reader.onload=function(event){callback00(event.target.result)}}}function processInWebWorker(_function){var url,blob=URL.createObjectURL(new Blob([_function.toString(),"this.onmessage =  function (eee) {"+_function.name+"(eee.data);}"],{type:"application/javascript"})),worker=new Worker(blob);if("undefined"!=typeof URL)url=URL;else{if("undefined"==typeof webkitURL)throw"Neither URL nor webkitURL detected.";url=webkitURL}return url.revokeObjectURL(blob),worker}this.getBlob(function(blob){blob.audio&&blob.video?getDataURL(blob.audio,function(_audioDataURL){getDataURL(blob.video,function(_videoDataURL){callback({audio:_audioDataURL,video:_videoDataURL})})}):blob.audio?getDataURL(blob.audio,function(_audioDataURL){callback({audio:_audioDataURL})}):blob.video&&getDataURL(blob.video,function(_videoDataURL){callback({video:_videoDataURL})})})},this.writeToDisk=function(){RecordRTC.writeToDisk({audio:this.audioRecorder,video:this.videoRecorder,gif:this.gifRecorder})},this.save=function(args){args=args||{audio:!0,video:!0,gif:!0},args.audio&&this.audioRecorder&&this.audioRecorder.save("string"==typeof args.audio?args.audio:""),args.video&&this.videoRecorder&&this.videoRecorder.save("string"==typeof args.video?args.video:""),args.gif&&this.gifRecorder&&this.gifRecorder.save("string"==typeof args.gif?args.gif:"")}}function bytesToSize(bytes){var k=1e3,sizes=["Bytes","KB","MB","GB","TB"];if(0===bytes)return"0 Bytes";var i=parseInt(Math.floor(Math.log(bytes)/Math.log(k)),10);return(bytes/Math.pow(k,i)).toPrecision(3)+" "+sizes[i]}function invokeSaveAsDialog(file,fileName){if(!file)throw"Blob object is required.";if(!file.type)try{file.type="video/webm"}catch(e){}var fileExtension=(file.type||"video/webm").split("/")[1];if(fileExtension.indexOf(";")!==-1&&(fileExtension=fileExtension.split(";")[0]),fileName&&fileName.indexOf(".")!==-1){var splitted=fileName.split(".");fileName=splitted[0],fileExtension=splitted[1]}var fileFullName=(fileName||Math.round(9999999999*Math.random())+888888888)+"."+fileExtension;if("undefined"!=typeof navigator.msSaveOrOpenBlob)return navigator.msSaveOrOpenBlob(file,fileFullName);if("undefined"!=typeof navigator.msSaveBlob)return navigator.msSaveBlob(file,fileFullName);var hyperlink=document.createElement("a");hyperlink.href=URL.createObjectURL(file),hyperlink.download=fileFullName,hyperlink.style="display:none;opacity:0;color:transparent;",(document.body||document.documentElement).appendChild(hyperlink),"function"==typeof hyperlink.click?hyperlink.click():(hyperlink.target="_blank",hyperlink.dispatchEvent(new MouseEvent("click",{view:window,bubbles:!0,cancelable:!0}))),URL.revokeObjectURL(hyperlink.href)}function isElectron(){return"undefined"!=typeof window&&"object"==typeof window.process&&"renderer"===window.process.type||(!("undefined"==typeof process||"object"!=typeof process.versions||!process.versions.electron)||"object"==typeof navigator&&"string"==typeof navigator.userAgent&&navigator.userAgent.indexOf("Electron")>=0)}function getTracks(stream,kind){return stream&&stream.getTracks?stream.getTracks().filter(function(t){return t.kind===(kind||"audio")}):[]}function setSrcObject(stream,element){"srcObject"in element?element.srcObject=stream:"mozSrcObject"in element?element.mozSrcObject=stream:element.srcObject=stream}function getSeekableBlob(inputBlob,callback){if("undefined"==typeof EBML)throw new Error("Please link: https://www.webrtc-experiment.com/EBML.js");var reader=new EBML.Reader,decoder=new EBML.Decoder,tools=EBML.tools,fileReader=new FileReader;fileReader.onload=function(e){var ebmlElms=decoder.decode(this.result);ebmlElms.forEach(function(element){reader.read(element)}),reader.stop();var refinedMetadataBuf=tools.makeMetadataSeekable(reader.metadatas,reader.duration,reader.cues),body=this.result.slice(reader.metadataSize),newBlob=new Blob([refinedMetadataBuf,body],{type:"video/webm"});callback(newBlob)},fileReader.readAsArrayBuffer(inputBlob)}function isMediaRecorderCompatible(){if(isFirefox||isSafari||isEdge)return!0;var verOffset,ix,nAgt=(navigator.appVersion,navigator.userAgent),fullVersion=""+parseFloat(navigator.appVersion),majorVersion=parseInt(navigator.appVersion,10);return(isChrome||isOpera)&&(verOffset=nAgt.indexOf("Chrome"),fullVersion=nAgt.substring(verOffset+7)),(ix=fullVersion.indexOf(";"))!==-1&&(fullVersion=fullVersion.substring(0,ix)),(ix=fullVersion.indexOf(" "))!==-1&&(fullVersion=fullVersion.substring(0,ix)),majorVersion=parseInt(""+fullVersion,10),isNaN(majorVersion)&&(fullVersion=""+parseFloat(navigator.appVersion),majorVersion=parseInt(navigator.appVersion,10)),majorVersion>=49}function MediaStreamRecorder(mediaStream,config){function updateTimeStamp(){self.timestamps.push((new Date).getTime()),"function"==typeof config.onTimeStamp&&config.onTimeStamp(self.timestamps[self.timestamps.length-1],self.timestamps)}function getMimeType(secondObject){return mediaRecorder&&mediaRecorder.mimeType?mediaRecorder.mimeType:secondObject.mimeType||"video/webm"}function clearRecordedDataCB(){arrayOfBlobs=[],mediaRecorder=null,self.timestamps=[]}function isMediaStreamActive(){if("active"in mediaStream){if(!mediaStream.active)return!1}else if("ended"in mediaStream&&mediaStream.ended)return!1;return!0}var self=this;if("undefined"==typeof mediaStream)throw'First argument "MediaStream" is required.';if("undefined"==typeof MediaRecorder)throw"Your browser does not support the Media Recorder API. Please try other modules e.g. WhammyRecorder or StereoAudioRecorder.";if(config=config||{mimeType:"video/webm"},"audio"===config.type){if(getTracks(mediaStream,"video").length&&getTracks(mediaStream,"audio").length){var stream;navigator.mozGetUserMedia?(stream=new MediaStream,stream.addTrack(getTracks(mediaStream,"audio")[0])):stream=new MediaStream(getTracks(mediaStream,"audio")),mediaStream=stream}config.mimeType&&config.mimeType.toString().toLowerCase().indexOf("audio")!==-1||(config.mimeType=isChrome?"audio/webm":"audio/ogg"),config.mimeType&&"audio/ogg"!==config.mimeType.toString().toLowerCase()&&navigator.mozGetUserMedia&&(config.mimeType="audio/ogg")}var arrayOfBlobs=[];this.getArrayOfBlobs=function(){return arrayOfBlobs},this.record=function(){self.blob=null,self.clearRecordedData(),self.timestamps=[],allStates=[],arrayOfBlobs=[];var recorderHints=config;config.disableLogs||console.log("Passing following config over MediaRecorder API.",recorderHints),mediaRecorder&&(mediaRecorder=null),isChrome&&!isMediaRecorderCompatible()&&(recorderHints="video/vp8"),"function"==typeof MediaRecorder.isTypeSupported&&recorderHints.mimeType&&(MediaRecorder.isTypeSupported(recorderHints.mimeType)||(config.disableLogs||console.warn("MediaRecorder API seems unable to record mimeType:",recorderHints.mimeType),recorderHints.mimeType="audio"===config.type?"audio/webm":"video/webm"));try{mediaRecorder=new MediaRecorder(mediaStream,recorderHints),config.mimeType=recorderHints.mimeType}catch(e){mediaRecorder=new MediaRecorder(mediaStream)}recorderHints.mimeType&&!MediaRecorder.isTypeSupported&&"canRecordMimeType"in mediaRecorder&&mediaRecorder.canRecordMimeType(recorderHints.mimeType)===!1&&(config.disableLogs||console.warn("MediaRecorder API seems unable to record mimeType:",recorderHints.mimeType)),mediaRecorder.ondataavailable=function(e){if(e.data&&allStates.push("ondataavailable: "+bytesToSize(e.data.size)),"number"!=typeof config.timeSlice){if(!e.data||!e.data.size||e.data.size<100||self.blob)return void(self.recordingCallback&&(self.recordingCallback(new Blob([],{type:getMimeType(recorderHints)})),self.recordingCallback=null));self.blob=config.getNativeBlob?e.data:new Blob([e.data],{type:getMimeType(recorderHints)}),self.recordingCallback&&(self.recordingCallback(self.blob),self.recordingCallback=null)}else if(e.data&&e.data.size&&(arrayOfBlobs.push(e.data),updateTimeStamp(),"function"==typeof config.ondataavailable)){var blob=config.getNativeBlob?e.data:new Blob([e.data],{type:getMimeType(recorderHints)});config.ondataavailable(blob)}},mediaRecorder.onstart=function(){allStates.push("started")},mediaRecorder.onpause=function(){allStates.push("paused")},mediaRecorder.onresume=function(){allStates.push("resumed")},mediaRecorder.onstop=function(){allStates.push("stopped")},mediaRecorder.onerror=function(error){error&&(error.name||(error.name="UnknownError"),allStates.push("error: "+error),config.disableLogs||(error.name.toString().toLowerCase().indexOf("invalidstate")!==-1?console.error("The MediaRecorder is not in a state in which the proposed operation is allowed to be executed.",error):error.name.toString().toLowerCase().indexOf("notsupported")!==-1?console.error("MIME type (",recorderHints.mimeType,") is not supported.",error):error.name.toString().toLowerCase().indexOf("security")!==-1?console.error("MediaRecorder security error",error):"OutOfMemory"===error.name?console.error("The UA has exhaused the available memory. User agents SHOULD provide as much additional information as possible in the message attribute.",error):"IllegalStreamModification"===error.name?console.error("A modification to the stream has occurred that makes it impossible to continue recording. An example would be the addition of a Track while recording is occurring. User agents SHOULD provide as much additional information as possible in the message attribute.",error):"OtherRecordingError"===error.name?console.error("Used for an fatal error other than those listed above. User agents SHOULD provide as much additional information as possible in the message attribute.",error):"GenericError"===error.name?console.error("The UA cannot provide the codec or recording option that has been requested.",error):console.error("MediaRecorder Error",error)),function(looper){return!self.manuallyStopped&&mediaRecorder&&"inactive"===mediaRecorder.state?(delete config.timeslice,void mediaRecorder.start(6e5)):void setTimeout(looper,1e3)}(),"inactive"!==mediaRecorder.state&&"stopped"!==mediaRecorder.state&&mediaRecorder.stop())},"number"==typeof config.timeSlice?(updateTimeStamp(),mediaRecorder.start(config.timeSlice)):mediaRecorder.start(36e5),config.initCallback&&config.initCallback()},this.timestamps=[],this.stop=function(callback){callback=callback||function(){},self.manuallyStopped=!0,mediaRecorder&&(this.recordingCallback=callback,"recording"===mediaRecorder.state&&mediaRecorder.stop(),"number"==typeof config.timeSlice&&setTimeout(function(){self.blob=new Blob(arrayOfBlobs,{type:getMimeType(config)}),self.recordingCallback(self.blob)},100))},this.pause=function(){mediaRecorder&&"recording"===mediaRecorder.state&&mediaRecorder.pause()},this.resume=function(){mediaRecorder&&"paused"===mediaRecorder.state&&mediaRecorder.resume()},this.clearRecordedData=function(){mediaRecorder&&"recording"===mediaRecorder.state&&self.stop(clearRecordedDataCB),clearRecordedDataCB()};var mediaRecorder;this.getInternalRecorder=function(){return mediaRecorder},this.blob=null,this.getState=function(){return mediaRecorder?mediaRecorder.state||"inactive":"inactive"};var allStates=[];this.getAllStates=function(){return allStates},"undefined"==typeof config.checkForInactiveTracks&&(config.checkForInactiveTracks=!1);var self=this;!function looper(){if(mediaRecorder&&config.checkForInactiveTracks!==!1)return isMediaStreamActive()===!1?(config.disableLogs||console.log("MediaStream seems stopped."),void self.stop()):void setTimeout(looper,1e3)}(),this.name="MediaStreamRecorder",this.toString=function(){return this.name}}function StereoAudioRecorder(mediaStream,config){function isMediaStreamActive(){if(config.checkForInactiveTracks===!1)return!0;if("active"in mediaStream){if(!mediaStream.active)return!1}else if("ended"in mediaStream&&mediaStream.ended)return!1;return!0}function mergeLeftRightBuffers(config,callback){function mergeAudioBuffers(config,cb){function interpolateArray(data,newSampleRate,oldSampleRate){var fitCount=Math.round(data.length*(newSampleRate/oldSampleRate)),newData=[],springFactor=Number((data.length-1)/(fitCount-1));newData[0]=data[0];for(var i=1;i<fitCount-1;i++){var tmp=i*springFactor,before=Number(Math.floor(tmp)).toFixed(),after=Number(Math.ceil(tmp)).toFixed(),atPoint=tmp-before;newData[i]=linearInterpolate(data[before],data[after],atPoint)}return newData[fitCount-1]=data[data.length-1],newData}function linearInterpolate(before,after,atPoint){return before+(after-before)*atPoint}function mergeBuffers(channelBuffer,rLength){for(var result=new Float64Array(rLength),offset=0,lng=channelBuffer.length,i=0;i<lng;i++){var buffer=channelBuffer[i];result.set(buffer,offset),offset+=buffer.length}return result}function interleave(leftChannel,rightChannel){for(var length=leftChannel.length+rightChannel.length,result=new Float64Array(length),inputIndex=0,index=0;index<length;)result[index++]=leftChannel[inputIndex],result[index++]=rightChannel[inputIndex],inputIndex++;return result}function writeUTFBytes(view,offset,string){for(var lng=string.length,i=0;i<lng;i++)view.setUint8(offset+i,string.charCodeAt(i))}var numberOfAudioChannels=config.numberOfAudioChannels,leftBuffers=config.leftBuffers.slice(0),rightBuffers=config.rightBuffers.slice(0),sampleRate=config.sampleRate,internalInterleavedLength=config.internalInterleavedLength,desiredSampRate=config.desiredSampRate;2===numberOfAudioChannels&&(leftBuffers=mergeBuffers(leftBuffers,internalInterleavedLength),rightBuffers=mergeBuffers(rightBuffers,internalInterleavedLength),desiredSampRate&&(leftBuffers=interpolateArray(leftBuffers,desiredSampRate,sampleRate),rightBuffers=interpolateArray(rightBuffers,desiredSampRate,sampleRate))),1===numberOfAudioChannels&&(leftBuffers=mergeBuffers(leftBuffers,internalInterleavedLength),desiredSampRate&&(leftBuffers=interpolateArray(leftBuffers,desiredSampRate,sampleRate))),desiredSampRate&&(sampleRate=desiredSampRate);var interleaved;2===numberOfAudioChannels&&(interleaved=interleave(leftBuffers,rightBuffers)),1===numberOfAudioChannels&&(interleaved=leftBuffers);var interleavedLength=interleaved.length,resultingBufferLength=44+2*interleavedLength,buffer=new ArrayBuffer(resultingBufferLength),view=new DataView(buffer);writeUTFBytes(view,0,"RIFF"),view.setUint32(4,36+2*interleavedLength,!0),writeUTFBytes(view,8,"WAVE"),writeUTFBytes(view,12,"fmt "),view.setUint32(16,16,!0),view.setUint16(20,1,!0),view.setUint16(22,numberOfAudioChannels,!0),view.setUint32(24,sampleRate,!0),view.setUint32(28,sampleRate*numberOfAudioChannels*2,!0),view.setUint16(32,2*numberOfAudioChannels,!0),view.setUint16(34,16,!0),writeUTFBytes(view,36,"data"),view.setUint32(40,2*interleavedLength,!0);for(var lng=interleavedLength,index=44,volume=1,i=0;i<lng;i++)view.setInt16(index,interleaved[i]*(32767*volume),!0),index+=2;return cb?cb({buffer:buffer,view:view}):void postMessage({buffer:buffer,view:view})}if(config.noWorker)return void mergeAudioBuffers(config,function(data){callback(data.buffer,data.view)});var webWorker=processInWebWorker(mergeAudioBuffers);webWorker.onmessage=function(event){callback(event.data.buffer,event.data.view),URL.revokeObjectURL(webWorker.workerURL),webWorker.terminate()},webWorker.postMessage(config)}function processInWebWorker(_function){var workerURL=URL.createObjectURL(new Blob([_function.toString(),";this.onmessage =  function (eee) {"+_function.name+"(eee.data);}"],{type:"application/javascript"})),worker=new Worker(workerURL);return worker.workerURL=workerURL,worker}function resetVariables(){leftchannel=[],rightchannel=[],recordingLength=0,isAudioProcessStarted=!1,recording=!1,isPaused=!1,context=null,self.leftchannel=leftchannel,self.rightchannel=rightchannel,self.numberOfAudioChannels=numberOfAudioChannels,self.desiredSampRate=desiredSampRate,self.sampleRate=sampleRate,self.recordingLength=recordingLength,intervalsBasedBuffers={left:[],right:[],recordingLength:0}}function clearRecordedDataCB(){jsAudioNode&&(jsAudioNode.onaudioprocess=null,jsAudioNode.disconnect(),jsAudioNode=null),audioInput&&(audioInput.disconnect(),audioInput=null),resetVariables()}function onAudioProcessDataAvailable(e){if(!isPaused){if(isMediaStreamActive()===!1&&(config.disableLogs||console.log("MediaStream seems stopped."),jsAudioNode.disconnect(),recording=!1),!recording)return void(audioInput&&(audioInput.disconnect(),audioInput=null));isAudioProcessStarted||(isAudioProcessStarted=!0,config.onAudioProcessStarted&&config.onAudioProcessStarted(),config.initCallback&&config.initCallback());var left=e.inputBuffer.getChannelData(0),chLeft=new Float32Array(left);if(leftchannel.push(chLeft),2===numberOfAudioChannels){var right=e.inputBuffer.getChannelData(1),chRight=new Float32Array(right);rightchannel.push(chRight)}recordingLength+=bufferSize,self.recordingLength=recordingLength,"undefined"!=typeof config.timeSlice&&(intervalsBasedBuffers.recordingLength+=bufferSize,intervalsBasedBuffers.left.push(chLeft),2===numberOfAudioChannels&&intervalsBasedBuffers.right.push(chRight))}}function looper(){recording&&"function"==typeof config.ondataavailable&&"undefined"!=typeof config.timeSlice&&(intervalsBasedBuffers.left.length?(mergeLeftRightBuffers({desiredSampRate:desiredSampRate,sampleRate:sampleRate,numberOfAudioChannels:numberOfAudioChannels,internalInterleavedLength:intervalsBasedBuffers.recordingLength,leftBuffers:intervalsBasedBuffers.left,rightBuffers:1===numberOfAudioChannels?[]:intervalsBasedBuffers.right},function(buffer,view){var blob=new Blob([view],{type:"audio/wav"});config.ondataavailable(blob),setTimeout(looper,config.timeSlice)}),intervalsBasedBuffers={left:[],right:[],recordingLength:0}):setTimeout(looper,config.timeSlice))}if(!getTracks(mediaStream,"audio").length)throw"Your stream has no audio tracks.";config=config||{};var jsAudioNode,self=this,leftchannel=[],rightchannel=[],recording=!1,recordingLength=0,numberOfAudioChannels=2,desiredSampRate=config.desiredSampRate;
+config.leftChannel===!0&&(numberOfAudioChannels=1),1===config.numberOfAudioChannels&&(numberOfAudioChannels=1),(!numberOfAudioChannels||numberOfAudioChannels<1)&&(numberOfAudioChannels=2),config.disableLogs||console.log("StereoAudioRecorder is set to record number of channels: "+numberOfAudioChannels),"undefined"==typeof config.checkForInactiveTracks&&(config.checkForInactiveTracks=!0),this.record=function(){if(isMediaStreamActive()===!1)throw"Please make sure MediaStream is active.";resetVariables(),isAudioProcessStarted=isPaused=!1,recording=!0,"undefined"!=typeof config.timeSlice&&looper()},this.stop=function(callback){callback=callback||function(){},recording=!1,mergeLeftRightBuffers({desiredSampRate:desiredSampRate,sampleRate:sampleRate,numberOfAudioChannels:numberOfAudioChannels,internalInterleavedLength:recordingLength,leftBuffers:leftchannel,rightBuffers:1===numberOfAudioChannels?[]:rightchannel,noWorker:config.noWorker},function(buffer,view){self.blob=new Blob([view],{type:"audio/wav"}),self.buffer=new ArrayBuffer(view.buffer.byteLength),self.view=view,self.sampleRate=desiredSampRate||sampleRate,self.bufferSize=bufferSize,self.length=recordingLength,isAudioProcessStarted=!1,callback&&callback(self.blob)})},"undefined"==typeof RecordRTC.Storage&&(RecordRTC.Storage={AudioContextConstructor:null,AudioContext:window.AudioContext||window.webkitAudioContext}),RecordRTC.Storage.AudioContextConstructor&&"closed"!==RecordRTC.Storage.AudioContextConstructor.state||(RecordRTC.Storage.AudioContextConstructor=new RecordRTC.Storage.AudioContext);var context=RecordRTC.Storage.AudioContextConstructor,audioInput=context.createMediaStreamSource(mediaStream),legalBufferValues=[0,256,512,1024,2048,4096,8192,16384],bufferSize="undefined"==typeof config.bufferSize?4096:config.bufferSize;if(legalBufferValues.indexOf(bufferSize)===-1&&(config.disableLogs||console.log("Legal values for buffer-size are "+JSON.stringify(legalBufferValues,null,"\t"))),context.createJavaScriptNode)jsAudioNode=context.createJavaScriptNode(bufferSize,numberOfAudioChannels,numberOfAudioChannels);else{if(!context.createScriptProcessor)throw"WebAudio API has no support on this browser.";jsAudioNode=context.createScriptProcessor(bufferSize,numberOfAudioChannels,numberOfAudioChannels)}audioInput.connect(jsAudioNode),config.bufferSize||(bufferSize=jsAudioNode.bufferSize);var sampleRate="undefined"!=typeof config.sampleRate?config.sampleRate:context.sampleRate||44100;(sampleRate<22050||sampleRate>96e3)&&(config.disableLogs||console.log("sample-rate must be under range 22050 and 96000.")),config.disableLogs||config.desiredSampRate&&console.log("Desired sample-rate: "+config.desiredSampRate);var isPaused=!1;this.pause=function(){isPaused=!0},this.resume=function(){if(isMediaStreamActive()===!1)throw"Please make sure MediaStream is active.";return recording?void(isPaused=!1):(config.disableLogs||console.log("Seems recording has been restarted."),void this.record())},this.clearRecordedData=function(){config.checkForInactiveTracks=!1,recording&&this.stop(clearRecordedDataCB),clearRecordedDataCB()},this.name="StereoAudioRecorder",this.toString=function(){return this.name};var isAudioProcessStarted=!1;jsAudioNode.onaudioprocess=onAudioProcessDataAvailable,context.createMediaStreamDestination?jsAudioNode.connect(context.createMediaStreamDestination()):jsAudioNode.connect(context.destination),this.leftchannel=leftchannel,this.rightchannel=rightchannel,this.numberOfAudioChannels=numberOfAudioChannels,this.desiredSampRate=desiredSampRate,this.sampleRate=sampleRate,self.recordingLength=recordingLength;var intervalsBasedBuffers={left:[],right:[],recordingLength:0}}function CanvasRecorder(htmlElement,config){function clearRecordedDataCB(){whammy.frames=[],isRecording=!1,isPausedRecording=!1}function cloneCanvas(){var newCanvas=document.createElement("canvas"),context=newCanvas.getContext("2d");return newCanvas.width=htmlElement.width,newCanvas.height=htmlElement.height,context.drawImage(htmlElement,0,0),newCanvas}function drawCanvasFrame(){if(isPausedRecording)return lastTime=(new Date).getTime(),setTimeout(drawCanvasFrame,500);if("canvas"===htmlElement.nodeName.toLowerCase()){var duration=(new Date).getTime()-lastTime;return lastTime=(new Date).getTime(),whammy.frames.push({image:cloneCanvas(),duration:duration}),void(isRecording&&setTimeout(drawCanvasFrame,config.frameInterval))}html2canvas(htmlElement,{grabMouse:"undefined"==typeof config.showMousePointer||config.showMousePointer,onrendered:function(canvas){var duration=(new Date).getTime()-lastTime;return duration?(lastTime=(new Date).getTime(),whammy.frames.push({image:canvas.toDataURL("image/webp",1),duration:duration}),void(isRecording&&setTimeout(drawCanvasFrame,config.frameInterval))):setTimeout(drawCanvasFrame,config.frameInterval)}})}if("undefined"==typeof html2canvas)throw"Please link: https://www.webrtc-experiment.com/screenshot.js";config=config||{},config.frameInterval||(config.frameInterval=10);var isCanvasSupportsStreamCapturing=!1;["captureStream","mozCaptureStream","webkitCaptureStream"].forEach(function(item){item in document.createElement("canvas")&&(isCanvasSupportsStreamCapturing=!0)});var _isChrome=!(!window.webkitRTCPeerConnection&&!window.webkitGetUserMedia||!window.chrome),chromeVersion=50,matchArray=navigator.userAgent.match(/Chrom(e|ium)\/([0-9]+)\./);_isChrome&&matchArray&&matchArray[2]&&(chromeVersion=parseInt(matchArray[2],10)),_isChrome&&chromeVersion<52&&(isCanvasSupportsStreamCapturing=!1),config.useWhammyRecorder&&(isCanvasSupportsStreamCapturing=!1);var globalCanvas,mediaStreamRecorder;if(isCanvasSupportsStreamCapturing)if(config.disableLogs||console.log("Your browser supports both MediRecorder API and canvas.captureStream!"),htmlElement instanceof HTMLCanvasElement)globalCanvas=htmlElement;else{if(!(htmlElement instanceof CanvasRenderingContext2D))throw"Please pass either HTMLCanvasElement or CanvasRenderingContext2D.";globalCanvas=htmlElement.canvas}else navigator.mozGetUserMedia&&(config.disableLogs||console.error("Canvas recording is NOT supported in Firefox."));var isRecording;this.record=function(){if(isRecording=!0,isCanvasSupportsStreamCapturing&&!config.useWhammyRecorder){var canvasMediaStream;"captureStream"in globalCanvas?canvasMediaStream=globalCanvas.captureStream(25):"mozCaptureStream"in globalCanvas?canvasMediaStream=globalCanvas.mozCaptureStream(25):"webkitCaptureStream"in globalCanvas&&(canvasMediaStream=globalCanvas.webkitCaptureStream(25));try{var mdStream=new MediaStream;mdStream.addTrack(getTracks(canvasMediaStream,"video")[0]),canvasMediaStream=mdStream}catch(e){}if(!canvasMediaStream)throw"captureStream API are NOT available.";mediaStreamRecorder=new MediaStreamRecorder(canvasMediaStream,{mimeType:config.mimeType||"video/webm"}),mediaStreamRecorder.record()}else whammy.frames=[],lastTime=(new Date).getTime(),drawCanvasFrame();config.initCallback&&config.initCallback()},this.getWebPImages=function(callback){if("canvas"!==htmlElement.nodeName.toLowerCase())return void callback();var framesLength=whammy.frames.length;whammy.frames.forEach(function(frame,idx){var framesRemaining=framesLength-idx;config.disableLogs||console.log(framesRemaining+"/"+framesLength+" frames remaining"),config.onEncodingCallback&&config.onEncodingCallback(framesRemaining,framesLength);var webp=frame.image.toDataURL("image/webp",1);whammy.frames[idx].image=webp}),config.disableLogs||console.log("Generating WebM"),callback()},this.stop=function(callback){isRecording=!1;var that=this;return isCanvasSupportsStreamCapturing&&mediaStreamRecorder?void mediaStreamRecorder.stop(callback):void this.getWebPImages(function(){whammy.compile(function(blob){config.disableLogs||console.log("Recording finished!"),that.blob=blob,that.blob.forEach&&(that.blob=new Blob([],{type:"video/webm"})),callback&&callback(that.blob),whammy.frames=[]})})};var isPausedRecording=!1;this.pause=function(){if(isPausedRecording=!0,mediaStreamRecorder instanceof MediaStreamRecorder)return void mediaStreamRecorder.pause()},this.resume=function(){return isPausedRecording=!1,mediaStreamRecorder instanceof MediaStreamRecorder?void mediaStreamRecorder.resume():void(isRecording||this.record())},this.clearRecordedData=function(){isRecording&&this.stop(clearRecordedDataCB),clearRecordedDataCB()},this.name="CanvasRecorder",this.toString=function(){return this.name};var lastTime=(new Date).getTime(),whammy=new Whammy.Video(100)}function WhammyRecorder(mediaStream,config){function drawFrames(frameInterval){frameInterval="undefined"!=typeof frameInterval?frameInterval:10;var duration=(new Date).getTime()-lastTime;return duration?isPausedRecording?(lastTime=(new Date).getTime(),setTimeout(drawFrames,100)):(lastTime=(new Date).getTime(),video.paused&&video.play(),context.drawImage(video,0,0,canvas.width,canvas.height),whammy.frames.push({duration:duration,image:canvas.toDataURL("image/webp")}),void(isStopDrawing||setTimeout(drawFrames,frameInterval,frameInterval))):setTimeout(drawFrames,frameInterval,frameInterval)}function asyncLoop(o){var i=-1,length=o.length;!function loop(){return i++,i===length?void o.callback():void setTimeout(function(){o.functionToLoop(loop,i)},1)}()}function dropBlackFrames(_frames,_framesToCheck,_pixTolerance,_frameTolerance,callback){var localCanvas=document.createElement("canvas");localCanvas.width=canvas.width,localCanvas.height=canvas.height;var context2d=localCanvas.getContext("2d"),resultFrames=[],checkUntilNotBlack=_framesToCheck===-1,endCheckFrame=_framesToCheck&&_framesToCheck>0&&_framesToCheck<=_frames.length?_framesToCheck:_frames.length,sampleColor={r:0,g:0,b:0},maxColorDifference=Math.sqrt(Math.pow(255,2)+Math.pow(255,2)+Math.pow(255,2)),pixTolerance=_pixTolerance&&_pixTolerance>=0&&_pixTolerance<=1?_pixTolerance:0,frameTolerance=_frameTolerance&&_frameTolerance>=0&&_frameTolerance<=1?_frameTolerance:0,doNotCheckNext=!1;asyncLoop({length:endCheckFrame,functionToLoop:function(loop,f){var matchPixCount,endPixCheck,maxPixCount,finishImage=function(){!doNotCheckNext&&maxPixCount-matchPixCount<=maxPixCount*frameTolerance||(checkUntilNotBlack&&(doNotCheckNext=!0),resultFrames.push(_frames[f])),loop()};if(doNotCheckNext)finishImage();else{var image=new Image;image.onload=function(){context2d.drawImage(image,0,0,canvas.width,canvas.height);var imageData=context2d.getImageData(0,0,canvas.width,canvas.height);matchPixCount=0,endPixCheck=imageData.data.length,maxPixCount=imageData.data.length/4;for(var pix=0;pix<endPixCheck;pix+=4){var currentColor={r:imageData.data[pix],g:imageData.data[pix+1],b:imageData.data[pix+2]},colorDifference=Math.sqrt(Math.pow(currentColor.r-sampleColor.r,2)+Math.pow(currentColor.g-sampleColor.g,2)+Math.pow(currentColor.b-sampleColor.b,2));colorDifference<=maxColorDifference*pixTolerance&&matchPixCount++}finishImage()},image.src=_frames[f].image}},callback:function(){resultFrames=resultFrames.concat(_frames.slice(endCheckFrame)),resultFrames.length<=0&&resultFrames.push(_frames[_frames.length-1]),callback(resultFrames)}})}function clearRecordedDataCB(){whammy.frames=[],isStopDrawing=!0,isPausedRecording=!1}config=config||{},config.frameInterval||(config.frameInterval=10),config.disableLogs||console.log("Using frames-interval:",config.frameInterval),this.record=function(){config.width||(config.width=320),config.height||(config.height=240),config.video||(config.video={width:config.width,height:config.height}),config.canvas||(config.canvas={width:config.width,height:config.height}),canvas.width=config.canvas.width||320,canvas.height=config.canvas.height||240,context=canvas.getContext("2d"),config.video&&config.video instanceof HTMLVideoElement?(video=config.video.cloneNode(),config.initCallback&&config.initCallback()):(video=document.createElement("video"),setSrcObject(mediaStream,video),video.onloadedmetadata=function(){config.initCallback&&config.initCallback()},video.width=config.video.width,video.height=config.video.height),video.muted=!0,video.play(),lastTime=(new Date).getTime(),whammy=new Whammy.Video,config.disableLogs||(console.log("canvas resolutions",canvas.width,"*",canvas.height),console.log("video width/height",video.width||canvas.width,"*",video.height||canvas.height)),drawFrames(config.frameInterval)};var isStopDrawing=!1;this.stop=function(callback){callback=callback||function(){},isStopDrawing=!0;var _this=this;setTimeout(function(){dropBlackFrames(whammy.frames,-1,null,null,function(frames){whammy.frames=frames,config.advertisement&&config.advertisement.length&&(whammy.frames=config.advertisement.concat(whammy.frames)),whammy.compile(function(blob){_this.blob=blob,_this.blob.forEach&&(_this.blob=new Blob([],{type:"video/webm"})),callback&&callback(_this.blob)})})},10)};var isPausedRecording=!1;this.pause=function(){isPausedRecording=!0},this.resume=function(){isPausedRecording=!1,isStopDrawing&&this.record()},this.clearRecordedData=function(){isStopDrawing||this.stop(clearRecordedDataCB),clearRecordedDataCB()},this.name="WhammyRecorder",this.toString=function(){return this.name};var video,lastTime,whammy,canvas=document.createElement("canvas"),context=canvas.getContext("2d")}function GifRecorder(mediaStream,config){function clearRecordedDataCB(){gifEncoder&&(gifEncoder.stream().bin=[])}if("undefined"==typeof GIFEncoder){var script=document.createElement("script");script.src="https://www.webrtc-experiment.com/gif-recorder.js",(document.body||document.documentElement).appendChild(script)}config=config||{};var isHTMLObject=mediaStream instanceof CanvasRenderingContext2D||mediaStream instanceof HTMLCanvasElement;this.record=function(){function drawVideoFrame(time){if(self.clearedRecordedData!==!0){if(isPausedRecording)return setTimeout(function(){drawVideoFrame(time)},100);lastAnimationFrame=requestAnimationFrame(drawVideoFrame),void 0===typeof lastFrameTime&&(lastFrameTime=time),time-lastFrameTime<90||(!isHTMLObject&&video.paused&&video.play(),isHTMLObject||context.drawImage(video,0,0,canvas.width,canvas.height),config.onGifPreview&&config.onGifPreview(canvas.toDataURL("image/png")),gifEncoder.addFrame(context),lastFrameTime=time)}}return"undefined"==typeof GIFEncoder?void setTimeout(self.record,1e3):isLoadedMetaData?(isHTMLObject||(config.width||(config.width=video.offsetWidth||320),config.height||(config.height=video.offsetHeight||240),config.video||(config.video={width:config.width,height:config.height}),config.canvas||(config.canvas={width:config.width,height:config.height}),canvas.width=config.canvas.width||320,canvas.height=config.canvas.height||240,video.width=config.video.width||320,video.height=config.video.height||240),gifEncoder=new GIFEncoder,gifEncoder.setRepeat(0),gifEncoder.setDelay(config.frameRate||200),gifEncoder.setQuality(config.quality||10),gifEncoder.start(),"function"==typeof config.onGifRecordingStarted&&config.onGifRecordingStarted(),startTime=Date.now(),lastAnimationFrame=requestAnimationFrame(drawVideoFrame),void(config.initCallback&&config.initCallback())):void setTimeout(self.record,1e3)},this.stop=function(callback){callback=callback||function(){},lastAnimationFrame&&cancelAnimationFrame(lastAnimationFrame),endTime=Date.now(),this.blob=new Blob([new Uint8Array(gifEncoder.stream().bin)],{type:"image/gif"}),callback(this.blob),gifEncoder.stream().bin=[]};var isPausedRecording=!1;this.pause=function(){isPausedRecording=!0},this.resume=function(){isPausedRecording=!1},this.clearRecordedData=function(){self.clearedRecordedData=!0,clearRecordedDataCB()},this.name="GifRecorder",this.toString=function(){return this.name};var canvas=document.createElement("canvas"),context=canvas.getContext("2d");isHTMLObject&&(mediaStream instanceof CanvasRenderingContext2D?(context=mediaStream,canvas=context.canvas):mediaStream instanceof HTMLCanvasElement&&(context=mediaStream.getContext("2d"),canvas=mediaStream));var isLoadedMetaData=!0;if(!isHTMLObject){var video=document.createElement("video");video.muted=!0,video.autoplay=!0,video.playsInline=!0,isLoadedMetaData=!1,video.onloadedmetadata=function(){isLoadedMetaData=!0},setSrcObject(mediaStream,video),video.play()}var startTime,endTime,lastFrameTime,gifEncoder,lastAnimationFrame=null,self=this}function MultiStreamsMixer(arrayOfMediaStreams,elementClass){function setSrcObject(stream,element){"srcObject"in element?element.srcObject=stream:"mozSrcObject"in element?element.mozSrcObject=stream:element.srcObject=stream}function drawVideosToCanvas(){if(!isStopDrawingFrames){var videosLength=videos.length,fullcanvas=!1,remaining=[];if(videos.forEach(function(video){video.stream||(video.stream={}),video.stream.fullcanvas?fullcanvas=video:remaining.push(video)}),fullcanvas)canvas.width=fullcanvas.stream.width,canvas.height=fullcanvas.stream.height;else if(remaining.length){canvas.width=videosLength>1?2*remaining[0].width:remaining[0].width;var height=1;3!==videosLength&&4!==videosLength||(height=2),5!==videosLength&&6!==videosLength||(height=3),7!==videosLength&&8!==videosLength||(height=4),9!==videosLength&&10!==videosLength||(height=5),canvas.height=remaining[0].height*height}else canvas.width=self.width||360,canvas.height=self.height||240;fullcanvas&&fullcanvas instanceof HTMLVideoElement&&drawImage(fullcanvas),remaining.forEach(function(video,idx){drawImage(video,idx)}),setTimeout(drawVideosToCanvas,self.frameInterval)}}function drawImage(video,idx){if(!isStopDrawingFrames){var x=0,y=0,width=video.width,height=video.height;1===idx&&(x=video.width),2===idx&&(y=video.height),3===idx&&(x=video.width,y=video.height),4===idx&&(y=2*video.height),5===idx&&(x=video.width,y=2*video.height),6===idx&&(y=3*video.height),7===idx&&(x=video.width,y=3*video.height),"undefined"!=typeof video.stream.left&&(x=video.stream.left),"undefined"!=typeof video.stream.top&&(y=video.stream.top),"undefined"!=typeof video.stream.width&&(width=video.stream.width),"undefined"!=typeof video.stream.height&&(height=video.stream.height),context.drawImage(video,x,y,width,height),"function"==typeof video.stream.onRender&&video.stream.onRender(context,x,y,width,height,idx)}}function getMixedStream(){isStopDrawingFrames=!1;var mixedVideoStream=getMixedVideoStream(),mixedAudioStream=getMixedAudioStream();mixedAudioStream&&mixedAudioStream.getTracks().filter(function(t){return"audio"===t.kind}).forEach(function(track){mixedVideoStream.addTrack(track)});var fullcanvas;return arrayOfMediaStreams.forEach(function(stream){stream.fullcanvas&&(fullcanvas=!0)}),mixedVideoStream}function getMixedVideoStream(){resetVideoStreams();var capturedStream;"captureStream"in canvas?capturedStream=canvas.captureStream():"mozCaptureStream"in canvas?capturedStream=canvas.mozCaptureStream():self.disableLogs||console.error("Upgrade to latest Chrome or otherwise enable this flag: chrome://flags/#enable-experimental-web-platform-features");var videoStream=new MediaStream;return capturedStream.getTracks().filter(function(t){return"video"===t.kind}).forEach(function(track){videoStream.addTrack(track)}),canvas.stream=videoStream,videoStream}function getMixedAudioStream(){Storage.AudioContextConstructor||(Storage.AudioContextConstructor=new Storage.AudioContext),self.audioContext=Storage.AudioContextConstructor,self.audioSources=[],self.useGainNode===!0&&(self.gainNode=self.audioContext.createGain(),self.gainNode.connect(self.audioContext.destination),self.gainNode.gain.value=0);var audioTracksLength=0;if(arrayOfMediaStreams.forEach(function(stream){if(stream.getTracks().filter(function(t){return"audio"===t.kind}).length){audioTracksLength++;var audioSource=self.audioContext.createMediaStreamSource(stream);self.useGainNode===!0&&audioSource.connect(self.gainNode),self.audioSources.push(audioSource)}}),audioTracksLength)return self.audioDestination=self.audioContext.createMediaStreamDestination(),self.audioSources.forEach(function(audioSource){audioSource.connect(self.audioDestination)}),self.audioDestination.stream}function getVideo(stream){var video=document.createElement("video");return setSrcObject(stream,video),video.className=elementClass,video.muted=!0,video.volume=0,video.width=stream.width||self.width||360,video.height=stream.height||self.height||240,video.play(),video}function resetVideoStreams(streams){videos=[],streams=streams||arrayOfMediaStreams,streams.forEach(function(stream){if(stream.getTracks().filter(function(t){return"video"===t.kind}).length){var video=getVideo(stream);video.stream=stream,videos.push(video)}})}var browserFakeUserAgent="Fake/5.0 (FakeOS) AppleWebKit/123 (KHTML, like Gecko) Fake/12.3.4567.89 Fake/123.45";!function(that){"undefined"==typeof RecordRTC&&that&&"undefined"==typeof window&&"undefined"!=typeof global&&(global.navigator={userAgent:browserFakeUserAgent,getUserMedia:function(){}},global.console||(global.console={}),"undefined"!=typeof global.console.log&&"undefined"!=typeof global.console.error||(global.console.error=global.console.log=global.console.log||function(){console.log(arguments)}),"undefined"==typeof document&&(that.document={documentElement:{appendChild:function(){return""}}},document.createElement=document.captureStream=document.mozCaptureStream=function(){var obj={getContext:function(){return obj},play:function(){},pause:function(){},drawImage:function(){},toDataURL:function(){return""},style:{}};return obj},that.HTMLVideoElement=function(){}),"undefined"==typeof location&&(that.location={protocol:"file:",href:"",hash:""}),"undefined"==typeof screen&&(that.screen={width:0,height:0}),"undefined"==typeof URL&&(that.URL={createObjectURL:function(){return""},revokeObjectURL:function(){return""}}),that.window=global)}("undefined"!=typeof global?global:null),elementClass=elementClass||"multi-streams-mixer";var videos=[],isStopDrawingFrames=!1,canvas=document.createElement("canvas"),context=canvas.getContext("2d");canvas.style.opacity=0,canvas.style.position="absolute",canvas.style.zIndex=-1,canvas.style.top="-1000em",canvas.style.left="-1000em",canvas.className=elementClass,(document.body||document.documentElement).appendChild(canvas),this.disableLogs=!1,this.frameInterval=10,this.width=360,this.height=240,this.useGainNode=!0;var self=this,AudioContext=window.AudioContext;"undefined"==typeof AudioContext&&("undefined"!=typeof webkitAudioContext&&(AudioContext=webkitAudioContext),"undefined"!=typeof mozAudioContext&&(AudioContext=mozAudioContext));var URL=window.URL;"undefined"==typeof URL&&"undefined"!=typeof webkitURL&&(URL=webkitURL),"undefined"!=typeof navigator&&"undefined"==typeof navigator.getUserMedia&&("undefined"!=typeof navigator.webkitGetUserMedia&&(navigator.getUserMedia=navigator.webkitGetUserMedia),"undefined"!=typeof navigator.mozGetUserMedia&&(navigator.getUserMedia=navigator.mozGetUserMedia));var MediaStream=window.MediaStream;"undefined"==typeof MediaStream&&"undefined"!=typeof webkitMediaStream&&(MediaStream=webkitMediaStream),"undefined"!=typeof MediaStream&&"undefined"==typeof MediaStream.prototype.stop&&(MediaStream.prototype.stop=function(){this.getTracks().forEach(function(track){track.stop()})});var Storage={};"undefined"!=typeof AudioContext?Storage.AudioContext=AudioContext:"undefined"!=typeof webkitAudioContext&&(Storage.AudioContext=webkitAudioContext),this.startDrawingFrames=function(){drawVideosToCanvas()},this.appendStreams=function(streams){if(!streams)throw"First parameter is required.";streams instanceof Array||(streams=[streams]),streams.forEach(function(stream){var newStream=new MediaStream;if(stream.getTracks().filter(function(t){return"video"===t.kind}).length){var video=getVideo(stream);video.stream=stream,videos.push(video),newStream.addTrack(stream.getTracks().filter(function(t){return"video"===t.kind})[0])}if(stream.getTracks().filter(function(t){return"audio"===t.kind}).length){var audioSource=self.audioContext.createMediaStreamSource(stream);self.audioDestination=self.audioContext.createMediaStreamDestination(),audioSource.connect(self.audioDestination),newStream.addTrack(self.audioDestination.stream.getTracks().filter(function(t){return"audio"===t.kind})[0])}arrayOfMediaStreams.push(newStream)})},this.releaseStreams=function(){videos=[],isStopDrawingFrames=!0,self.gainNode&&(self.gainNode.disconnect(),self.gainNode=null),self.audioSources.length&&(self.audioSources.forEach(function(source){source.disconnect()}),self.audioSources=[]),self.audioDestination&&(self.audioDestination.disconnect(),self.audioDestination=null),self.audioContext&&self.audioContext.close(),self.audioContext=null,context.clearRect(0,0,canvas.width,canvas.height),canvas.stream&&(canvas.stream.stop(),canvas.stream=null)},this.resetVideoStreams=function(streams){!streams||streams instanceof Array||(streams=[streams]),resetVideoStreams(streams)},this.name="MultiStreamsMixer",this.toString=function(){return this.name},this.getMixedStream=getMixedStream}function MultiStreamRecorder(arrayOfMediaStreams,options){function getAllVideoTracks(){var tracks=[];return arrayOfMediaStreams.forEach(function(stream){getTracks(stream,"video").forEach(function(track){tracks.push(track)})}),tracks}arrayOfMediaStreams=arrayOfMediaStreams||[];var mixer,mediaRecorder,self=this;options=options||{elementClass:"multi-streams-mixer",mimeType:"video/webm",video:{width:360,height:240}},options.frameInterval||(options.frameInterval=10),options.video||(options.video={}),options.video.width||(options.video.width=360),options.video.height||(options.video.height=240),this.record=function(){mixer=new MultiStreamsMixer(arrayOfMediaStreams,options.elementClass||"multi-streams-mixer"),getAllVideoTracks().length&&(mixer.frameInterval=options.frameInterval||10,mixer.width=options.video.width||360,mixer.height=options.video.height||240,mixer.startDrawingFrames()),options.previewStream&&"function"==typeof options.previewStream&&options.previewStream(mixer.getMixedStream()),mediaRecorder=new MediaStreamRecorder(mixer.getMixedStream(),options),mediaRecorder.record()},this.stop=function(callback){mediaRecorder&&mediaRecorder.stop(function(blob){self.blob=blob,callback(blob),self.clearRecordedData()})},this.pause=function(){mediaRecorder&&mediaRecorder.pause()},this.resume=function(){mediaRecorder&&mediaRecorder.resume()},this.clearRecordedData=function(){mediaRecorder&&(mediaRecorder.clearRecordedData(),mediaRecorder=null),mixer&&(mixer.releaseStreams(),mixer=null)},this.addStreams=function(streams){if(!streams)throw"First parameter is required.";streams instanceof Array||(streams=[streams]),arrayOfMediaStreams.concat(streams),mediaRecorder&&mixer&&(mixer.appendStreams(streams),options.previewStream&&"function"==typeof options.previewStream&&options.previewStream(mixer.getMixedStream()))},this.resetVideoStreams=function(streams){mixer&&(!streams||streams instanceof Array||(streams=[streams]),mixer.resetVideoStreams(streams))},this.getMixer=function(){return mixer},this.name="MultiStreamRecorder",this.toString=function(){return this.name}}function RecordRTCPromisesHandler(mediaStream,options){if(!this)throw'Use "new RecordRTCPromisesHandler()"';if("undefined"==typeof mediaStream)throw'First argument "MediaStream" is required.';var self=this;self.recordRTC=new RecordRTC(mediaStream,options),this.startRecording=function(){return new Promise(function(resolve,reject){try{self.recordRTC.startRecording(),resolve()}catch(e){reject(e)}})},this.stopRecording=function(){return new Promise(function(resolve,reject){try{self.recordRTC.stopRecording(function(url){return self.blob=self.recordRTC.getBlob(),self.blob&&self.blob.size?void resolve(url):void reject("Empty blob.",self.blob)})}catch(e){reject(e)}})},this.pauseRecording=function(){return new Promise(function(resolve,reject){try{self.recordRTC.pauseRecording(),resolve()}catch(e){reject(e)}})},this.resumeRecording=function(){return new Promise(function(resolve,reject){try{self.recordRTC.resumeRecording(),resolve()}catch(e){reject(e)}})},this.getDataURL=function(callback){return new Promise(function(resolve,reject){try{self.recordRTC.getDataURL(function(dataURL){resolve(dataURL)})}catch(e){reject(e)}})},this.getBlob=function(){return new Promise(function(resolve,reject){try{resolve(self.recordRTC.getBlob())}catch(e){reject(e)}})},this.getInternalRecorder=function(){return new Promise(function(resolve,reject){try{resolve(self.recordRTC.getInternalRecorder())}catch(e){reject(e)}})},this.reset=function(){return new Promise(function(resolve,reject){try{resolve(self.recordRTC.reset())}catch(e){reject(e)}})},this.destroy=function(){return new Promise(function(resolve,reject){try{resolve(self.recordRTC.destroy())}catch(e){reject(e)}})},this.getState=function(){return new Promise(function(resolve,reject){try{resolve(self.recordRTC.getState())}catch(e){reject(e)}})},this.blob=null,this.version="5.6.2"}function WebAssemblyRecorder(stream,config){function cameraStream(){return new ReadableStream({start:function(controller){var cvs=document.createElement("canvas"),video=document.createElement("video"),first=!0;video.srcObject=stream,video.muted=!0,video.height=config.height,video.width=config.width,video.volume=0,video.onplaying=function(){cvs.width=config.width,cvs.height=config.height;var ctx=cvs.getContext("2d"),frameTimeout=1e3/config.frameRate,cameraTimer=setInterval(function(){if(finished&&(clearInterval(cameraTimer),controller.close()),first&&(first=!1,config.onVideoProcessStarted&&config.onVideoProcessStarted()),ctx.drawImage(video,0,0),"closed"!==controller._controlledReadableStream.state)try{controller.enqueue(ctx.getImageData(0,0,config.width,config.height))}catch(e){}},frameTimeout)},video.play()}})}function startRecording(stream,buffer){if(!config.workerPath&&!buffer)return finished=!1,void fetch("https://unpkg.com/webm-wasm@latest/dist/webm-worker.js").then(function(r){r.arrayBuffer().then(function(buffer){startRecording(stream,buffer)})});if(!config.workerPath&&buffer instanceof ArrayBuffer){var blob=new Blob([buffer],{type:"text/javascript"});config.workerPath=URL.createObjectURL(blob)}config.workerPath||console.error("workerPath parameter is missing."),worker=new Worker(config.workerPath),worker.postMessage(config.webAssemblyPath||"https://unpkg.com/webm-wasm@latest/dist/webm-wasm.wasm"),worker.addEventListener("message",function(event){"READY"===event.data?(worker.postMessage({width:config.width,height:config.height,bitrate:config.bitrate||1200,timebaseDen:config.frameRate||30,realtime:config.realtime}),cameraStream().pipeTo(new WritableStream({write:function(image){return finished?void console.error("Got image, but recorder is finished!"):void worker.postMessage(image.data.buffer,[image.data.buffer])}}))):event.data&&(isPaused||arrayOfBuffers.push(event.data))})}function terminate(callback){return worker?(worker.addEventListener("message",function(event){null===event.data&&(worker.terminate(),worker=null,callback&&callback())}),void worker.postMessage(null)):void(callback&&callback())}"undefined"!=typeof ReadableStream&&"undefined"!=typeof WritableStream||console.error("Following polyfill is strongly recommended: https://unpkg.com/@mattiasbuelens/web-streams-polyfill/dist/polyfill.min.js"),config=config||{},config.width=config.width||640,config.height=config.height||480,config.frameRate=config.frameRate||30,config.bitrate=config.bitrate||1200,config.realtime=config.realtime||!0;var finished,worker;this.record=function(){arrayOfBuffers=[],isPaused=!1,this.blob=null,startRecording(stream),"function"==typeof config.initCallback&&config.initCallback()};var isPaused;this.pause=function(){isPaused=!0},this.resume=function(){isPaused=!1};var arrayOfBuffers=[];this.stop=function(callback){finished=!0;var recorder=this;terminate(function(){recorder.blob=new Blob(arrayOfBuffers,{type:"video/webm"}),callback(recorder.blob)})},this.name="WebAssemblyRecorder",this.toString=function(){return this.name},this.clearRecordedData=function(){arrayOfBuffers=[],isPaused=!1,this.blob=null},this.blob=null}RecordRTC.version="5.6.2","undefined"!=typeof module&&(module.exports=RecordRTC),"function"==typeof define&&define.amd&&define("RecordRTC",[],function(){
+return RecordRTC}),RecordRTC.getFromDisk=function(type,callback){if(!callback)throw"callback is mandatory.";console.log("Getting recorded "+("all"===type?"blobs":type+" blob ")+" from disk!"),DiskStorage.Fetch(function(dataURL,_type){"all"!==type&&_type===type+"Blob"&&callback&&callback(dataURL),"all"===type&&callback&&callback(dataURL,_type.replace("Blob",""))})},RecordRTC.writeToDisk=function(options){console.log("Writing recorded blob(s) to disk!"),options=options||{},options.audio&&options.video&&options.gif?options.audio.getDataURL(function(audioDataURL){options.video.getDataURL(function(videoDataURL){options.gif.getDataURL(function(gifDataURL){DiskStorage.Store({audioBlob:audioDataURL,videoBlob:videoDataURL,gifBlob:gifDataURL})})})}):options.audio&&options.video?options.audio.getDataURL(function(audioDataURL){options.video.getDataURL(function(videoDataURL){DiskStorage.Store({audioBlob:audioDataURL,videoBlob:videoDataURL})})}):options.audio&&options.gif?options.audio.getDataURL(function(audioDataURL){options.gif.getDataURL(function(gifDataURL){DiskStorage.Store({audioBlob:audioDataURL,gifBlob:gifDataURL})})}):options.video&&options.gif?options.video.getDataURL(function(videoDataURL){options.gif.getDataURL(function(gifDataURL){DiskStorage.Store({videoBlob:videoDataURL,gifBlob:gifDataURL})})}):options.audio?options.audio.getDataURL(function(audioDataURL){DiskStorage.Store({audioBlob:audioDataURL})}):options.video?options.video.getDataURL(function(videoDataURL){DiskStorage.Store({videoBlob:videoDataURL})}):options.gif&&options.gif.getDataURL(function(gifDataURL){DiskStorage.Store({gifBlob:gifDataURL})})},MRecordRTC.getFromDisk=RecordRTC.getFromDisk,MRecordRTC.writeToDisk=RecordRTC.writeToDisk,"undefined"!=typeof RecordRTC&&(RecordRTC.MRecordRTC=MRecordRTC);var browserFakeUserAgent="Fake/5.0 (FakeOS) AppleWebKit/123 (KHTML, like Gecko) Fake/12.3.4567.89 Fake/123.45";!function(that){that&&"undefined"==typeof window&&"undefined"!=typeof global&&(global.navigator={userAgent:browserFakeUserAgent,getUserMedia:function(){}},global.console||(global.console={}),"undefined"!=typeof global.console.log&&"undefined"!=typeof global.console.error||(global.console.error=global.console.log=global.console.log||function(){console.log(arguments)}),"undefined"==typeof document&&(that.document={documentElement:{appendChild:function(){return""}}},document.createElement=document.captureStream=document.mozCaptureStream=function(){var obj={getContext:function(){return obj},play:function(){},pause:function(){},drawImage:function(){},toDataURL:function(){return""},style:{}};return obj},that.HTMLVideoElement=function(){}),"undefined"==typeof location&&(that.location={protocol:"file:",href:"",hash:""}),"undefined"==typeof screen&&(that.screen={width:0,height:0}),"undefined"==typeof URL&&(that.URL={createObjectURL:function(){return""},revokeObjectURL:function(){return""}}),that.window=global)}("undefined"!=typeof global?global:null);var requestAnimationFrame=window.requestAnimationFrame;if("undefined"==typeof requestAnimationFrame)if("undefined"!=typeof webkitRequestAnimationFrame)requestAnimationFrame=webkitRequestAnimationFrame;else if("undefined"!=typeof mozRequestAnimationFrame)requestAnimationFrame=mozRequestAnimationFrame;else if("undefined"!=typeof msRequestAnimationFrame)requestAnimationFrame=msRequestAnimationFrame;else if("undefined"==typeof requestAnimationFrame){var lastTime=0;requestAnimationFrame=function(callback,element){var currTime=(new Date).getTime(),timeToCall=Math.max(0,16-(currTime-lastTime)),id=setTimeout(function(){callback(currTime+timeToCall)},timeToCall);return lastTime=currTime+timeToCall,id}}var cancelAnimationFrame=window.cancelAnimationFrame;"undefined"==typeof cancelAnimationFrame&&("undefined"!=typeof webkitCancelAnimationFrame?cancelAnimationFrame=webkitCancelAnimationFrame:"undefined"!=typeof mozCancelAnimationFrame?cancelAnimationFrame=mozCancelAnimationFrame:"undefined"!=typeof msCancelAnimationFrame?cancelAnimationFrame=msCancelAnimationFrame:"undefined"==typeof cancelAnimationFrame&&(cancelAnimationFrame=function(id){clearTimeout(id)}));var AudioContext=window.AudioContext;"undefined"==typeof AudioContext&&("undefined"!=typeof webkitAudioContext&&(AudioContext=webkitAudioContext),"undefined"!=typeof mozAudioContext&&(AudioContext=mozAudioContext));var URL=window.URL;"undefined"==typeof URL&&"undefined"!=typeof webkitURL&&(URL=webkitURL),"undefined"!=typeof navigator&&"undefined"==typeof navigator.getUserMedia&&("undefined"!=typeof navigator.webkitGetUserMedia&&(navigator.getUserMedia=navigator.webkitGetUserMedia),"undefined"!=typeof navigator.mozGetUserMedia&&(navigator.getUserMedia=navigator.mozGetUserMedia));var isEdge=!(navigator.userAgent.indexOf("Edge")===-1||!navigator.msSaveBlob&&!navigator.msSaveOrOpenBlob),isOpera=!!window.opera||navigator.userAgent.indexOf("OPR/")!==-1,isFirefox=navigator.userAgent.toLowerCase().indexOf("firefox")>-1&&"netscape"in window&&/ rv:/.test(navigator.userAgent),isChrome=!isOpera&&!isEdge&&!!navigator.webkitGetUserMedia||isElectron()||navigator.userAgent.toLowerCase().indexOf("chrome/")!==-1,isSafari=/^((?!chrome|android).)*safari/i.test(navigator.userAgent);isSafari&&!isChrome&&navigator.userAgent.indexOf("CriOS")!==-1&&(isSafari=!1,isChrome=!0);var MediaStream=window.MediaStream;"undefined"==typeof MediaStream&&"undefined"!=typeof webkitMediaStream&&(MediaStream=webkitMediaStream),"undefined"!=typeof MediaStream&&"undefined"==typeof MediaStream.prototype.stop&&(MediaStream.prototype.stop=function(){this.getTracks().forEach(function(track){track.stop()})}),"undefined"!=typeof RecordRTC&&(RecordRTC.invokeSaveAsDialog=invokeSaveAsDialog,RecordRTC.getTracks=getTracks,RecordRTC.getSeekableBlob=getSeekableBlob,RecordRTC.bytesToSize=bytesToSize,RecordRTC.isElectron=isElectron);var Storage={};"undefined"!=typeof AudioContext?Storage.AudioContext=AudioContext:"undefined"!=typeof webkitAudioContext&&(Storage.AudioContext=webkitAudioContext),"undefined"!=typeof RecordRTC&&(RecordRTC.Storage=Storage),"undefined"!=typeof RecordRTC&&(RecordRTC.MediaStreamRecorder=MediaStreamRecorder),"undefined"!=typeof RecordRTC&&(RecordRTC.StereoAudioRecorder=StereoAudioRecorder),"undefined"!=typeof RecordRTC&&(RecordRTC.CanvasRecorder=CanvasRecorder),"undefined"!=typeof RecordRTC&&(RecordRTC.WhammyRecorder=WhammyRecorder);var Whammy=function(){function WhammyVideo(duration){this.frames=[],this.duration=duration||1,this.quality=.8}function processInWebWorker(_function){var blob=URL.createObjectURL(new Blob([_function.toString(),"this.onmessage =  function (eee) {"+_function.name+"(eee.data);}"],{type:"application/javascript"})),worker=new Worker(blob);return URL.revokeObjectURL(blob),worker}function whammyInWebWorker(frames){function ArrayToWebM(frames){var info=checkFrames(frames);if(!info)return[];for(var clusterMaxDuration=3e4,EBML=[{id:440786851,data:[{data:1,id:17030},{data:1,id:17143},{data:4,id:17138},{data:8,id:17139},{data:"webm",id:17026},{data:2,id:17031},{data:2,id:17029}]},{id:408125543,data:[{id:357149030,data:[{data:1e6,id:2807729},{data:"whammy",id:19840},{data:"whammy",id:22337},{data:doubleToString(info.duration),id:17545}]},{id:374648427,data:[{id:174,data:[{data:1,id:215},{data:1,id:29637},{data:0,id:156},{data:"und",id:2274716},{data:"V_VP8",id:134},{data:"VP8",id:2459272},{data:1,id:131},{id:224,data:[{data:info.width,id:176},{data:info.height,id:186}]}]}]}]}],frameNumber=0,clusterTimecode=0;frameNumber<frames.length;){var clusterFrames=[],clusterDuration=0;do clusterFrames.push(frames[frameNumber]),clusterDuration+=frames[frameNumber].duration,frameNumber++;while(frameNumber<frames.length&&clusterDuration<clusterMaxDuration);var clusterCounter=0,cluster={id:524531317,data:getClusterData(clusterTimecode,clusterCounter,clusterFrames)};EBML[1].data.push(cluster),clusterTimecode+=clusterDuration}return generateEBML(EBML)}function getClusterData(clusterTimecode,clusterCounter,clusterFrames){return[{data:clusterTimecode,id:231}].concat(clusterFrames.map(function(webp){var block=makeSimpleBlock({discardable:0,frame:webp.data.slice(4),invisible:0,keyframe:1,lacing:0,trackNum:1,timecode:Math.round(clusterCounter)});return clusterCounter+=webp.duration,{data:block,id:163}}))}function checkFrames(frames){if(!frames[0])return void postMessage({error:"Something went wrong. Maybe WebP format is not supported in the current browser."});for(var width=frames[0].width,height=frames[0].height,duration=frames[0].duration,i=1;i<frames.length;i++)duration+=frames[i].duration;return{duration:duration,width:width,height:height}}function numToBuffer(num){for(var parts=[];num>0;)parts.push(255&num),num>>=8;return new Uint8Array(parts.reverse())}function strToBuffer(str){return new Uint8Array(str.split("").map(function(e){return e.charCodeAt(0)}))}function bitsToBuffer(bits){var data=[],pad=bits.length%8?new Array(9-bits.length%8).join("0"):"";bits=pad+bits;for(var i=0;i<bits.length;i+=8)data.push(parseInt(bits.substr(i,8),2));return new Uint8Array(data)}function generateEBML(json){for(var ebml=[],i=0;i<json.length;i++){var data=json[i].data;"object"==typeof data&&(data=generateEBML(data)),"number"==typeof data&&(data=bitsToBuffer(data.toString(2))),"string"==typeof data&&(data=strToBuffer(data));var len=data.size||data.byteLength||data.length,zeroes=Math.ceil(Math.ceil(Math.log(len)/Math.log(2))/8),sizeToString=len.toString(2),padded=new Array(7*zeroes+7+1-sizeToString.length).join("0")+sizeToString,size=new Array(zeroes).join("0")+"1"+padded;ebml.push(numToBuffer(json[i].id)),ebml.push(bitsToBuffer(size)),ebml.push(data)}return new Blob(ebml,{type:"video/webm"})}function makeSimpleBlock(data){var flags=0;if(data.keyframe&&(flags|=128),data.invisible&&(flags|=8),data.lacing&&(flags|=data.lacing<<1),data.discardable&&(flags|=1),data.trackNum>127)throw"TrackNumber > 127 not supported";var out=[128|data.trackNum,data.timecode>>8,255&data.timecode,flags].map(function(e){return String.fromCharCode(e)}).join("")+data.frame;return out}function parseWebP(riff){for(var VP8=riff.RIFF[0].WEBP[0],frameStart=VP8.indexOf("*"),i=0,c=[];i<4;i++)c[i]=VP8.charCodeAt(frameStart+3+i);var width,height,tmp;return tmp=c[1]<<8|c[0],width=16383&tmp,tmp=c[3]<<8|c[2],height=16383&tmp,{width:width,height:height,data:VP8,riff:riff}}function getStrLength(string,offset){return parseInt(string.substr(offset+4,4).split("").map(function(i){var unpadded=i.charCodeAt(0).toString(2);return new Array(8-unpadded.length+1).join("0")+unpadded}).join(""),2)}function parseRIFF(string){for(var offset=0,chunks={};offset<string.length;){var id=string.substr(offset,4),len=getStrLength(string,offset),data=string.substr(offset+4+4,len);offset+=8+len,chunks[id]=chunks[id]||[],"RIFF"===id||"LIST"===id?chunks[id].push(parseRIFF(data)):chunks[id].push(data)}return chunks}function doubleToString(num){return[].slice.call(new Uint8Array(new Float64Array([num]).buffer),0).map(function(e){return String.fromCharCode(e)}).reverse().join("")}var webm=new ArrayToWebM(frames.map(function(frame){var webp=parseWebP(parseRIFF(atob(frame.image.slice(23))));return webp.duration=frame.duration,webp}));postMessage(webm)}return WhammyVideo.prototype.add=function(frame,duration){if("canvas"in frame&&(frame=frame.canvas),"toDataURL"in frame&&(frame=frame.toDataURL("image/webp",this.quality)),!/^data:image\/webp;base64,/gi.test(frame))throw"Input must be formatted properly as a base64 encoded DataURI of type image/webp";this.frames.push({image:frame,duration:duration||this.duration})},WhammyVideo.prototype.compile=function(callback){var webWorker=processInWebWorker(whammyInWebWorker);webWorker.onmessage=function(event){return event.data.error?void console.error(event.data.error):void callback(event.data)},webWorker.postMessage(this.frames)},{Video:WhammyVideo}}();"undefined"!=typeof RecordRTC&&(RecordRTC.Whammy=Whammy);var DiskStorage={init:function(){function createObjectStore(dataBase){dataBase.createObjectStore(self.dataStoreName)}function putInDB(){function getFromStore(portionName){transaction.objectStore(self.dataStoreName).get(portionName).onsuccess=function(event){self.callback&&self.callback(event.target.result,portionName)}}var transaction=db.transaction([self.dataStoreName],"readwrite");self.videoBlob&&transaction.objectStore(self.dataStoreName).put(self.videoBlob,"videoBlob"),self.gifBlob&&transaction.objectStore(self.dataStoreName).put(self.gifBlob,"gifBlob"),self.audioBlob&&transaction.objectStore(self.dataStoreName).put(self.audioBlob,"audioBlob"),getFromStore("audioBlob"),getFromStore("videoBlob"),getFromStore("gifBlob")}var self=this;if("undefined"==typeof indexedDB||"undefined"==typeof indexedDB.open)return void console.error("IndexedDB API are not available in this browser.");var db,dbVersion=1,dbName=this.dbName||location.href.replace(/\/|:|#|%|\.|\[|\]/g,""),request=indexedDB.open(dbName,dbVersion);request.onerror=self.onError,request.onsuccess=function(){if(db=request.result,db.onerror=self.onError,db.setVersion)if(db.version!==dbVersion){var setVersion=db.setVersion(dbVersion);setVersion.onsuccess=function(){createObjectStore(db),putInDB()}}else putInDB();else putInDB()},request.onupgradeneeded=function(event){createObjectStore(event.target.result)}},Fetch:function(callback){return this.callback=callback,this.init(),this},Store:function(config){return this.audioBlob=config.audioBlob,this.videoBlob=config.videoBlob,this.gifBlob=config.gifBlob,this.init(),this},onError:function(error){console.error(JSON.stringify(error,null,"\t"))},dataStoreName:"recordRTC",dbName:null};"undefined"!=typeof RecordRTC&&(RecordRTC.DiskStorage=DiskStorage),"undefined"!=typeof RecordRTC&&(RecordRTC.GifRecorder=GifRecorder),"undefined"==typeof RecordRTC&&("undefined"!=typeof module&&(module.exports=MultiStreamsMixer),"function"==typeof define&&define.amd&&define("MultiStreamsMixer",[],function(){return MultiStreamsMixer})),"undefined"!=typeof RecordRTC&&(RecordRTC.MultiStreamRecorder=MultiStreamRecorder),"undefined"!=typeof RecordRTC&&(RecordRTC.RecordRTCPromisesHandler=RecordRTCPromisesHandler),"undefined"!=typeof RecordRTC&&(RecordRTC.WebAssemblyRecorder=WebAssemblyRecorder);// v3.2.5（语音识别模块）：voiceCfgState——独立配置（对齐 updaterCfgState 模式）。
+// localStorage 仅存非敏感项（engine/protocol/baseUrl/model/refine 开关）；apiKey 只在磁盘
+// （config/set → dsh-prompt-enhancer.config.json），设置页经 fetchVoiceApiKey 回显、保存时随 config/set 提交。
+const VOICE_CFG_KEY = 'dsh.prompt-enhancer.voice';
+const VOICE_CFG_DEFAULTS = {
+  asr: {
+    engine: 'cloud',
+    local: { model: 'sensevoice-q8' },
+    cloud: { protocol: 'chat', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-asr-flash' },
+  },
+  refine: { enabled: true, provider: '', model: '', baseUrl: '', maxTokens: 300 },
+};
+
+const voiceCfgState = { value: { ...VOICE_CFG_DEFAULTS }, listeners: new Set(), synced: false };
+
+function mergeVoice(v) {
+  const a = v && v.asr && typeof v.asr === 'object' ? v.asr : {};
+  const c = a.cloud && typeof a.cloud === 'object' ? a.cloud : {};
+  const l = a.local && typeof a.local === 'object' ? a.local : {};
+  const r = v && v.refine && typeof v.refine === 'object' ? v.refine : {};
+  return {
+    asr: {
+      engine: a.engine === 'local' ? 'local' : 'cloud',
+      local: { model: typeof l.model === 'string' && l.model ? l.model : VOICE_CFG_DEFAULTS.asr.local.model },
+      cloud: {
+        protocol: c.protocol === 'openai' ? 'openai' : 'chat',
+        baseUrl: typeof c.baseUrl === 'string' && c.baseUrl ? c.baseUrl : VOICE_CFG_DEFAULTS.asr.cloud.baseUrl,
+        model: typeof c.model === 'string' && c.model ? c.model : VOICE_CFG_DEFAULTS.asr.cloud.model,
+      },
+    },
+    refine: {
+      enabled: r.enabled === true,
+      provider: typeof r.provider === 'string' ? r.provider : '',
+      model: typeof r.model === 'string' ? r.model : '',
+      baseUrl: typeof r.baseUrl === 'string' ? r.baseUrl : '',
+      maxTokens: Number.isInteger(r.maxTokens) && r.maxTokens >= 1 && r.maxTokens <= 2000 ? r.maxTokens : 300,
+    },
+  };
+}
+
+// 初始化：localStorage 非敏感项
+try {
+  const raw = localStorage.getItem(VOICE_CFG_KEY);
+  if (raw) {
+    const v = JSON.parse(raw);
+    if (v && typeof v === 'object') voiceCfgState.value = mergeVoice(v);
+  }
+} catch (e) { /* 损坏忽略 */ }
+
+function persistVoiceLocal() {
+  try { localStorage.setItem(VOICE_CFG_KEY, JSON.stringify(voiceCfgState.value)); } catch (e) { /* 忽略 */ }
+}
+function notifyVoice() { for (const fn of [...voiceCfgState.listeners]) fn(); }
+
+// 启动磁盘同步（config/get）——Desktop 动态端口下恢复配置
+function syncVoiceFromHost() {
+  return host.call('config/get', {}).then((res) => {
+    if (res && res.ok && res.config && res.config.voice && typeof res.config.voice === 'object') {
+      voiceCfgState.value = mergeVoice(res.config.voice);
+    }
+    voiceCfgState.synced = true;
+    persistVoiceLocal();
+    notifyVoice();
+  }).catch(() => { voiceCfgState.synced = true; /* host 未就绪：用 localStorage 值 */ });
+}
+
+// 保存：patch 合并非敏感项 + 可选 apiKey（仅磁盘）→ config/set（merge 语义）+ localStorage
+function saveVoiceCfg(patch, apiKey) {
+  voiceCfgState.value = mergeVoice({ ...voiceCfgState.value, ...(patch || {}) });
+  persistVoiceLocal();
+  const disk = { voice: JSON.parse(JSON.stringify(voiceCfgState.value)) };
+  if (typeof apiKey === 'string') disk.voice.asr.cloud.apiKey = apiKey; // apiKey 仅磁盘，不进 localStorage
+  host.call('config/set', { config: disk }).catch(() => { /* 静默：下次保存重试 */ });
+  notifyVoice();
+}
+
+// 设置页 apiKey 回显（仅内存返回，不落 localStorage）
+function fetchVoiceApiKey() {
+  return host.call('config/get', {}).then((res) => {
+    if (res && res.ok && res.config && res.config.voice && res.config.voice.asr
+      && res.config.voice.asr.cloud && typeof res.config.voice.asr.cloud.apiKey === 'string') {
+      return res.config.voice.asr.cloud.apiKey;
+    }
+    return '';
+  }).catch(() => '');
+}
+
+function subscribeVoiceConfig(fn) { voiceCfgState.listeners.add(fn); return () => voiceCfgState.listeners.delete(fn); }
+// v3.2.5（语音识别模块）：录音封装——RecordRTC（vendor 内联，经 window.RecordRTC 公开 API）。
+// getUserMedia 约束：降噪/回声消除/自动增益开（识别质量关键，§6.2）；16k mono wav（ASR 标准）。
+// 60s 上限由 mic-button 的 timerSvc.timeout 触发 stopVoiceRecording（本模块不管理时间）。
+// 音频仅内存中转、不落盘（隐私）；转换走 FileReader.readAsDataURL。
+let voiceRecorder = null;
+let voiceStream = null;
+
+async function startVoiceRecording() {
+  if (voiceRecorder) throw new Error('already recording');
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+  });
+  voiceStream = stream;
+  const RR = window.RecordRTC;
+  if (typeof RR !== 'function') throw new Error('RecordRTC missing');
+  const rec = new RR(stream, {
+    type: 'audio',
+    recorderType: RR.StereoAudioRecorder,
+    numberOfAudioChannels: 1,
+    desiredSampRate: 16000,
+  });
+  voiceRecorder = rec;
+  rec.startRecording();
+  return rec;
+}
+
+// 停止 → getBlob → FileReader → data URL；返回 Promise<string|null>
+function stopVoiceRecording() {
+  const rec = voiceRecorder;
+  voiceRecorder = null;
+  if (voiceStream) { try { voiceStream.getTracks().forEach((tr) => tr.stop()); } catch (e) { /* 忽略 */ } voiceStream = null; }
+  if (!rec) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    try {
+      rec.stopRecording(() => {
+        let blob = null;
+        try { blob = rec.getBlob(); } catch (e) { /* 忽略 */ }
+        if (!blob) { resolve(null); return; }
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    } catch (e) { resolve(null); }
+  });
+}
+
+function isVoiceRecording() { return !!voiceRecorder; }
+// v3.2.5（语音识别模块）：填入逻辑——运行时能力探测（insert/append/none）+ 双暂存时序防护。
+// 时序防护（§6 定案）：isEnhancing（优化中）或发送飞行期（submitting/adjudicating）→ 暂存，
+// 等恢复后自动填入；其余立即填入。填入不覆盖已有内容（append 级追加，insert 级光标插入）。
+
+// 能力探测：inputActions 为客户端注入 props（官方仅 setDraft → append 级；含插入能力 → insert 级）
+function probeInputActions(inputActions) {
+  if (!inputActions || typeof inputActions.setDraft !== 'function') return 'none';
+  if (typeof inputActions.insertText === 'function' || typeof inputActions.insertDraft === 'function'
+    || typeof inputActions.replaceSelection === 'function') return 'insert';
+  return 'append';
+}
+
+function appendText(current, text) {
+  if (!current) return text;
+  return current.endsWith('\n') ? current + text : current + ' ' + text;
+}
+
+function applyFill(inputActions, draft, text, capa) {
+  if (!inputActions || typeof inputActions.setDraft !== 'function') return;
+  if (capa === 'insert' && typeof inputActions.insertText === 'function') {
+    try { inputActions.insertText(text); return; } catch (e) { /* 降级走 setDraft */ }
+  }
+  try { inputActions.setDraft(draft ? appendText(draft, text) : text); } catch (e) { /* 忽略 */ }
+}
+
+// 核心：识别结果填入。dep 由调用方注入（只读依赖，见 §2 唯一跨模块依赖）。
+// 返回 { filled, pending }——pending=true 表示已暂存等待自动填入。
+function insertVoiceText(sessionId, input, inputActions, draft, text, capa, dep) {
+  if (!text) return Promise.resolve({ filled: false, pending: false });
+  const phase = input && typeof input.phase === 'string' ? input.phase : '';
+  const blocked = (typeof dep.getIsEnhancing === 'function' && dep.getIsEnhancing(sessionId))
+    || phase === 'submitting' || phase === 'adjudicating';
+  if (!blocked) {
+    applyFill(inputActions, draft, text, capa);
+    return Promise.resolve({ filled: true, pending: false });
+  }
+  // 暂存：订阅 enhance session 通知，恢复后自动填入
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (done) return; done = true; try { off(); } catch (e) { /* 忽略 */ } resolve({ filled: true, pending: true }); };
+    const off = dep.subscribeSession(sessionId, () => {
+      const ph = typeof dep.getPhase === 'function' ? dep.getPhase(sessionId) : '';
+      const enhancing = typeof dep.getIsEnhancing === 'function' && dep.getIsEnhancing(sessionId);
+      if (!enhancing && ph !== 'enhancing' && ph !== 'submitting' && ph !== 'adjudicating') {
+        const curDraft = typeof dep.getDraft === 'function' ? dep.getDraft() : draft;
+        applyFill(inputActions, curDraft, text, capa);
+        finish();
+      }
+    });
+  });
+}
+// v3.2.5（语音识别模块）：🎤 录音按钮——状态机 idle→recording→recognizing→pending/filling→done。
+// 时序防护（§6.1）：识别完成时若 enhance 优化中或发送飞行期 → 暂存等待自动填入（voicePendingEnhance）。
+// 模块零交叉：只经 isEnhancing/subscribe/storeFor 只读依赖 enhance；能力探测 probeInputActions。
+function VoiceMicButton(props) {
+  const t = makeT(props);
+  const sessionId = props.session && props.session.sessionId;
+  const input = props.input || {};
+  const draft = typeof input.draft === 'string' ? input.draft : '';
+  const inputActions = props.inputActions;
+  const [status, setStatus] = React.useState('idle');
+  const [errKey, setErrKey] = React.useState('');
+  const [seconds, setSeconds] = React.useState(0);
+  const capaRef = React.useRef('append');
+
+  // 能力探测（P1 基线 append；若基座注入插入能力 → insert）
+  React.useEffect(() => { capaRef.current = probeInputActions(inputActions); }, [inputActions]);
+
+  // 录音计时（1s tick）
+  React.useEffect(() => {
+    if (status !== 'recording') return undefined;
+    setSeconds(0);
+    if (!timerSvc || typeof timerSvc.interval !== 'function') return undefined;
+    return timerSvc.interval(() => setSeconds((s) => s + 1), 1000);
+  }, [status]);
+
+  // 60s 自动停止（超时即停并进识别）
+  React.useEffect(() => {
+    if (status !== 'recording') return undefined;
+    if (!timerSvc || typeof timerSvc.timeout !== 'function') return undefined;
+    return timerSvc.timeout(() => { stopAndTranscribe(); }, 60000);
+  }, [status]);
+
+  const click = () => {
+    if (status === 'recording') { stopAndTranscribe(); return; }
+    if (status === 'recognizing' || status === 'pending' || status === 'done') return;
+    startRec();
+  };
+
+  async function startRec() {
+    try {
+      await startVoiceRecording();
+      setStatus('recording');
+      setErrKey('');
+    } catch (e) {
+      setStatus('error');
+      setErrKey('voiceErrNoMic');
+    }
+  }
+
+  function errKeyFor(code) {
+    const map = {
+      ASR_NO_KEY: 'voiceErrNoKey',
+      ASR_NETWORK: 'voiceErrNetwork',
+      ASR_TIMEOUT: 'voiceErrTimeout',
+      ASR_BAD_RESPONSE: 'voiceErrAudio',
+      AUDIO_TOO_LARGE: 'voiceErrAudio',
+      BAD_AUDIO: 'voiceErrAudio',
+    };
+    return map[code] || 'voiceErrNetwork';
+  }
+
+  async function stopAndTranscribe() {
+    if (status !== 'recording') return;
+    setStatus('recognizing');
+    const dataUrl = await stopVoiceRecording();
+    if (!dataUrl) { setStatus('error'); setErrKey('voiceErrAudio'); return; }
+    try {
+      const res = await host.call('voice/transcribe', { audioBase64: dataUrl });
+      if (!res || res.ok !== true) {
+        const code = res && res.code ? res.code : 'ASR_NETWORK';
+        setStatus('error'); setErrKey(errKeyFor(code)); return;
+      }
+      if (!res.text) { setStatus('error'); setErrKey('voiceErrEmpty'); return; }
+      const dep = {
+        getIsEnhancing: (sid) => (typeof isEnhancing === 'function' ? isEnhancing(sid) : false),
+        subscribeSession: subscribe,
+        getPhase: (sid) => storeFor(sid).phase,
+        getDraft: () => draft,
+      };
+      // 填入（含双暂存时序防护）；pending 等待期间按钮显示 voicePendingEnhance
+      await insertVoiceText(sessionId, input, inputActions, draft, res.text, capaRef.current, dep);
+      setStatus('done');
+      if (timerSvc && typeof timerSvc.timeout === 'function') timerSvc.timeout(() => setStatus('idle'), 1500);
+      else setTimeout(() => setStatus('idle'), 1500);
+    } catch (e) {
+      setStatus('error');
+      setErrKey('voiceErrNetwork');
+    }
+  }
+
+  let cls = 'dsh-vi-btn';
+  let label;
+  let title;
+  if (status === 'recording') {
+    cls += ' dsh-vi-rec';
+    label = t('voiceStop');
+    title = t('voiceStop');
+  } else if (status === 'recognizing') {
+    cls += ' dsh-vi-busy';
+    label = t('voiceRecognizing');
+    title = t('voiceRecognizing');
+  } else if (status === 'pending') {
+    cls += ' dsh-vi-busy';
+    label = t('voicePendingEnhance');
+    title = t('voicePendingEnhance');
+  } else if (status === 'error') {
+    cls += ' dsh-vi-err';
+    label = '🎤';
+    title = t(errKey || 'voiceErrNetwork');
+  } else {
+    label = '🎤';
+    title = t('voiceRecord');
+  }
+  const inner = status === 'recording' && seconds > 0 ? label + ' ' + seconds + 's' : label;
+  return React.createElement('button', {
+    type: 'button',
+    className: cls,
+    onClick: click,
+    title,
+    tabIndex: -1,
+    'aria-label': t('voiceRecord'),
+  },
+    React.createElement('span', { className: 'dsh-vi-label' }, inner),
+    status === 'error' ? React.createElement('span', { className: 'dsh-vi-err-msg' }, t(errKey || 'voiceErrNetwork')) : null,
+  );
+}
+// v3.2.5（语音识别模块）：设置段落块——「模型配置」tab 内可折叠段落（collapsible-section 样式）。
+// 交互（§6 定案）：引擎切换字段联动显隐；apiKey password 输入 blur 即存（仅磁盘）；状态检测按钮；
+// 字段 blur/change 即 config/set（无保存按钮）；engine=cloud 常显隐私提示。
+function VoiceSection(props) {
+  const t = makeT(props);
+  const [, setVer] = React.useState(0);
+  const [apiKey, setApiKey] = React.useState('');
+  const [apiKeyLoaded, setApiKeyLoaded] = React.useState(false);
+  const [status, setStatus] = React.useState(null); // {cloud, refine, local} 检测结果
+  const [checking, setChecking] = React.useState(false);
+
+  React.useEffect(() => subscribeVoiceConfig(() => setVer((v) => v + 1)), []);
+  // 启动磁盘同步 + apiKey 回显（仅内存）
+  React.useEffect(() => {
+    syncVoiceFromHost();
+    fetchVoiceApiKey().then((k) => { setApiKey(k); setApiKeyLoaded(true); });
+  }, []);
+
+  const v = voiceCfgState.value;
+  const isCloud = v.asr.engine === 'cloud';
+
+  const saveCloud = (patch) => saveVoiceCfg({ asr: { ...v.asr, cloud: { ...v.asr.cloud, ...patch } } });
+  const saveRefine = (patch) => saveVoiceCfg({ refine: { ...v.refine, ...patch } });
+
+  const check = () => {
+    setChecking(true);
+    host.call('voice/status', {}).then((r) => {
+      setStatus(r && r.ok === true ? r : null);
+      setChecking(false);
+    }).catch(() => { setStatus(null); setChecking(false); });
+  };
+
+  const summary = isCloud
+    ? t('voiceSectionSummary') + ': ' + v.asr.cloud.model
+    : t('voiceSectionSummary') + ': local';
+
+  const body = React.createElement('div', { className: 'dsh-vi-section' },
+    // 引擎选择
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('label', { className: 'dsh-plg-label' }, t('voiceAsrEngine')),
+      React.createElement('select', {
+        className: 'dsh-plg-select',
+        value: v.asr.engine,
+        onChange: (e) => saveVoiceCfg({ asr: { ...v.asr, engine: e.target.value } }),
+      },
+        React.createElement('option', { value: 'cloud' }, t('voiceAsrCloud')),
+        React.createElement('option', { value: 'local' }, t('voiceAsrLocal')),
+      ),
+    ),
+    isCloud ? React.createElement('div', { className: 'dsh-vi-cloud' },
+      React.createElement('div', { className: 'dsh-plg-row' },
+        React.createElement('label', { className: 'dsh-plg-label' }, t('voiceCloudProtocol')),
+        React.createElement('select', {
+          className: 'dsh-plg-select',
+          value: v.asr.cloud.protocol,
+          onChange: (e) => saveCloud({ protocol: e.target.value }),
+        },
+          React.createElement('option', { value: 'chat' }, 'Qwen3-ASR (chat)'),
+          React.createElement('option', { value: 'openai' }, 'OpenAI (openai)'),
+        ),
+      ),
+      React.createElement('div', { className: 'dsh-plg-row' },
+        React.createElement('label', { className: 'dsh-plg-label' }, t('voiceCloudBaseUrl')),
+        React.createElement('input', {
+          type: 'text', className: 'dsh-plg-input', value: v.asr.cloud.baseUrl,
+          onBlur: (e) => saveCloud({ baseUrl: e.target.value }),
+        }),
+      ),
+      React.createElement('div', { className: 'dsh-plg-row' },
+        React.createElement('label', { className: 'dsh-plg-label' }, t('voiceCloudModel')),
+        React.createElement('input', {
+          type: 'text', className: 'dsh-plg-input', value: v.asr.cloud.model,
+          onBlur: (e) => saveCloud({ model: e.target.value }),
+        }),
+      ),
+      React.createElement('div', { className: 'dsh-plg-row' },
+        React.createElement('label', { className: 'dsh-plg-label' }, t('voiceCloudApiKey')),
+        React.createElement('input', {
+          type: 'password', className: 'dsh-plg-input', value: apiKeyLoaded ? apiKey : '',
+          placeholder: 'sk-...',
+          onChange: (e) => setApiKey(e.target.value),
+          onBlur: () => { saveCloud({}); saveVoiceCfg({}, apiKey); }, // apiKey 仅磁盘
+        }),
+      ),
+      React.createElement('p', { className: 'dsh-plg-note' }, t('voiceCloudHint')),
+    ) : React.createElement('p', { className: 'dsh-plg-note' }, t('voiceStatusLocalNotReady')),
+    // 规整
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineEnabled')),
+      React.createElement('input', {
+        type: 'checkbox', className: 'dsh-plg-check', checked: v.refine.enabled,
+        onChange: (e) => saveRefine({ enabled: e.target.checked }),
+      }),
+    ),
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineBaseUrl')),
+      React.createElement('input', {
+        type: 'text', className: 'dsh-plg-input', value: v.refine.baseUrl,
+        onBlur: (e) => saveRefine({ baseUrl: e.target.value }),
+      }),
+    ),
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineModel')),
+      React.createElement('input', {
+        type: 'text', className: 'dsh-plg-input', value: v.refine.model,
+        onBlur: (e) => saveRefine({ model: e.target.value }),
+      }),
+    ),
+    React.createElement('p', { className: 'dsh-plg-note' }, t('voiceRefineHint')),
+    // 状态检测
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: check, disabled: checking },
+        checking ? t('voiceStatusChecking') : t('voiceStatusCheck')),
+      status ? React.createElement('span', { className: 'dsh-plg-status' },
+        (status.asr.cloud.configured ? '✓ ' + t('voiceStatusCloudReady') : '✗ ' + t('voiceStatusNoKey'))
+        + (status.refine.configured ? ' · ✓ ' + t('voiceRefineEnabled') : '')) : null,
+    ),
+    // 隐私提示（cloud 常显）
+    isCloud ? React.createElement('p', { className: 'dsh-vi-privacy' }, t('voicePrivacyHint')) : null,
+  );
+
+  return React.createElement(CollapsibleSection, { title: t('voiceSectionTitle'), summary }, body);
+}
 const CSS = [
   // v2.3.3（§7.10）：font-weight:500 对齐 DSH ModelSelect trigger 样式
   // v2.4.3-c（统一样式）：容器对齐模型 trigger——无边框、24px 胶囊、label-secondary 灰字、
@@ -3884,7 +4406,18 @@ const CSS = [
   '.dsh-plg-svc-hint{padding:6px 0;background:var(--dsw-alias-bg-layer-2);border-radius:8px}',
   '.dsh-plg-svc-hint-text{flex:1;min-width:0}',
   // v3.2.1（用户反馈·按钮贴最右）：引导行按钮 margin-left:auto 兜底贴右
-  '.dsh-plg-svc-hint .dsh-plg-btn{margin-left:auto;flex:none}'
+  '.dsh-plg-svc-hint .dsh-plg-btn{margin-left:auto;flex:none}',
+  // v3.2.5（语音识别模块）：voice UI（dsh-vi-* 前缀）
+  '.dsh-vi-btn{display:inline-flex;align-items:center;gap:4px;min-width:30px;height:30px;padding:0 8px;border:1px solid rgba(128,128,128,.35);border-radius:6px;background:transparent;color:inherit;font-size:13px;line-height:1;cursor:pointer;user-select:none}'
+  ,'.dsh-vi-btn:hover{background:rgba(128,128,128,.12)}'
+  ,'.dsh-vi-btn.dsh-vi-rec{color:#e5484d;border-color:rgba(229,72,77,.5)}'
+  ,'.dsh-vi-btn.dsh-vi-busy{opacity:.7;cursor:default}'
+  ,'.dsh-vi-btn.dsh-vi-err{border-color:rgba(229,72,77,.5);color:#e5484d}'
+  ,'.dsh-vi-label{font-weight:500}'
+  ,'.dsh-vi-err-msg{font-size:11px;margin-left:4px}'
+  ,'.dsh-vi-section{display:flex;flex-direction:column;gap:8px}'
+  ,'.dsh-vi-cloud{display:flex;flex-direction:column;gap:8px}'
+  ,'.dsh-vi-privacy{color:rgba(128,128,128,.8);font-size:11px;margin:0}'
 ].join('\n');
 
 return {
@@ -3934,6 +4467,11 @@ return {
     slots.inject('conversation.input.right', () => slots.register(
       { name: 'conversation.input.right', id: 'prompt-enhance', order: 10, label: '提示词优化', locale: 'enhance' },
       EnhanceButton,
+    ));
+    // v3.2.5（语音识别模块）：🎤 按钮独立注册同一槽位（order 11，紧邻优化按钮）——不侵入 EnhanceButton 既有代码（模块零交叉）
+    slots.inject('conversation.input.right', () => slots.register(
+      { name: 'conversation.input.right', id: 'voice-input', order: 11, label: '语音输入', locale: 'enhance' },
+      VoiceMicButton,
     ));
     slots.inject('conversation.input.dock', () => slots.register(
       { name: 'conversation.input.dock', id: 'prompt-enhance-status', order: 30, label: '优化错误提示', locale: 'enhance' },

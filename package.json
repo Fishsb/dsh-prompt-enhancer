@@ -22,7 +22,7 @@
     "build:host": "node scripts/build-host.mjs",
     "build:client": "node scripts/build-client.mjs",
     "build": "node scripts/build-host.mjs && node scripts/build-client.mjs",
-    "test": "node --test test/lib.test.cjs test/sys.test.cjs test/updater-host.test.cjs test/pipeline.test.cjs test/enhance-pipeline.test.cjs test/services.test.cjs test/protocol.test.cjs test/config-schema.test.cjs test/update-platform.test.cjs test/executor-reloader.test.cjs test/observability.test.cjs test/bundle-smoke.test.cjs test/config-persist.test.cjs"
+    "test": "node --test test/lib.test.cjs test/sys.test.cjs test/updater-host.test.cjs test/pipeline.test.cjs test/enhance-pipeline.test.cjs test/services.test.cjs test/protocol.test.cjs test/config-schema.test.cjs test/update-platform.test.cjs test/executor-reloader.test.cjs test/observability.test.cjs test/bundle-smoke.test.cjs test/config-persist.test.cjs test/voice-persist.test.cjs"
   },
   "dsh": {
     "bundle": {

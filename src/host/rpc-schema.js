@@ -50,6 +50,20 @@ const schemas = {
       return !!args.config && typeof args.config === 'object' && !Array.isArray(args.config);
     },
   },
+  'voice/status': {
+    required: [],
+    validate() {
+      return true;
+    },
+  },
+  'voice/transcribe': {
+    required: ['audioBase64'],
+    validate(args) {
+      return typeof args.audioBase64 === 'string'
+        && /^data:audio\/(wav|mp3);base64,/.test(args.audioBase64)
+        && (args.engine === undefined || args.engine === 'local' || args.engine === 'cloud');
+    },
+  },
 };
 
 function validateRpcArgs(method, args) {

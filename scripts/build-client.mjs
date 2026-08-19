@@ -40,6 +40,13 @@ function buildClient() {
   const modelPluginsSectionChunk = require('../src/client/components/model-plugins-section.js');
   const stylesChunk = require('../src/client/styles.js');
   const appChunk = require('../src/client/app.js');
+  // v3.2.5（语音识别模块）：voice chunk（独立模块）+ RecordRTC vendor chunk（GENERATED）
+  const recordrtcChunk = require('../src/client/vendor/recordrtc.chunk.js');
+  const voiceStateChunk = require('../src/client/voice/state.js');
+  const voiceRecorderChunk = require('../src/client/voice/recorder.js');
+  const voiceInsertChunk = require('../src/client/voice/voice-insert.js');
+  const voiceMicButtonChunk = require('../src/client/voice/mic-button.js');
+  const voiceSectionChunk = require('../src/client/voice/voice-section.js');
   // Inject all chunks, looping until no marker remains: component chunks may
   // themselves contain other injection markers (e.g. the updater constants
   // lived between EnhanceBar and UpdaterCard), so a single pass would leave
@@ -62,6 +69,12 @@ function buildClient() {
     ['// @dsh-client-comp-model-config-tab-inject\n', modelConfigTabChunk],
     ['// @dsh-client-comp-params-tab-inject\n', paramsTabChunk],
     ['// @dsh-client-comp-model-plugins-section-inject\n', modelPluginsSectionChunk],
+    ['// @dsh-client-vendor-recordrtc-inject\n', recordrtcChunk],
+    ['// @dsh-client-voice-state-inject\n', voiceStateChunk],
+    ['// @dsh-client-voice-recorder-inject\n', voiceRecorderChunk],
+    ['// @dsh-client-voice-insert-inject\n', voiceInsertChunk],
+    ['// @dsh-client-voice-comp-mic-button-inject\n', voiceMicButtonChunk],
+    ['// @dsh-client-voice-comp-section-inject\n', voiceSectionChunk],
     ['// @dsh-client-styles-inject\n', stylesChunk],
     ['// @dsh-client-app-inject\n', appChunk],
   ];

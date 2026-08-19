@@ -7,6 +7,9 @@
 
 ## [Unreleased]
 
+### Added
+- **语音识别模块（新功能·P1 云端闭环）**：输入框旁新增 🎤 录音按钮——语音 → 云端识别 → 可选规整（去口水词）→ 填入草稿 → 可一键优化。**P1 内容**：① host `lib/asr.cjs`——cloud 双协议 ASR（阿里 Qwen3-ASR `chat/completions+input_audio` 默认 / OpenAI `/audio/transcriptions` 兼容），出网走 `node:https` 直连（通道 C，P0.5 探针实测通过）；规整层（refine，OpenAI 兼容，失败自动降级原文）；② RPC `voice/status`·`voice/transcribe`（rpc-schema 双份 + data URL 校验 + 30s/15s 超时 + 错误码）；③ client `src/client/voice/`——recorder（RecordRTC 16k mono wav，≤60s，仅内存）/ mic-button（状态机 + 双暂存时序防护：优化中/发送期暂存自动填入）/ voice-insert（能力探测 append/insert）/ voice-section（模型配置 tab 段落块，apiKey 仅存磁盘）；④ **config/set 升级「顶层键级 merge」**（enhancer+voice 双写入方互相清空修复，向后兼容）；⑤ vendor RecordRTC 5.6.2（官方原码只读 + 转义工具 + GENERATED chunk）；⑥ 契约测试 voice-persist（12 项）+ config merge（2 项）。— [VOICE-003]
+
 ### Fixed
 - **优化按钮模型序号改为「设置链序号」（用户需求）**：按钮显示的「{n}正在优化」数字改为**用户模型链（设置里）的对应序号**——host 侧 `buildTryChain` 会去重/过滤导致 chain 索引与配置偏移，现在 llm 阶段按 fallback 原始数组匹配当前模型位置（第 N 条即显示 N，自动随设置数量 1..N）；进度 total 同步为设置模型总数。— [PEN-002]
 
