@@ -656,7 +656,7 @@ const ZH = {
   svcInstallConfirm: '确认安装',
   svcInstallSkip: '跳过',
   svcInstallBusy: '正在安装服务化（需要一次管理员确认）…',
-  svcInstallDone: '✓ 服务化安装完成 —— 重启电脑（或注销）后，nssm 将自动接管端口；不想重启可点「端口重启」立即接管',
+  svcInstallDone: '✓ 服务化安装完成 —— 请重启电脑或注销当前用户，让 nssm 以系统服务接管端口',
   svcInstallFail: '✗ 服务化安装失败',
 
   // v3.2.1（独立化·端口重启）：重启中/完成文案
@@ -694,6 +694,7 @@ const ZH = {
   cfgLogs: '诊断日志',
   cfgLogsEmpty: '暂无日志（执行优化后生成）',
   navModelPlugins: '提示词增强',
+  navServiceUpdater: '服务与更新',
   // 2026-08-16（方案「设置界面样式与交互对齐官方」）：设置页 section 简介
   secPluginsIntro: '模型链、优化参数与插件管理的统一设置入口，修改即时保存。',
   tabModels: '模型配置',
@@ -960,6 +961,7 @@ const EN = {
   cfgLogs: 'Diagnostics log',
   cfgLogsEmpty: 'No logs yet (they appear after optimizations)',
   navModelPlugins: 'Prompt Enhancer',
+  navServiceUpdater: 'Service & Update',
   // 2026-08-16（方案「设置界面样式与交互对齐官方」）：设置页 section 简介
   secPluginsIntro: 'Model chain, optimization parameters, and plugin management in one place; changes save immediately.',
   tabModels: 'Models',
@@ -1638,6 +1640,57 @@ const ENV_DETAIL_TEXT = {
   'no-port': 'envExecPortNoPort',
 };
 
+// ============================================================================
+// v3.2.1-i（用户指令·两功能模块解耦）：服务端口模块配置**完全独立**——
+// 不再读写提示词增强模块的 configState/saveConfig（saveConfig 会触发提示词增强
+// 模块的「保存校验状态机」，属跨模块逻辑打架）。独立 localStorage key + 独立订阅。
+// 旧版 updater 配置存于提示词增强模块 config（CONFIG_KEY），此处仅做**一次性数据
+// 迁移**（纯 localStorage 数据读取，不依赖提示词增强模块任何 JS API），此后两模块
+// 配置互不相干。
+// ============================================================================
+const UPDATER_CFG_KEY = 'dsh.prompt-enhancer.updater';
+const UPDATER_CFG_DEFAULTS = {
+  repo: UPDATER_DEFAULT_REPO,
+  targetDir: '',
+  serviceName: 'dsh-web',
+  profile: 'web',
+  executorPort: 3081,
+};
+const updaterCfgState = { value: { ...UPDATER_CFG_DEFAULTS }, listeners: new Set() };
+function loadUpdaterConfig() {
+  try {
+    const raw = localStorage.getItem(UPDATER_CFG_KEY);
+    if (raw) {
+      const v = JSON.parse(raw);
+      updaterCfgState.value = { ...UPDATER_CFG_DEFAULTS, ...(v && typeof v === 'object' ? v : {}) };
+      return;
+    }
+  } catch (e) { /* 忽略 */ }
+  // 一次性迁移：旧版 updater 配置（repo/targetDir/serviceName/profile/executorPort）
+  // 存于提示词增强模块 config 的 updater 段（CONFIG_KEY）——仅读取数据，迁移后删依赖
+  try {
+    const legacy = localStorage.getItem(CONFIG_KEY);
+    if (legacy) {
+      const v = JSON.parse(legacy);
+      const old = v && typeof v === 'object' ? v.updater : null;
+      if (old && typeof old === 'object' && Object.keys(old).length) {
+        updaterCfgState.value = { ...UPDATER_CFG_DEFAULTS, ...old };
+        try { localStorage.setItem(UPDATER_CFG_KEY, JSON.stringify(updaterCfgState.value)); } catch (e) { /* 忽略 */ }
+      }
+    }
+  } catch (e) { /* 忽略 */ }
+}
+function saveUpdaterConfig(patch) {
+  updaterCfgState.value = { ...updaterCfgState.value, ...(patch || {}) };
+  try { localStorage.setItem(UPDATER_CFG_KEY, JSON.stringify(updaterCfgState.value)); } catch (e) { /* 忽略 */ }
+  for (const fn of [...updaterCfgState.listeners]) fn();
+}
+function subscribeUpdaterConfig(fn) {
+  updaterCfgState.listeners.add(fn);
+  return () => { updaterCfgState.listeners.delete(fn); };
+}
+loadUpdaterConfig();
+
 // v2.9.x（重启反馈优化·用户需求）：执行器 message → 中文阶段文案（兜底原文，保证任何时刻有显式反馈）
 function restartStageText(t, message) {
   const msg = typeof message === 'string' ? message : '';
@@ -1653,8 +1706,8 @@ function restartStageText(t, message) {
 
 function UpdaterCard(props) {
   const t = makeT(props);
-  const [repoInput, setRepoInput] = React.useState(updaterRepoOf(configState.value));
-  const [dirInput, setDirInput] = React.useState((configState.value.updater && configState.value.updater.targetDir) || '');
+  const [repoInput, setRepoInput] = React.useState(updaterCfgState.value.repo);
+  const [dirInput, setDirInput] = React.useState(updaterCfgState.value.targetDir || '');
   const [checking, setChecking] = React.useState(false);
   const [result, setResult] = React.useState(null);
   const [error, setError] = React.useState(null);
@@ -1710,12 +1763,12 @@ function UpdaterCard(props) {
 
   const repo = updaterRepoOf({ updater: { repo: repoInput, targetDir: '' } });
   // v2.5.0：可配置服务名/profile（config.updater，缺省 dsh-web / web）
-  const updaterCfg = configState.value && configState.value.updater ? configState.value.updater : {};
+  const updaterCfg = updaterCfgState.value;
   const serviceName = typeof updaterCfg.serviceName === 'string' && /^[A-Za-z0-9_-]+$/.test(updaterCfg.serviceName) ? updaterCfg.serviceName : 'dsh-web';
   const profile = typeof updaterCfg.profile === 'string' && /^[A-Za-z0-9_-]+$/.test(updaterCfg.profile) ? updaterCfg.profile : 'web';
 
   const persist = (nextRepo, nextDir) => {
-    saveConfig({ updater: { repo: nextRepo, targetDir: nextDir } });
+    saveUpdaterConfig({ repo: nextRepo, targetDir: nextDir });
   };
 
   const onRepoChange = (value) => {
@@ -1792,8 +1845,8 @@ function UpdaterCard(props) {
   // 「一键拉取更新」= 执行器 apply restart:false（下载 + 校验 + 停服 + 安装，不重启）；
   // 「端口重启」= 执行器 restart（仅重启循环）。服务重启期间执行器独立存活。
   const executorPort = () => {
-    const p = configState.value && configState.value.updater && Number.isInteger(configState.value.updater.executorPort)
-      ? configState.value.updater.executorPort : 3081;
+    const p = Number.isInteger(updaterCfgState.value.executorPort)
+      ? updaterCfgState.value.executorPort : 3081;
     return p;
   };
   // 公共前置：环境检测（block 级拦截）→ executorEnsure（拉起/版本对齐）→ 返回执行器端口
@@ -2743,8 +2796,8 @@ function PluginsSection(props) {
   }
 
   return React.createElement('div', { className: 'dsh-plg-root' },
-    // v2.4.0（方案 §4）：版本检测与更新卡片（置于插件清单上方，与清单状态无关）
-    React.createElement(UpdaterCard, props),
+    // v3.2.1-i（用户指令·两功能模块解耦）：UpdaterCard 已独立为「服务与更新」设置页
+    // （app.js 独立注册 settings.section），此处不再嵌套渲染——插件管理 tab 与提示词增强模块解耦。
     // 2026-08-18（用户需求）：项目地址跳转链接——版本检测与更新下方另起一行
     React.createElement('div', { className: 'dsh-plg-project-link' },
       React.createElement('a', { href: 'https://github.com/Fishsb/dsh-prompt-enhancer', target: '_blank', rel: 'noreferrer' }, t('cfgProjectLink')),
@@ -3790,6 +3843,20 @@ return {
     // CordisPanel（id: 'cordis-panel'）冲突——同槽位同 id 触发 single-occupant duplicate，
     // 导致 update/重挂时 "Failed to load plugins"。历史 v2.4.1-fix2 同类问题即由此来。
     // （v2.4.5 曾无记录回退为 cordis-panel；v2.4.8 恢复本修复，见 CHANGELOG。）
+    // v3.2.1-i（用户指令·两功能模块解耦）：服务端口模块独立设置入口「服务与更新」——
+    // UpdaterCard（版本检测更新 + 端口重启 + 服务安装引导 + 桌面快捷方式）不再嵌在
+    // 提示词增强模块的「模型与插件」页内，独立注册 settings.section（逻辑/挂载解耦，
+    // 仅共享显示样式与 i18n 字典）。
+    slots.inject('settings.section', () => slots.register(
+      {
+        name: 'settings.section',
+        id: 'svc-updater',
+        order: 30,
+        label: () => (locale && typeof locale.bind === 'function' ? locale.bind('enhance')('navServiceUpdater') : ZH.navServiceUpdater),
+        locale: 'enhance',
+      },
+      UpdaterCard,
+    ));
     slots.inject('sidebar.footer.action', () => slots.register(
       { name: 'sidebar.footer.action', id: 'cordis-panel-enh', order: 0 },
       CordisBadgePlaceholder,
