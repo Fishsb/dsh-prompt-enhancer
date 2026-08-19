@@ -572,10 +572,10 @@ const ZH = {
   enhanceButton: '优化',
   enhancing: '优化中',
   // 2026-08-18（用户需求）：llm 阶段显示正在优化的模型序号；重试精简（从 2 起「N 正在重试」）
-  enhancingModel: '{n} 优化中',
-  enhancingRetryModel: '{n} 正在重试',
-  result: '可撤回',
-  resultFallback: '可撤回',
+  enhancingModel: '{n}优化中',
+  enhancingRetryModel: '{n}重试中',
+  result: '撤销优化',
+  resultFallback: '撤销优化',
   titleIdle: '一键优化提示词（独立 LLM 调用）',
   // v2.6.2（继续优化）：已优化过一轮后修改草稿的按钮文字与提示
   btnContinue: '继续优化',
@@ -1417,6 +1417,16 @@ function EnhanceButton(props) {
   const phase = s ? s.phase : 'idle';
   // v3.0r（细粒度进度反馈）：progress 对象 {stage, detailKey, detailArgs, step, total, elapsedMs}
   const [prog, setProg] = React.useState(null);
+
+  // v3.2.4（用户需求）：优化中动态点——三点 1→2→3 循环（优化中. → 优化中.. → 优化中...）
+  // 动态 client 无浏览器 timer 全局，经 timerSvc.interval（与 progress 轮询一致）
+  const [dots, setDots] = React.useState(0);
+  React.useEffect(() => {
+    if (phase !== 'enhancing') { setDots(0); return undefined; }
+    setDots(1);
+    if (!timerSvc || typeof timerSvc.interval !== 'function') return undefined;
+    return timerSvc.interval(() => setDots((v) => (v % 3) + 1), 400);
+  }, [phase]);
   React.useEffect(() => {
     if (sessionId === undefined) return undefined;
     const st = storeFor(sessionId);
@@ -1488,9 +1498,7 @@ function EnhanceButton(props) {
           progText = tmpl;
         }
       }
-      if (st.elapsedMs > 0) {
-        progText = progText + ' ' + Math.round(st.elapsedMs / 1000) + 's';
-      }
+      // v3.2.4（用户需求·文字 ≤6 字）：移除秒数追加，动态点提供持续动态反馈
     }
     onClick = () => cancelEnhance(sessionId, inputActions);
     title = t('titleBusy');
@@ -1507,7 +1515,7 @@ function EnhanceButton(props) {
       // v2.3.3（§7.10）：hover 闪烁修复——progress 文档流占位（宽度恒定），
       // cancel absolute 覆盖其上，hover 只切 opacity（无尺寸抖动）
       React.createElement('span', { className: 'dsh-enh-status', 'aria-hidden': true },
-        React.createElement('span', { className: 'dsh-enh-progress' }, progText),
+        React.createElement('span', { className: 'dsh-enh-progress' }, progText + (dots > 0 ? '.'.repeat(dots) : '')),
         React.createElement('span', { className: 'dsh-enh-cancel' }, t('cancel')),
       ),
     );
