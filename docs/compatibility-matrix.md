@@ -30,16 +30,21 @@
 | `models/test` | client → host | 连通性测试 | 用户触发 |
 | `models/autochain` | client → host | 自适应链 | 只读 |
 | `template/default` | client → host | 默认模板 | 只读 |
-| `update/check` | client → host | 版本检测 | 只读 |
+| `update/check` | client → host | 版本检测（local 运行时读运行环境 package.json） | 只读 |
 | `update/pull` | client → host | 拉取清单文件 | 用户触发 |
 | `update/envcheck` | client → host | 环境检测 | 只读 |
+| `update/portRestart` | client → host | 端口重启（服务模式 schtasks / 默认模式 detached 脚本） | 用户触发 |
+| `update/serviceInstall` | client → host | nssm 服务化安装 | 管理 |
+| `update/makeShortcut` | client → host | 创建桌面快捷方式（RunAs lnk + CLI 脚本） | 用户触发 |
 | `logs/last` | client → host | 诊断日志 | 只读 |
 | `plugins/inventory` | client → host | 插件清单 | 只读 |
 | `plugins/run` | client → host | 运行插件 | 管理 |
 | `plugins/stop` | client → host | 停止插件 | 管理 |
 | `plugins/undefine` | client → host | 取消定义 | 管理 |
-| `update/executorEnsure` | client → host | 拉起/对齐执行器 | 用户触发 |
+| `update/executorEnsure` | client → host | 拉起/对齐执行器（版本+内容哈希） | 用户触发 |
 | `update/restartNeeded` | client → host | 检测未重启 | 只读 |
+
+> 注：`update/executorEnsure` / `update/restartNeeded` 在 host RPC 清单中保留（部分版本由 client 直连执行器 3081），见 executor RPC。
 
 ### executor RPC（`127.0.0.1:3081/rpc`）
 
@@ -95,12 +100,14 @@
 |---|---|---|---|
 | ≤ 2.8.3 | 隐式 | 0.1.5 / 0.1.6 | 无显式协议版本 |
 | 3.0.0（重构目标） | `protocolVersion: 1` | `protocolVersion: 1` | 显式协商 |
+| 3.2.x（当前） | `protocolVersion: 1` | 0.1.12+（内容哈希重建） | update/portRestart 独立化（服务模式 schtasks / 默认模式脚本）；执行器专注一键更新/watchdog |
 
 兼容策略：
 
 - host 与 client 通过 `protocolVersion` 协商，不匹配时返回明确错误。
-- executor 版本由 `EXECUTOR_VERSION` 管理，`executorEnsure` 负责对齐。
+- executor 版本由 `EXECUTOR_VERSION` + **内容哈希**（.executor-hash）管理，`executorEnsure` 负责对齐（代码变自动重建，不依赖手动 bump）。
 - 旧 client + 新 host：优先兼容层；无法兼容时提示刷新/升级。
+- 版本检测：本地版本**运行时读运行环境 package.json**（非构建硬编码），发版后产物与版本号天然一致。
 
 ---
 
