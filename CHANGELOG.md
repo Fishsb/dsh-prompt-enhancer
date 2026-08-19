@@ -7,6 +7,9 @@
 
 ## [3.2.2] - 2026-08-19
 
+### Changed
+- **架构调整·版本单一事实源 + 同步自动化（用户评审·v3.2.1-t）**：根治「改一个版本、运行的却是另一个」的六面漂移问题。① **版本单一事实源**：源码 `PLUGIN_VERSION` 硬编码删除，改为 `build-host.mjs` 从 package.json 构建注入（`__DASH_PLUGIN_VERSION__` 占位符替换）——产物版本永远=package.json，杜绝「发版忘 bump → 检测永远旧版」。② **漂移检测**：`build-host.mjs` / `build-client.mjs` 新增 `--check` 模式（重建到内存对比磁盘产物，不一致报错退出 1）——从机制上杜绝「只改产物被重建冲掉」「改源码不重建」两类历史问题。③ **同步自动化**：新增 `scripts/sync-runtime.mjs`——一条命令完成 build → --check → 同步运行环境 → md5 校验 → 提示重启 DSH + 刷新页面（不再手动 cp 漏文件）。④ **执行器内容哈希重建**：`executorEnsure` 判断过期条件从「仅版本号相等」升级为「版本号 + 内容哈希（lib 全部 .cjs + plugin-host.js 的 sha1）」——执行器代码一变即使 EXECUTOR_VERSION 没 bump 也强制重建（历史教训：v3.2.1-p 镜像 fallback 因版本号不变、执行器副本不重建而一直不生效）。⑤ **发布全自动**：新增 `scripts/release.mjs`（bump → build --check → 全量测试 → npm pack → git tag → GitHub Release + 资产上传，需 GITHUB_TOKEN）——tgz 永远等于当前代码。全量测试 158/158（1 环境 skip）。— [PEN-002]
+
 ### Added
 - **一键更新/端口重启进度反馈（用户需求·v3.2.1-s）**：① 一键更新下载改为 **Node https 流式下载**（替代 curl，跟随重定向、Content-Length 总字节、每 400ms 回报进度）——client 下载阶段实时显示「下载 N% · 源 X/Y（直连/镜像切换）」，并展示步骤序号「[第 N 步] 校验/下载/环境检测/安装…」；② **端口重启倒计时改为 1 秒一更新**——原实现把递归放在 `fetch('')` 回调里，DSH 被杀时 fetch 挂起（5s abort）→ 倒计时 3~5s 一跳；改为 doneFlag + fetch 检查独立于倒计时节奏，每轮 1s 无条件递归，倒计时稳定每秒刷新。执行器版本 0.1.11 → 0.1.12（触发 ensure 重建副本）。全量测试 158/158（1 环境 skip）。— [PEN-002]
 
