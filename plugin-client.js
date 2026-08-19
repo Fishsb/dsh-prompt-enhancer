@@ -854,7 +854,6 @@ const ZH = {
   voiceStatusChecking: '检测中…',
   voiceStatusCloudReady: '云端已配置',
   voiceStatusNoKey: '缺 API Key',
-  voiceStatusLocalNotReady: '本地引擎未启用（P2）',
   voiceRecord: '开始录音',
   voiceStop: '停止',
   voiceRecognizing: '正在识别',
@@ -867,6 +866,13 @@ const ZH = {
   voiceErrEmpty: '未识别到语音',
   voicePrivacyHint: '音频将上传至所配置的云端服务',
   voiceResultFilled: '已填入草稿',
+  voiceStatusLocalReady: '本地就绪',
+  voiceStatusLocalNotInstalled: '本地引擎未安装',
+  voiceStatusLocalModelMissing: '模型未下载',
+  voiceStatusLocalWorkerDown: '引擎进程未运行',
+  voiceStatusLocalHint: '点「检测状态」查看本地引擎就绪情况',
+  voiceErrLocalNotReady: '本地引擎未就绪',
+  voiceErrLocalFailed: '本地识别失败',
   stageDone: '✓',
 };
 
@@ -1150,7 +1156,6 @@ const EN = {
   voiceStatusChecking: 'Checking…',
   voiceStatusCloudReady: 'Cloud ready',
   voiceStatusNoKey: 'API key missing',
-  voiceStatusLocalNotReady: 'Local engine not enabled (P2)',
   voiceRecord: 'Start recording',
   voiceStop: 'Stop',
   voiceRecognizing: 'Recognizing',
@@ -1163,6 +1168,13 @@ const EN = {
   voiceErrEmpty: 'No speech detected',
   voicePrivacyHint: 'Audio is uploaded to the configured cloud service',
   voiceResultFilled: 'Filled into draft',
+  voiceStatusLocalReady: 'Local ready',
+  voiceStatusLocalNotInstalled: 'Local engine not installed',
+  voiceStatusLocalModelMissing: 'Model not downloaded',
+  voiceStatusLocalWorkerDown: 'Engine process not running',
+  voiceStatusLocalHint: 'Click "Check" to see local engine status',
+  voiceErrLocalNotReady: 'Local engine not ready',
+  voiceErrLocalFailed: 'Local recognition failed',
   stageDone: '✓',
 };
 
@@ -4021,6 +4033,10 @@ function VoiceMicButton(props) {
       ASR_BAD_RESPONSE: 'voiceErrAudio',
       AUDIO_TOO_LARGE: 'voiceErrAudio',
       BAD_AUDIO: 'voiceErrAudio',
+      ASR_LOCAL_WORKER_DOWN: 'voiceErrLocalNotReady',
+      ASR_LOCAL_NOT_READY: 'voiceErrLocalNotReady',
+      ASR_LOCAL_FAILED: 'voiceErrLocalFailed',
+      ASR_LOCAL_BAD_RESPONSE: 'voiceErrLocalFailed',
     };
     return map[code] || 'voiceErrNetwork';
   }
@@ -4106,6 +4122,7 @@ function VoiceSection(props) {
   React.useEffect(() => {
     syncVoiceFromHost();
     fetchVoiceApiKey().then((k) => { setApiKey(k); setApiKeyLoaded(true); });
+    check(); // P2 收尾：挂载即检测一次（local 分支显示实时状态，非 P1 静态占位）
   }, []);
 
   const v = voiceCfgState.value;
@@ -4113,6 +4130,15 @@ function VoiceSection(props) {
 
   const saveCloud = (patch) => saveVoiceCfg({ asr: { ...v.asr, cloud: { ...v.asr.cloud, ...patch } } });
   const saveRefine = (patch) => saveVoiceCfg({ refine: { ...v.refine, ...patch } });
+
+  function localStatusText() {
+    const l = status && status.asr && status.asr.local;
+    if (!l) return '✗ ' + t('voiceStatusLocalNotInstalled');
+    if (l.workerUp && l.modelReady) return '✓ ' + t('voiceStatusLocalReady');
+    if (l.installed && l.modelReady && !l.workerUp) return '✗ ' + t('voiceStatusLocalWorkerDown');
+    if (l.installed && !l.modelReady) return '✗ ' + t('voiceStatusLocalModelMissing');
+    return '✗ ' + t('voiceStatusLocalNotInstalled');
+  }
 
   const check = () => {
     setChecking(true);
@@ -4175,7 +4201,10 @@ function VoiceSection(props) {
         }),
       ),
       React.createElement('p', { className: 'dsh-plg-note' }, t('voiceCloudHint')),
-    ) : React.createElement('p', { className: 'dsh-plg-note' }, t('voiceStatusLocalNotReady')),
+    ) : React.createElement('div', { className: 'dsh-vi-cloud' },
+      React.createElement('p', { className: 'dsh-plg-note' }, t('voiceStatusLocalHint')),
+      status ? React.createElement('p', { className: 'dsh-plg-status' }, localStatusText()) : null,
+    ),
     // 规整
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineEnabled')),
@@ -4204,8 +4233,10 @@ function VoiceSection(props) {
       React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: check, disabled: checking },
         checking ? t('voiceStatusChecking') : t('voiceStatusCheck')),
       status ? React.createElement('span', { className: 'dsh-plg-status' },
-        (status.asr.cloud.configured ? '✓ ' + t('voiceStatusCloudReady') : '✗ ' + t('voiceStatusNoKey'))
-        + (status.refine.configured ? ' · ✓ ' + t('voiceRefineEnabled') : '')) : null,
+        isCloud
+          ? (status.asr.cloud.configured ? '✓ ' + t('voiceStatusCloudReady') : '✗ ' + t('voiceStatusNoKey'))
+          : localStatusText(),
+        (status.refine.configured ? ' · ✓ ' + t('voiceRefineEnabled') : '')) : null,
     ),
     // 隐私提示（cloud 常显）
     isCloud ? React.createElement('p', { className: 'dsh-vi-privacy' }, t('voicePrivacyHint')) : null,
