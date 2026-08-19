@@ -1288,20 +1288,23 @@ test('U44 mergeEnvPath PATH 合并去重（v2.5.0）', () => {
 
 // v2.5.0：环境探测计划契约（与 lib/index.cjs probeEnv 的 key 一一对应）。
 // v2.7.0：收敛为重启阶段真实依赖 5 项；v2.7.1：恢复 net 网络预检 → 6 项。
-test('U45 ENV_PROBE_KEYS 探测计划（v2.7.1 收敛）', () => {
-  assert.ok(Array.isArray(ENV_PROBE_KEYS) && ENV_PROBE_KEYS.length === 6, '探测项 6 个（重启阶段 5 项 + net）');
+// v3.2.1-o：exec-port（更新端口独立）删除——readServicePort 对默认端口必然解析失败、
+// v3.2 执行器动态端口 fallback 后已无意义；替换为 port-mode（3080 托管模式）+ port-pid（当前 PID）→ 7 项。
+test('U45 ENV_PROBE_KEYS 探测计划（v3.2.1-o 收敛）', () => {
+  assert.ok(Array.isArray(ENV_PROBE_KEYS) && ENV_PROBE_KEYS.length === 7, '探测项 7 个（服务 3 项 + tools + net + port-mode + port-pid）');
   const keys = ENV_PROBE_KEYS.map((e) => e.key);
-  assert.equal(new Set(keys).size, 6, 'key 唯一');
+  assert.equal(new Set(keys).size, 7, 'key 唯一');
   for (const e of ENV_PROBE_KEYS) {
     assert.ok(['block', 'warn'].includes(e.level), 'level 合法: ' + e.key);
   }
   assert.ok(keys.includes('service') && keys.includes('svc-type')
     && keys.includes('svc-bin') && keys.includes('tools')
-    && keys.includes('net') && keys.includes('exec-port'),
-    '6 项 key 与 probeEnv 一致');
+    && keys.includes('net') && keys.includes('port-mode') && keys.includes('port-pid'),
+    '7 项 key 与 probeEnv 一致');
+  assert.equal(keys.includes('exec-port'), false, 'exec-port 已清理（v3.2.1-o：默认端口无法解析 + 执行器动态端口 fallback 后无意义）');
   assert.equal(keys.includes('account'), false, 'account 已清理（启动账号与 sc start 无关）');
   assert.equal(keys.includes('restart'), false, 'restart 已清理（KillProcessTree 不影响独立执行器）');
-  assert.equal(keys.includes('port'), false, 'port 已清理（标准场景不可达，no-port 并入 exec-port）');
+  assert.equal(keys.includes('port'), false, 'port 已清理（标准场景不可达，no-port 并入 exec-port 后随 exec-port 一并删除）');
   assert.ok(ENV_PROBE_KEYS.find((e) => e.key === 'tools').level === 'block', 'tools 为 block（重启命令缺失必失败）');
   assert.ok(ENV_PROBE_KEYS.find((e) => e.key === 'net').level === 'warn', 'net 为 warn（网络受限不阻断，仅提示）');
   const json = JSON.stringify(ENV_PROBE_KEYS);

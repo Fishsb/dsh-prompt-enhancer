@@ -616,13 +616,13 @@ const ZH = {
   envNet: '网络可达（GitHub）',
   envNetUnreachable: 'GitHub 不可达——一键更新安装可能失败（检查网络/代理）',
   envToolUnreachable: '系统工具不可达（PATH 异常）——检查结果不可信，请检查系统环境',
-  // v2.7.0（更新端口独立检查——显示名用「更新」口径，避免内部术语「执行器」）
-  envExecPort: '更新端口独立',
-  // v3.2（动态端口 fallback）：端口冲突 → 执行器自动 fallback 动态端口（warn）
-  envExecPortDynamic: '更新端口被占用——执行器将自动使用动态端口，功能不受影响',
-  envExecPortSame: '更新端口与服务端口相同——更新功能无法监听，请修改 updater.executorPort',
-  envExecPortOccupied: '更新端口被其他进程占用——更新功能可能不可用，请释放或修改 updater.executorPort',
-  envExecPortNoPort: '无法解析服务端口——无法确认更新端口独立',
+  // v3.2.1-o（用户需求·环境检测重构）：端口托管模式与当前 PID（替代过时的 exec-port）
+  envPortMode: '端口托管模式',
+  envPortModeService: 'nssm 服务接管（会话 0）',
+  envPortModeDefault: '前台默认运行（用户会话）',
+  envPortModePidOnly: '运行中（会话未知）',
+  envPortModeNoListener: '无监听（DSH 未运行）',
+  envPortPid: '当前端口 PID',
   updApplyConfirm: '确认',
   // v3.2（用户需求·桌面快捷方式 CLI 重启）：端口重启确认态「桌面」按钮 + 悬停提示 + 创建结果提示
   updMakeShortcut: '桌面',
@@ -887,13 +887,13 @@ const EN = {
   envNet: 'Network (GitHub)',
   envNetUnreachable: 'GitHub unreachable — one-click update install may fail (check network/proxy)',
   envToolUnreachable: 'System tools unreachable (PATH broken) — results unreliable, check the system environment',
-  // v2.7.0（更新端口独立检查——显示名用「更新」口径，避免内部术语「执行器」）
-  envExecPort: 'Update port independent',
-  // v3.2（动态端口 fallback）：端口冲突 → 执行器自动 fallback 动态端口（warn）
-  envExecPortDynamic: 'Update port is taken — the updater will use a dynamic port automatically; functionality unaffected',
-  envExecPortSame: 'Update port equals the service port — the updater cannot listen; change updater.executorPort',
-  envExecPortOccupied: 'Update port is held by another process — the updater may be unavailable; free it or change updater.executorPort',
-  envExecPortNoPort: 'Cannot resolve the service port — cannot confirm update-port independence',
+  // v3.2.1-o (env-check rework): port host mode and current PID (replaces exec-port)
+  envPortMode: 'Port host mode',
+  envPortModeService: 'nssm service (session 0)',
+  envPortModeDefault: 'Foreground default (user session)',
+  envPortModePidOnly: 'Running (session unknown)',
+  envPortModeNoListener: 'No listener (DSH not running)',
+  envPortPid: 'Port PID',
   updApplyConfirm: 'Confirm',
   // v3.2：桌面快捷方式 CLI 重启
   updMakeShortcut: 'Desktop',
@@ -1619,7 +1619,8 @@ const ENV_ITEMS = [
   { key: 'svc-bin', label: 'envSvcBin' },
   { key: 'tools', label: 'envTools' },
   { key: 'net', label: 'envNet' },
-  { key: 'exec-port', label: 'envExecPort' },
+  { key: 'port-mode', label: 'envPortMode' },
+  { key: 'port-pid', label: 'envPortPid' },
 ];
 const ENV_DETAIL_TEXT = {
   ok: 'envOk',
@@ -1631,11 +1632,11 @@ const ENV_DETAIL_TEXT = {
   'tools-missing': 'envToolsMissing',
   unreachable: 'envNetUnreachable',
   'tool-unreachable': 'envToolUnreachable',
-  'same-as-service': 'envExecPortSame',
-  'exec-occupied': 'envExecPortOccupied',
-  // v3.2（动态端口 fallback）：端口冲突 → 执行器自动 fallback 动态端口（warn 提示）
-  'exec-dynamic': 'envExecPortDynamic',
-  'no-port': 'envExecPortNoPort',
+  // v3.2.1-o（用户需求·环境检测重构）：端口托管模式映射
+  'service': 'envPortModeService',
+  'default': 'envPortModeDefault',
+  'pid-only': 'envPortModePidOnly',
+  'no-listener': 'envPortModeNoListener',
 };
 
 // ============================================================================
@@ -2270,11 +2271,13 @@ function UpdaterCard(props) {
                   const it = envItems.find((x) => x.key === def.key);
                   if (!it) return null;
                   const cls = it.ok ? 'ok' : (it.warn ? 'warn' : 'fail');
-                  const detailKey = ENV_DETAIL_TEXT[it.detail] || 'envOk';
+                  // v3.2.1-o（环境检测重构）：有映射走 i18n；无映射（如 port-pid 的动态 PID）直接显示原文
+                  const detailKey = ENV_DETAIL_TEXT[it.detail];
+                  const detailText = detailKey ? t(detailKey) : (it.detail ? String(it.detail) : t('envOk'));
                   return React.createElement('div', { key: def.key, className: 'dsh-plg-env-item dsh-plg-env-' + cls },
                     React.createElement('span', { className: 'dsh-plg-env-mark' }, it.ok ? '✓' : (it.warn ? '⚠' : '✗')),
                     React.createElement('span', { className: 'dsh-plg-env-label' }, t(def.label)),
-                    React.createElement('span', { className: 'dsh-plg-env-detail' }, t(detailKey)),
+                    React.createElement('span', { className: 'dsh-plg-env-detail' }, detailText),
                   );
                 }),
               )

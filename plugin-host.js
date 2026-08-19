@@ -2292,7 +2292,10 @@ const ENV_PROBE_KEYS = [
   { key: 'svc-bin', level: 'block' },  // 服务可执行文件存在（nssm Application / 原生 ImagePath）
   { key: 'tools', level: 'block' },    // 重启链系统工具可用（sc/netstat/reg）
   { key: 'net', level: 'warn' },       // GitHub 可达性（安装依赖，v2.7.1 恢复）
-  { key: 'exec-port', level: 'warn' }, // 更新端口独立（≠ 服务端口且未被占用；解析失败 → warn）
+  // v3.2.1-o（用户需求·环境检测重构）：exec-port（更新端口独立）删除——readServicePort
+  // 对默认端口必然解析失败 + v3.2 执行器动态端口 fallback 后已无意义；替换为：
+  { key: 'port-mode', level: 'warn' }, // 3080 托管模式（nssm 服务 / 前台默认 / 无监听）
+  { key: 'port-pid', level: 'warn' },  // 3080 实际监听者 PID
 ];
 
 // 安装命令构造：node <dshBin> plugin --profile <profile> add github:Fishsb/dsh-prompt-enhancer#<tag>
