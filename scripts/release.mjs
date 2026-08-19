@@ -130,7 +130,9 @@ console.log('Release: ' + release.html_url);
 console.log('== 上传 tgz 资产 ==');
 const up = await http('https://uploads.github.com/repos/' + REPO + '/releases/' + release.id + '/assets?name=' + encodeURIComponent(packOut), {
   method: 'POST',
-  headers: { 'content-type': 'application/octet-stream' },
+  // v3.2.3 修复：必须显式 content-length——Node 不设该头时走 chunked 传输，
+  // GitHub uploads API 拒绝（400 Bad Content-Length），tgz 资产会传不上
+  headers: { 'content-type': 'application/octet-stream', 'content-length': statSync(tgz).size },
   body: readFileSync(tgz),
 });
 if (up.status >= 300) { console.error('资产上传失败: ' + up.status + ' ' + up.body.slice(0, 300)); process.exit(1); }
