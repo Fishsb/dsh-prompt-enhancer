@@ -1884,8 +1884,6 @@ function UpdaterCard(props) {
     // restarting 阶段展示执行器 message 阶段（停止/等待稳定/第 N 次尝试/端口未就绪）+
     // 轮次 + 剩余秒 + 已用秒；轮询连续失败 15 次（约 15s 无响应）→ 判定执行器不可达并终止
     const startedAt = Date.now();
-    let doneFlag = false;
-    let sawDown = false; // v3.2.1-t（A）：观察到服务断开才允许判完成
     let localLeft = 10;
     let failCount = 0;
     setRestartLeft(localLeft);
@@ -2138,6 +2136,9 @@ function UpdaterCard(props) {
     setApplyErr(null);
     setApplyStatus(t('updPortRestarting'));
     const startedAt = Date.now();
+    let doneFlag = false; // v3.2.1-u3（作用域修复）：声明移回 runRestart（原错插 runPullApply → pollRestored 闭包 ReferenceError）
+    let sawDown = false;
+
     // v3.2.1（独立化·用户指令）：端口重启 = host update/portRestart 独立 RPC——host 读
     // 进程索引 → 生成自包含 .cmd 脚本 detached 执行（杀旧 DSH + 拉起新 DSH），不再依赖
     // 执行器/executorEnsure/schtasks/冷启动时序。DSH 被杀时页面短暂断连，轮询自身恢复。
