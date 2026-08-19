@@ -12,7 +12,7 @@ A DeepSeek Harness (DSH) plugin with two core capabilities: **prompt enhancement
 - **📋 5 optimization modes** — Basic (direct) / Lite (previous-round context) / Standard (rules + retrieval) / Expert (task analysis + full retrieval) / One-click Publish (complete dev-spec generator)
 - **🧠 Memory switch** — when on, pre-send rounds (optimize → edit → re-optimize) accumulate into a memory chain the next round replays and senses your edit direction; sending the message clears it; when off, nothing is read or written
 - **🔗 Model chain** — try multiple models in order, reorder, toggle thinking, run inline connectivity tests
-- **🔁 One-click restart (standalone feature)** — restart DSH even when the web UI is down: double-click the desktop shortcut (whale icon) or invoke the CLI directly; supports service-managed (Windows/Linux/macOS) and process-level fallback restart
+- **🔁 One-click restart (standalone feature)** — restart DSH even when the web UI is down: double-click the desktop shortcut (whale icon) or invoke the CLI directly; supports service-managed and process-level fallback restart
 - **🌐 i18n** — follows the DSH interface language (中文 / English)
 
 ## 🚀 Install
@@ -41,8 +41,6 @@ Restart DSH even when the service is broken and the web UI is unreachable — no
 ```sh
 node "<DSH_HOME>\AppData\Local\dsh-prompt-enhancer\executor\0.1.11\lib\updater-host.cjs" --cli restart --service dsh-web --profile web
 ```
-
-Supports service-managed restart on Windows (sc) / Linux (systemctl) / macOS (launchctl) with process-level fallback.
 
 ## 📦 Library notes
 
