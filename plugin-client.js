@@ -3875,8 +3875,11 @@ async function startVoiceRecording() {
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
   });
   voiceStream = stream;
-  const RR = window.RecordRTC;
-  if (typeof RR !== 'function') throw new Error('RecordRTC missing');
+  // 加载器把 vendor chunk 字符串 eval 到模块作用域（非 window）——裸 RecordRTC 优先，window 兜底
+  const RR = (typeof RecordRTC !== 'undefined') ? RecordRTC
+    : (typeof window !== 'undefined' && typeof window.RecordRTC === 'function') ? window.RecordRTC
+    : null;
+  if (typeof RR !== 'function') { console.warn('[voice] RecordRTC 未加载（vendor chunk 未生效）'); throw new Error('RecordRTC missing'); }
   const rec = new RR(stream, {
     type: 'audio',
     recorderType: RR.StereoAudioRecorder,
