@@ -5,6 +5,11 @@
 
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
+## [Unreleased]
+
+### Fixed
+- **端口重启服务模式根治（v3.2.1-u）**：实测发现 `schtasks /create` 的 **`/tr` 参数有 261 字符上限**——A+B 方案把完整 PowerShell 任务链塞进 `/tr` 超长 → create 失败（status=2147500037）→ 旧降级分支 `sc stop`（只停不启）→ 服务挂死、3080 空、页面全报错（08-19 18:32 实测）。**修复**：① 任务链改为**独立 node 脚本**（host 生成 `restart-service-<ts>.cjs` 到 executor/cli，`/tr` 只指 `node.exe <script>`，远小于 261 字符）；脚本内（SYSTEM 运行、脱离 nssm Job 树）`sc.exe stop` → **轮询 SCM 状态 STOPPED**（nssm stop 后 SCM 可能仍 STOP_PENDING，立即 start 会被拒）→ 轮询 3080 端口释放（≤30s，残留单 PID 杀）→ `sc.exe start` 重试 3 次 → 删任务 + 自删脚本。② 降级分支**安全化**：create 失败不再 `sc stop`（杜绝只停不启），返回 `SCHEDULE_FAILED` 明确错误，client 终止轮询显示错误。③ 新增 **test/e2e-restart.cjs 端到端回归**（真实 RPC 链路：netstat 观测 3080 → POST update/portRestart → 校验新 PID 会话 0 接管/任务自删/无 EADDRINUSE）——**实测 5/5 PASS**（每轮 ~3.5s 接管、PID 变化、无 EADDRINUSE）。— [PEN-002]
+
 ## [3.2.2] - 2026-08-19
 
 ### Fixed

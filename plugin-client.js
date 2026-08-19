@@ -2185,7 +2185,7 @@ function UpdaterCard(props) {
       trigger().then((r) => {
         const rr = r && typeof r === 'object' ? r : {};
         if (rr.ok === true) { return; } // v3.2.1-t（A）：轮询已独立启动，这里无需动作
-        if (rr.code === 'NO_INDEX' || rr.code === 'PORT_RESTART_EXCEPTION' || rr.code === 'STAGED_INSTALL_FAILED') {
+        if (rr.code === 'NO_INDEX' || rr.code === 'PORT_RESTART_EXCEPTION' || rr.code === 'STAGED_INSTALL_FAILED' || rr.code === 'SCHEDULE_FAILED') {
           doneFlag = true; // v3.2.1-t（A）：明确失败 → 终止轮询
           setApplyErr((rr.message || rr.code || t('updError')));
           setApplyStatus(null);
