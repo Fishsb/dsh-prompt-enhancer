@@ -3312,7 +3312,7 @@ function ModelConfigTab(props) {
     const maybeInherit = () => {
       if (!providersReady || inheritedDone) return;
       // v18/v19：fresh install → 模型链继承当前使用模型（含推理等级）+ 自适应链补足
-      if (configState.fresh && configState.hostSync !== null && configState.value.fallback.length === 0) {
+      if (configState.fresh && configState.hostSync === true && configState.value.fallback.length === 0) {
         inheritedDone = true;
         // 先取当前默认模型作首项（含推理等级），再用自适应链 / 静态链做补足
         host.call('models/current').then((res2) => {

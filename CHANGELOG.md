@@ -7,6 +7,9 @@
 
 ## [Unreleased]
 
+### Changed
+- **Issue #1 修复审查补充（v3.2.4 发布后代码审查）**：① 新增 `test/config-persist.test.cjs`（7 项契约测试：config/get·config/set 参数校验行为、lib 与 src/host 双份 rpc-schema 同步防漂移、lib/index.cjs 注册存在、plugin-client.js 产物注入防漂移）；② 首次安装继承条件加固——`hostSync !== null` 收紧为 `hostSync === true`：host 磁盘同步超时放弃（20s）时不再执行自动继承，杜绝「磁盘有配置但同步失败」场景下默认链覆盖用户配置的残余路径。— [PEN-002]
+
 ## [3.2.4] - 2026-08-19
 
 ### Fixed
