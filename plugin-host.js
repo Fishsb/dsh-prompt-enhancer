@@ -2290,9 +2290,9 @@ function validateManifestFiles(files) {
 // restart（KillProcessTree 不影响独立执行器）与 port 占用（标准场景不可达，
 // no-port 并入 exec-port）已删；新增 tools（重启命令工具）与 svc-bin 降级链。）
 const ENV_PROBE_KEYS = [
-  { key: 'service', level: 'block' },  // 服务名存在（sc query）
-  { key: 'svc-type', level: 'block' }, // 服务启用状态（START_TYPE != DISABLED）
-  { key: 'svc-bin', level: 'block' },  // 服务可执行文件存在（nssm Application / 原生 ImagePath）
+  // v3.2.1-v（用户审核·去重收敛）：service/svc-type/svc-bin 三项信息已被 port-mode 状态机覆盖——
+  //   service↔监听者会话0、svc-type↔是否在跑、svc-bin↔能否接管——全部由 port-mode 的
+  //   service/service-stopped/default/no-listener 四态表达，删除三项避免重复检测。
   { key: 'tools', level: 'block' },    // 重启链系统工具可用（sc/netstat/reg）
   { key: 'net', level: 'warn' },       // GitHub 可达性（安装依赖，v2.7.1 恢复）
   { key: 'port-mode', level: 'warn' }, // v3.2.1-o：端口托管模式（nssm 服务会话0/前台默认/无监听）

@@ -618,10 +618,11 @@ const ZH = {
   envToolUnreachable: '系统工具不可达（PATH 异常）——检查结果不可信，请检查系统环境',
   // v3.2.1-o（用户需求·环境检测重构）：端口托管模式与当前 PID（替代过时的 exec-port）
   envPortMode: '端口托管模式',
-  envPortModeService: 'nssm 服务接管（会话 0）',
-  envPortModeDefault: '前台默认运行（用户会话）',
-  envPortModePidOnly: '运行中（会话未知）',
-  envPortModeNoListener: '无监听（DSH 未运行）',
+  envPortModeService: '服务模式（nssm · Session 0）',
+  envPortModeServiceStopped: '服务模式 · 已安装未运行',
+  envPortModeDefault: '前台模式（用户会话）',
+  envPortModePidOnly: '进程模式（会话未知）',
+  envPortModeNoListener: '未运行（无端口监听）',
   envPortPid: '当前端口 PID',
   updApplyConfirm: '确认',
   // v3.2（用户需求·桌面快捷方式 CLI 重启）：端口重启确认态「桌面」按钮 + 悬停提示 + 创建结果提示
@@ -889,10 +890,11 @@ const EN = {
   envToolUnreachable: 'System tools unreachable (PATH broken) — results unreliable, check the system environment',
   // v3.2.1-o (env-check rework): port host mode and current PID (replaces exec-port)
   envPortMode: 'Port host mode',
-  envPortModeService: 'nssm service (session 0)',
-  envPortModeDefault: 'Foreground default (user session)',
-  envPortModePidOnly: 'Running (session unknown)',
-  envPortModeNoListener: 'No listener (DSH not running)',
+  envPortModeService: 'Service mode (nssm, Session 0)',
+  envPortModeServiceStopped: 'Service mode, installed but not running',
+  envPortModeDefault: 'Foreground mode (user session)',
+  envPortModePidOnly: 'Process mode (session unknown)',
+  envPortModeNoListener: 'Not running (no port listener)',
   envPortPid: 'Port PID',
   updApplyConfirm: 'Confirm',
   // v3.2：桌面快捷方式 CLI 重启
@@ -1614,9 +1616,6 @@ function executorVersionAtLeast(v) {
 // v2.5.2 收敛为重启链 6 项；v2.7.0 收敛为重启阶段真实依赖 5 项：
 // 删 port 占用（标准场景不可达），加 tools 重启工具，exec-port 承接 no-port）
 const ENV_ITEMS = [
-  { key: 'service', label: 'envService' },
-  { key: 'svc-type', label: 'envSvcType' },
-  { key: 'svc-bin', label: 'envSvcBin' },
   { key: 'tools', label: 'envTools' },
   { key: 'net', label: 'envNet' },
   { key: 'port-mode', label: 'envPortMode' },
@@ -1624,16 +1623,13 @@ const ENV_ITEMS = [
 ];
 const ENV_DETAIL_TEXT = {
   ok: 'envOk',
-  missing: 'envServiceMissing',
-  disabled: 'envSvcTypeDisabled',
-  'bin-missing': 'envSvcBinMissing',
-  'image-missing': 'envSvcImageMissing',
-  'no-service': 'envSvcNoService',
+  // v3.2.1-v（去重收敛）：service 系 detail 已随三项删除；port-mode 四态映射见下
   'tools-missing': 'envToolsMissing',
   unreachable: 'envNetUnreachable',
   'tool-unreachable': 'envToolUnreachable',
   // v3.2.1-o（用户需求·环境检测重构）：端口托管模式映射
   'service': 'envPortModeService',
+  'service-stopped': 'envPortModeServiceStopped',
   'default': 'envPortModeDefault',
   'pid-only': 'envPortModePidOnly',
   'no-listener': 'envPortModeNoListener',
@@ -1748,14 +1744,14 @@ function UpdaterCard(props) {
     return () => { disposed = true; };
   }, []);
 
-  // v3.2.1（无服务化引导·审查加固）：挂载时检测 nssm 服务——无服务则显示行内引导
+  // v3.2.1（无服务化引导·审查加固）+ v3.2.1-w（键对齐修复）：挂载时检测 nssm 服务——无服务则显示行内引导
   // （不依赖端口重启流程的 applyPhase，刷新页面后依然可见；安装成功自动隐藏）
   React.useEffect(() => {
     host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
       const er = envRes && typeof envRes === 'object' ? envRes : {};
       const its = (er.ok === true && Array.isArray(er.items)) ? er.items : [];
-      const svc = its.find((i) => i.key === 'service');
-      setSvcNeedInstall(!(svc && svc.ok === true));
+      const pm = (its.find((i) => i.key === 'port-mode') || {}).detail;
+      setSvcNeedInstall(pm === 'default' || pm === 'no-listener');
     }).catch(() => { /* host 未就绪/无此 RPC → 静默 */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1901,8 +1897,8 @@ function UpdaterCard(props) {
           host.call('update/envcheck', { serviceName, executorPort }).then((envRes) => {
             const er = envRes && typeof envRes === 'object' ? envRes : {};
             const its = (er.ok === true && Array.isArray(er.items)) ? er.items : [];
-            const svc = its.find((i) => i.key === 'service');
-            setSvcNeedInstall(!(svc && svc.ok === true));
+            const pm = (its.find((i) => i.key === 'port-mode') || {}).detail;
+            setSvcNeedInstall(pm === 'default' || pm === 'no-listener');
           }).catch(() => setSvcNeedInstall(false));
           if (/rolled back/i.test(s.message || '')) {
             setApplyStatus(t('updApplyRolledBack'));
@@ -2171,8 +2167,8 @@ function UpdaterCard(props) {
             host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
               const er = envRes && typeof envRes === 'object' ? envRes : {};
               const its = (er.ok === true && Array.isArray(er.items)) ? er.items : [];
-              const svc = its.find((i) => i.key === 'service');
-              setSvcNeedInstall(!(svc && svc.ok === true));
+              const pm = (its.find((i) => i.key === 'port-mode') || {}).detail;
+              setSvcNeedInstall(pm === 'default' || pm === 'no-listener');
             }).catch(() => setSvcNeedInstall(false));
             setApplyStatus(t('updPortRestartDone'));
             setApplyPhase('done');

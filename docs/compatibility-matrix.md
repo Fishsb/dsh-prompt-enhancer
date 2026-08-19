@@ -117,4 +117,4 @@
 2. 所有 RPC 方法名不得随意变更；变更必须走 `protocolVersion`。
 3. 配置迁移必须可回退，禁止静默丢失用户设置。
 4. 多 profile（web/headless/自定义）必须继续支持。
-5. 安装/更新命令白名单不得放宽。
+5. 安装/更新必须走**受控通道**：一键更新仅接受 GitHub Release 的 npm pack tgz（固定仓库 `buildTarballUrl`）+ staging 目录内的本地 tgz（路径白名单校验）；v3.2.2 起安装为**直接解包复制到运行环境目录**（`System32\tar.exe` + 文件级覆盖，不再经 `dsh plugin add`/pnpm——规避操作运行中 profile 卡死，v3.2.1-r 根因修复）；禁止任意路径/任意命令执行安装。

@@ -1290,17 +1290,19 @@ test('U44 mergeEnvPath PATH 合并去重（v2.5.0）', () => {
 // v2.7.0：收敛为重启阶段真实依赖 5 项；v2.7.1：恢复 net 网络预检 → 6 项。
 // v3.2.1-o：exec-port（更新端口独立）删除——readServicePort 对默认端口必然解析失败、
 // v3.2 执行器动态端口 fallback 后已无意义；替换为 port-mode（3080 托管模式）+ port-pid（当前 PID）→ 7 项。
-test('U45 ENV_PROBE_KEYS 探测计划（v3.2.1-o 收敛）', () => {
-  assert.ok(Array.isArray(ENV_PROBE_KEYS) && ENV_PROBE_KEYS.length === 7, '探测项 7 个（服务 3 项 + tools + net + port-mode + port-pid）');
+test('U45 ENV_PROBE_KEYS 探测计划（v3.2.1-v 去重收敛）', () => {
+  assert.ok(Array.isArray(ENV_PROBE_KEYS) && ENV_PROBE_KEYS.length === 4, '探测项 4 个（tools + net + port-mode + port-pid）');
   const keys = ENV_PROBE_KEYS.map((e) => e.key);
-  assert.equal(new Set(keys).size, 7, 'key 唯一');
+  assert.equal(new Set(keys).size, 4, 'key 唯一');
   for (const e of ENV_PROBE_KEYS) {
     assert.ok(['block', 'warn'].includes(e.level), 'level 合法: ' + e.key);
   }
-  assert.ok(keys.includes('service') && keys.includes('svc-type')
-    && keys.includes('svc-bin') && keys.includes('tools')
-    && keys.includes('net') && keys.includes('port-mode') && keys.includes('port-pid'),
-    '7 项 key 与 probeEnv 一致');
+  assert.ok(keys.includes('tools') && keys.includes('net')
+    && keys.includes('port-mode') && keys.includes('port-pid'),
+    '4 项 key 与 probeEnv 一致');
+  assert.equal(keys.includes('service'), false, 'service 已清理（v3.2.1-v：信息被 port-mode 状态机覆盖——监听者会话0=服务存在且在跑）');
+  assert.equal(keys.includes('svc-type'), false, 'svc-type 已清理（是否在跑 = port-mode 四态之一）');
+  assert.equal(keys.includes('svc-bin'), false, 'svc-bin 已清理（能否接管 = port-mode service/service-stopped）');
   assert.equal(keys.includes('exec-port'), false, 'exec-port 已清理（v3.2.1-o：默认端口无法解析 + 执行器动态端口 fallback 后无意义）');
   assert.equal(keys.includes('account'), false, 'account 已清理（启动账号与 sc start 无关）');
   assert.equal(keys.includes('restart'), false, 'restart 已清理（KillProcessTree 不影响独立执行器）');
