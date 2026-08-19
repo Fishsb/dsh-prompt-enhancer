@@ -2292,10 +2292,8 @@ const ENV_PROBE_KEYS = [
   { key: 'svc-bin', level: 'block' },  // 服务可执行文件存在（nssm Application / 原生 ImagePath）
   { key: 'tools', level: 'block' },    // 重启链系统工具可用（sc/netstat/reg）
   { key: 'net', level: 'warn' },       // GitHub 可达性（安装依赖，v2.7.1 恢复）
-  // v3.2.1-o（用户需求·环境检测重构）：exec-port（更新端口独立）删除——readServicePort
-  // 对默认端口必然解析失败 + v3.2 执行器动态端口 fallback 后已无意义；替换为：
-  { key: 'port-mode', level: 'warn' }, // 3080 托管模式（nssm 服务 / 前台默认 / 无监听）
-  { key: 'port-pid', level: 'warn' },  // 3080 实际监听者 PID
+  { key: 'port-mode', level: 'warn' }, // v3.2.1-o：端口托管模式（nssm 服务会话0/前台默认/无监听）
+  { key: 'port-pid', level: 'warn' },  // v3.2.1-o：3080 实际监听者 PID
 ];
 
 // 安装命令构造：node <dshBin> plugin --profile <profile> add github:Fishsb/dsh-prompt-enhancer#<tag>
@@ -3278,10 +3276,16 @@ return {
         if (!tags) return { ok: false, code: 'BAD_ARGS', message: 'tagsPayload is not a valid JSON array' };
         const best = pickMaxTag(tags);
         if (!best) return { ok: false, code: 'NO_REMOTE_VERSION', message: 'no version-like tags found' };
-        const status = versionStatus(PLUGIN_VERSION, best.version);
+        // v3.2.1-r（根因修复·版本检测失真）：本地版本运行时读取（lib 注入 readPluginVersion，
+// 读运行环境 package.json；动态形态/读取失败回退 PLUGIN_VERSION 常量）
+        const localVer = (typeof harness.readPluginVersion === 'function' ? harness.readPluginVersion() : '') || PLUGIN_VERSION;
+        const status = versionStatus(localVer, best.version);
         // v2.4.1：默认目录基于**会话策略**的 workspaceRoot（无会话回退配置根）
         const policy = resolveSessionPolicy(sessionId);
-        const defaultDir = defaultDirFor(policy && policy.workspaceRoot, best.raw);
+        // v3.2.1-r（幽灵目录修正）：一键更新走 tgz 安装，defaultDir 改为真实运行环境目录（实际安装目标）
+        const defaultDir = typeof harness.pluginRuntimeDir === 'function'
+          ? harness.pluginRuntimeDir()
+          : defaultDirFor(policy && policy.workspaceRoot, best.raw);
         // 附加展示元数据：仅当 release 的 tag 与最大 tag 同名（§1.2-2；缺失/失败不阻断）
         let releaseMeta = null;
         if (releasePayload !== '') {
@@ -3299,18 +3303,18 @@ return {
         const value = {
           ok: true,
           repo,
-          local: PLUGIN_VERSION,
+          local: localVer,
           remote: best.version,
           remoteTag: best.raw,
           status,
-          ahead: status === 'current' && compareVersions(PLUGIN_VERSION, best.version) > 0,
+          ahead: status === 'current' && compareVersions(localVer, best.version) > 0,
           defaultDir,
           source: 'tag',
           ...(releaseMeta ? releaseMeta : {}),
           checkedAt: Date.now(),
         };
         updateCache.set(repo, { at: Date.now(), value });
-        hlog('[enhance] update/check repo=' + repo + ' local=' + PLUGIN_VERSION + ' remote=' + best.version + ' tag=' + best.raw + ' status=' + status + ' dir=' + defaultDir);
+        hlog('[enhance] update/check repo=' + repo + ' local=' + localVer + ' remote=' + best.version + ' tag=' + best.raw + ' status=' + status + ' dir=' + defaultDir);
         return value;
       } catch (e) {
         herr('[enhance] update/check failed', e);

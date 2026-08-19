@@ -5,6 +5,11 @@
 
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
+## [3.2.2] - 2026-08-19
+
+### Fixed
+- **一键更新→端口重启 90s 超时·根因修复（用户全流程实测·v3.2.1-r）**：完整根因链——v3.2.1-q 把 staging 安装塞进 host 的 `update/portRestart`（`spawnSync('dsh plugin add', timeout=120s)`，而 `dsh plugin add` 实际是转发 **pnpm 在 profile 目录执行 `pnpm add`**，该 profile 正是 host 自己所在、正在运行的服务环境）→ pnpm 卡死 → **host 事件循环冻结 ≥90s → DSH 网页服务器无响应 → client 90s 轮询报「端口重启超时」** → 120s 后安装失败、服务从未重启。**修复**：① `installStagedTarball` 不再用 dsh/pnpm——npm pack tgz 是标准 tar（顶层 `package/`），直接**解包 + 文件级覆盖复制到运行环境目录**（`$DSH_HOME/profiles/<profile>/node_modules/dsh-prompt-enhancer`），秒级完成、无网络/无依赖树/无锁（插件加载走 cordis include，不依赖 pnpm 依赖登记，手动 cp 覆盖重启即生效早已验证）；tar 用 `System32\tar.exe`（bsdtar）绝对路径，规避 Git Bash GNU tar 把 `C:\` 解析成远程主机。② **版本检测失真修复**：`PLUGIN_VERSION` 构建硬编码与 package.json 脱节（发版后未重建产物 → 永远 local=3.2.0 → 永远检测到更新）——`update/check` 的本地版本改为**运行时读取运行环境 package.json**（lib 注入 `harness.readPluginVersion`），动态形态/读取失败回退常量。③ **幽灵目录修正**：`update/check` 的 `defaultDir`（v2.4.1 逐文件写入遗留的 `<workspaceRoot>/dsh-prompt-enhancer-<tag>/`）改为真实运行环境目录（`harness.pluginRuntimeDir`）。④ 同步源码：v3.2.1-o 的 ENV_PROBE_KEYS（exec-port→port-mode/port-pid）此前只改了构建产物，本次回灌 src/host/pure.js（重建不再丢失）。全量测试 158/158。— [PEN-002]
+
 ## [3.2.1] - 2026-08-18
 
 ### Fixed
