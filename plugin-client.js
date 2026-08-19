@@ -570,23 +570,22 @@ syncConfigFromHost();
 
 const ZH = {
   enhanceButton: '优化',
-  enhancing: '优化中',
+  enhancing: '正在优化',
   // 2026-08-18（用户需求）：llm 阶段显示正在优化的模型序号；重试精简（从 2 起「N 正在重试」）
-  enhancingModel: '{n}优化中',
-  enhancingRetryModel: '{n}重试中',
+  enhancingModel: '{n}正在优化',
   result: '撤销优化',
   resultFallback: '撤销优化',
-  titleIdle: '一键优化提示词（独立 LLM 调用）',
+  titleIdle: '一键优化',
   // v2.6.2（继续优化）：已优化过一轮后修改草稿的按钮文字与提示
   btnContinue: '继续优化',
-  titleContinue: '继续优化：已优化过一轮，基于当前修改继续完善（独立 LLM 调用）',
-  titleBusy: '点击取消优化并恢复原文',
-  titleResult: '恢复优化前的原文',
-  titleCommand: '命令内容为空，无可优化',
-  titleBusyInput: '当前输入状态不允许优化',
+  titleContinue: '继续优化',
+  titleBusy: '点击取消',
+  titleResult: '点击恢复原文',
+  titleCommand: '命令无可优化',
+  titleBusyInput: '当前不可优化',
   // v2.3.3（§7.10）：空输入时按钮 = 记忆开关（点击切换记忆）
-  titleMemoryOn: '记忆开关：点击切换记忆功能（当前：开）',
-  titleMemoryOff: '记忆开关：点击切换记忆功能（当前：关）',
+  titleMemoryOn: '点击切换记忆',
+  titleMemoryOff: '点击切换记忆',
   errorPrefix: '优化失败：',
   dismiss: '知道了',
   cancel: '取消',
@@ -821,7 +820,7 @@ const ZH = {
   modeLabelPublish: '一键发布',
   // v3.0r（细粒度进度反馈）：子步骤详情文案（detailKey → 模板，{current}/{total}/{query} 占位）
   // 2026-08-18（用户需求）：按钮提醒精简——4~6 字，保留进度数字（{current}/{total}），去 query
-  stagePrepare: '准备中',
+  stagePrepare: '正在准备',
   stageHistory: '读取会话',
   stageAnalyze: '分析任务',
   stageFiles: '检索文件',
@@ -844,21 +843,20 @@ const EN = {
   enhanceButton: 'Optimize',
   enhancing: 'Optimizing',
   // 2026-08-18（用户需求）：llm 阶段显示正在优化的模型序号；重试精简
-  enhancingModel: 'Model {n} optimizing',
-  enhancingRetryModel: 'Retrying {n}',
+  enhancingModel: '{n} optimizing',
   result: 'Undo',
   resultFallback: 'Undo',
-  titleIdle: 'Optimize the prompt with an independent LLM call',
+  titleIdle: 'Optimize prompt',
   // v2.6.2（继续优化）：已优化过一轮后修改草稿的按钮文字与提示
   btnContinue: 'Continue',
-  titleContinue: 'Continue optimizing: a previous round exists; refine based on your edits (independent LLM call)',
-  titleBusy: 'Click to cancel optimization and restore the original text',
-  titleResult: 'Restore the original text',
-  titleCommand: 'Empty command, nothing to optimize',
-  titleBusyInput: 'Input is not ready',
+  titleContinue: 'Continue optimizing',
+  titleBusy: 'Click to cancel',
+  titleResult: 'Click to undo',
+  titleCommand: 'Nothing to optimize',
+  titleBusyInput: 'Not ready',
   // v2.3.3（§7.10）：空输入时按钮 = 记忆开关（点击切换记忆）
-  titleMemoryOn: 'Memory toggle: click to switch (currently on)',
-  titleMemoryOff: 'Memory toggle: click to switch (currently off)',
+  titleMemoryOn: 'Click to toggle memory',
+  titleMemoryOff: 'Click to toggle memory',
   errorPrefix: 'Optimize failed: ',
   dismiss: 'Dismiss',
   cancel: 'Cancel',
@@ -1417,16 +1415,6 @@ function EnhanceButton(props) {
   const phase = s ? s.phase : 'idle';
   // v3.0r（细粒度进度反馈）：progress 对象 {stage, detailKey, detailArgs, step, total, elapsedMs}
   const [prog, setProg] = React.useState(null);
-
-  // v3.2.4（用户需求）：优化中动态点——三点 1→2→3 循环（优化中. → 优化中.. → 优化中...）
-  // 动态 client 无浏览器 timer 全局，经 timerSvc.interval（与 progress 轮询一致）
-  const [dots, setDots] = React.useState(0);
-  React.useEffect(() => {
-    if (phase !== 'enhancing') { setDots(0); return undefined; }
-    setDots(1);
-    if (!timerSvc || typeof timerSvc.interval !== 'function') return undefined;
-    return timerSvc.interval(() => setDots((v) => (v % 3) + 1), 400);
-  }, [phase]);
   React.useEffect(() => {
     if (sessionId === undefined) return undefined;
     const st = storeFor(sessionId);
@@ -1473,8 +1461,8 @@ function EnhanceButton(props) {
         // 2026-08-18（用户需求）：llm 阶段显示「N 优化中」——N = 当前尝试的模型序号（step），
         // 失败切换模型时序号递增（1→2→3），用户能判断是模型配置问题而非插件问题
         if (st.stage === 'llm' && st.step > 0) {
-          // 重试（模型切换）时显示「N 正在重试」，其余显示「N 优化中」
-          progText = (st.detailKey === 'retry' ? t('enhancingRetryModel') : t('enhancingModel')).replace('{n}', String(st.step));
+          // v3.2.4（用户需求）：模型 1（默认）直接显示「正在优化」；失败切换后显示「{n}正在优化」
+          progText = (st.step > 1 ? t('enhancingModel') : t('enhancing')).replace('{n}', String(st.step));
         } else {
           const key = 'stage' + st.stage.charAt(0).toUpperCase() + st.stage.slice(1);
           const localized = t(key);
@@ -1515,7 +1503,7 @@ function EnhanceButton(props) {
       // v2.3.3（§7.10）：hover 闪烁修复——progress 文档流占位（宽度恒定），
       // cancel absolute 覆盖其上，hover 只切 opacity（无尺寸抖动）
       React.createElement('span', { className: 'dsh-enh-status', 'aria-hidden': true },
-        React.createElement('span', { className: 'dsh-enh-progress' }, progText + (dots > 0 ? '.'.repeat(dots) : '')),
+        React.createElement('span', { className: 'dsh-enh-progress' }, progText),
         React.createElement('span', { className: 'dsh-enh-cancel' }, t('cancel')),
       ),
     );
