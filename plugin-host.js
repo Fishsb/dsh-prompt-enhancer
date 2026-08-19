@@ -4052,7 +4052,18 @@ return {
           return state;
         }
         hlog('[enhance] try session=' + sessionId + ' provider=' + entry.provider + ' model=' + entry.model + (entry.reasoningEffort ? ' effort=' + entry.reasoningEffort : '') + ' seq=' + seq);
-        setProgress(rec, STAGE_LLM, i > 0 ? 'retry' : '', null, i + 1, chain.length);
+        // v3.2.4（用户需求）：模型序号 = 用户设置（fallback 链）中的位置——buildTryChain
+        // 会去重/过滤导致 chain 索引偏移；用 fallback 原始序号，设置里第 N 条就显示 N（自动随数量）
+        const fb = state.cfg && Array.isArray(state.cfg.fallback) ? state.cfg.fallback : [];
+        let stepNum = i + 1;
+        for (let fi = 0; fi < fb.length; fi++) {
+          const it = fb[fi];
+          if (it && typeof it === 'object' && String(it.provider).trim() === entry.provider && String(it.model).trim() === entry.model) {
+            stepNum = fi + 1;
+            break;
+          }
+        }
+        setProgress(rec, STAGE_LLM, i > 0 ? 'retry' : '', null, stepNum, fb.length > 0 ? fb.length : chain.length);
         let stream;
         try {
           stream = llm.stream({
