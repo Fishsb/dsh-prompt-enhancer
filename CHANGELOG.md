@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [3.2.3] - 2026-08-19
+
 ### Fixed
 - **环境检测误报「安装 nssm」（用户实测·v3.2.1-w）**：nssm 已装且服务模式生效（port-mode=service）时，环境检测仍显示「检测到 DSH 未以系统服务运行（无 nssm）。是否现在安装？」——根因：v3.2.1-v 删除 host `service` 探测项后，client `updater-card.js` **三处 `svcNeedInstall` 判定仍写死 `its.find((i) => i.key === 'service')`** → 永远 undefined → 永远判「需要安装」。修复：判定改用 `port-mode` 四态——仅 `default`（前台模式·用户会话）/ `no-listener`（未运行）提示安装；`service`（nssm 接管）/ `service-stopped`（已装未运行）/ 未知态（pid-only / tool-unreachable）一律不再误报。— [PEN-002]
 - **端口重启服务模式根治（v3.2.1-u）**：实测发现 `schtasks /create` 的 **`/tr` 参数有 261 字符上限**——A+B 方案把完整 PowerShell 任务链塞进 `/tr` 超长 → create 失败（status=2147500037）→ 旧降级分支 `sc stop`（只停不启）→ 服务挂死、3080 空、页面全报错（08-19 18:32 实测）。**修复**：① 任务链改为**独立 node 脚本**（host 生成 `restart-service-<ts>.cjs` 到 executor/cli，`/tr` 只指 `node.exe <script>`，远小于 261 字符）；脚本内（SYSTEM 运行、脱离 nssm Job 树）`sc.exe stop` → **轮询 SCM 状态 STOPPED**（nssm stop 后 SCM 可能仍 STOP_PENDING，立即 start 会被拒）→ 轮询 3080 端口释放（≤30s，残留单 PID 杀）→ `sc.exe start` 重试 3 次 → 删任务 + 自删脚本。② 降级分支**安全化**：create 失败不再 `sc stop`（杜绝只停不启），返回 `SCHEDULE_FAILED` 明确错误，client 终止轮询显示错误。③ 新增 **test/e2e-restart.cjs 端到端回归**（真实 RPC 链路：netstat 观测 3080 → POST update/portRestart → 校验新 PID 会话 0 接管/任务自删/无 EADDRINUSE）——**实测 5/5 PASS**（每轮 ~3.5s 接管、PID 变化、无 EADDRINUSE）。— [PEN-002]
@@ -406,6 +408,10 @@
 - 版本检测与一键更新（update/check + update/pull，contents API 下载）— [VU-001]
 - 插件管理页版本检测卡片；按钮三态字体锚点对齐模型选择器（13px/500/20px）— [VU-001]
 
+[3.2.3]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.2.3
+[3.2.2]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.2.2
+[3.2.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.2.1
+[3.2.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.2.0
 [2.8.3]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v2.8.3
 [3.1.4]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.4
 [3.1.3]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.1.3

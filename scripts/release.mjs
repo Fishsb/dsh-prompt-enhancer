@@ -31,6 +31,21 @@ function runNode(script, args) {
 function sh(cmd, args) {
   return execFileSync(cmd, args, { encoding: 'utf8', cwd: root }).trim();
 }
+// npm-cli.js 解析：优先仓库内 node_modules/npm（旧路径），缺失时回退 node 同级全局 npm
+// （v3.2.3 修复：本机 node_modules/npm 不存在，硬编码路径 MODULE_NOT_FOUND 曾阻塞发布；
+// 不跑 `npm root -g`——Windows 下 execFileSync 无法直接执行 .cmd，且 PATH 布局不可靠）
+function resolveNpmCli() {
+  const local = join(root, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  if (existsSync(local)) return local;
+  const nodeDir = dirname(process.execPath);
+  const candidates = [
+    join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ];
+  for (const p of candidates) if (existsSync(p)) return p;
+  throw new Error('npm-cli.js not found: 仓库 node_modules/npm 与 node 同级全局 npm 均缺失');
+}
+const NPM_CLI = resolveNpmCli();
 function http(url, opts) {
   const u = new URL(url);
   const http = u.protocol === 'http:' ? require('node:http') : require('node:https');
@@ -89,7 +104,7 @@ writeFileSync(PKG, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
 runNode('build-host.mjs', []); // 产物同步注入新版本
 runNode('build-client.mjs', []);
 console.log('== npm pack ==');
-const packOut = sh(NODE, [join(root, 'node_modules', 'npm', 'bin', 'npm-cli.js'), 'pack', '--pack-destination', '.']).split('\n').pop().trim();
+const packOut = sh(NODE, [NPM_CLI, 'pack', '--pack-destination', '.']).split('\n').pop().trim();
 const tgz = join(root, packOut);
 if (!existsSync(tgz)) { console.error('npm pack 失败'); process.exit(1); }
 console.log('产物: ' + packOut + ' (' + statSync(tgz).size + 'B)');
