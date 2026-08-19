@@ -223,7 +223,7 @@ function customPickIndex(pick) {
   return Number.isInteger(idx) && idx >= 0 ? idx : -1;
 }
 
-const configState = { value: { ...CONFIG_DEFAULTS }, listeners: new Set(), fresh: true, unsupported: false };
+const configState = { value: { ...CONFIG_DEFAULTS }, listeners: new Set(), fresh: true, unsupported: false, hostSync: null };
 
 function cloneDefaults() {
   return {
@@ -484,6 +484,11 @@ function saveConfig(patch) {
   if (typeof localStorage !== 'undefined') {
     try { localStorage.setItem(CONFIG_KEY, JSON.stringify(configState.value)); } catch (e) { /* 忽略 */ }
   }
+  // v3.2.4（Issue #1 修复）：磁盘持久化双写——DSH Desktop 动态端口下 localStorage 按 Origin 隔离
+  // 会「丢失」，磁盘配置（$DSH_HOME/dsh-prompt-enhancer.config.json）跨端口共享（fire-and-forget 失败静默）
+  if (typeof host !== 'undefined' && host && typeof host.call === 'function') {
+    try { host.call('config/set', { config: configState.value }).catch(() => {}); } catch (e) { /* 忽略 */ }
+  }
   // v2.7.0：保存校验状态机——saving（转圈）→ 1s 后真实校验 → saved/failed；
   // 全状况显式反馈：无 timer 服务也启动状态机（同步校验，结果常驻）
   const seq = ++saveStatus.seq;
@@ -498,6 +503,58 @@ function subscribeConfig(fn) {
   return () => { configState.listeners.delete(fn); };
 }
 
+// v3.2.4（Issue #1 修复）：启动时从 host 磁盘同步配置（config/get·config/set，
+// $DSH_HOME/dsh-prompt-enhancer.config.json）。DSH Desktop 主进程每次启动动态分配端口，
+// localStorage 按 Origin（协议://域名:端口）隔离 → 重启后新 Origin 下 localStorage 为空 →
+// 旧逻辑判定 fresh=true 用默认链覆盖用户配置。磁盘配置跨端口共享，hostSync 完成前不做首次继承。
+const HOST_SYNC_MAX_ATTEMPTS = 10;
+const HOST_SYNC_RETRY_MS = 2000;
+let hostSyncAttempt = 0;
+function notifyConfig() {
+  for (const fn of [...configState.listeners]) fn();
+}
+function syncConfigFromHost() {
+  if (configState.hostSync === true) return;
+  const retry = () => {
+    if (++hostSyncAttempt >= HOST_SYNC_MAX_ATTEMPTS) {
+      configState.hostSync = false;
+      notifyConfig();
+      return;
+    }
+    if (timerSvc && typeof timerSvc.timeout === 'function') { timerSvc.timeout(() => syncConfigFromHost(), HOST_SYNC_RETRY_MS); return; }
+    if (typeof setTimeout === 'function') { setTimeout(syncConfigFromHost, HOST_SYNC_RETRY_MS); return; }
+    configState.hostSync = false;
+    notifyConfig();
+  };
+  if (typeof host === 'undefined' || !host || typeof host.call !== 'function') { retry(); return; }
+  host.call('config/get').then((res) => {
+    const r = res && typeof res === 'object' ? res : {};
+    if (!r.ok) { retry(); return; }
+    if (r.config && typeof r.config === 'object') {
+      // 磁盘有配置：版本门控同 localStorage 策略（version>2 不 sanitize，防白名单摧毁用户数据）
+      if (typeof r.config.version === 'number' && r.config.version > 2) {
+        configState.value = cloneDefaults();
+        configState.unsupported = true;
+      } else {
+        configState.value = sanitizeV2(r.config);
+      }
+      configState.fresh = false;
+      configState.hostSync = true;
+      if (typeof localStorage !== 'undefined') {
+        try { localStorage.setItem(CONFIG_KEY, JSON.stringify(configState.value)); } catch (e) { /* 忽略 */ }
+      }
+      notifyConfig();
+      return;
+    }
+    // 磁盘无配置：localStorage 有（固定端口 web 老用户升级）→ 迁移写盘；都空 → 保持 fresh 首次继承
+    configState.hostSync = true;
+    if (!configState.fresh && typeof localStorage !== 'undefined' && localStorage.getItem(CONFIG_KEY)) {
+      try { host.call('config/set', { config: configState.value }).catch(() => {}); } catch (e) { /* 忽略 */ }
+    }
+    notifyConfig();
+  }).catch(() => retry());
+}
+
 
 // 2026-08-17（连通性测试预计耗时）：当前输入框草稿全局同步——设置页测试连通性
 // 需要按输入长度动态估算“基础模式默认模板”输出量。
@@ -509,6 +566,7 @@ function getLastDraft() {
   return lastDraft;
 }
 loadConfigFromStorage();
+syncConfigFromHost();
 
 const ZH = {
   enhanceButton: '优化',
@@ -3245,6 +3303,41 @@ function ModelConfigTab(props) {
   const [inherited, setInherited] = React.useState(false);
 
   React.useEffect(() => {
+    // v3.2.4（Issue #1 修复）：fresh 继承需等磁盘同步完成（hostSync 非 null）——
+    // DSH Desktop 动态端口下 localStorage 空是「配置待恢复」而非「首次安装」，
+    // 过早继承会用默认链覆盖用户配置。订阅 configState 响应同步完成事件。
+    let providersReady = false;
+    let inheritedDone = false;
+    let off = null;
+    const maybeInherit = () => {
+      if (!providersReady || inheritedDone) return;
+      // v18/v19：fresh install → 模型链继承当前使用模型（含推理等级）+ 自适应链补足
+      if (configState.fresh && configState.hostSync !== null && configState.value.fallback.length === 0) {
+        inheritedDone = true;
+        // 先取当前默认模型作首项（含推理等级），再用自适应链 / 静态链做补足
+        host.call('models/current').then((res2) => {
+          const r2 = res2 && typeof res2 === 'object' ? res2 : {};
+          let chain = [];
+          if (r2.ok && r2.provider && r2.model) {
+            const entry = { provider: r2.provider, model: r2.model };
+            if (r2.reasoningEffort) entry.reasoning = { enabled: true, effort: r2.reasoningEffort };
+            chain.push(entry);
+          }
+          const fill = (src) => {
+            for (const b of src) {
+              if (!b || typeof b.provider !== 'string' || typeof b.model !== 'string') continue;
+              if (!chain.some((x) => x.provider === b.provider && x.model === b.model)) chain.push({ provider: b.provider, model: b.model });
+            }
+            return chain;
+          };
+          // v3.2（用户需求）：首次安装默认模型链 = 官方两个模型（1 Flash、2 Pro），可删除可改；
+          // 不再走 autochain；增强时链为空仍报 NO_MODEL（非兜底）
+          chain = fill(DEFAULT_MODEL_CHAIN.map((x) => ({ provider: x.provider, model: x.model })));
+          if (chain.length > 0) { saveConfig({ fallback: chain }); configState.fresh = false; setInherited(true); }
+        }).catch(() => {});
+      }
+    };
+    off = subscribeConfig(maybeInherit);
     host.call('models/list').then((res) => {
       const r = res && typeof res === 'object' ? res : {};
       if (r.ok && Array.isArray(r.providers)) {
@@ -3255,34 +3348,13 @@ function ModelConfigTab(props) {
           const keep = configState.value.order.filter((k) => cand.some((c) => c.provider + '/' + c.model === k));
           if (keep.length !== configState.value.order.length) saveConfig({ order: keep });
         } catch (e) { /* 清理失败静默（下次打开再试） */ }
-        // v18/v19：fresh install → 模型链继承当前使用模型（含推理等级）+ 自适应链补足
-        if (configState.fresh && configState.value.fallback.length === 0) {
-          // 先取当前默认模型作首项（含推理等级），再用自适应链 / 静态链做补足
-          host.call('models/current').then((res2) => {
-            const r2 = res2 && typeof res2 === 'object' ? res2 : {};
-            let chain = [];
-            if (r2.ok && r2.provider && r2.model) {
-              const entry = { provider: r2.provider, model: r2.model };
-              if (r2.reasoningEffort) entry.reasoning = { enabled: true, effort: r2.reasoningEffort };
-              chain.push(entry);
-            }
-            const fill = (src) => {
-              for (const b of src) {
-                if (!b || typeof b.provider !== 'string' || typeof b.model !== 'string') continue;
-                if (!chain.some((x) => x.provider === b.provider && x.model === b.model)) chain.push({ provider: b.provider, model: b.model });
-              }
-              return chain;
-            };
-            // v3.2（用户需求）：首次安装默认模型链 = 官方两个模型（1 Flash、2 Pro），可删除可改；
-            // 不再走 autochain；增强时链为空仍报 NO_MODEL（非兜底）
-            chain = fill(DEFAULT_MODEL_CHAIN.map((x) => ({ provider: x.provider, model: x.model })));
-            if (chain.length > 0) { saveConfig({ fallback: chain }); configState.fresh = false; setInherited(true); }
-          }).catch(() => {});
-        }
+        providersReady = true;
+        maybeInherit();
       } else {
         setError(t('cfgLoadFailed'));
       }
     }).catch(() => setError(t('cfgLoadFailed')));
+    return () => { if (off) off(); };
   }, []);
 
   const cfg = configState.value;

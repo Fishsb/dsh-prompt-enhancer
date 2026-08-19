@@ -38,6 +38,18 @@ const schemas = {
       return typeof args.sessionId === 'string' && typeof args.pluginId === 'string';
     },
   },
+  'config/get': {
+    required: [],
+    validate() {
+      return true;
+    },
+  },
+  'config/set': {
+    required: ['config'],
+    validate(args) {
+      return !!args.config && typeof args.config === 'object' && !Array.isArray(args.config);
+    },
+  },
 };
 
 function validateRpcArgs(method, args) {

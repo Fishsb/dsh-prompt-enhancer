@@ -7,6 +7,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **桌面端 (DSH Desktop) 每次重启插件设置被重置（GitHub Issue #1 用户反馈）**：DSH Desktop 主进程每次启动动态分配端口（`listen(port 0)`），Chromium localStorage 按 Origin（协议://域名:端口）隔离 → 每次重启新 Origin 下配置「消失」→ client 误判 `fresh=true` 用默认模型链覆盖用户配置（模型链/模板/参数全丢）。**修复**：① host 新增 `config/get`·`config/set` RPC（`$DSH_HOME/dsh-prompt-enhancer.config.json` 磁盘持久化，原子写 tmp+rename，≤1MB）；② client `saveConfig` 双写（localStorage + 磁盘 fire-and-forget）；③ 启动时 `syncConfigFromHost()` 从磁盘恢复配置并回填 localStorage（host 未就绪重试 10×2s，覆盖冷启动）；④ 首次安装模型链继承加 `hostSync` 门控——磁盘同步完成前不判定 fresh，杜绝「配置待恢复」被误判为「首次安装」覆盖；⑤ web 固定端口场景不受影响，磁盘为空时自动迁移 localStorage 存量配置写盘。— [PEN-002]
+
 ## [3.2.3] - 2026-08-19
 
 ### Fixed

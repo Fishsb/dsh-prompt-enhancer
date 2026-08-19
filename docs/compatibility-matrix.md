@@ -43,6 +43,8 @@
 | `plugins/undefine` | client → host | 取消定义 | 管理 |
 | `update/executorEnsure` | client → host | 拉起/对齐执行器（版本+内容哈希） | 用户触发 |
 | `update/restartNeeded` | client → host | 检测未重启 | 只读 |
+| `config/get` | client → host | 读取磁盘配置（$DSH_HOME/dsh-prompt-enhancer.config.json；DSH Desktop 动态端口配置恢复） | 只读 |
+| `config/set` | client → host | 写入磁盘配置（原子写 tmp+rename，≤1MB） | 用户触发 |
 
 > 注：`update/executorEnsure` / `update/restartNeeded` 在 host RPC 清单中保留（部分版本由 client 直连执行器 3081），见 executor RPC。
 
