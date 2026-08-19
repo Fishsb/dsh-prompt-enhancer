@@ -648,7 +648,7 @@ const ZH = {
   updApplyRestartFailed: '5 次重启均未恢复——请手动执行 net start dsh-web 后刷新',
   // v3.1.6（用户反馈·文案误导）：bundle 安装但执行器未拉起/中途不可达时，旧文案
   // 「请确认插件为 bundle 安装」会让用户误以为是安装问题——改为准确提示自动重试结果
-  updApplyExecutorDown: '更新执行器未能启动（端口 3081）——已自动重试仍失败，请刷新页面后重试；若仍失败请重启 dsh-web 服务',
+  updApplyExecutorDown: '端口重启超时：DSH 服务未在 90 秒内恢复，请刷新页面重试；若仍失败请重启 dsh-web 服务',
 
   // v3.2.1（用户需求·无服务化引导）：端口重启前检测无 nssm 服务 → 弹窗一键服务化
   svcInstallTitle: 'nssm 服务化',
@@ -914,7 +914,7 @@ const EN = {
   updRestartNotListening: 'Port not ready, about to retry',
   updApplyRetry: 'Attempt {n} in progress (service starting, up to 20s)…',
   updApplyRestartFailed: 'Still down after 5 attempts — run `net start dsh-web` manually, then refresh',
-  updApplyExecutorDown: 'Update executor failed to start (port 3081) — auto-retried; refresh the page and retry, or restart the dsh-web service',
+  updApplyExecutorDown: 'Port restart timed out: the DSH service did not recover within 90s. Refresh the page and retry, or restart the dsh-web service',
 
   // v3.2.1 (no-service onboarding): before port-restart, detect missing nssm service and offer one-click install
   svcInstallTitle: 'nssm service',
