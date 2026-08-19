@@ -1884,6 +1884,7 @@ function UpdaterCard(props) {
     // restarting 阶段展示执行器 message 阶段（停止/等待稳定/第 N 次尝试/端口未就绪）+
     // 轮次 + 剩余秒 + 已用秒；轮询连续失败 15 次（约 15s 无响应）→ 判定执行器不可达并终止
     const startedAt = Date.now();
+    let doneFlag = false;
     let localLeft = 10;
     let failCount = 0;
     setRestartLeft(localLeft);
@@ -1942,9 +1943,20 @@ function UpdaterCard(props) {
           installing: t('updApplying'),
           rollback: t('updApplyRollingBack'),
         };
+        // v3.2.1-s（用户需求·进度反馈）：apply 流程步骤序号 + staging 下载百分比
+        const PHASE_STEP = { validating: 1, staging: 2, envcheck: 3, preparing: 4, installing: 5, rollback: 6 };
         if (phaseStatus[s.phase]) {
           setApplyErr(null);
-          setApplyStatus(phaseStatus[s.phase] + ' · 已用 ' + elapsed + 's');
+          const step = PHASE_STEP[s.phase] || 0;
+          let extra = '';
+          // v3.2.1-s（下载进度）：staging 阶段展示下载百分比与镜像源（执行器 state.download）
+          if (s.phase === 'staging' && s.download) {
+            const dl = s.download;
+            const pct = typeof dl.percent === 'number' ? dl.percent : 0;
+            const srcTxt = (dl.attempt && dl.attempts) ? (' · 源 ' + dl.attempt + '/' + dl.attempts) : '';
+            extra = ' · 下载 ' + pct + '%' + srcTxt;
+          }
+          setApplyStatus((step ? '[第 ' + step + ' 步] ' : '') + phaseStatus[s.phase] + extra + ' · 已用 ' + elapsed + 's');
           setApplyPhase('applying');
           setTimeout(tick, 1000);
           return;
@@ -2130,6 +2142,7 @@ function UpdaterCard(props) {
     // 执行器/executorEnsure/schtasks/冷启动时序。DSH 被杀时页面短暂断连，轮询自身恢复。
     const trigger = () => host.call('update/portRestart', { serviceName, profile });
     const pollRestored = () => {
+      if (doneFlag) return;
       const elapsed = Math.round((Date.now() - startedAt) / 1000);
       setApplyStatus(t('updPortRestarting') + '（' + elapsed + 's）');
       if (Date.now() - startedAt > 90000) {
@@ -2139,31 +2152,32 @@ function UpdaterCard(props) {
         setAction(null);
         return;
       }
-      // v3.2.1-c（用户实测·计时不更新）：DSH 被杀时 fetch('') 可能**挂起不返回**
-      // （浏览器 fetch 无超时，TCP 断开未必立即 reject）→ pollRestored 不再递归 →
-      // 倒计时冻结。加 AbortController 5s 超时：超时视为未恢复，继续轮询（计时持续更新）。
+      // v3.2.1-s（用户需求·倒计时 1 秒一更新）：fetch('') 可能挂起（DSH 被杀时 TCP 断开未必立即
+      // reject，AbortController 5s 超时）——旧实现把递归放在 fetch 回调里，fetch 挂起→下一轮 5s 后
+      // 才跑→倒计时 3~5s 一跳。改为：doneFlag + fetch 检查独立于倒计时节奏——每轮 1s 后无条件
+      // 递归（fetch 结果只决定成功/继续，不阻塞计时）。
       const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
       const abortTimer = ctrl ? setTimeout(() => ctrl.abort(), 5000) : null;
-      window.fetch('', { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined }).then((res) => {
-        if (abortTimer) clearTimeout(abortTimer);
-        if (res.ok) {
-          setApplyErr(null);
-          // v3.2.1（用户需求·无服务化引导）：重启完成 → 检测 nssm 服务，缺失则行内引导一键服务化
-          host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
-            const er = envRes && typeof envRes === 'object' ? envRes : {};
-            const its = (er.ok === true && Array.isArray(er.items)) ? er.items : [];
-            const svc = its.find((i) => i.key === 'service');
-            setSvcNeedInstall(!(svc && svc.ok === true));
-          }).catch(() => setSvcNeedInstall(false));
-          setApplyStatus(t('updPortRestartDone'));
-          setApplyPhase('done');
-          return;
-        }
-        setTimeout(pollRestored, 1000);
-      }).catch(() => {
-        if (abortTimer) clearTimeout(abortTimer);
-        setTimeout(pollRestored, 1000);
-      });
+      window.fetch('', { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
+        .then((res) => {
+          if (abortTimer) clearTimeout(abortTimer);
+          if (res.ok && !doneFlag) {
+            doneFlag = true;
+            setApplyErr(null);
+            // v3.2.1（用户需求·无服务化引导）：重启完成 → 检测 nssm 服务，缺失则行内引导一键服务化
+            host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
+              const er = envRes && typeof envRes === 'object' ? envRes : {};
+              const its = (er.ok === true && Array.isArray(er.items)) ? er.items : [];
+              const svc = its.find((i) => i.key === 'service');
+              setSvcNeedInstall(!(svc && svc.ok === true));
+            }).catch(() => setSvcNeedInstall(false));
+            setApplyStatus(t('updPortRestartDone'));
+            setApplyPhase('done');
+            return;
+          }
+        })
+        .catch(() => { if (abortTimer) clearTimeout(abortTimer); })
+        .then(() => { if (!doneFlag) setTimeout(pollRestored, 1000); });
     };
     let ensureAttempts = 0;
     const ensure = () => {
