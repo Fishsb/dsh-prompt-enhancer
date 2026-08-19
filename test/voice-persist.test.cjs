@@ -96,24 +96,29 @@ test('VOICE-P09 sanitizeVoiceCfg 白名单净化', () => {
   assert.equal(clean.refine.maxTokens, 300); // 越界回退默认
 });
 
-test('VOICE-P10 status 组装：cloud/refine configured 判定', () => {
-  const s = asr.status({
+test('VOICE-P10 status 组装：cloud/refine configured 判定（P2 local 实时探测）', async () => {
+  const s = await asr.status({
     asr: { engine: 'cloud', cloud: { baseUrl: 'b', apiKey: 'k', model: 'm' } },
     refine: { enabled: true, baseUrl: 'r', apiKey: 'k', model: 'm' },
   });
   assert.equal(s.ok, true);
   assert.equal(s.asr.cloud.configured, true);
   assert.equal(s.refine.configured, true);
-  assert.equal(s.asr.local.installed, false); // P1 占位
+  // local 字段结构（worker 探测，测试环境通常未运行 → installed=false 但结构完整）
+  assert.equal(typeof s.asr.local.installed, 'boolean');
+  assert.equal(typeof s.asr.local.modelReady, 'boolean');
+  assert.equal(typeof s.asr.local.workerUp, 'boolean');
 });
 
-test('VOICE-P11 transcribe 错误路径：空配置 ASR_NO_KEY / local 未就绪', async () => {
+test('VOICE-P11 transcribe 错误路径：空配置 ASR_NO_KEY / local 分派 / BAD_AUDIO', async () => {
   const noKey = await asr.transcribe({ asr: { engine: 'cloud' } }, 'data:audio/wav;base64,AAAA');
   assert.equal(noKey.ok, false);
   assert.equal(noKey.code, 'ASR_NO_KEY');
+  // P2：local 引擎已实现——分派到 worker（本机可能运行中或未部署）；无论 worker 状态如何，
+  // 都应返回 ok:false 且错误码为 ASR_LOCAL_* 系列（不再有 NOT_READY 占位）
   const local = await asr.transcribe({ asr: { engine: 'local' } }, 'data:audio/wav;base64,AAAA');
   assert.equal(local.ok, false);
-  assert.equal(local.code, 'ASR_LOCAL_NOT_READY');
+  assert.ok(String(local.code).startsWith('ASR_LOCAL_'), 'local 错误码应为 ASR_LOCAL_*，实际 ' + local.code);
   const badAudio = await asr.transcribe({ asr: { engine: 'cloud' } }, 'not-a-data-url');
   assert.equal(badAudio.ok, false);
   assert.equal(badAudio.code, 'BAD_AUDIO');
