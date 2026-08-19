@@ -18,7 +18,7 @@ DeepSeek Harness (DSH) 插件，两大核心能力：**提示词增强**（输�
 ## 🚀 安装
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.2.3
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.2.4
 ```
 
 安装后重启 DSH（`dsh web`），输入框工具行出现 ✨ 按钮即安装成功。
