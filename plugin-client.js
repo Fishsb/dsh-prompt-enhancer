@@ -2185,8 +2185,11 @@ function UpdaterCard(props) {
             sawDown = true;
           }
         })
-        .catch(() => { if (abortTimer) clearTimeout(abortTimer); sawDown = true; })
-        .then(() => { if (!doneFlag) setTimeout(pollRestored, 1000); });
+        .catch(() => { if (abortTimer) clearTimeout(abortTimer); sawDown = true; });
+        // v3.2.1-u4（倒计时 1 秒修复）：递归独立于 fetch——旧实现把 setTimeout 放在 fetch
+        // promise 链末尾，fetch 挂起（5s 超时中断）时递归同样推迟 → 倒计时 5s 一跳。
+        // 改为独立定时器：每 1s 无条件下一轮（fetch 结果只经 doneFlag/sawDown 影响状态）。
+        if (!doneFlag) setTimeout(pollRestored, 1000);
     };
     let ensureAttempts = 0;
     const ensure = () => {
