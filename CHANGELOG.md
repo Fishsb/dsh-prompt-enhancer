@@ -7,6 +7,9 @@
 
 ## [3.2.2] - 2026-08-19
 
+### Fixed
+- **端口重启 UI 卡住·架构根因修复（用户实测「端口重启成功但一直显示正在重启」·v3.2.1-t 补丁）**：根因链——host 就是 DSH 服务进程，`scheduleServiceRestart` 在 host 进程内**同步执行 `sc stop` 杀自己**，`spawnSync` 未返回、`portRestart` 的 RPC 响应在竞态中丢失（杀树快时响应发不出）；而 client 把恢复轮询的启动**门控在 RPC 响应上**（`trigger().then` 才 `pollRestored`）→ 响应丢失 → 轮询永不启动 → UI 永远停在「正在重启端口」，但服务实际已重启成功。这是 v3.2.1「端口重启独立化」（从执行器移到 host）引入的架构退化。**修复（A+B 双保险）**：**B（host 根治）**——`sc stop` 也移进 schtasks 调度任务（任务内 powershell：3s → sc.exe stop → 2s → 清 3080 残留占用 → 2s → sc.exe start → 自删），host **只创建+触发任务+立即返回响应**，不再自己杀自己（注：必须 `sc.exe`，PowerShell 的 `sc` 是 Set-Content 别名）；**A（client 兜底）**——轮询**立即启动**（fire-and-forget，不依赖 RPC 响应），并引入 `sawDown` 判定（仅「曾观察到服务断开→恢复」才判完成，避免冷启动时 fetch 一直 200 误报）。全量测试 158/158（1 环境 skip）。— [PEN-002]
+
 ### Changed
 - **架构调整·版本单一事实源 + 同步自动化（用户评审·v3.2.1-t）**：根治「改一个版本、运行的却是另一个」的六面漂移问题。① **版本单一事实源**：源码 `PLUGIN_VERSION` 硬编码删除，改为 `build-host.mjs` 从 package.json 构建注入（`__DASH_PLUGIN_VERSION__` 占位符替换）——产物版本永远=package.json，杜绝「发版忘 bump → 检测永远旧版」。② **漂移检测**：`build-host.mjs` / `build-client.mjs` 新增 `--check` 模式（重建到内存对比磁盘产物，不一致报错退出 1）——从机制上杜绝「只改产物被重建冲掉」「改源码不重建」两类历史问题。③ **同步自动化**：新增 `scripts/sync-runtime.mjs`——一条命令完成 build → --check → 同步运行环境 → md5 校验 → 提示重启 DSH + 刷新页面（不再手动 cp 漏文件）。④ **执行器内容哈希重建**：`executorEnsure` 判断过期条件从「仅版本号相等」升级为「版本号 + 内容哈希（lib 全部 .cjs + plugin-host.js 的 sha1）」——执行器代码一变即使 EXECUTOR_VERSION 没 bump 也强制重建（历史教训：v3.2.1-p 镜像 fallback 因版本号不变、执行器副本不重建而一直不生效）。⑤ **发布全自动**：新增 `scripts/release.mjs`（bump → build --check → 全量测试 → npm pack → git tag → GitHub Release + 资产上传，需 GITHUB_TOKEN）——tgz 永远等于当前代码。全量测试 158/158（1 环境 skip）。— [PEN-002]
 

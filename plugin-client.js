@@ -1885,6 +1885,7 @@ function UpdaterCard(props) {
     // 轮次 + 剩余秒 + 已用秒；轮询连续失败 15 次（约 15s 无响应）→ 判定执行器不可达并终止
     const startedAt = Date.now();
     let doneFlag = false;
+    let sawDown = false; // v3.2.1-t（A）：观察到服务断开才允许判完成
     let localLeft = 10;
     let failCount = 0;
     setRestartLeft(localLeft);
@@ -2161,7 +2162,7 @@ function UpdaterCard(props) {
       window.fetch('', { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
         .then((res) => {
           if (abortTimer) clearTimeout(abortTimer);
-          if (res.ok && !doneFlag) {
+          if (res.ok && sawDown && !doneFlag) { // v3.2.1-t（A）：仅「曾断开→恢复」判完成，避免冷启动误报
             doneFlag = true;
             setApplyErr(null);
             // v3.2.1（用户需求·无服务化引导）：重启完成 → 检测 nssm 服务，缺失则行内引导一键服务化
@@ -2176,15 +2177,16 @@ function UpdaterCard(props) {
             return;
           }
         })
-        .catch(() => { if (abortTimer) clearTimeout(abortTimer); })
+        .catch((e) => { if (abortTimer) clearTimeout(abortTimer); if (!(e && e.name === 'AbortError')) sawDown = true; })
         .then(() => { if (!doneFlag) setTimeout(pollRestored, 1000); });
     };
     let ensureAttempts = 0;
     const ensure = () => {
       trigger().then((r) => {
         const rr = r && typeof r === 'object' ? r : {};
-        if (rr.ok === true) { setTimeout(pollRestored, 1000); return; }
-        if (rr.code === 'NO_INDEX' || rr.code === 'PORT_RESTART_EXCEPTION') {
+        if (rr.ok === true) { return; } // v3.2.1-t（A）：轮询已独立启动，这里无需动作
+        if (rr.code === 'NO_INDEX' || rr.code === 'PORT_RESTART_EXCEPTION' || rr.code === 'STAGED_INSTALL_FAILED') {
+          doneFlag = true; // v3.2.1-t（A）：明确失败 → 终止轮询
           setApplyErr((rr.message || rr.code || t('updError')));
           setApplyStatus(null);
           setApplyPhase('idle');
@@ -2192,26 +2194,17 @@ function UpdaterCard(props) {
           return;
         }
         ensureAttempts += 1;
-        if (ensureAttempts >= 10) {
-          setApplyErr(t('updApplyExecutorDown'));
-          setApplyStatus(null);
-          setApplyPhase('idle');
-          setAction(null);
-          return;
-        }
+        if (ensureAttempts >= 10) return; // v3.2.1-t（A）：停止重试，轮询 90s 超时兜底
         setTimeout(ensure, 2000);
       }).catch(() => {
         ensureAttempts += 1;
-        if (ensureAttempts >= 10) {
-          setApplyErr(t('updApplyExecutorDown'));
-          setApplyStatus(null);
-          setApplyPhase('idle');
-          setAction(null);
-          return;
-        }
+        if (ensureAttempts >= 10) return; // v3.2.1-t（A）：停止重试，轮询 90s 超时兜底
         setTimeout(ensure, 2000);
       });
     };
+    // v3.2.1-t（架构修复 A·fire-and-forget）：轮询立即启动，不等待 RPC 响应——
+    // host 服务模式重启时可能被杀导致响应丢失，若轮询启动门控在响应上会永远卡住
+    setTimeout(pollRestored, 1000);
     ensure();
   };
 
