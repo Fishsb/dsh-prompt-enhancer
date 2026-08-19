@@ -2162,7 +2162,8 @@ function UpdaterCard(props) {
       window.fetch('', { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
         .then((res) => {
           if (abortTimer) clearTimeout(abortTimer);
-          if (res.ok && sawDown && !doneFlag) { // v3.2.1-t（A）：仅「曾断开→恢复」判完成，避免冷启动误报
+          if (res && res.ok) {
+          if ((sawDown || elapsed >= 12) && !doneFlag) { // v3.2.1-t（A）+v3.2.1-u2：曾断开→恢复 或 超任务窗口(12s)后稳定恢复 判完成
             doneFlag = true;
             setApplyErr(null);
             // v3.2.1（用户需求·无服务化引导）：重启完成 → 检测 nssm 服务，缺失则行内引导一键服务化
@@ -2176,8 +2177,14 @@ function UpdaterCard(props) {
             setApplyPhase('done');
             return;
           }
+          } else {
+            // v3.2.1-u2（UI 卡住根因修复）：服务优雅停止时 fetch 收 FIN 会 resolve(非ok) 而非 reject——
+            // 原实现只在 catch 置 sawDown，优雅停止永远不触发 → 永不判完成（一直「正在重启端口」）。
+            // 修复：非 200 / 空响应同样视为服务断开。
+            sawDown = true;
+          }
         })
-        .catch((e) => { if (abortTimer) clearTimeout(abortTimer); if (!(e && e.name === 'AbortError')) sawDown = true; })
+        .catch(() => { if (abortTimer) clearTimeout(abortTimer); sawDown = true; })
         .then(() => { if (!doneFlag) setTimeout(pollRestored, 1000); });
     };
     let ensureAttempts = 0;
