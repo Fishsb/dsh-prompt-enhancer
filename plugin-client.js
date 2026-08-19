@@ -656,7 +656,7 @@ const ZH = {
   svcInstallConfirm: '确认安装',
   svcInstallSkip: '跳过',
   svcInstallBusy: '正在安装服务化（需要一次管理员确认）…',
-  svcInstallDone: '✓ 服务化安装完成 —— 请重启电脑或注销当前用户，让 nssm 以系统服务接管端口',
+  svcInstallDone: '✓ 服务化安装完成 —— 请重启电脑，让 nssm 以系统服务接管端口',
   svcInstallFail: '✗ 服务化安装失败',
 
   // v3.2.1（独立化·端口重启）：重启中/完成文案
@@ -694,7 +694,6 @@ const ZH = {
   cfgLogs: '诊断日志',
   cfgLogsEmpty: '暂无日志（执行优化后生成）',
   navModelPlugins: '提示词增强',
-  navServiceUpdater: '服务与更新',
   // 2026-08-16（方案「设置界面样式与交互对齐官方」）：设置页 section 简介
   secPluginsIntro: '模型链、优化参数与插件管理的统一设置入口，修改即时保存。',
   tabModels: '模型配置',
@@ -923,7 +922,7 @@ const EN = {
   svcInstallConfirm: 'Install',
   svcInstallSkip: 'Skip',
   svcInstallBusy: 'Installing service (one admin confirmation required)…',
-  svcInstallDone: '✓ Service installed — reboot (or sign out) and nssm will take over the port automatically; or click "Port Restart" to take over immediately',
+  svcInstallDone: '✓ Service installed — please restart the computer and nssm will take over the port as a system service',
   svcInstallFail: '✗ Install failed',
 
   // v3.2.1 (independent port-restart): in-progress / done texts
@@ -961,7 +960,6 @@ const EN = {
   cfgLogs: 'Diagnostics log',
   cfgLogsEmpty: 'No logs yet (they appear after optimizations)',
   navModelPlugins: 'Prompt Enhancer',
-  navServiceUpdater: 'Service & Update',
   // 2026-08-16（方案「设置界面样式与交互对齐官方」）：设置页 section 简介
   secPluginsIntro: 'Model chain, optimization parameters, and plugin management in one place; changes save immediately.',
   tabModels: 'Models',
@@ -2796,8 +2794,9 @@ function PluginsSection(props) {
   }
 
   return React.createElement('div', { className: 'dsh-plg-root' },
-    // v3.2.1-i（用户指令·两功能模块解耦）：UpdaterCard 已独立为「服务与更新」设置页
-    // （app.js 独立注册 settings.section），此处不再嵌套渲染——插件管理 tab 与提示词增强模块解耦。
+    // v3.2.1-j（用户确认·UI 回滚）：UpdaterCard 放回插件管理 tab 原位置（插件清单上方）——
+    // 解耦只保留逻辑层（updaterCfgState 独立配置），UI 布局恢复原状。
+    React.createElement(UpdaterCard, props),
     // 2026-08-18（用户需求）：项目地址跳转链接——版本检测与更新下方另起一行
     React.createElement('div', { className: 'dsh-plg-project-link' },
       React.createElement('a', { href: 'https://github.com/Fishsb/dsh-prompt-enhancer', target: '_blank', rel: 'noreferrer' }, t('cfgProjectLink')),
@@ -3843,20 +3842,6 @@ return {
     // CordisPanel（id: 'cordis-panel'）冲突——同槽位同 id 触发 single-occupant duplicate，
     // 导致 update/重挂时 "Failed to load plugins"。历史 v2.4.1-fix2 同类问题即由此来。
     // （v2.4.5 曾无记录回退为 cordis-panel；v2.4.8 恢复本修复，见 CHANGELOG。）
-    // v3.2.1-i（用户指令·两功能模块解耦）：服务端口模块独立设置入口「服务与更新」——
-    // UpdaterCard（版本检测更新 + 端口重启 + 服务安装引导 + 桌面快捷方式）不再嵌在
-    // 提示词增强模块的「模型与插件」页内，独立注册 settings.section（逻辑/挂载解耦，
-    // 仅共享显示样式与 i18n 字典）。
-    slots.inject('settings.section', () => slots.register(
-      {
-        name: 'settings.section',
-        id: 'svc-updater',
-        order: 30,
-        label: () => (locale && typeof locale.bind === 'function' ? locale.bind('enhance')('navServiceUpdater') : ZH.navServiceUpdater),
-        locale: 'enhance',
-      },
-      UpdaterCard,
-    ));
     slots.inject('sidebar.footer.action', () => slots.register(
       { name: 'sidebar.footer.action', id: 'cordis-panel-enh', order: 0 },
       CordisBadgePlaceholder,
