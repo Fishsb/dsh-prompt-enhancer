@@ -649,6 +649,19 @@ const ZH = {
   // v3.1.6（用户反馈·文案误导）：bundle 安装但执行器未拉起/中途不可达时，旧文案
   // 「请确认插件为 bundle 安装」会让用户误以为是安装问题——改为准确提示自动重试结果
   updApplyExecutorDown: '更新执行器未能启动（端口 3081）——已自动重试仍失败，请刷新页面后重试；若仍失败请重启 dsh-web 服务',
+
+  // v3.2.1（用户需求·无服务化引导）：端口重启前检测无 nssm 服务 → 弹窗一键服务化
+  svcInstallTitle: 'nssm 服务化',
+  svcInstallBody: '检测到 DSH 未以系统服务运行（无 nssm）。安装 nssm 服务化后，端口重启走系统服务路径，更稳定并支持开机自启。是否现在安装？',
+  svcInstallConfirm: '确认安装',
+  svcInstallSkip: '跳过',
+  svcInstallBusy: '正在安装服务化（需要一次管理员确认）…',
+  svcInstallDone: '✓ 服务化安装完成 —— 重启电脑（或注销）后，nssm 将自动接管端口；不想重启可点「端口重启」立即接管',
+  svcInstallFail: '✗ 服务化安装失败',
+
+  // v3.2.1（独立化·端口重启）：重启中/完成文案
+  updPortRestarting: '正在重启端口…',
+  updPortRestartDone: '✓ 端口重启完成，请刷新页面',
   // v2.9.x（一键更新不重启·修复）：旧执行器无 restart:false 支持，阻止执行并提示重启 dsh-web
   updExecutorTooOld: '更新执行器版本过旧（v{v}），不支持「只安装不重启」——请重启 dsh-web 完成执行器升级（≥0.1.7）后重试',
   updCheckFirst: '请先点击「检测版本」确认有新版本后再更新',
@@ -902,6 +915,19 @@ const EN = {
   updApplyRetry: 'Attempt {n} in progress (service starting, up to 20s)…',
   updApplyRestartFailed: 'Still down after 5 attempts — run `net start dsh-web` manually, then refresh',
   updApplyExecutorDown: 'Update executor failed to start (port 3081) — auto-retried; refresh the page and retry, or restart the dsh-web service',
+
+  // v3.2.1 (no-service onboarding): before port-restart, detect missing nssm service and offer one-click install
+  svcInstallTitle: 'nssm service',
+  svcInstallBody: 'DSH is not running as a system service (no nssm). Installing the nssm service routes port-restart through the system-service path — more stable and auto-starts on boot. Install now?',
+  svcInstallConfirm: 'Install',
+  svcInstallSkip: 'Skip',
+  svcInstallBusy: 'Installing service (one admin confirmation required)…',
+  svcInstallDone: '✓ Service installed — reboot (or sign out) and nssm will take over the port automatically; or click "Port Restart" to take over immediately',
+  svcInstallFail: '✗ Install failed',
+
+  // v3.2.1 (independent port-restart): in-progress / done texts
+  updPortRestarting: 'Restarting port…',
+  updPortRestartDone: '✓ Port restarted — refresh the page',
   // v2.9.x (install-without-restart fix): old executor lacks restart:false — block and ask to restart dsh web
   updExecutorTooOld: 'Update executor is too old (v{v}) and does not support install-without-restart — restart dsh web to upgrade the executor (≥0.1.7), then retry',
   updCheckFirst: 'Run "Check version" first to confirm a new version before updating',
@@ -1649,6 +1675,11 @@ function UpdaterCard(props) {
   const [restartRound, setRestartRound] = React.useState(1);
   // v2.7.0：更新未重启提醒（null=无提醒；命中显示横幅 + 重启命令）
   const [restartNotice, setRestartNotice] = React.useState(null);
+  // v3.2.1（用户需求·无服务化引导）：端口重启完成态检测无 nssm 服务 → 行内引导（非弹窗），
+  // 「✓ 重启成功」下方换一行：引导文案 + 最右「确认安装」按钮（与刷新页面按钮对齐）
+  const [svcNeedInstall, setSvcNeedInstall] = React.useState(false);
+  const [svcInstalling, setSvcInstalling] = React.useState(false);
+  const [svcInstallMsg, setSvcInstallMsg] = React.useState('');
   // 2026-08-16（方案「设置界面样式与交互对齐官方」）：repo/目录输入 label htmlFor 关联（稳定 id）
   const updIds = React.useState(() => ({ repo: dshEnhId('dsh-enh-upd-repo'), dir: dshEnhId('dsh-enh-upd-dir') }))[0];
 
@@ -1663,6 +1694,18 @@ function UpdaterCard(props) {
       if (!disposed && r && r.needed === true) setRestartNotice(r);
     }).catch(() => { /* 旧 host/动态形态无此 RPC → 静默 */ });
     return () => { disposed = true; };
+  }, []);
+
+  // v3.2.1（无服务化引导·审查加固）：挂载时检测 nssm 服务——无服务则显示行内引导
+  // （不依赖端口重启流程的 applyPhase，刷新页面后依然可见；安装成功自动隐藏）
+  React.useEffect(() => {
+    host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
+      const er = envRes && typeof envRes === 'object' ? envRes : {};
+      const its = (er.ok === true && Array.isArray(er.items)) ? er.items : [];
+      const svc = its.find((i) => i.key === 'service');
+      setSvcNeedInstall(!(svc && svc.ok === true));
+    }).catch(() => { /* host 未就绪/无此 RPC → 静默 */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const repo = updaterRepoOf({ updater: { repo: repoInput, targetDir: '' } });
@@ -1802,6 +1845,13 @@ function UpdaterCard(props) {
           setApplyErr(null);
           // v3.1.x（用户需求）：服务已重启完成 → 清除「未重启」提醒横幅
           setRestartNotice(null);
+          // v3.2.1（用户需求·无服务化引导）：重启完成 → 检测 nssm 服务，缺失则行内引导一键服务化
+          host.call('update/envcheck', { serviceName, executorPort }).then((envRes) => {
+            const er = envRes && typeof envRes === 'object' ? envRes : {};
+            const its = (er.ok === true && Array.isArray(er.items)) ? er.items : [];
+            const svc = its.find((i) => i.key === 'service');
+            setSvcNeedInstall(!(svc && svc.ok === true));
+          }).catch(() => setSvcNeedInstall(false));
           if (/rolled back/i.test(s.message || '')) {
             setApplyStatus(t('updApplyRolledBack'));
             setApplyPhase('rolledback');
@@ -1920,6 +1970,19 @@ function UpdaterCard(props) {
     setAction(which);
     setApplyPhase('confirm');
   };
+  // v3.2.1（用户需求·无服务化引导·非弹窗）：重启完成态点「确认安装」→ host 一键服务化（下载/探测 nssm + 提权脚本 + UAC 一次）
+  const doServiceInstall = () => {
+    if (svcInstalling) return;
+    setSvcInstalling(true);
+    setSvcInstallMsg('');
+    host.call('update/serviceInstall', { serviceName, profile }).then((r) => {
+      const rr = r && typeof r === 'object' ? r : {};
+      setSvcInstalling(false);
+      if (rr.ok === true) { setSvcNeedInstall(false); setSvcInstallMsg(t('svcInstallDone')); }
+      else { setSvcInstallMsg(t('svcInstallFail') + '：' + (rr.message || rr.code || '')); }
+    }).catch(() => { setSvcInstalling(false); setSvcInstallMsg(t('svcInstallFail') + '：host unreachable'); });
+  };
+  // v3.2.1（非弹窗）：引导行内联，无需倒计时 effect
   const cancelApply = () => {
     if (applyPhase === 'confirm') { setApplyPhase('idle'); setAction(null); }
   };
@@ -2008,73 +2071,82 @@ function UpdaterCard(props) {
     if (applyPhase !== 'confirm' || action !== 'restart') return;
     setApplyPhase('restarting');
     setApplyErr(null);
-    setApplyStatus(t('updApplyRestarting').replace('{sec}', '10').replace('{round}', '1'));
-    setRestartLeft(10);
-    setRestartRound(1);
-    // v3.1.x（用户报告·更新完成后端口重启误报执行器不可用）：重启**不依赖 host RPC**——
-    // 一键更新（apply restart:false）已停服，host 侧 envcheck/executorEnsure 必然失败，
-    // 旧实现走 ensureExecutor 会被外层 catch 误报「更新执行器不可用——请确认插件为
-    // bundle 安装」；执行器是独立进程（3081），直连 ping/restart 即可完成重启
-    // v3.1.5（用户反馈·执行器未拉起时误报）：先直连 ping；未运行则尝试 host
-    // executorEnsure 自动拉起（服务存活时有效）——拉起成功后继续；host 也不可达
-    // （服务已停且执行器未运行，异常场景）才报「执行器不可用」
-    const port = executorPort();
-    // v3.2（动态端口 fallback）：执行器实际端口可能 ≠ 配置端口（3081 被占用时执行器
-    // 自动 fallback 动态端口并写入 executor.port，executorEnsure 返回真实端口）。
-    // actualPort 在 tryPing/ensureThenPing 成功后确定，restart/poll 用它。
-    let actualPort = port;
-    // 带新版本 tag（一键更新已下载 staging）→ 需要执行器 ≥0.1.8（restart 承载安装）；
-    // 纯重启（无 tag）不设版本门槛
-    const installTag = result && result.remoteTag ? result.remoteTag : '';
-    const tryPing = () => executor.call('ping', {}, port);
-    // v3.1.6（用户反馈·执行器未拉起时仍误报）：executorEnsure 拉起执行器需 2-5s
-    // （schtasks 创建计划任务 + 进程启动 + ping 轮询），且前端 RPC 可能瞬时失败——
-    // 最多重试 3 次（间隔 1s），大幅提高「执行器未运行」场景的拉起成功率
-    const ensureThenPing = (attempt) => {
-      const n = attempt || 1;
-      return host.call('update/executorEnsure', { port }).then((en) => {
-        if (en && en.ok === true) {
-          // 用 executorEnsure 返回的真实端口（动态 fallback 场景 port ≠ en.port）
-          actualPort = (en.port && en.port > 0) ? en.port : port;
-          return executor.call('ping', {}, actualPort);
-        }
-        if (n >= 3) return Promise.resolve(null);
-        return new Promise((res) => setTimeout(() => res(ensureThenPing(n + 1)), 1000));
-      }).catch(() => {
-        if (n >= 3) return Promise.resolve(null);
-        return new Promise((res) => setTimeout(() => res(ensureThenPing(n + 1)), 1000));
-      });
-    };
-    tryPing().then((p0) => {
-      if (p0 && p0.ok === true) return p0;
-      // 执行器未运行 → 尝试 host executorEnsure 自动拉起（服务存活时有效；服务已停时 host 不可达 → null）
-      return ensureThenPing(1);
-    }).then((p) => {
-      if (!p || p.ok !== true) {
-        // 执行器确实不可达（未以 bundle 安装/未拉起）——v3.1.6 补清残留阶段文案
+    setApplyStatus(t('updPortRestarting'));
+    const startedAt = Date.now();
+    // v3.2.1（独立化·用户指令）：端口重启 = host update/portRestart 独立 RPC——host 读
+    // 进程索引 → 生成自包含 .cmd 脚本 detached 执行（杀旧 DSH + 拉起新 DSH），不再依赖
+    // 执行器/executorEnsure/schtasks/冷启动时序。DSH 被杀时页面短暂断连，轮询自身恢复。
+    const trigger = () => host.call('update/portRestart', { serviceName, profile });
+    const pollRestored = () => {
+      const elapsed = Math.round((Date.now() - startedAt) / 1000);
+      setApplyStatus(t('updPortRestarting') + '（' + elapsed + 's）');
+      if (Date.now() - startedAt > 90000) {
         setApplyErr(t('updApplyExecutorDown'));
         setApplyStatus(null);
         setApplyPhase('idle');
         setAction(null);
         return;
       }
-      const pv = p && typeof p === 'object' && typeof p.version === 'string' ? p.version : '';
-      if (installTag !== '' && !executorVersionAtLeast(pv)) {
-        setApplyErr(t('updExecutorTooOld').replace('{v}', pv || '?'));
-        setApplyPhase('idle');
-        setAction(null);
-        return;
-      }
-      // 发送即返回（旧版挂起模式由轮询 status 接管进度展示）；带 tag 时执行器在
-      // 停服窗口内安装 staging tarball 后重启（全部端口操作统一在此模块）
-      executor.call('restart', { serviceName, profile, tag: installTag, port: actualPort }, actualPort).then(() => {}).catch(() => {});
-      pollExecutorStatus(actualPort);
-    }).catch(() => {
-      setApplyErr(t('updApplyExecutorDown'));
-      setApplyStatus(null);
-      setApplyPhase('idle');
-      setAction(null);
-    });
+      // v3.2.1-c（用户实测·计时不更新）：DSH 被杀时 fetch('') 可能**挂起不返回**
+      // （浏览器 fetch 无超时，TCP 断开未必立即 reject）→ pollRestored 不再递归 →
+      // 倒计时冻结。加 AbortController 5s 超时：超时视为未恢复，继续轮询（计时持续更新）。
+      const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const abortTimer = ctrl ? setTimeout(() => ctrl.abort(), 5000) : null;
+      window.fetch('', { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined }).then((res) => {
+        if (abortTimer) clearTimeout(abortTimer);
+        if (res.ok) {
+          setApplyErr(null);
+          // v3.2.1（用户需求·无服务化引导）：重启完成 → 检测 nssm 服务，缺失则行内引导一键服务化
+          host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
+            const er = envRes && typeof envRes === 'object' ? envRes : {};
+            const its = (er.ok === true && Array.isArray(er.items)) ? er.items : [];
+            const svc = its.find((i) => i.key === 'service');
+            setSvcNeedInstall(!(svc && svc.ok === true));
+          }).catch(() => setSvcNeedInstall(false));
+          setApplyStatus(t('updPortRestartDone'));
+          setApplyPhase('done');
+          return;
+        }
+        setTimeout(pollRestored, 1000);
+      }).catch(() => {
+        if (abortTimer) clearTimeout(abortTimer);
+        setTimeout(pollRestored, 1000);
+      });
+    };
+    let ensureAttempts = 0;
+    const ensure = () => {
+      trigger().then((r) => {
+        const rr = r && typeof r === 'object' ? r : {};
+        if (rr.ok === true) { setTimeout(pollRestored, 1000); return; }
+        if (rr.code === 'NO_INDEX' || rr.code === 'PORT_RESTART_EXCEPTION') {
+          setApplyErr((rr.message || rr.code || t('updError')));
+          setApplyStatus(null);
+          setApplyPhase('idle');
+          setAction(null);
+          return;
+        }
+        ensureAttempts += 1;
+        if (ensureAttempts >= 10) {
+          setApplyErr(t('updApplyExecutorDown'));
+          setApplyStatus(null);
+          setApplyPhase('idle');
+          setAction(null);
+          return;
+        }
+        setTimeout(ensure, 2000);
+      }).catch(() => {
+        ensureAttempts += 1;
+        if (ensureAttempts >= 10) {
+          setApplyErr(t('updApplyExecutorDown'));
+          setApplyStatus(null);
+          setApplyPhase('idle');
+          setAction(null);
+          return;
+        }
+        setTimeout(ensure, 2000);
+      });
+    };
+    ensure();
   };
 
   let statusNode = null;
@@ -2191,15 +2263,6 @@ function UpdaterCard(props) {
         : applyPhase === 'applying' ? t('updApplying')
         : (applyPhase === 'staged' || applyPhase === 'installed') ? t('updStagedShort')
         : t('updPull')),
-      React.createElement('button', {
-        type: 'button',
-        className: 'dsh-plg-btn' + (applyPhase === 'confirm' && action === 'restart' ? ' dsh-plg-btn-danger' : ''),
-        disabled: portRestartDisabled,
-        onClick: applyPhase === 'confirm' && action === 'restart' ? runRestart : () => startConfirm('restart'),
-      }, applyPhase === 'confirm' && action === 'restart' ? t('updApplyConfirm')
-        : applyPhase === 'restarting' ? t('updApplyRestarting').replace('{sec}', String(restartLeft)).replace('{round}', String(restartRound))
-        : applyPhase === 'done' ? t('updApplyDone')
-        : t('updPortRestart')),
       // v3.2（用户需求）：端口重启确认态「桌面」按钮——创建桌面快捷方式（脱 Web CLI 重启）；
       // 悬停提示（title）说明用途
       applyPhase === 'confirm' && action === 'restart'
@@ -2211,6 +2274,16 @@ function UpdaterCard(props) {
             title: t('updShortcutTooltip'),
           }, shortcutBusy ? '…' : t('updMakeShortcut'))
         : null,
+      React.createElement('button', {
+        type: 'button',
+        className: 'dsh-plg-btn' + (applyPhase === 'confirm' && action === 'restart' ? ' dsh-plg-btn-danger' : ''),
+        disabled: portRestartDisabled,
+        onClick: applyPhase === 'confirm' && action === 'restart' ? runRestart : () => startConfirm('restart'),
+      }, applyPhase === 'confirm' && action === 'restart' ? t('updApplyConfirm')
+        : applyPhase === 'restarting' ? t('updPortRestarting')
+        : applyPhase === 'done' ? t('updApplyDone')
+        : t('updPortRestart')),
+
       applyPhase === 'confirm'
         ? React.createElement('button', {
             type: 'button',
@@ -2237,6 +2310,23 @@ function UpdaterCard(props) {
       ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, applyErr)
       : null,
     error ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, error) : null,
+    // v3.2.1（用户需求·无服务化引导·非弹窗）：重启完成态换一行引导——文案 + 最右「确认安装」
+    // 按钮（与上方「刷新页面」按钮右对齐）；安装完成/失败显示结果行
+    svcNeedInstall || svcInstallMsg !== ''
+      ? React.createElement('div', { className: 'dsh-plg-row dsh-plg-svc-hint' },
+          React.createElement('span', { className: 'dsh-plg-muted dsh-plg-svc-hint-text' },
+            svcInstallMsg !== '' ? svcInstallMsg : t('svcInstallBody'),
+          ),
+          svcNeedInstall && svcInstallMsg === ''
+            ? React.createElement('button', {
+                type: 'button',
+                className: 'dsh-plg-btn dsh-plg-btn-primary',
+                disabled: svcInstalling,
+                onClick: doServiceInstall,
+              }, svcInstalling ? t('svcInstallBusy') : t('svcInstallConfirm'))
+            : null,
+        )
+      : null,
   );
 }
 function MarqueeOption(props) {
@@ -3646,7 +3736,18 @@ const CSS = [
   '.dsh-plg-btn-danger{border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}',
   '.dsh-plg-btn-danger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger)}',
   '.dsh-plg-title{font-size:18px;line-height:26px;font-weight:600;margin:0;color:var(--dsw-alias-label-primary)}',
-  '.dsh-plg-intro{font-size:13px;line-height:20px;margin:0;color:var(--dsw-alias-label-tertiary)}'
+  '.dsh-plg-intro{font-size:13px;line-height:20px;margin:0;color:var(--dsw-alias-label-tertiary)}',
+  // v3.2.1：无服务化引导弹窗样式（遮罩 + 卡片 + 标题/正文/按钮行）
+  '.dsh-plg-modal-mask{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center}',
+  '.dsh-plg-modal{background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:18px 20px;max-width:440px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,.25)}',
+  '.dsh-plg-modal-title{font-size:15px;line-height:21px;font-weight:600;margin:0 0 10px;color:var(--dsw-alias-label-primary)}',
+  '.dsh-plg-modal-body{font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);margin:0 0 14px}',
+  '.dsh-plg-modal-actions{display:flex;gap:10px;justify-content:flex-end}',
+  // v3.2.1（用户需求·行内引导）：重启完成态 nssm 服务化引导行——文案撑开、按钮最右（与刷新页面按钮对齐）
+  '.dsh-plg-svc-hint{padding:6px 0;background:var(--dsw-alias-bg-layer-2);border-radius:8px}',
+  '.dsh-plg-svc-hint-text{flex:1;min-width:0}',
+  // v3.2.1（用户反馈·按钮贴最右）：引导行按钮 margin-left:auto 兜底贴右
+  '.dsh-plg-svc-hint .dsh-plg-btn{margin-left:auto;flex:none}'
 ].join('\n');
 
 return {
