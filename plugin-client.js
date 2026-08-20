@@ -866,7 +866,7 @@ const ZH = {
   voiceRefineChainModel: '模型',
   voiceRefineChainHint: '使用提示词增强的模型配置，无需重复填写 API Key',
   voiceRefineApiKey: 'API Key',
-  voiceErrNoChain: '请先在模型配置中设置模型链',
+  voiceErrNoChain: '未找到可用模型，请在基座模型配置中添加模型',
   voiceStatusCheck: '检测状态',
   voiceStatusChecking: '检测中…',
   voiceStatusCloudReady: '云端已配置',
@@ -1196,7 +1196,7 @@ const EN = {
   voiceRefineChainModel: 'Model',
   voiceRefineChainHint: 'Uses the enhance model config; no API key needed',
   voiceRefineApiKey: 'API Key',
-  voiceErrNoChain: 'Set up the model chain in model config first',
+  voiceErrNoChain: 'No models found; add a model in the base model config',
   voiceStatusCheck: 'Check',
   voiceStatusChecking: 'Checking…',
   voiceStatusCloudReady: 'Cloud ready',
@@ -3854,7 +3854,7 @@ const VOICE_CFG_DEFAULTS = {
     local: { model: 'sense-voice', language: 'auto' },
     cloud: { protocol: 'chat', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-asr-flash' },
   },
-  refine: { enabled: true, mode: 'chain', modelRef: 0, provider: '', model: '', baseUrl: '', maxTokens: 300 },
+  refine: { enabled: true, mode: 'chain', provider: '', model: '', baseUrl: '', maxTokens: 300 },
   vad: { enabled: true },
 };
 
@@ -3882,9 +3882,8 @@ function mergeVoice(v) {
     },
     refine: {
       enabled: r.enabled === true,
-      // v3.2.8：mode chain=复用 enhance 模型链（免 key）/ custom=独立配置；modelRef=链中序号
+      // v3.2.8：mode chain=基座模型列表选中的 provider/model（走基座 llm，免 key，含本地模型）/ custom=独立配置
       mode: r.mode === 'custom' ? 'custom' : 'chain',
-      modelRef: Number.isInteger(r.modelRef) && r.modelRef >= 0 && r.modelRef < 8 ? r.modelRef : 0,
       provider: typeof r.provider === 'string' ? r.provider : '',
       model: typeof r.model === 'string' ? r.model : '',
       baseUrl: typeof r.baseUrl === 'string' ? r.baseUrl : '',
@@ -4303,7 +4302,8 @@ function VoiceSection(props) {
     fetchVoiceApiKey().then((k) => { setApiKey(k); setApiKeyLoaded(true); });
     host.call('config/get', {}).then((r) => { const k = r && r.ok && r.config && r.config.voice && r.config.voice.refine ? r.config.voice.refine.apiKey : ''; if (typeof k === 'string') setRefineApiKey(k); }).catch(() => {});
     check();
-    refreshModels(); // P2 收尾：挂载即检测一次（local 分支显示实时状态，非 P1 静态占位）
+    refreshModels();
+    refreshBaseProviders(); // P2 收尾：挂载即检测一次（local 分支显示实时状态，非 P1 静态占位）
   }, []);
 
   const v = voiceCfgState.value;
@@ -4311,11 +4311,16 @@ function VoiceSection(props) {
 
   const saveCloud = (patch) => saveVoiceCfg({ asr: { ...v.asr, cloud: { ...v.asr.cloud, ...patch } } });
   const saveRefine = (patch) => saveVoiceCfg({ refine: { ...v.refine, ...patch } });
-  // v3.2.8：规整「跟随模型配置」的模型列表 = enhance 模型链（configState 同作用域只读）
-  function refineChainModels() {
-    const fb = (typeof configState !== 'undefined' && configState.value && Array.isArray(configState.value.fallback)) ? configState.value.fallback : [];
-    return fb.filter((m) => m && typeof m.provider === 'string' && m.provider && typeof m.model === 'string' && m.model);
-  }
+  // v3.2.8（修正·用户澄清）：规整「跟随模型配置」= 从基座 models/list 选已配置模型（含本地模型），
+  // 与增强模块同款选择方式（厂家+模型双下拉），选中存 refine.provider/refine.model
+  const [baseProviders, setBaseProviders] = React.useState([]);
+  const refreshBaseProviders = () => {
+    host.call('models/list', {}).then((r) => {
+      if (r && r.ok && Array.isArray(r.providers)) setBaseProviders(r.providers);
+    }).catch(() => {});
+  };
+  const curProvider = baseProviders.find((p) => p.provider === v.refine.provider) || null;
+  const curModels = curProvider && Array.isArray(curProvider.models) ? curProvider.models : [];
 
   function localStatusText() {
     const l = status && status.asr && status.asr.local;
@@ -4445,15 +4450,25 @@ function VoiceSection(props) {
       ),
     ),
     v.refine.mode === 'chain'
-      ? React.createElement('div', { className: 'dsh-plg-row' },
-          React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineChainModel')),
-          refineChainModels().length === 0
-            ? React.createElement('span', { className: 'dsh-plg-note' }, t('voiceErrNoChain'))
-            : React.createElement('select', { className: 'dsh-plg-select', value: String(v.refine.modelRef),
-                onChange: (e) => saveRefine({ modelRef: parseInt(e.target.value, 10) }) },
-                refineChainModels().map((m, i) => React.createElement('option', { key: i, value: String(i) },
-                  m.provider + ' / ' + m.model)),
-              ),
+      ? React.createElement('div', { className: 'dsh-plg-col' },
+          React.createElement('div', { className: 'dsh-plg-row' },
+            React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineChainModel')),
+            baseProviders.length === 0
+              ? React.createElement('span', { className: 'dsh-plg-note' }, t('voiceErrNoChain'))
+              : React.createElement('select', { className: 'dsh-plg-select', value: v.refine.provider || '',
+                  onChange: (e) => { const p = e.target.value; const first = (baseProviders.find((x) => x.provider === p) || {}).models; saveRefine({ provider: p, model: (first && first[0] && first[0].id) || '' }); } },
+                  React.createElement('option', { value: '' }, t('voiceRefineChainModel') + '...'),
+                  baseProviders.map((p) => React.createElement('option', { key: p.provider, value: p.provider }, p.name || p.provider)),
+                ),
+          ),
+          curProvider ? React.createElement('div', { className: 'dsh-plg-row' },
+            React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineChainModel')),
+            React.createElement('select', { className: 'dsh-plg-select', value: v.refine.model || '',
+              onChange: (e) => saveRefine({ model: e.target.value }) },
+              React.createElement('option', { value: '' }, t('voiceRefineChainModel') + '...'),
+              curModels.map((m) => React.createElement('option', { key: m.id, value: m.id }, m.name || m.id)),
+            ),
+          ) : null,
         )
       : React.createElement('div', { className: 'dsh-vi-cloud' },
           React.createElement('div', { className: 'dsh-plg-row' },
