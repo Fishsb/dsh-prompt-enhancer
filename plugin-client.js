@@ -860,6 +860,13 @@ const ZH = {
   voiceRefineBaseUrl: '规整接口',
   voiceRefineModel: '规整模型',
   voiceRefineHint: '规整=去口水词（留空跳过；失败自动用原文）',
+  voiceRefineSource: '模型来源',
+  voiceRefineChain: '跟随模型配置',
+  voiceRefineCustom: '自定义',
+  voiceRefineChainModel: '模型',
+  voiceRefineChainHint: '使用提示词增强的模型配置，无需重复填写 API Key',
+  voiceRefineApiKey: 'API Key',
+  voiceErrNoChain: '请先在模型配置中设置模型链',
   voiceStatusCheck: '检测状态',
   voiceStatusChecking: '检测中…',
   voiceStatusCloudReady: '云端已配置',
@@ -1183,6 +1190,13 @@ const EN = {
   voiceRefineBaseUrl: 'Refine URL',
   voiceRefineModel: 'Refine Model',
   voiceRefineHint: 'Refine removes filler words (leave empty to skip; falls back to raw)',
+  voiceRefineSource: 'Model source',
+  voiceRefineChain: 'Use enhance models',
+  voiceRefineCustom: 'Custom',
+  voiceRefineChainModel: 'Model',
+  voiceRefineChainHint: 'Uses the enhance model config; no API key needed',
+  voiceRefineApiKey: 'API Key',
+  voiceErrNoChain: 'Set up the model chain in model config first',
   voiceStatusCheck: 'Check',
   voiceStatusChecking: 'Checking…',
   voiceStatusCloudReady: 'Cloud ready',
@@ -3840,7 +3854,7 @@ const VOICE_CFG_DEFAULTS = {
     local: { model: 'sense-voice', language: 'auto' },
     cloud: { protocol: 'chat', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-asr-flash' },
   },
-  refine: { enabled: true, provider: '', model: '', baseUrl: '', maxTokens: 300 },
+  refine: { enabled: true, mode: 'chain', modelRef: 0, provider: '', model: '', baseUrl: '', maxTokens: 300 },
   vad: { enabled: true },
 };
 
@@ -3868,6 +3882,9 @@ function mergeVoice(v) {
     },
     refine: {
       enabled: r.enabled === true,
+      // v3.2.8：mode chain=复用 enhance 模型链（免 key）/ custom=独立配置；modelRef=链中序号
+      mode: r.mode === 'custom' ? 'custom' : 'chain',
+      modelRef: Number.isInteger(r.modelRef) && r.modelRef >= 0 && r.modelRef < 8 ? r.modelRef : 0,
       provider: typeof r.provider === 'string' ? r.provider : '',
       model: typeof r.model === 'string' ? r.model : '',
       baseUrl: typeof r.baseUrl === 'string' ? r.baseUrl : '',
@@ -4248,6 +4265,8 @@ function VoiceSection(props) {
   const [, setVer] = React.useState(0);
   const [apiKey, setApiKey] = React.useState('');
   const [apiKeyLoaded, setApiKeyLoaded] = React.useState(false);
+  // v3.2.8（规整复用模型配置）：custom 模式 apiKey 回显（仅内存+磁盘，同 asr cloud 模式）
+  const [refineApiKey, setRefineApiKey] = React.useState('');
   const [status, setStatus] = React.useState(null); // {cloud, refine, local} 检测结果
   const [checking, setChecking] = React.useState(false);
   // v3.2.7（模型管理框架）：模型清单 + 下载进度（设置页选择/下载，不默认拉取）
@@ -4282,6 +4301,7 @@ function VoiceSection(props) {
   React.useEffect(() => {
     syncVoiceFromHost();
     fetchVoiceApiKey().then((k) => { setApiKey(k); setApiKeyLoaded(true); });
+    host.call('config/get', {}).then((r) => { const k = r && r.ok && r.config && r.config.voice && r.config.voice.refine ? r.config.voice.refine.apiKey : ''; if (typeof k === 'string') setRefineApiKey(k); }).catch(() => {});
     check();
     refreshModels(); // P2 收尾：挂载即检测一次（local 分支显示实时状态，非 P1 静态占位）
   }, []);
@@ -4291,6 +4311,11 @@ function VoiceSection(props) {
 
   const saveCloud = (patch) => saveVoiceCfg({ asr: { ...v.asr, cloud: { ...v.asr.cloud, ...patch } } });
   const saveRefine = (patch) => saveVoiceCfg({ refine: { ...v.refine, ...patch } });
+  // v3.2.8：规整「跟随模型配置」的模型列表 = enhance 模型链（configState 同作用域只读）
+  function refineChainModels() {
+    const fb = (typeof configState !== 'undefined' && configState.value && Array.isArray(configState.value.fallback)) ? configState.value.fallback : [];
+    return fb.filter((m) => m && typeof m.provider === 'string' && m.provider && typeof m.model === 'string' && m.model);
+  }
 
   function localStatusText() {
     const l = status && status.asr && status.asr.local;
@@ -4403,7 +4428,7 @@ function VoiceSection(props) {
       React.createElement('p', { className: 'dsh-plg-note' }, t('voiceStatusLocalHint')),
       status ? React.createElement('p', { className: 'dsh-plg-status' }, localStatusText()) : null,
     ),
-    // 规整
+    // 规整（v3.2.8：模型来源选择——跟随模型配置默认，自定义保留）
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineEnabled')),
       React.createElement('input', {
@@ -4412,20 +4437,49 @@ function VoiceSection(props) {
       }),
     ),
     React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineBaseUrl')),
-      React.createElement('input', {
-        type: 'text', className: 'dsh-plg-input', value: v.refine.baseUrl,
-        onBlur: (e) => saveRefine({ baseUrl: e.target.value }),
-      }),
+      React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineSource')),
+      React.createElement('select', { className: 'dsh-plg-select', value: v.refine.mode,
+        onChange: (e) => saveRefine({ mode: e.target.value }) },
+        React.createElement('option', { value: 'chain' }, t('voiceRefineChain')),
+        React.createElement('option', { value: 'custom' }, t('voiceRefineCustom')),
+      ),
     ),
-    React.createElement('div', { className: 'dsh-plg-row' },
-      React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineModel')),
-      React.createElement('input', {
-        type: 'text', className: 'dsh-plg-input', value: v.refine.model,
-        onBlur: (e) => saveRefine({ model: e.target.value }),
-      }),
-    ),
-    React.createElement('p', { className: 'dsh-plg-note' }, t('voiceRefineHint')),
+    v.refine.mode === 'chain'
+      ? React.createElement('div', { className: 'dsh-plg-row' },
+          React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineChainModel')),
+          refineChainModels().length === 0
+            ? React.createElement('span', { className: 'dsh-plg-note' }, t('voiceErrNoChain'))
+            : React.createElement('select', { className: 'dsh-plg-select', value: String(v.refine.modelRef),
+                onChange: (e) => saveRefine({ modelRef: parseInt(e.target.value, 10) }) },
+                refineChainModels().map((m, i) => React.createElement('option', { key: i, value: String(i) },
+                  m.provider + ' / ' + m.model)),
+              ),
+        )
+      : React.createElement('div', { className: 'dsh-vi-cloud' },
+          React.createElement('div', { className: 'dsh-plg-row' },
+            React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineBaseUrl')),
+            React.createElement('input', {
+              type: 'text', className: 'dsh-plg-input', value: v.refine.baseUrl,
+              onBlur: (e) => saveRefine({ baseUrl: e.target.value }),
+            }),
+          ),
+          React.createElement('div', { className: 'dsh-plg-row' },
+            React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineModel')),
+            React.createElement('input', {
+              type: 'text', className: 'dsh-plg-input', value: v.refine.model,
+              onBlur: (e) => saveRefine({ model: e.target.value }),
+            }),
+          ),
+          React.createElement('div', { className: 'dsh-plg-row' },
+            React.createElement('label', { className: 'dsh-plg-label' }, t('voiceRefineApiKey')),
+            React.createElement('input', {
+              type: 'password', className: 'dsh-plg-input', value: refineApiKey,
+              onChange: (e) => setRefineApiKey(e.target.value),
+              onBlur: () => saveRefine({ apiKey: refineApiKey }),
+            }),
+          ),
+        ),
+    React.createElement('p', { className: 'dsh-plg-note' }, v.refine.mode === 'chain' ? t('voiceRefineChainHint') : t('voiceRefineHint')),
     // 状态检测
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: check, disabled: checking },

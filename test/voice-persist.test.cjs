@@ -97,13 +97,21 @@ test('VOICE-P09 sanitizeVoiceCfg 白名单净化', () => {
 });
 
 test('VOICE-P10 status 组装：cloud/refine configured 判定（P2 local 实时探测）', async () => {
+  // refine 默认 chain 模式：给 enhancer 链 → configured=true（v3.2.8 复用模型配置）
   const s = await asr.status({
     asr: { engine: 'cloud', cloud: { baseUrl: 'b', apiKey: 'k', model: 'm' } },
     refine: { enabled: true, baseUrl: 'r', apiKey: 'k', model: 'm' },
+    enhancer: { fallback: [{ provider: 'a', model: 'b' }] },
   });
   assert.equal(s.ok, true);
   assert.equal(s.asr.cloud.configured, true);
-  assert.equal(s.refine.configured, true);
+  assert.equal(s.refine.configured, true, 'chain 模式 + 有链 → 就绪');
+  // custom 模式（无链）：独立三项完整 → configured
+  const s2 = await asr.status({
+    asr: { engine: 'cloud' },
+    refine: { enabled: true, mode: 'custom', baseUrl: 'r', apiKey: 'k', model: 'm' },
+  });
+  assert.equal(s2.refine.configured, true, 'custom 模式独立三项 → 就绪');
   // local 字段结构（worker 探测，测试环境通常未运行 → installed=false 但结构完整）
   assert.equal(typeof s.asr.local.installed, 'boolean');
   assert.equal(typeof s.asr.local.modelReady, 'boolean');
@@ -227,4 +235,38 @@ test('VOICE-P17 模型市场多条目 + 自定义扫描 + modelApply 校验', ()
   assert.equal(ok.ok, true);
   assert.equal(ok.model, 'sense-voice');
   assert.equal(ok.type, 'sense-voice');
+});
+
+// ---- 12. 规整复用模型配置（2026-08-20 用户需求）：chain 模式走基座 llm ----
+test('VOICE-P18 refine chain 模式：sanitize + llm 调用 + 降级', async () => {
+  // sanitize：默认 chain + modelRef 0；custom 保留
+  const d = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, refine: { enabled: true } });
+  assert.equal(d.refine.mode, 'chain', '默认 chain');
+  assert.equal(d.refine.modelRef, 0, '默认链第一条');
+  const c = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, refine: { enabled: true, mode: 'custom' } });
+  assert.equal(c.refine.mode, 'custom', 'custom 保留');
+  // chain 模式 mock llm
+  let called = null;
+  asr.setLlm({
+    stream: (args) => { called = args; return (async function* () { yield { text: '方案OK' }; })(); },
+  });
+  const voice = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, refine: { enabled: true } });
+  const chain = [{ provider: 'deepseek', model: 'deepseek-chat' }];
+  const r = await asr.refineText(voice, '嗯方案OK', chain);
+  assert.equal(r.ok, true);
+  assert.equal(r.text, '方案OK');
+  assert.equal(called.provider, 'deepseek', 'provider 透传');
+  assert.equal(called.model, 'deepseek-chat', 'model 透传');
+  assert.ok(called.system.includes('口水词'), '系统提示词为去口水词');
+  assert.ok(called.maxTokens > 0, 'maxTokens 有值');
+  // 空链跳过 / 无 llm 服务报错 / modelRef 越界取第一条
+  assert.equal((await asr.refineText(voice, 'x', [])).skipped, true, '空链跳过');
+  asr.setLlm(null);
+  assert.equal((await asr.refineText(voice, 'x', chain)).code, 'REFINE_NO_LLM', '无 llm 服务报错');
+  asr.setLlm({ stream: () => (async function* () { yield { text: 'y' }; })() });
+  const r2 = await asr.refineText(voice, 'x', chain, { modelRef: 9 });
+  assert.equal(r2.text, 'y', '越界取第一条');
+  // status：chain + 有链 → configured
+  const s = await asr.status({ voice: { asr: { engine: 'cloud' }, refine: { enabled: true } }, enhancer: { fallback: [{ provider: 'a', model: 'b' }] } });
+  assert.equal(s.refine.configured, true, 'chain+有链就绪');
 });
