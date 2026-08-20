@@ -170,3 +170,13 @@ test('VOICE-P14 sanitizeVoiceCfg vad 字段：默认开启，显式 false 关闭
   const off = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, vad: { enabled: false } });
   assert.equal(off.vad.enabled, false, '显式 false 关闭');
 });
+
+// ---- 9. 多语言（2026-08-20 P3）：sanitize local.language 白名单 ----
+test('VOICE-P15 sanitizeVoiceCfg local.language：默认 auto，非法回退 auto', () => {
+  const d = asr.sanitizeVoiceCfg({ asr: { engine: 'local' } });
+  assert.equal(d.asr.local.language, 'auto', '默认 auto');
+  const ja = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { language: 'ja' } } });
+  assert.equal(ja.asr.local.language, 'ja', '合法枚举保留');
+  const bad = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { language: 'xx' } } });
+  assert.equal(bad.asr.local.language, 'auto', '非法回退 auto');
+});

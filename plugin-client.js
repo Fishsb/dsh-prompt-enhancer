@@ -841,7 +841,13 @@ const ZH = {
   voiceAsrEngine: '识别引擎',
   voiceAsrLocal: '本地',
   voiceVadEnabled: '静音自动停',
-  voiceLocalModelLabel: '当前模型',
+  voiceLocalModelLabel: '识别语言',
+  voiceLangAuto: '自动',
+  voiceLangZh: '中文',
+  voiceLangEn: 'English',
+  voiceLangJa: '日本語',
+  voiceLangKo: '한국어',
+  voiceLangYue: '粤语',
   voiceAsrCloud: '云端',
   voiceCloudProtocol: '协议',
   voiceCloudBaseUrl: '接口地址',
@@ -1145,7 +1151,13 @@ const EN = {
   voiceAsrEngine: 'Engine',
   voiceAsrLocal: 'Local',
   voiceVadEnabled: 'Auto-stop on silence',
-  voiceLocalModelLabel: 'Model',
+  voiceLocalModelLabel: 'Language',
+  voiceLangAuto: 'Auto',
+  voiceLangZh: 'Chinese',
+  voiceLangEn: 'English',
+  voiceLangJa: 'Japanese',
+  voiceLangKo: 'Korean',
+  voiceLangYue: 'Cantonese',
   voiceAsrCloud: 'Cloud',
   voiceCloudProtocol: 'Protocol',
   voiceCloudBaseUrl: 'Base URL',
@@ -3797,7 +3809,7 @@ const VOICE_CFG_KEY = 'dsh.prompt-enhancer.voice';
 const VOICE_CFG_DEFAULTS = {
   asr: {
     engine: 'cloud',
-    local: { model: 'sensevoice-q8' },
+    local: { model: 'sensevoice-q8', language: 'auto' },
     cloud: { protocol: 'chat', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-asr-flash' },
   },
   refine: { enabled: true, provider: '', model: '', baseUrl: '', maxTokens: 300 },
@@ -3815,7 +3827,10 @@ function mergeVoice(v) {
   return {
     asr: {
       engine: a.engine === 'local' ? 'local' : 'cloud',
-      local: { model: typeof l.model === 'string' && l.model ? l.model : VOICE_CFG_DEFAULTS.asr.local.model },
+      local: {
+        model: typeof l.model === 'string' && l.model ? l.model : VOICE_CFG_DEFAULTS.asr.local.model,
+        language: ['auto','zh','en','ja','ko','yue'].indexOf(l.language) >= 0 ? l.language : 'auto',
+      },
       cloud: {
         protocol: c.protocol === 'openai' ? 'openai' : 'chat',
         baseUrl: typeof c.baseUrl === 'string' && c.baseUrl ? c.baseUrl : VOICE_CFG_DEFAULTS.asr.cloud.baseUrl,
@@ -4016,29 +4031,48 @@ function applyFill(inputActions, draft, text, capa) {
 
 // 核心：识别结果填入。dep 由调用方注入（只读依赖，见 §2 唯一跨模块依赖）。
 // 返回 { filled, pending }——pending=true 表示已暂存等待自动填入。
+// v3.2.6 (P3 queue): pending 中再录音的识别结果入队，enhance 恢复后 FIFO 合并一次填入
+const voiceQueue = [];
+let voiceQueueSubscribed = false;
+
+// flush：合并队列文本一次填入（避免逐段 setDraft 互相覆盖）
+function flushVoiceQueue(inputActions, capa, dep) {
+  if (voiceQueue.length === 0) return;
+  let merged = null;
+  while (voiceQueue.length > 0) {
+    const t = voiceQueue.shift();
+    if (!t) continue;
+    const base = merged !== null ? merged : (typeof dep.getDraft === 'function' ? dep.getDraft() : '');
+    merged = base ? appendText(base, t) : t;
+  }
+  if (merged !== null && inputActions && typeof inputActions.setDraft === 'function') {
+    try { inputActions.setDraft(merged); } catch (e) { /* ignore */ }
+  }
+}
+
 function insertVoiceText(sessionId, input, inputActions, draft, text, capa, dep) {
-  if (!text) return Promise.resolve({ filled: false, pending: false });
+  if (!text) return Promise.resolve({ filled: false, pending: false, queueLen: voiceQueue.length });
   const phase = input && typeof input.phase === 'string' ? input.phase : '';
   const blocked = (typeof dep.getIsEnhancing === 'function' && dep.getIsEnhancing(sessionId))
     || phase === 'submitting' || phase === 'adjudicating';
-  if (!blocked) {
+  if (!blocked && voiceQueue.length === 0) {
     applyFill(inputActions, draft, text, capa);
-    return Promise.resolve({ filled: true, pending: false });
+    return Promise.resolve({ filled: true, pending: false, queueLen: 0 });
   }
-  // 暂存：订阅 enhance session 通知，恢复后自动填入
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = () => { if (done) return; done = true; try { off(); } catch (e) { /* 忽略 */ } resolve({ filled: true, pending: true }); };
-    const off = dep.subscribeSession(sessionId, () => {
-      const ph = typeof dep.getPhase === 'function' ? dep.getPhase(sessionId) : '';
-      const enhancing = typeof dep.getIsEnhancing === 'function' && dep.getIsEnhancing(sessionId);
-      if (!enhancing && ph !== 'enhancing' && ph !== 'submitting' && ph !== 'adjudicating') {
-        const curDraft = typeof dep.getDraft === 'function' ? dep.getDraft() : draft;
-        applyFill(inputActions, curDraft, text, capa);
-        finish();
-      }
-    });
+  // 入队（blocked 或队列已有等待项——保持 FIFO）
+  voiceQueue.push(text);
+  const queueLen = voiceQueue.length;
+  if (voiceQueueSubscribed) return Promise.resolve({ filled: true, pending: true, queueLen });
+  voiceQueueSubscribed = true;
+  const off = dep.subscribeSession(sessionId, () => {
+    const ph = typeof dep.getPhase === 'function' ? dep.getPhase(sessionId) : '';
+    const enh = typeof dep.getIsEnhancing === 'function' && dep.getIsEnhancing(sessionId);
+    if (enh || ph === 'enhancing' || ph === 'submitting' || ph === 'adjudicating') return;
+    flushVoiceQueue(inputActions, capa, dep);
+    voiceQueueSubscribed = false;
+    try { off(); } catch (e) { /* ignore */ }
   });
+  return Promise.resolve({ filled: true, pending: true, queueLen });
 }
 // v3.2.5（语音识别模块）：🎤 录音按钮——状态机 idle→recording→recognizing→pending/filling→done。
 // 时序防护（§6.1）：识别完成时若 enhance 优化中或发送飞行期 → 暂存等待自动填入（voicePendingEnhance）。
@@ -4056,6 +4090,9 @@ function VoiceMicButton(props) {
   // VAD 异步回调需取最新闭包（守卫依赖 status）——ref 每次渲染更新
   const stopRef = React.useRef(null);
   stopRef.current = stopAndTranscribe;
+  // 实时草稿：flush 队列取最新（props draft 每渲染更新）
+  const draftRef = React.useRef(draft);
+  draftRef.current = draft;
 
   // 能力探测（P1 基线 append；若基座注入插入能力 → insert）
   React.useEffect(() => { capaRef.current = probeInputActions(inputActions); }, [inputActions]);
@@ -4077,7 +4114,7 @@ function VoiceMicButton(props) {
 
   const click = () => {
     if (status === 'recording') { stopAndTranscribe(); return; }
-    if (status === 'recognizing' || status === 'pending' || status === 'done') return;
+    if (status === 'recognizing' || status === 'done') return; // pending 可再点开始新录音（排队）
     startRec();
   };
 
@@ -4125,7 +4162,7 @@ function VoiceMicButton(props) {
         getIsEnhancing: (sid) => (typeof isEnhancing === 'function' ? isEnhancing(sid) : false),
         subscribeSession: subscribe,
         getPhase: (sid) => storeFor(sid).phase,
-        getDraft: () => draft,
+        getDraft: () => draftRef.current,
       };
       // 填入（含双暂存时序防护）；pending 等待期间按钮显示 voicePendingEnhance
       await insertVoiceText(sessionId, input, inputActions, draft, res.text, capaRef.current, dep);
@@ -4152,7 +4189,7 @@ function VoiceMicButton(props) {
   } else if (status === 'pending') {
     cls += ' dsh-vi-busy';
     label = t('voicePendingEnhance');
-    title = t('voicePendingEnhance');
+    title = t('voiceRecord'); // pending 可再点开始新录音（入队）
   } else if (status === 'error') {
     cls += ' dsh-vi-err';
     label = '🎤';
@@ -4277,6 +4314,17 @@ function VoiceSection(props) {
       React.createElement('div', { className: 'dsh-plg-row' },
         React.createElement('label', { className: 'dsh-plg-label' }, t('voiceLocalModelLabel')),
         React.createElement('span', { className: 'dsh-plg-input-static' }, v.asr.local.model),
+      ),
+      React.createElement('div', { className: 'dsh-plg-row' },
+        React.createElement('label', { className: 'dsh-plg-label' }, t('voiceLocalLanguage')),
+        React.createElement('select', { className: 'dsh-plg-select', value: v.asr.local.language, onChange: (e) => saveVoiceCfg({ asr: { ...v.asr, local: { ...v.asr.local, language: e.target.value } } }) },
+          React.createElement('option', { value: 'auto' }, t('voiceLangAuto')),
+          React.createElement('option', { value: 'zh' }, t('voiceLangZh')),
+          React.createElement('option', { value: 'en' }, t('voiceLangEn')),
+          React.createElement('option', { value: 'ja' }, t('voiceLangJa')),
+          React.createElement('option', { value: 'ko' }, t('voiceLangKo')),
+          React.createElement('option', { value: 'yue' }, t('voiceLangYue')),
+        ),
       ),
       React.createElement('p', { className: 'dsh-plg-note' }, t('voiceStatusLocalHint')),
       status ? React.createElement('p', { className: 'dsh-plg-status' }, localStatusText()) : null,
