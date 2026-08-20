@@ -85,18 +85,23 @@ if (!st.modelOnnx || !st.tokens) {
   fail('模型缺失：请先下载 SenseVoice int8 到 ' + MODEL_DIR + '（228MB，见 README 或运行模型下载脚本）');
 }
 if (doStart) {
-  // 启动 worker（detached）
-  const child = spawn(nodeBin(), [WORKER_DST], { detached: true, stdio: 'ignore', env: { ...process.env } });
-  child.unref();
-  console.log('✓ worker 已启动（pid ' + child.pid + '），健康检查…');
-  // 3s 内探测
-  const t0 = Date.now();
-  let up = false;
-  while (Date.now() - t0 < 8000) {
-    const r = spawnSync('curl', ['-s', '--max-time', '1', 'http://127.0.0.1:' + PORT + '/health'], { encoding: 'utf8' });
-    if (r.stdout && r.stdout.includes('"ok"')) { up = true; break; }
-    spawnSync(nodeBin(), ['-e', 'setTimeout(()=>{},500)']);
+  // 2026-08-20（桌面端随机端口·多实例）：3082 已健康（可能是另一 DSH 实例的 worker，同 DSH_HOME 可共享）→ 复用跳过启动
+  if (st.workerUp) {
+    console.log('✓ worker 已在运行（:' + PORT + '）——复用，跳过启动（多实例共享，避免端口冲突）');
+  } else {
+    // 启动 worker（detached；3082 被占时 worker 自身动态 fallback + 写 worker.port）
+    const child = spawn(nodeBin(), [WORKER_DST], { detached: true, stdio: 'ignore', env: { ...process.env } });
+    child.unref();
+    console.log('✓ worker 已启动（pid ' + child.pid + '），健康检查…');
+    // 8s 内探测
+    const t0 = Date.now();
+    let up = false;
+    while (Date.now() - t0 < 8000) {
+      const r = spawnSync('curl', ['-s', '--max-time', '1', 'http://127.0.0.1:' + PORT + '/health'], { encoding: 'utf8' });
+      if (r.stdout && r.stdout.includes('"ok"')) { up = true; break; }
+      spawnSync(nodeBin(), ['-e', 'setTimeout(()=>{},500)']);
+    }
+    console.log(up ? '✓ worker 健康检查通过' : '⚠️ worker 启动中/未就绪（稍后重试或查日志；3082 被占时已动态换端口，host 会读 worker.port）');
   }
-  console.log(up ? '✓ worker 健康检查通过' : '⚠️ worker 启动中/未就绪（稍后重试或查日志）');
 }
 console.log('=== 部署完成 ===');
