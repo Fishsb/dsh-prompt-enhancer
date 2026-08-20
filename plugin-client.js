@@ -891,6 +891,7 @@ const ZH = {
   voiceModelCurrent: '当前',
   voiceModelCustom: '自定义',
   voiceModelOpenDir: '打开模型文件夹',
+  voiceModelOpenDirFail: '打开模型文件夹失败，请检查服务状态',
   voiceErrLocalNotReady: '本地引擎未就绪',
   voiceErrLocalFailed: '本地识别失败',
   stageDone: '✓',
@@ -1213,6 +1214,7 @@ const EN = {
   voiceModelCurrent: 'Current',
   voiceModelCustom: 'Custom',
   voiceModelOpenDir: 'Open model folder',
+  voiceModelOpenDirFail: 'Failed to open model folder; check service status',
   voiceErrLocalNotReady: 'Local engine not ready',
   voiceErrLocalFailed: 'Local recognition failed',
   stageDone: '✓',
@@ -4251,6 +4253,7 @@ function VoiceSection(props) {
   // v3.2.7（模型管理框架）：模型清单 + 下载进度（设置页选择/下载，不默认拉取）
   const [models, setModels] = React.useState([]);
   const [dlProgress, setDlProgress] = React.useState({});
+  const [modelOpenErr, setModelOpenErr] = React.useState(false);
   const refreshModels = () => {
     host.call('voice/modelList', {}).then((r) => { if (r && r.ok && Array.isArray(r.models)) setModels(r.models); }).catch(() => {});
   };
@@ -4382,7 +4385,8 @@ function VoiceSection(props) {
           );
         }),
         React.createElement('div', { className: 'dsh-plg-row' },
-          React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: () => host.call('voice/modelOpenDir', {}).catch(() => {}) }, t('voiceModelOpenDir')),
+          React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: () => host.call('voice/modelOpenDir', {}).then((r) => { if (!r || r.ok !== true) setModelOpenErr(true); }).catch(() => setModelOpenErr(true)) }, t('voiceModelOpenDir')),
+          modelOpenErr ? React.createElement('span', { className: 'dsh-plg-error' }, t('voiceModelOpenDirFail')) : null,
         ),
       ),
       React.createElement('div', { className: 'dsh-plg-row' },
