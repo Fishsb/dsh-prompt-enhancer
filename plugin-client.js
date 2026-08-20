@@ -840,6 +840,7 @@ const ZH = {
   voiceSectionSummary: '语音识别',
   voiceAsrEngine: '识别引擎',
   voiceAsrLocal: '本地',
+  voiceVadEnabled: '静音自动停',
   voiceLocalModelLabel: '当前模型',
   voiceAsrCloud: '云端',
   voiceCloudProtocol: '协议',
@@ -1143,6 +1144,7 @@ const EN = {
   voiceSectionSummary: 'Voice',
   voiceAsrEngine: 'Engine',
   voiceAsrLocal: 'Local',
+  voiceVadEnabled: 'Auto-stop on silence',
   voiceLocalModelLabel: 'Model',
   voiceAsrCloud: 'Cloud',
   voiceCloudProtocol: 'Protocol',
@@ -3799,6 +3801,7 @@ const VOICE_CFG_DEFAULTS = {
     cloud: { protocol: 'chat', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-asr-flash' },
   },
   refine: { enabled: true, provider: '', model: '', baseUrl: '', maxTokens: 300 },
+  vad: { enabled: true },
 };
 
 const voiceCfgState = { value: { ...VOICE_CFG_DEFAULTS }, listeners: new Set(), synced: false };
@@ -3808,6 +3811,7 @@ function mergeVoice(v) {
   const c = a.cloud && typeof a.cloud === 'object' ? a.cloud : {};
   const l = a.local && typeof a.local === 'object' ? a.local : {};
   const r = v && v.refine && typeof v.refine === 'object' ? v.refine : {};
+  const vd = v && v.vad && typeof v.vad === 'object' ? v.vad : {};
   return {
     asr: {
       engine: a.engine === 'local' ? 'local' : 'cloud',
@@ -3825,6 +3829,7 @@ function mergeVoice(v) {
       baseUrl: typeof r.baseUrl === 'string' ? r.baseUrl : '',
       maxTokens: Number.isInteger(r.maxTokens) && r.maxTokens >= 1 && r.maxTokens <= 2000 ? r.maxTokens : 300,
     },
+    vad: { enabled: vd.enabled !== false },
   };
 }
 
@@ -3880,16 +3885,71 @@ function subscribeVoiceConfig(fn) { voiceCfgState.listeners.add(fn); return () =
 // getUserMedia 约束：降噪/回声消除/自动增益开（识别质量关键，§6.2）；16k mono wav（ASR 标准）。
 // 60s 上限由 mic-button 的 timerSvc.timeout 触发 stopVoiceRecording（本模块不管理时间）。
 // 音频仅内存中转、不落盘（隐私）；转换走 FileReader.readAsDataURL。
+// v3.2.6（P3·VAD）：静音自动停——AudioContext + AnalyserNode 实时 RMS 检测，
+// 首次检测到语音（heardSpeech）后静音持续 1200ms 触发 onAutoStop；未说话不触发（防误停）。
 let voiceRecorder = null;
 let voiceStream = null;
+let voiceVadTimer = null;
+let voiceVadCtx = null;
 
-async function startVoiceRecording() {
+const VAD_THRESHOLD = 0.025;   // RMS 阈值（归一化，环境噪声容忍）
+const VAD_SILENCE_MS = 1200;   // 静音持续时长（首次语音后）
+const VAD_POLL_MS = 100;       // 轮询间隔
+const VAD_REQUIRED_QUIET = Math.round(VAD_SILENCE_MS / VAD_POLL_MS); // 连续静音帧数（抗单帧噪声）
+
+// VAD 静音检测：vadEnabled=false / 无 AudioContext 时静默跳过（60s 上限兜底）
+function startVoiceVad(stream, vadEnabled, onAutoStop) {
+  if (!vadEnabled || typeof onAutoStop !== 'function') return;
+  const AC = (typeof window !== 'undefined' && window.AudioContext) ? window.AudioContext
+    : (typeof window !== 'undefined' && window.webkitAudioContext) ? window.webkitAudioContext
+    : (typeof AudioContext !== 'undefined') ? AudioContext : null;
+  if (!AC) return;
+  try {
+    const ctx = new AC();
+    const src = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    src.connect(analyser);
+    const buf = new Uint8Array(analyser.fftSize);
+    let heardSpeech = false;
+    let quietFrames = 0;
+    let smoothRms = 0;
+    let stopped = false;
+    voiceVadCtx = ctx;
+    voiceVadTimer = setInterval(() => {
+      if (stopped) return;
+      try {
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) { const d = (buf[i] - 128) / 128; sum += d * d; }
+        const rms = Math.sqrt(sum / buf.length);
+        smoothRms = smoothRms * 0.7 + rms * 0.3; // EMA 平滑抗 mp3/底噪抖动
+        if (smoothRms >= VAD_THRESHOLD) { heardSpeech = true; quietFrames = 0; }
+        else if (heardSpeech) {
+          quietFrames++;
+          if (quietFrames >= VAD_REQUIRED_QUIET) {
+            stopped = true;
+            stopVoiceVad();
+            try { console.log('[voice] VAD auto-stop (silence)'); } catch (e) {}
+            onAutoStop();
+          }
+        }
+      } catch (e) { /* 单帧失败忽略 */ }
+    }, VAD_POLL_MS);
+  } catch (e) { /* VAD 初始化失败静默降级 */ }
+}
+
+function stopVoiceVad() {
+  if (voiceVadTimer) { try { clearInterval(voiceVadTimer); } catch (e) { /* 忽略 */ } voiceVadTimer = null; }
+  if (voiceVadCtx) { try { voiceVadCtx.close(); } catch (e) { /* 忽略 */ } voiceVadCtx = null; }
+}
+
+async function startVoiceRecording(onAutoStop, vadEnabled) {
   if (voiceRecorder) throw new Error('already recording');
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
   });
   voiceStream = stream;
-  // 加载器把 vendor chunk 字符串 eval 到模块作用域（非 window）——裸 RecordRTC 优先，window 兜底
   const RR = (typeof RecordRTC !== 'undefined') ? RecordRTC
     : (typeof window !== 'undefined' && typeof window.RecordRTC === 'function') ? window.RecordRTC
     : null;
@@ -3902,11 +3962,13 @@ async function startVoiceRecording() {
   });
   voiceRecorder = rec;
   rec.startRecording();
+  startVoiceVad(stream, vadEnabled, onAutoStop);
   return rec;
 }
 
 // 停止 → getBlob → FileReader → data URL；返回 Promise<string|null>
 function stopVoiceRecording() {
+  stopVoiceVad();
   const rec = voiceRecorder;
   voiceRecorder = null;
   if (voiceStream) { try { voiceStream.getTracks().forEach((tr) => tr.stop()); } catch (e) { /* 忽略 */ } voiceStream = null; }
@@ -3991,6 +4053,9 @@ function VoiceMicButton(props) {
   const [errKey, setErrKey] = React.useState('');
   const [seconds, setSeconds] = React.useState(0);
   const capaRef = React.useRef('append');
+  // VAD 异步回调需取最新闭包（守卫依赖 status）——ref 每次渲染更新
+  const stopRef = React.useRef(null);
+  stopRef.current = stopAndTranscribe;
 
   // 能力探测（P1 基线 append；若基座注入插入能力 → insert）
   React.useEffect(() => { capaRef.current = probeInputActions(inputActions); }, [inputActions]);
@@ -4018,7 +4083,8 @@ function VoiceMicButton(props) {
 
   async function startRec() {
     try {
-      await startVoiceRecording();
+      const vadEnabled = !!(voiceCfgState.value && voiceCfgState.value.vad && voiceCfgState.value.vad.enabled);
+      await startVoiceRecording(() => { const f = stopRef.current; if (f) f(); }, vadEnabled);
       setStatus('recording');
       setErrKey('');
     } catch (e) {
@@ -4166,6 +4232,10 @@ function VoiceSection(props) {
         React.createElement('option', { value: 'cloud' }, t('voiceAsrCloud')),
         React.createElement('option', { value: 'local' }, t('voiceAsrLocal')),
       ),
+    ),
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('label', { className: 'dsh-plg-label' }, t('voiceVadEnabled')),
+      React.createElement('input', { type: 'checkbox', className: 'dsh-plg-check', checked: v.vad.enabled, onChange: (e) => saveVoiceCfg({ vad: { enabled: e.target.checked } }) }),
     ),
     isCloud ? React.createElement('div', { className: 'dsh-vi-cloud' },
       React.createElement('div', { className: 'dsh-plg-row' },

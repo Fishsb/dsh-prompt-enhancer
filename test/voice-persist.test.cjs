@@ -162,3 +162,11 @@ test('VOICE-P13 整配置结构调用（handler 真实形态）engine=local 生�
   const tc = await asr.transcribe(wholeCloud, 'data:audio/wav;base64,AAAA');
   assert.equal(tc.code, 'ASR_NETWORK', 'cloud 整配置应走云端分支（bad url → NETWORK），实际 ' + tc.code);
 });
+
+// ---- 8. VAD 配置（2026-08-20 P3）：sanitize vad 白名单 ----
+test('VOICE-P14 sanitizeVoiceCfg vad 字段：默认开启，显式 false 关闭', () => {
+  const d = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' } });
+  assert.equal(d.vad.enabled, true, 'vad 默认开启');
+  const off = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, vad: { enabled: false } });
+  assert.equal(off.vad.enabled, false, '显式 false 关闭');
+});
