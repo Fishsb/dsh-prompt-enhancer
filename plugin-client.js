@@ -843,6 +843,12 @@ const ZH = {
   voiceAsrEngine: '识别引擎',
   voiceAsrLocal: '本地',
   voiceVadEnabled: '静音自动停',
+  voiceHotkeyEnabled: '快捷键唤醒',
+  voiceHotkeyCombo: '快捷键',
+  voiceHotkeyCapturing: '请按组合键…（Esc 取消）',
+  voiceHotkeyNone: '未设置',
+  voiceHotkeyClear: '清除',
+  voiceHotkeyHint: '按住说话：按下开始录音，松开后 0.5 秒自动识别；快速点按：再按一次结束或静音自动停',
   voiceLocalModelLabel: '识别语言',
   voiceLangAuto: '自动',
   voiceLangZh: '中文',
@@ -1173,6 +1179,12 @@ const EN = {
   voiceAsrEngine: 'Engine',
   voiceAsrLocal: 'Local',
   voiceVadEnabled: 'Auto-stop on silence',
+  voiceHotkeyEnabled: 'Hotkey wake',
+  voiceHotkeyCombo: 'Hotkey',
+  voiceHotkeyCapturing: 'Press keys... (Esc to cancel)',
+  voiceHotkeyNone: 'Not set',
+  voiceHotkeyClear: 'Clear',
+  voiceHotkeyHint: 'Press and hold to talk: release to transcribe after 0.5s; tap to start/stop',
   voiceLocalModelLabel: 'Language',
   voiceLangAuto: 'Auto',
   voiceLangZh: 'Chinese',
@@ -3856,6 +3868,8 @@ const VOICE_CFG_DEFAULTS = {
   },
   refine: { enabled: true, mode: 'chain', provider: '', model: '', baseUrl: '', maxTokens: 300 },
   vad: { enabled: true },
+  // v3.2.9（快捷键唤醒）：hotkey.enabled=快捷键开关；combo=组合键（e.code 格式，如 'Backquote'/'Ctrl+Shift+Backquote'）
+  hotkey: { enabled: true, combo: 'Backquote' },
 };
 
 const voiceCfgState = { value: { ...VOICE_CFG_DEFAULTS }, listeners: new Set(), synced: false };
@@ -3866,6 +3880,7 @@ function mergeVoice(v) {
   const l = a.local && typeof a.local === 'object' ? a.local : {};
   const r = v && v.refine && typeof v.refine === 'object' ? v.refine : {};
   const vd = v && v.vad && typeof v.vad === 'object' ? v.vad : {};
+  const hk = v && v.hotkey && typeof v.hotkey === 'object' ? v.hotkey : {};
   return {
     asr: {
       engine: a.engine === 'local' ? 'local' : 'cloud',
@@ -3890,6 +3905,10 @@ function mergeVoice(v) {
       maxTokens: Number.isInteger(r.maxTokens) && r.maxTokens >= 1 && r.maxTokens <= 2000 ? r.maxTokens : 300,
     },
     vad: { enabled: vd.enabled !== false },
+    hotkey: {
+      enabled: hk.enabled !== false,
+      combo: typeof hk.combo === 'string' && hk.combo ? hk.combo : 'Backquote',
+    },
   };
 }
 
@@ -4122,6 +4141,35 @@ function insertVoiceText(sessionId, input, inputActions, draft, text, capa, dep)
 // v3.2.5（语音识别模块）：🎤 录音按钮——状态机 idle→recording→recognizing→pending/filling→done。
 // 时序防护（§6.1）：识别完成时若 enhance 优化中或发送飞行期 → 暂存等待自动填入（voicePendingEnhance）。
 // 模块零交叉：只经 isEnhancing/subscribe/storeFor 只读依赖 enhance；能力探测 probeInputActions。
+// v3.2.9（快捷键唤醒）：新增键盘快捷键（默认 ` 键，可配置）+ 点按/长按双触发——
+//   点按 = 现有 toggle（开始/再按结束，VAD 静音自动停）；长按（按住 ≥500ms）松开后 0.5s 立即识别。
+//   统一 pressStart/pressEnd 抽象（键盘 keydown/keyup + 鼠标 mousedown/mouseup），mouseup 抑制 click 防双重处理；
+//   getUserMedia 未就绪时 longReleaseRef 兜底（startRec 完成后补触发识别）。
+const VOICE_LONG_PRESS_MS = 500;     // 按住 ≥500ms 判定为长按
+const VOICE_RELEASE_BUFFER_MS = 500; // 长按松开后 0.5s 收尾缓冲再识别
+// hotkey combo 解析/匹配/显示（combo 存 e.code 格式：'Backquote' / 'Ctrl+Shift+Backquote'）
+function parseVoiceHotkey(combo) {
+  const parts = String(combo || '').split('+').map((s) => s.trim()).filter(Boolean);
+  const out = { ctrl: false, alt: false, shift: false, meta: false, code: null };
+  for (const p of parts) {
+    if (p === 'Ctrl') out.ctrl = true;
+    else if (p === 'Alt') out.alt = true;
+    else if (p === 'Shift') out.shift = true;
+    else if (p === 'Meta') out.meta = true;
+    else if (!out.code) out.code = p;
+    else return null;
+  }
+  return out.code ? out : null;
+}
+function matchVoiceHotkey(e, hk) {
+  return hk && e.ctrlKey === hk.ctrl && e.altKey === hk.alt && e.shiftKey === hk.shift && e.metaKey === hk.meta && e.code === hk.code;
+}
+function voiceHotkeyDisplay(combo) {
+  const parts = String(combo || '').split('+').filter(Boolean);
+  const last = parts[parts.length - 1];
+  const key = last === 'Backquote' ? '`' : last;
+  return parts.length > 1 ? parts.slice(0, -1).concat(key).join('+') : key;
+}
 function VoiceMicButton(props) {
   const t = makeT(props);
   const sessionId = props.session && props.session.sessionId;
@@ -4131,13 +4179,26 @@ function VoiceMicButton(props) {
   const [status, setStatus] = React.useState('idle');
   const [errKey, setErrKey] = React.useState('');
   const [seconds, setSeconds] = React.useState(0);
+  const [cfgVer, setCfgVer] = React.useState(0); // v3.2.9：订阅 voiceCfgState（快捷键配置变化 → 重挂监听）
   const capaRef = React.useRef('append');
+  // 状态守卫读 ref（长按定时器/VAD 异步回调可能持旧渲染闭包）——ref 每次渲染更新
+  const statusRef = React.useRef(status);
+  statusRef.current = status;
   // VAD 异步回调需取最新闭包（守卫依赖 status）——ref 每次渲染更新
   const stopRef = React.useRef(null);
   stopRef.current = stopAndTranscribe;
   // 实时草稿：flush 队列取最新（props draft 每渲染更新）
   const draftRef = React.useRef(draft);
   draftRef.current = draft;
+  // v3.2.9：按下/松开触发抽象——pressStartRef=按下时刻；pressStatusRef=按下时的状态；
+  // suppressClickRef=鼠标路径已由 pressEnd 处理，抑制 click 防双重；longReleaseRef=长按松开时录音未就绪，startRec 完成后补触发
+  const pressStartRef = React.useRef(0);
+  const pressStatusRef = React.useRef(null);
+  const suppressClickRef = React.useRef(false);
+  const longReleaseRef = React.useRef(false);
+
+  // v3.2.9：订阅配置（快捷键开关/组合变化 → 重渲染重挂监听）
+  React.useEffect(() => subscribeVoiceConfig(() => setCfgVer((n) => n + 1)), []);
 
   // 能力探测（P1 基线 append；若基座注入插入能力 → insert）
   React.useEffect(() => { capaRef.current = probeInputActions(inputActions); }, [inputActions]);
@@ -4157,11 +4218,65 @@ function VoiceMicButton(props) {
     return timerSvc.timeout(() => { stopAndTranscribe(); }, 60000);
   }, [status]);
 
+  // v3.2.9：快捷键监听（页面级 keydown/keyup，capture 阶段抢在输入框前 preventDefault；设置页录制中暂停）
+  React.useEffect(() => {
+    const hkCfg = voiceCfgState.value && voiceCfgState.value.hotkey ? voiceCfgState.value.hotkey : null;
+    if (!hkCfg || !hkCfg.enabled || !hkCfg.combo) return undefined;
+    const hk = parseVoiceHotkey(hkCfg.combo);
+    if (!hk) return undefined;
+    const onKeyDown = (e) => {
+      if (typeof window !== 'undefined' && window.__voiceHotkeyCapturing) return;
+      if (e.repeat || !matchVoiceHotkey(e, hk)) return;
+      e.preventDefault(); e.stopPropagation();
+      pressStart();
+    };
+    const onKeyUp = (e) => {
+      if (typeof window !== 'undefined' && window.__voiceHotkeyCapturing) return;
+      if (!matchVoiceHotkey(e, hk)) return;
+      e.preventDefault(); e.stopPropagation();
+      pressEnd();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+    };
+  }, [cfgVer]);
+
   const click = () => {
-    if (status === 'recording') { stopAndTranscribe(); return; }
-    if (status === 'recognizing' || status === 'done') return; // pending 可再点开始新录音（排队）
+    if (suppressClickRef.current) { suppressClickRef.current = false; return; } // 鼠标路径已由 pressEnd 处理
+    if (statusRef.current === 'recording') { const f = stopRef.current; if (f) f(); return; }
+    if (statusRef.current === 'recognizing' || statusRef.current === 'done') return; // pending 可再点开始新录音（排队）
     startRec();
   };
+
+  // v3.2.9：按下（keydown/mousedown）——idle 开始录音；recording 仅记录按下时刻（松开时判定）
+  function pressStart() {
+    const s = statusRef.current;
+    if (s !== 'idle' && s !== 'recording' && s !== 'error') return;
+    pressStartRef.current = Date.now();
+    pressStatusRef.current = s;
+    if (s === 'idle' || s === 'error') startRec();
+  }
+  // v3.2.9：松开（keyup/mouseup）——按住 ≥500ms=长按 → 松开后 0.5s 识别；
+  // 快速松开=点按 → idle 保持录音（等 VAD 自动停/再按结束）；recording 立即识别
+  function pressEnd() {
+    const s = pressStatusRef.current;
+    pressStatusRef.current = null;
+    if (s !== 'idle' && s !== 'recording' && s !== 'error') return;
+    const long = (Date.now() - pressStartRef.current) >= VOICE_LONG_PRESS_MS;
+    if (long || s === 'recording') {
+      if (statusRef.current === 'recording') {
+        const f = stopRef.current; if (f) f(long ? VOICE_RELEASE_BUFFER_MS : 0);
+      } else if (long) {
+        longReleaseRef.current = true; // getUserMedia 未就绪 → startRec 完成后补触发
+      }
+    }
+  }
+  // 鼠标路径：mousedown 开始；mouseup 由 pressEnd 处理并抑制 click（防双重触发）
+  const onMouseDown = (e) => { if (e.button !== 0) return; pressStart(); };
+  const onMouseUp = (e) => { if (e.button !== 0) return; suppressClickRef.current = true; pressEnd(); };
 
   async function startRec() {
     try {
@@ -4169,6 +4284,11 @@ function VoiceMicButton(props) {
       await startVoiceRecording(() => { const f = stopRef.current; if (f) f(); }, vadEnabled);
       setStatus('recording');
       setErrKey('');
+      // v3.2.9：长按松开时录音尚未就绪 → 现在补触发（0.5s 后识别）
+      if (longReleaseRef.current) {
+        longReleaseRef.current = false;
+        const f = stopRef.current; if (f) f(VOICE_RELEASE_BUFFER_MS);
+      }
     } catch (e) {
       setStatus('error');
       setErrKey('voiceErrNoMic');
@@ -4191,33 +4311,39 @@ function VoiceMicButton(props) {
     return map[code] || 'voiceErrNetwork';
   }
 
-  async function stopAndTranscribe() {
-    if (status !== 'recording') return;
+  // v3.2.9：delayMs>0 = 长按松开收尾缓冲（录音已停，0.5s 后发识别请求）；0/undefined = 立即识别
+  async function stopAndTranscribe(delayMs) {
+    if (statusRef.current !== 'recording' && !isVoiceRecording()) return;
     setStatus('recognizing');
     const dataUrl = await stopVoiceRecording();
     if (!dataUrl) { setStatus('error'); setErrKey('voiceErrAudio'); return; }
-    try {
-      const res = await host.call('voice/transcribe', { audioBase64: dataUrl });
-      if (!res || res.ok !== true) {
-        const code = res && res.code ? res.code : 'ASR_NETWORK';
-        setStatus('error'); setErrKey(errKeyFor(code)); return;
+    const runTranscribe = async () => {
+      try {
+        const res = await host.call('voice/transcribe', { audioBase64: dataUrl });
+        if (!res || res.ok !== true) {
+          const code = res && res.code ? res.code : 'ASR_NETWORK';
+          setStatus('error'); setErrKey(errKeyFor(code)); return;
+        }
+        if (!res.text) { setStatus('error'); setErrKey('voiceErrEmpty'); return; }
+        const dep = {
+          getIsEnhancing: (sid) => (typeof isEnhancing === 'function' ? isEnhancing(sid) : false),
+          subscribeSession: subscribe,
+          getPhase: (sid) => storeFor(sid).phase,
+          getDraft: () => draftRef.current,
+        };
+        // 填入（含双暂存时序防护）；pending 等待期间按钮显示 voicePendingEnhance
+        await insertVoiceText(sessionId, input, inputActions, draft, res.text, capaRef.current, dep);
+        setStatus('done');
+        if (timerSvc && typeof timerSvc.timeout === 'function') timerSvc.timeout(() => setStatus('idle'), 1500);
+        else setTimeout(() => setStatus('idle'), 1500);
+      } catch (e) {
+        setStatus('error');
+        setErrKey('voiceErrNetwork');
       }
-      if (!res.text) { setStatus('error'); setErrKey('voiceErrEmpty'); return; }
-      const dep = {
-        getIsEnhancing: (sid) => (typeof isEnhancing === 'function' ? isEnhancing(sid) : false),
-        subscribeSession: subscribe,
-        getPhase: (sid) => storeFor(sid).phase,
-        getDraft: () => draftRef.current,
-      };
-      // 填入（含双暂存时序防护）；pending 等待期间按钮显示 voicePendingEnhance
-      await insertVoiceText(sessionId, input, inputActions, draft, res.text, capaRef.current, dep);
-      setStatus('done');
-      if (timerSvc && typeof timerSvc.timeout === 'function') timerSvc.timeout(() => setStatus('idle'), 1500);
-      else setTimeout(() => setStatus('idle'), 1500);
-    } catch (e) {
-      setStatus('error');
-      setErrKey('voiceErrNetwork');
-    }
+    };
+    if (delayMs && timerSvc && typeof timerSvc.timeout === 'function') timerSvc.timeout(runTranscribe, delayMs);
+    else if (delayMs) setTimeout(runTranscribe, delayMs);
+    else runTranscribe();
   }
 
   let cls = 'dsh-vi-btn';
@@ -4244,11 +4370,17 @@ function VoiceMicButton(props) {
     title = t('voiceRecord');
   }
   const inner = status === 'recording' && seconds > 0 ? label + ' ' + seconds + 's' : label;
+  // v3.2.9：idle 时 title 附带快捷键提示（如「开始录音（`）」）
+  const hkTipCfg = voiceCfgState.value && voiceCfgState.value.hotkey ? voiceCfgState.value.hotkey : null;
+  const hotkeyTip = status === 'idle' && hkTipCfg && hkTipCfg.enabled && hkTipCfg.combo ? ' (' + voiceHotkeyDisplay(hkTipCfg.combo) + ')' : '';
+  const btnTitle = title + hotkeyTip;
   return React.createElement('button', {
     type: 'button',
     className: cls,
     onClick: click,
-    title,
+    onMouseDown,
+    onMouseUp,
+    title: btnTitle,
     tabIndex: -1,
     'aria-label': t('voiceRecord'),
   },
@@ -4268,6 +4400,8 @@ function VoiceSection(props) {
   const [refineApiKey, setRefineApiKey] = React.useState('');
   const [status, setStatus] = React.useState(null); // {cloud, refine, local} 检测结果
   const [checking, setChecking] = React.useState(false);
+  // v3.2.9：快捷键录制模式（true=正在等待按键；期间暂停 mic 快捷键监听，避免抢走录制按键）
+  const [hotkeyCapture, setHotkeyCapture] = React.useState(false);
   // v3.2.7（模型管理框架）：模型清单 + 下载进度（设置页选择/下载，不默认拉取）
   const [models, setModels] = React.useState([]);
   const [dlProgress, setDlProgress] = React.useState({});
@@ -4312,6 +4446,25 @@ function VoiceSection(props) {
 
   const saveCloud = (patch) => saveVoiceCfg({ asr: { ...v.asr, cloud: { ...v.asr.cloud, ...patch } } });
   const saveRefine = (patch) => saveVoiceCfg({ refine: { ...v.refine, ...patch } });
+  // v3.2.9：快捷键录制——点击输入框进入捕获；keydown 捕获组合并保存（combo 存 e.code）；Esc/失焦取消；
+  // 捕获期间置 window.__voiceHotkeyCapturing 暂停 mic 快捷键监听（capture 阶段会抢走按键）
+  const startHotkeyCapture = () => { if (typeof window !== 'undefined') window.__voiceHotkeyCapturing = true; setHotkeyCapture(true); };
+  const cancelHotkeyCapture = () => { if (typeof window !== 'undefined') window.__voiceHotkeyCapturing = false; setHotkeyCapture(false); };
+  const onHotkeyKeyDown = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (e.key === 'Escape') { cancelHotkeyCapture(); return; }
+    const mods = ['Control', 'Alt', 'Shift', 'Meta'];
+    if (mods.indexOf(e.code) >= 0) return; // 纯修饰键按下：等待主键
+    const parts = [];
+    if (e.ctrlKey) parts.push('Ctrl');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+    if (e.metaKey) parts.push('Meta');
+    parts.push(e.code);
+    saveVoiceCfg({ hotkey: { enabled: true, combo: parts.join('+') } });
+    cancelHotkeyCapture();
+  };
+  const clearHotkey = () => { saveVoiceCfg({ hotkey: { enabled: false, combo: '' } }); };
   // v3.2.8（修正·用户澄清）：规整「跟随模型配置」= 从基座 models/list 选已配置模型（含本地模型），
   // 与增强模块同款选择方式（厂家+模型双下拉），选中存 refine.provider/refine.model
   const [baseProviders, setBaseProviders] = React.useState([]);
@@ -4361,6 +4514,24 @@ function VoiceSection(props) {
       React.createElement('label', { className: 'dsh-plg-label' }, t('voiceVadEnabled')),
       React.createElement('input', { type: 'checkbox', className: 'dsh-plg-check', checked: v.vad.enabled, onChange: (e) => saveVoiceCfg({ vad: { enabled: e.target.checked } }) }),
     ),
+    // v3.2.9：快捷键唤醒——启用开关 + 组合键录制（点输入框按组合键；Esc 取消；清除=禁用）
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('label', { className: 'dsh-plg-label' }, t('voiceHotkeyEnabled')),
+      React.createElement('input', { type: 'checkbox', className: 'dsh-plg-check', checked: v.hotkey.enabled, onChange: (e) => saveVoiceCfg({ hotkey: { ...v.hotkey, enabled: e.target.checked } }) }),
+    ),
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('label', { className: 'dsh-plg-label' }, t('voiceHotkeyCombo')),
+      React.createElement('input', {
+        type: 'text', className: 'dsh-plg-input', readOnly: true,
+        value: hotkeyCapture ? t('voiceHotkeyCapturing') : voiceHotkeyDisplay(v.hotkey.combo),
+        placeholder: t('voiceHotkeyNone'),
+        onFocus: startHotkeyCapture,
+        onKeyDown: onHotkeyKeyDown,
+        onBlur: cancelHotkeyCapture,
+      }),
+      React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: clearHotkey }, t('voiceHotkeyClear')),
+    ),
+    React.createElement('p', { className: 'dsh-plg-note' }, t('voiceHotkeyHint')),
     isCloud ? React.createElement('div', { className: 'dsh-vi-cloud' },
       React.createElement('div', { className: 'dsh-plg-row' },
         React.createElement('label', { className: 'dsh-plg-label' }, t('voiceCloudProtocol')),

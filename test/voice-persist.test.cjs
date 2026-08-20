@@ -132,7 +132,7 @@ test('VOICE-P11 transcribe 错误路径：空配置 ASR_NO_KEY / local 分派 / 
 });
 
 // ---- 6. i18n 平衡 ----
-test('VOICE-P12 i18n voice 键 ZH/EN 平衡（31 键成对）', () => {
+test('VOICE-P12 i18n voice 键 ZH/EN 平衡（37 键成对，v3.2.9 快捷键 +6）', () => {
   const i18n = readFileSync(join(__dirname, '..', 'src', 'client', 'i18n.js'), 'utf8');
   const m = i18n.match(/module\.exports = \"([\s\S]*)\"\s*;?\s*$/);
   const body = m ? m[1] : i18n;
@@ -140,7 +140,7 @@ test('VOICE-P12 i18n voice 键 ZH/EN 平衡（31 键成对）', () => {
   const en = body.split('const EN = {')[1] || '';
   const z = (zh.match(/voice[A-Za-z]+:/g) || []).length;
   const e = (en.match(/voice[A-Za-z]+:/g) || []).length;
-  assert.ok(z >= 31, 'ZH voice 键不足 31（实际 ' + z + '）');
+  assert.ok(z >= 37, 'ZH voice 键不足 37（实际 ' + z + '）');
   assert.equal(z, e, 'ZH/EN voice 键不平衡: ' + z + ' vs ' + e);
 });
 
@@ -270,4 +270,34 @@ test('VOICE-P18 refine chain 模式：基座模型选择（provider/model）+ ll
   assert.equal(s1.refine.configured, true, 'chain+已选模型就绪');
   const s2 = await asr.status({ voice: { asr: { engine: 'cloud' }, refine: { enabled: true } } });
   assert.equal(s2.refine.configured, false, 'chain+未选模型未就绪');
+});
+
+// ---- 8. v3.2.9 快捷键唤醒（hotkey 白名单 + 产物含双触发逻辑）----
+test('VOICE-P19 hotkey 配置白名单 + 产物含快捷键/双触发逻辑', () => {
+  // sanitize：默认启用 Backquote；显式禁用/自定义 combo
+  const d = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' } });
+  assert.equal(d.hotkey.enabled, true, '默认启用');
+  assert.equal(d.hotkey.combo, 'Backquote', '默认 Backquote');
+  const off = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, hotkey: { enabled: false } });
+  assert.equal(off.hotkey.enabled, false, '显式禁用');
+  const custom = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, hotkey: { enabled: true, combo: 'Ctrl+Shift+Backquote' } });
+  assert.equal(custom.hotkey.combo, 'Ctrl+Shift+Backquote', '组合键保留');
+  const bad = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, hotkey: { combo: 123 } });
+  assert.equal(bad.hotkey.combo, 'Backquote', '非法 combo 回退默认');
+  // 产物含快捷键/双触发逻辑
+  const client = readFileSync(join(__dirname, '..', 'plugin-client.js'), 'utf8');
+  assert.ok(client.includes('VOICE_LONG_PRESS_MS'), '产物缺长按阈值常量');
+  assert.ok(client.includes('parseVoiceHotkey'), '产物缺快捷键解析');
+  assert.ok(client.includes('pressStart') && client.includes('pressEnd'), '产物缺按下/松开触发抽象');
+  assert.ok(client.includes('voiceHotkeyCapturing'), '产物缺录制 i18n 引用');
+  // i18n 键平衡（v3.2.9 +6 键 → 37）
+  const i18n = readFileSync(join(__dirname, '..', 'src', 'client', 'i18n.js'), 'utf8');
+  const m = i18n.match(/module\.exports = \"([\s\S]*)\"\s*;?\s*$/);
+  const body = m ? m[1] : i18n;
+  const zh = body.split('const EN = {')[0] || '';
+  const en = body.split('const EN = {')[1] || '';
+  const z = (zh.match(/voice[A-Za-z]+:/g) || []).length;
+  const e = (en.match(/voice[A-Za-z]+:/g) || []).length;
+  assert.ok(z >= 37, 'ZH voice 键不足 37（实际 ' + z + '）');
+  assert.equal(z, e, 'ZH/EN voice 键不平衡: ' + z + ' vs ' + e);
 });
