@@ -180,3 +180,23 @@ test('VOICE-P15 sanitizeVoiceCfg local.language：默认 auto，非法回退 aut
   const bad = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { language: 'xx' } } });
   assert.equal(bad.asr.local.language, 'auto', '非法回退 auto');
 });
+
+// ---- 10. 模型管理框架（2026-08-20：插件精简·框架接口 + 可选下载）----
+test('VOICE-P16 模型清单结构 + installed 判定 + sanitize model id', () => {
+  const am = require('../lib/asr-models.cjs');
+  const list = am.modelList();
+  assert.equal(list.ok, true);
+  assert.ok(Array.isArray(list.models) && list.models.length >= 1, '至少一个模型');
+  const m = list.models[0];
+  assert.equal(typeof m.id, 'string');
+  assert.equal(typeof m.name, 'string');
+  assert.ok(m.sizeMB > 0, 'sizeMB 为正');
+  assert.equal(typeof m.installed, 'boolean');
+  // 未知模型下载拒绝
+  const bad = am.modelDownload('no-such-model');
+  assert.equal(bad.ok, false);
+  assert.equal(bad.code, 'MODEL_UNKNOWN');
+  // sanitize model id（单模型 sense-voice，旧值 sensevoice-q8 兼容映射）
+  const d = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { model: 'sensevoice-q8' } } });
+  assert.equal(d.asr.local.model, 'sense-voice', '旧值兼容映射');
+});

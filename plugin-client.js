@@ -881,6 +881,12 @@ const ZH = {
   voiceStatusLocalModelMissing: '模型未下载',
   voiceStatusLocalWorkerDown: '引擎进程未运行',
   voiceStatusLocalHint: '点「检测状态」查看本地引擎就绪情况',
+  voiceModelListTitle: '本地模型',
+  voiceModelEmpty: '暂无可用模型',
+  voiceModelDownload: '下载模型',
+  voiceModelInstalling: '下载中',
+  voiceModelInstalled: '已安装',
+  voiceModelFailed: '下载失败',
   voiceErrLocalNotReady: '本地引擎未就绪',
   voiceErrLocalFailed: '本地识别失败',
   stageDone: '✓',
@@ -1193,6 +1199,12 @@ const EN = {
   voiceStatusLocalModelMissing: 'Model not downloaded',
   voiceStatusLocalWorkerDown: 'Engine process not running',
   voiceStatusLocalHint: 'Click "Check" to see local engine status',
+  voiceModelListTitle: 'Local models',
+  voiceModelEmpty: 'No models available',
+  voiceModelDownload: 'Download model',
+  voiceModelInstalling: 'Downloading',
+  voiceModelInstalled: 'Installed',
+  voiceModelFailed: 'Download failed',
   voiceErrLocalNotReady: 'Local engine not ready',
   voiceErrLocalFailed: 'Local recognition failed',
   stageDone: '✓',
@@ -3815,7 +3827,7 @@ const VOICE_CFG_KEY = 'dsh.prompt-enhancer.voice';
 const VOICE_CFG_DEFAULTS = {
   asr: {
     engine: 'cloud',
-    local: { model: 'sensevoice-q8', language: 'auto' },
+    local: { model: 'sense-voice', language: 'auto' },
     cloud: { protocol: 'chat', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-asr-flash' },
   },
   refine: { enabled: true, provider: '', model: '', baseUrl: '', maxTokens: 300 },
@@ -3834,7 +3846,8 @@ function mergeVoice(v) {
     asr: {
       engine: a.engine === 'local' ? 'local' : 'cloud',
       local: {
-        model: typeof l.model === 'string' && l.model ? l.model : VOICE_CFG_DEFAULTS.asr.local.model,
+        // 模型 id 白名单（sense-voice 为当前唯一模型；旧值 sensevoice-q8 兼容映射）
+        model: l.model === 'sensevoice-q8' ? 'sense-voice' : (l.model === 'sense-voice' ? 'sense-voice' : VOICE_CFG_DEFAULTS.asr.local.model),
         language: ['auto','zh','en','ja','ko','yue'].indexOf(l.language) >= 0 ? l.language : 'auto',
       },
       cloud: {
@@ -4227,13 +4240,34 @@ function VoiceSection(props) {
   const [apiKeyLoaded, setApiKeyLoaded] = React.useState(false);
   const [status, setStatus] = React.useState(null); // {cloud, refine, local} 检测结果
   const [checking, setChecking] = React.useState(false);
+  // v3.2.7（模型管理框架）：模型清单 + 下载进度（设置页选择/下载，不默认拉取）
+  const [models, setModels] = React.useState([]);
+  const [dlProgress, setDlProgress] = React.useState({});
+  const refreshModels = () => {
+    host.call('voice/modelList', {}).then((r) => { if (r && r.ok && Array.isArray(r.models)) setModels(r.models); }).catch(() => {});
+  };
+  const startModelDownload = (mid) => {
+    host.call('voice/modelDownload', { id: mid }).then((r) => {
+      if (r && r.ok === true) {
+        const timer = setInterval(() => {
+          host.call('voice/modelProgress', { id: mid }).then((p) => {
+            if (p && p.ok) {
+              setDlProgress((prev) => Object.assign({}, prev, { [mid]: p }));
+              if (p.state === 'done' || p.state === 'error') { clearInterval(timer); refreshModels(); }
+            }
+          }).catch(() => clearInterval(timer));
+        }, 2000);
+      }
+    }).catch(() => {});
+  };
 
   React.useEffect(() => subscribeVoiceConfig(() => setVer((v) => v + 1)), []);
   // 启动磁盘同步 + apiKey 回显（仅内存）
   React.useEffect(() => {
     syncVoiceFromHost();
     fetchVoiceApiKey().then((k) => { setApiKey(k); setApiKeyLoaded(true); });
-    check(); // P2 收尾：挂载即检测一次（local 分支显示实时状态，非 P1 静态占位）
+    check();
+    refreshModels(); // P2 收尾：挂载即检测一次（local 分支显示实时状态，非 P1 静态占位）
   }, []);
 
   const v = voiceCfgState.value;
@@ -4317,9 +4351,23 @@ function VoiceSection(props) {
       ),
       React.createElement('p', { className: 'dsh-plg-note' }, t('voiceCloudHint')),
     ) : React.createElement('div', { className: 'dsh-vi-cloud' },
-      React.createElement('div', { className: 'dsh-plg-row' },
-        React.createElement('label', { className: 'dsh-plg-label' }, t('voiceLocalModelLabel')),
-        React.createElement('span', { className: 'dsh-plg-input-static' }, v.asr.local.model),
+      React.createElement('div', { className: 'dsh-plg-col' },
+        React.createElement('div', { className: 'dsh-plg-row' },
+          React.createElement('label', { className: 'dsh-plg-label' }, t('voiceModelListTitle')),
+        ),
+        models.length === 0 ? React.createElement('p', { className: 'dsh-plg-note' }, t('voiceModelEmpty')) : null,
+        models.map((m) => {
+          const dl = dlProgress[m.id];
+          const installing = dl && dl.state === 'downloading';
+          const failed = dl && dl.state === 'error';
+          return React.createElement('div', { key: m.id, className: 'dsh-plg-row' },
+            React.createElement('span', { className: 'dsh-plg-input-static' }, m.name + ' (' + m.sizeMB + 'MB)'),
+            m.installed ? React.createElement('span', { className: 'dsh-plg-status' }, '\u2713 ' + t('voiceModelInstalled'))
+              : installing ? React.createElement('span', { className: 'dsh-plg-status' }, t('voiceModelInstalling') + ' ' + dl.pct + '%')
+              : React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: () => startModelDownload(m.id) }, t('voiceModelDownload')),
+            failed ? React.createElement('span', { className: 'dsh-plg-error' }, t('voiceModelFailed')) : null,
+          );
+        }),
       ),
       React.createElement('div', { className: 'dsh-plg-row' },
         React.createElement('label', { className: 'dsh-plg-label' }, t('voiceLocalLanguage')),

@@ -50,6 +50,24 @@ const schemas = {
       return !!args.config && typeof args.config === 'object' && !Array.isArray(args.config);
     },
   },
+  'voice/modelList': {
+    required: [],
+    validate() {
+      return true;
+    },
+  },
+  'voice/modelDownload': {
+    required: ['id'],
+    validate(args) {
+      return typeof args.id === 'string' && args.id.length > 0;
+    },
+  },
+  'voice/modelProgress': {
+    required: ['id'],
+    validate(args) {
+      return typeof args.id === 'string' && args.id.length > 0;
+    },
+  },
   'voice/status': {
     required: [],
     validate() {
