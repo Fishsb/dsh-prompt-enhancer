@@ -887,6 +887,10 @@ const ZH = {
   voiceModelInstalling: '下载中',
   voiceModelInstalled: '已安装',
   voiceModelFailed: '下载失败',
+  voiceModelUse: '设为当前',
+  voiceModelCurrent: '当前',
+  voiceModelCustom: '自定义',
+  voiceModelOpenDir: '打开模型文件夹',
   voiceErrLocalNotReady: '本地引擎未就绪',
   voiceErrLocalFailed: '本地识别失败',
   stageDone: '✓',
@@ -1205,6 +1209,10 @@ const EN = {
   voiceModelInstalling: 'Downloading',
   voiceModelInstalled: 'Installed',
   voiceModelFailed: 'Download failed',
+  voiceModelUse: 'Use',
+  voiceModelCurrent: 'Current',
+  voiceModelCustom: 'Custom',
+  voiceModelOpenDir: 'Open model folder',
   voiceErrLocalNotReady: 'Local engine not ready',
   voiceErrLocalFailed: 'Local recognition failed',
   stageDone: '✓',
@@ -4260,6 +4268,11 @@ function VoiceSection(props) {
       }
     }).catch(() => {});
   };
+  // 切换当前模型：保存配置 + host 重启 worker 加载该模型
+  const selectModel = (mid) => {
+    saveVoiceCfg({ asr: { ...v.asr, local: { ...v.asr.local, model: mid } } });
+    host.call('voice/modelApply', { id: mid }).catch(() => {});
+  };
 
   React.useEffect(() => subscribeVoiceConfig(() => setVer((v) => v + 1)), []);
   // 启动磁盘同步 + apiKey 回显（仅内存）
@@ -4361,13 +4374,16 @@ function VoiceSection(props) {
           const installing = dl && dl.state === 'downloading';
           const failed = dl && dl.state === 'error';
           return React.createElement('div', { key: m.id, className: 'dsh-plg-row' },
-            React.createElement('span', { className: 'dsh-plg-input-static' }, m.name + ' (' + m.sizeMB + 'MB)'),
-            m.installed ? React.createElement('span', { className: 'dsh-plg-status' }, '\u2713 ' + t('voiceModelInstalled'))
+            React.createElement('span', { className: 'dsh-plg-input-static' }, (m.custom ? '[' + t('voiceModelCustom') + '] ' : '') + m.name + (m.sizeMB ? ' (' + m.sizeMB + 'MB)' : '')),
+            m.installed ? React.createElement('span', { className: 'dsh-plg-status' }, '\u2713 ' + t('voiceModelInstalled') + (v.asr.local.model === m.id ? ' \u00b7 ' + t('voiceModelCurrent') : ''), v.asr.local.model !== m.id ? React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: () => selectModel(m.id) }, t('voiceModelUse')) : null)
               : installing ? React.createElement('span', { className: 'dsh-plg-status' }, t('voiceModelInstalling') + ' ' + dl.pct + '%')
               : React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: () => startModelDownload(m.id) }, t('voiceModelDownload')),
             failed ? React.createElement('span', { className: 'dsh-plg-error' }, t('voiceModelFailed')) : null,
           );
         }),
+        React.createElement('div', { className: 'dsh-plg-row' },
+          React.createElement('button', { type: 'button', className: 'dsh-plg-btn', onClick: () => host.call('voice/modelOpenDir', {}).catch(() => {}) }, t('voiceModelOpenDir')),
+        ),
       ),
       React.createElement('div', { className: 'dsh-plg-row' },
         React.createElement('label', { className: 'dsh-plg-label' }, t('voiceLocalLanguage')),

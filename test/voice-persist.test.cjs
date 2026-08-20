@@ -200,3 +200,31 @@ test('VOICE-P16 模型清单结构 + installed 判定 + sanitize model id', () =
   const d = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { model: 'sensevoice-q8' } } });
   assert.equal(d.asr.local.model, 'sense-voice', '旧值兼容映射');
 });
+
+// ---- 11. 模型管理 v2（多模型市场/自定义扫描/切换，2026-08-20）----
+test('VOICE-P17 模型市场多条目 + 自定义扫描 + modelApply 校验', () => {
+  const am = require('../lib/asr-models.cjs');
+  const list = am.modelList();
+  assert.ok(list.models.length >= 2, '内置至少 2 个下载配置');
+  const ids = list.models.map((m) => m.id);
+  assert.ok(ids.includes('sense-voice') && ids.includes('paraformer-zh'), '内置含 SenseVoice + Paraformer');
+  const sense = list.models.find((m) => m.id === 'sense-voice');
+  assert.equal(sense.type, 'sense-voice');
+  const para = list.models.find((m) => m.id === 'paraformer-zh');
+  assert.equal(para.type, 'paraformer', 'paraformer 带类型（worker 按类型加载）');
+  // 自定义扫描：非内置目录 + onnx + tokens → custom 列出（本机 models/ 可能无自定义目录，但结构须正确）
+  for (const m of list.models) {
+    assert.equal(typeof m.installed, 'boolean');
+    assert.equal(typeof m.custom, 'boolean');
+  }
+  // modelApply：未安装拒绝 / 已安装 ok
+  const paraInstalled = para.installed;
+  if (!paraInstalled) {
+    const bad = am.modelApply('paraformer-zh');
+    assert.equal(bad.code, 'MODEL_NOT_INSTALLED', '未安装模型切换应拒绝');
+  }
+  const ok = am.modelApply('sense-voice');
+  assert.equal(ok.ok, true);
+  assert.equal(ok.model, 'sense-voice');
+  assert.equal(ok.type, 'sense-voice');
+});
