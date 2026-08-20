@@ -136,3 +136,29 @@ test('VOICE-P12 i18n voice 键 ZH/EN 平衡（31 键成对）', () => {
   assert.ok(z >= 31, 'ZH voice 键不足 31（实际 ' + z + '）');
   assert.equal(z, e, 'ZH/EN voice 键不平衡: ' + z + ' vs ' + e);
 });
+
+// ---- 7. 整配置结构回归（2026-08-20 实测修复：handler 传整配置致 engine 恒回退 cloud）----
+test('VOICE-P13 整配置结构调用（handler 真实形态）engine=local 生效', async () => {
+  // host handler 传入的是整个 dsh-prompt-enhancer.config.json（顶层键含 voice），非 voice 段
+  const whole = {
+    version: '3.2.4',
+    fallback: [],
+    params: {},
+    voice: {
+      asr: { engine: 'local', cloud: { protocol: 'chat', baseUrl: 'b', apiKey: 'k', model: 'm' } },
+      refine: { enabled: true, baseUrl: 'r', apiKey: 'k', model: 'm' },
+    },
+  };
+  const s = await asr.status(whole);
+  assert.equal(s.asr.engine, 'local', '整配置输入应读出 engine=local（此前恒 cloud）');
+  assert.ok(s.asr.local && typeof s.asr.local.workerUp === 'boolean', 'local 探测结构完整');
+  // 关键回归：engine=local 时 transcribe 必须走 local 分支（ASR_LOCAL_*），绝不能 ASR_NO_KEY
+  const t = await asr.transcribe(whole, 'data:audio/wav;base64,AAAA');
+  assert.equal(t.ok, false);
+  assert.ok(String(t.code).startsWith('ASR_LOCAL_'), '整配置 + local 应走本地分支，实际 ' + t.code);
+  // cloud 整配置：三元组完整（configured）→ 真实请求 baseUrl='b' 无效 → 云端分支网络错误（而非 local 分支）
+  const wholeCloud = JSON.parse(JSON.stringify(whole));
+  wholeCloud.voice.asr.engine = 'cloud';
+  const tc = await asr.transcribe(wholeCloud, 'data:audio/wav;base64,AAAA');
+  assert.equal(tc.code, 'ASR_NETWORK', 'cloud 整配置应走云端分支（bad url → NETWORK），实际 ' + tc.code);
+});
