@@ -26,7 +26,7 @@ dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.2.4
 
 > 需本机已装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 且 `pnpm` 在 PATH 中。
 >
-> **客户端兼容性（语音输入）**：🎤 语音输入依赖客户端注入 `inputActions.setDraft`（`dsh.client` 契约的一部分）——官方 web client 已满足；第三方客户端若实现同一契约即可加载，能力集不同时语音输入自动**降级**（无插入能力 → 识别结果追加到草稿末尾；完全不注入 → 🎤 禁用并提示）。本地离线引擎（P2）另需部署 `dsh-prompt-enhancer-asr` worker（模型 228MB），见 [docs/map/flow/voice-input.md](docs/map/flow/voice-input.md)。
+> **客户端兼容性（语音输入）**：🎤 语音输入依赖客户端注入 `inputActions.setDraft`（`dsh.client` 契约的一部分）——官方 web client 已满足；第三方客户端若实现同一契约即可加载，能力集不同时语音输入自动**降级**（无插入能力 → 识别结果追加到草稿末尾；完全不注入 → 🎤 禁用并提示）。**本地离线引擎为「框架 + 可选下载」模式**：插件安装**不携带/不默认下载模型**（发布物精简）；设置 → 模型配置 → 🎙 语音识别 → 引擎选「本地」→ 「本地模型」区点 **下载模型**（SenseVoice 228MB，带进度显示），下载完成自动生效。详见 [docs/map/flow/voice-input.md](docs/map/flow/voice-input.md)。
 
 更新 / 卸载：
 
