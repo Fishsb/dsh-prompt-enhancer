@@ -4303,7 +4303,8 @@ function VoiceSection(props) {
     host.call('config/get', {}).then((r) => { const k = r && r.ok && r.config && r.config.voice && r.config.voice.refine ? r.config.voice.refine.apiKey : ''; if (typeof k === 'string') setRefineApiKey(k); }).catch(() => {});
     check();
     refreshModels();
-    refreshBaseProviders(); // P2 收尾：挂载即检测一次（local 分支显示实时状态，非 P1 静态占位）
+    refreshBaseProviders();
+    check(); // P2 收尾：挂载即检测一次（local 分支显示实时状态，非 P1 静态占位）
   }, []);
 
   const v = voiceCfgState.value;
