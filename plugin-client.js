@@ -605,6 +605,8 @@ const ZH = {
   errLLM_FAILED: '优化请求异常，请重试',
   errNETWORK: '优化请求失败（网络错误）',
   errUNKNOWN: '优化失败',
+  errAllModels: '所有模型连接失败，请检查模型配置',
+  errModelUnreachable: '模型连接失败（网络或配置错误）',
   pluginsEmpty: '还没有定义任何插件',
   // 2026-08-18（用户需求）：插件管理板块项目地址跳转链接（版本检测与更新下方）
   cfgProjectLink: '项目地址：GitHub · Fishsb/dsh-prompt-enhancer ↗',
@@ -789,7 +791,7 @@ const ZH = {
   // F3（配置卫生）：新版本配置保护
   cfgNewerVersion: '当前配置由更新版本的插件创建，本版本暂以默认配置运行；你的配置未被改动',
   // F8（配置卫生）：恢复默认语义
-  cfgRestoreNote: '「恢复默认」重置模型链为官方模型配置，不清除自定义模板、优化参数与记忆设置',
+  cfgRestoreNote: '「恢复默认」将模型链重置为官方默认模型（自定义模型会被替换），自定义模板、优化参数与记忆设置保留',
   // v2.2（§0.2/§6.6）：模式体系文案（MODE_OPTIONS hint 由 cfgModeHint 提供）
   cfgMode: '优化模式',
   cfgMemory: '记忆功能',
@@ -921,6 +923,8 @@ const EN = {
   errLLM_FAILED: 'Optimize failed, please retry',
   errNETWORK: 'Network error',
   errUNKNOWN: 'Optimize failed',
+  errAllModels: 'All models failed to connect; check model config',
+  errModelUnreachable: 'Model connection failed (network or config)',
   pluginsEmpty: 'No plugins defined yet',
   // 2026-08-18（用户需求）：插件管理板块项目地址跳转链接（版本检测与更新下方）
   cfgProjectLink: 'Project: GitHub · Fishsb/dsh-prompt-enhancer ↗',
@@ -1100,7 +1104,7 @@ const EN = {
   // F3 (config hygiene): newer-version config protection
   cfgNewerVersion: 'This configuration was created by a newer plugin version; running with defaults for now — your stored configuration is untouched',
   // F8 (config hygiene): restore-defaults semantics
-  cfgRestoreNote: '"Restore defaults" resets the model chain to the official model config; custom templates, parameters and memory settings are kept',
+  cfgRestoreNote: '"Restore defaults" resets the model chain to the official default models (custom models are replaced); custom templates, optimization parameters and memory settings are kept',
   // v2.0.0（C3）：上下文配置文案
   cfgMode: 'Mode',
   cfgMemory: 'Memory',
@@ -1219,6 +1223,8 @@ function errorKey(code) {
     ABORTED: 'errABORTED',
     LLM_FAILED: 'errLLM_FAILED',
     NETWORK: 'errNETWORK',
+    ALL_MODELS_UNAVAILABLE: 'errAllModels',
+    STREAM_THROW: 'errModelUnreachable',
   };
   return map[code] || 'errUNKNOWN';
 }
@@ -3037,7 +3043,7 @@ function ModelMainSection(props) {
     const next = fallback.slice();
     const pick = candidates.find((c) => !next.some((x) => x.provider === c.provider && x.model === c.model));
     if (!pick) return;
-    next.push({ provider: pick.provider, model: pick.model });
+    next.unshift({ provider: pick.provider, model: pick.model }); // 默认添加到第一个位置（用户需求 2026-08-20）
     saveFallback(next);
   };
   const updateEntry = (index, entry) => {
