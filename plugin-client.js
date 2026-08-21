@@ -4215,6 +4215,24 @@ function voiceHotkeyDisplay(combo) {
   const key = last === 'Backquote' ? '`' : last;
   return parts.length > 1 ? parts.slice(0, -1).concat(key).join('+') : key;
 }
+function renderVoiceVisual(status, seconds) {
+  if (status === 'recognizing' || status === 'pending') {
+    return React.createElement('span', { className: 'dsh-vi-spin' });
+  }
+  if (status === 'recording') {
+    const bars = [];
+    for (let i = 0; i < 6; i++) bars.push(React.createElement('span', { className: 'dsh-vi-wave-bar', key: i }));
+    const labelEl = seconds > 0 ? React.createElement('span', { className: 'dsh-vi-label' }, seconds + 's') : null;
+    return React.createElement('span', { className: 'dsh-vi-wave' }, bars, labelEl);
+  }
+  if (status === 'idle' || status === 'done') {
+    const bars = [];
+    for (let i = 0; i < 6; i++) bars.push(React.createElement('span', { className: 'dsh-vi-wave-bar', key: i }));
+    return React.createElement('span', { className: 'dsh-vi-wave' }, bars);
+  }
+  return React.createElement('span', { className: 'dsh-vi-label' }, '🎤');
+}
+
 function VoiceMicButton(props) {
   const t = makeT(props);
   const sessionId = props.session && props.session.sessionId;
@@ -4422,7 +4440,6 @@ function VoiceMicButton(props) {
     label = '🎤';
     title = t('voiceRecord');
   }
-  const inner = status === 'recording' && seconds > 0 ? label + ' ' + seconds + 's' : label;
   // v3.2.9：idle 时 title 附带快捷键提示（如「开始录音（`）」）
   const hkTipCfg = voiceCfgState.value && voiceCfgState.value.hotkey ? voiceCfgState.value.hotkey : null;
   const hotkeyTip = status === 'idle' && hkTipCfg && hkTipCfg.enabled && hkTipCfg.combo ? ' (' + voiceHotkeyDisplay(hkTipCfg.combo) + ')' : '';
@@ -4437,7 +4454,7 @@ function VoiceMicButton(props) {
     tabIndex: -1,
     'aria-label': t('voiceRecord'),
   },
-    React.createElement('span', { className: 'dsh-vi-label' }, inner),
+    renderVoiceVisual(status, seconds),
     status === 'error' ? React.createElement('span', { className: 'dsh-vi-err-msg' }, t(errKey || 'voiceErrNetwork')) : null,
   );
 }
@@ -4969,6 +4986,25 @@ const CSS = [
   ,'.dsh-vi-err-msg{font-size:11px;margin-left:4px}'
   ,'.dsh-vi-section{display:flex;flex-direction:column;gap:6px}'
   ,'.dsh-vi-cloud{display:flex;flex-direction:column;gap:8px}'
+  ,'.dsh-vi-wave{display:inline-flex;align-items:flex-end;gap:1.5px;height:14px}','
+  ,'.dsh-vi-wave-bar{width:2px;background:currentColor;border-radius:1px;opacity:.6;transform-origin:50% 100%}','
+  ,'.dsh-vi-wave-bar:nth-child(1){height:5px}','
+  ,'.dsh-vi-wave-bar:nth-child(2){height:9px}','
+  ,'.dsh-vi-wave-bar:nth-child(3){height:12px}','
+  ,'.dsh-vi-wave-bar:nth-child(4){height:7px}','
+  ,'.dsh-vi-wave-bar:nth-child(5){height:11px}','
+  ,'.dsh-vi-wave-bar:nth-child(6){height:6px}','
+  ,'.dsh-vi-btn.dsh-vi-rec .dsh-vi-wave-bar{animation:dsh-vi-wave 1s ease-in-out infinite}','
+  ,'.dsh-vi-btn.dsh-vi-rec .dsh-vi-wave-bar:nth-child(1){animation-delay:0s}','
+  ,'.dsh-vi-btn.dsh-vi-rec .dsh-vi-wave-bar:nth-child(2){animation-delay:.1s}','
+  ,'.dsh-vi-btn.dsh-vi-rec .dsh-vi-wave-bar:nth-child(3){animation-delay:.2s}','
+  ,'.dsh-vi-btn.dsh-vi-rec .dsh-vi-wave-bar:nth-child(4){animation-delay:.3s}','
+  ,'.dsh-vi-btn.dsh-vi-rec .dsh-vi-wave-bar:nth-child(5){animation-delay:.4s}','
+  ,'.dsh-vi-btn.dsh-vi-rec .dsh-vi-wave-bar:nth-child(6){animation-delay:.5s}','
+  ,'@keyframes dsh-vi-wave{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1.2)}}','
+  ,'.dsh-vi-spin{width:12px;height:12px;border-radius:50%;border:2px solid currentColor;border-top-color:transparent;display:inline-block;animation:dsh-vi-spin .8s linear infinite}','
+  ,'@keyframes dsh-vi-spin{to{transform:rotate(360deg)}}','
+  ,'@media (prefers-reduced-motion: reduce){.dsh-vi-btn.dsh-vi-rec .dsh-vi-wave-bar,.dsh-vi-spin{animation:none}}','
   ,'.dsh-vi-privacy{color:rgba(128,128,128,.8);font-size:11px;margin:0}'
 ].join('\n');
 
