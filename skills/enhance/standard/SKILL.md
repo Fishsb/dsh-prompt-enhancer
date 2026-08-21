@@ -8,6 +8,8 @@ templates:
 retrieve:
   kind: rounds
   windows: [[1, 2], [3, 5], [6, 10]]
+sources: ["session"]
+rules: [{"rule": "reference-guide", "when": "参考块/记忆命中"}]
 ---
 
 # 标准模式（standard）

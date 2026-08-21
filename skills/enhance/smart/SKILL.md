@@ -8,6 +8,8 @@ templates:
 retrieve:
   kind: rounds
   windows: [[1, 1], [2, 3]]
+sources: ["session", "workspace"]
+rules: [{"rule": "reference-guide", "when": "参考块/记忆命中"}, {"rule": "smart-tail", "when": "smart+开发意向+代码阶段"}]
 ---
 
 # 开发向模式（smart）

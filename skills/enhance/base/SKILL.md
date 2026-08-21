@@ -8,6 +8,8 @@ templates:
 retrieve:
   kind: none
   windows: []
+sources: []
+rules: [{"rule": "reference-guide", "when": "参考块/记忆命中"}]
 ---
 
 # 基础模式（base）

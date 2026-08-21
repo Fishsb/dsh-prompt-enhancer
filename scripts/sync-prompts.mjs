@@ -42,6 +42,8 @@ const NAME_MAP = {
   'publish/system.md': 'SYSTEM_PUBLISH_PROMPT',
   'publish/increment.md': 'SYSTEM_INCREMENT_PUBLISH_PROMPT',
   'retrieval/relevance.md': 'RELEVANCE_PROMPT',
+  // v3.2.24（规则落点 L2）：参考使用规则独立技能文件——retrieve 命中参考块才条件注入（原在 discipline 内无条件）
+  'retrieval/reference-guide.md': 'REFERENCE_GUIDE',
   'retrieval/intent.md': 'DEV_INTENT_PROMPT',
   'retrieval/doc-analysis.md': 'DOC_ANALYSIS_PROMPT',
   'retrieval/websearch.md': 'WEBSEARCH_PLAN_PROMPT',
@@ -121,7 +123,10 @@ function buildSkillManifest() {
     lines.push('  ' + JSON.stringify(mode) + ': { name: ' + JSON.stringify(fm.name || 'enhance-' + mode) +
       ', mode: ' + JSON.stringify(mode) +
       ', templates: { t1: ' + t1 + ', t2: ' + t2 + ' }' +
-      ', retrieve: ' + JSON.stringify(fm.retrieve || { kind: 'none', windows: [] }) + ' },');
+      ', retrieve: ' + JSON.stringify(fm.retrieve || { kind: 'none', windows: [] }) +
+      // v3.2.24（规则落点 L2/L3）：可选参考源 + 场景触发规则声明（模型按需引入）
+      ', sources: ' + JSON.stringify(fm.sources || []) +
+      ', rules: ' + JSON.stringify(fm.rules || []) + ' },');
   }
   lines.push('};');
   const budgets = (pkg.retrieve && Array.isArray(pkg.retrieve.budgets)) ? pkg.retrieve.budgets : [];

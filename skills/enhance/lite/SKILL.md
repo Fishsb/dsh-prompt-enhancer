@@ -8,6 +8,8 @@ templates:
 retrieve:
   kind: rounds
   windows: [[1, 1]]
+sources: ["session"]
+rules: [{"rule": "reference-guide", "when": "参考块/记忆命中"}]
 ---
 
 # 轻量模式（lite）

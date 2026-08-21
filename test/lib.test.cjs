@@ -946,7 +946,11 @@ test('U39 SYSTEM_PROMPT 语义保真契约（v2.4.5）', () => {
   assert.ok(!systemText.includes('优化后的提示词不超过 800 字符'), '长度约束应改为服从语义保真');
   // 长度新表述与主体语言规则
   assert.ok(systemText.includes('长度服从语义保真'), '应含「长度服从语义保真」');
-  assert.ok(systemText.includes('输入以中文为主体则输出必须为中文'), '语言规则应为「主体语言」');
+  // v3.2.24（规则落点 L0）：语言规则已从模板去重归入纪律层——改查 DISCIPLINE_PROMPT
+  const dm = src.match(/const DISCIPLINE_PROMPT = \[([\s\S]*?)\n\];/);
+  assert.ok(dm, 'DISCIPLINE_PROMPT array not found');
+  const discText = new Function('return [' + dm[1] + '].join(String.fromCharCode(10));')();
+  assert.ok(discText.includes('主体语言跟随输入'), 'L0 纪律应含「主体语言」语言规则（v3.2.24 落点优化）');
 });
 
 // v2.4.6（提示词外置）：prompts/*.md 为事实源，plugin-host.js 生成区由
@@ -1012,10 +1016,10 @@ test('U40b 参考吸收规则存在于全部参考相关 prompt（2026-08-17）'
   const { readFileSync } = require('node:fs');
   const { join } = require('node:path');
   const readPrompt = (file) => readFileSync(join(__dirname, '..', 'skills', 'enhance', file), 'utf8');
-  // v3.2.20（防回显护栏并入纪律模板）：context-guard.md 已删，参考规则在 discipline.md
-  const guard = readPrompt('discipline.md');
-  assert.ok(guard.includes('吸收进优化后的提示词'), 'discipline 应要求吸收参考明确需求（原 context-guard 并入）');
-  assert.ok(guard.includes('禁止逐字复述'), 'discipline 应禁止逐字复述参考');
+  // v3.2.24（规则落点 L2）：参考规则独立技能文件 reference-guide.md（retrieve 命中才条件注入）
+  const guard = readPrompt('retrieval/reference-guide.md');
+  assert.ok(guard.includes('吸收进优化后的提示词'), 'reference-guide 应要求吸收参考明确需求（L2 条件注入）');
+  assert.ok(guard.includes('禁止逐字复述'), 'reference-guide 应禁止逐字复述参考');
   for (const f of ['base/system.md', 'base/increment.md', 'lite/increment.md', 'standard/increment.md', 'smart/increment.md']) {
     const text = readPrompt(f);
     assert.ok(text.includes('参考'), f + ' 应包含参考使用规则');
@@ -1027,7 +1031,7 @@ test('U40b 参考吸收规则存在于全部参考相关 prompt（2026-08-17）'
   const pubInc = readPrompt('publish/increment.md');
   assert.ok(pubInc.includes('参考'), 'publish/increment.md 应包含参考使用规则');
   assert.ok(pubInc.includes('吸收进对应章节'), 'publish/increment.md 应包含吸收参考需求');
-  assert.ok(src.includes('吸收进优化后的提示词'), 'plugin-host.js 纪律模板应含参考吸收规则（原 CONTEXT_GUARD 并入，v3.2.20）');
+  assert.ok(src.includes('吸收进优化后的提示词'), 'plugin-host.js 应含参考吸收规则（REFERENCE_GUIDE 生成区，v3.2.24）');
 });
 
 // v3.1.8（用户指令·每模式默认模板按场景定制）：模式专属默认模板契约——

@@ -8,6 +8,8 @@ templates:
 retrieve:
   kind: v2
   windows: []
+sources: ["web"]
+rules: [{"rule": "reference-guide", "when": "参考块/记忆命中"}, {"rule": "scenario-judge", "when": "publish+场景判定非通用"}]
 ---
 
 # 一键发布模式（publish）
