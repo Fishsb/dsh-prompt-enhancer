@@ -2250,7 +2250,8 @@ function UpdaterCard(props) {
             if (en && en.ok === true) {
               // v3.2（动态端口 fallback）：重发 restart 用 executorEnsure 返回的真实端口
               const ap = (en.port && en.port > 0) ? en.port : port;
-              return executor.call('restart', { serviceName, profile, tag: installTag, port: ap }, ap);
+              // v3.3.x（桌面安全·重试链换 RPC）：旧实现重发 executor 'restart'（读共享进程索引 + 健康检查兜底固定 3080、无桌面守卫，Desktop 下会杀错进程/死等 3080）——改走 host update/portRestart（v3.2.1 独立化 + v3.3.x 桌面适配：kind 校验索引 + 杀前身份校验 + profile 强制，web/desktop 双安全，语义更准：staged 安装+重启正是 portRestart 职责）。
+              return host.call('update/portRestart', { serviceName, profile });
             }
             return Promise.resolve(null);
           }).then((rr) => {

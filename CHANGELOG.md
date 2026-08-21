@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Fixed
+- **端口重启双实例隔离三连修（web+Desktop 共享 DSH_HOME）**：① 进程索引写入加 `kind`（web/desktop），`update/portRestart` 读取时 kind 与当前运行时不一致即整体不信任、回退当前进程事实值（pid/execPath/argv 第一手真相）——根治两实例互相覆盖索引导致的误杀对方进程/拉错应用；② staging 安装 profile 在 Desktop 下**无条件强制** `'desktop'`——旧三元优先信任 client 恒传的默认 `'web'`（client 无桌面检测），Desktop「一键更新→端口重启」装进 web profile、重启后版本不变；③ 生成的重启脚本 Desktop 分支杀前 tasklist 镜像名校验（非 DSH Desktop.exe 即中止防误杀）+ CLI 快捷方式脚本优先 kind 校验过的索引 pid 并校验存活镜像（防 tasklist 首个匹配命中 GPU/renderer 子进程）。— [PEN-002]
+- **portRestart TDZ ReferenceError 修复**：argv 兜底分支在 `const isDesktop` 声明前引用——桌面端索引 argv 缺失时整个 RPC 抛 `Cannot access 'isDesktop' before initialization`；声明提前至索引读取前。索引缺失同时不再硬失败（原 NO_INDEX → 现回退当前进程参数继续执行）。— [PEN-002]
+- **一键更新重试链桌面安全化**：apply 轮询中执行器连续失联的重试动作，由 executor `restart`（读共享进程索引 + 健康检查兜底固定 3080、无桌面守卫的后门路径）改为 host `update/portRestart` RPC——复用桌面适配全链路（kind 校验 + 身份校验 + profile 强制），语义更准（staged 安装+重启本就是 portRestart 职责）。— [PEN-002]
+
+### Changed
+- **sync-runtime 多 profile 部署**：默认部署到**所有**安装了本插件的 profile（原单 profile：web 优先、否则 readdir 第一个——双 profile 开发机另一侧永远跑旧代码）；DSH_RUNTIME_DIR 仍可限定单目标。— [PEN-002]
+
 ### Changed
 - **一键更新供应链加固（哈希强校验）**：executor 下载 tgz 后强制过哈希门禁——期望 sha256 取自 GitHub Releases API 资产 digest（主通道，api.github.com TLS 不经镜像）或直连 `.sha256` 发布资产（备用）；哈希失配拒绝安装（`STAGE_HASH_MISMATCH`），镜像下载且无可信哈希拒绝（`STAGE_HASH_UNVERIFIED`，fail closed），直连无哈希放行（TLS 可信）。校验通过后在 staging 旁挂 `.sha256`，端口重启安装前二次复验（防下载与安装窗口内被替换）。release.mjs 发布时同步上传 `.sha256` 资产。— [PEN-002]
 

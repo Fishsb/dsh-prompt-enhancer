@@ -119,9 +119,17 @@ sh('git', ['push', 'https://' + TOKEN + '@github.com/' + REPO + '.git', tag]);
 
 // ---- 6. GitHub Release + 资产 ----
 console.log('== GitHub Release ==');
+// 正文优先取 release-notes/<版本>.md（UTF-8 直传）；缺失时回退通用文案。
+// 不要发布后用命令行手工改正文——非 UTF-8 通道会把中文转成 ? 乱码（v3.3.1 教训），
+// 需要修正时用 scripts/sync-release-notes.mjs 重同步。
+const notesFile = join(root, 'release-notes', next + '.md');
+const notesBody = existsSync(notesFile)
+  ? readFileSync(notesFile, 'utf8')
+  : '自动发布 v' + next + '（build --check 校验 + 全量测试通过）。详见 CHANGELOG.md。';
+console.log(existsSync(notesFile) ? '正文: release-notes/' + next + '.md' : '正文: 通用文案（未找到 release-notes/' + next + '.md）');
 const rel = await http('https://api.github.com/repos/' + REPO + '/releases', {
   method: 'POST',
-  body: { tag_name: tag, name: tag, body: '自动发布 v' + next + '（build --check 校验 + 全量测试通过）。详见 CHANGELOG.md。', draft: false, prerelease: false },
+  body: { tag_name: tag, name: tag, body: notesBody, draft: false, prerelease: false },
 });
 if (rel.status >= 300) { console.error('Release 创建失败: ' + rel.status + ' ' + rel.body.slice(0, 300)); process.exit(1); }
 const release = JSON.parse(rel.body);
