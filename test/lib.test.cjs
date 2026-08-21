@@ -1050,7 +1050,7 @@ test('U39b 模式专属默认模板契约（v3.1.8）', () => {
   const smart = extractConst('SYSTEM_SMART_PROMPT');
   const sys = extractConst('SYSTEM_PROMPT');
   // ① 生成区与 md 同步（U40 机制已覆盖；此处抽查专属段存在）
-  assert.ok(lite.includes('上轮参考处理'), 'lite 模板应含【上轮参考处理】专属段');
+  assert.ok(lite.includes('参考处理（本模式核心）') && lite.includes('任务背景参考（上一轮相关会话）') && lite.includes('优化历史参考（记忆链）'), 'lite 模板应含【参考处理】专属段（v3.2.28 参考分层）');
   assert.ok(standard.includes('多轮脉络处理'), 'standard 模板应含【多轮脉络处理】专属段');
   assert.ok(smart.includes('项目事实优先'), 'smart 模板应含【项目事实优先】专属段');
   // ② 全部模板含语义重构方法（五步法，论文支撑：VisualPrompter 原子拆解 / RiOT 保留防漂移 /
@@ -1075,15 +1075,15 @@ test('U39b 模式专属默认模板契约（v3.1.8）', () => {
   assert.ok(src.includes('smart: [SYSTEM_SMART_PROMPT, SYSTEM_INCREMENT_SMART_PROMPT]'), 'BUILTIN_TEMPLATES smart 应指向 SYSTEM_SMART_PROMPT + 专属增量');
   assert.ok(src.includes('publish: [SYSTEM_PUBLISH_PROMPT, SYSTEM_INCREMENT_PUBLISH_PROMPT]'), 'BUILTIN_TEMPLATES publish 应指向 SYSTEM_PUBLISH_PROMPT + 专属增量');
   // ⑤ 五步法强化按模式差异化（用户指令：每模式方向/场景不同 → 强化调整不同）
-  assert.ok(lite.includes('上轮已确认决策'), 'lite 五步法应含「上轮已确认决策」强化（延续场景）');
-  assert.ok(lite.includes('上轮延续强化'), 'lite 五步法标题应标注上轮延续强化');
+  assert.ok(lite.includes('参考中已确认的决策'), 'lite 五步法应含「参考中已确认决策」强化（v3.2.28 参考分层）');
+  assert.ok(lite.includes('参考延续强化'), 'lite 五步法标题应标注参考延续强化（v3.2.28）');
   assert.ok(standard.includes('禁入集合'), 'standard 五步法应含「禁入集合」（多轮脉络：识别已否决方向）');
   assert.ok(standard.includes('多轮脉络强化'), 'standard 五步法标题应标注多轮脉络强化');
   assert.ok(smart.includes('工程概念'), 'smart 五步法应含「工程概念」映射（开发向）');
   assert.ok(smart.includes('项目文档/代码确认的事实'), 'smart 五步法不可删集合应含项目事实');
   assert.ok(smart.includes('开发向强化'), 'smart 五步法标题应标注开发向强化');
   // base 为通用五步法（纯输入场景，无需模式专属强化）
-  assert.ok(!sys.includes('上轮延续强化') && !sys.includes('多轮脉络强化') && !sys.includes('开发向强化'), 'base 保持通用五步法');
+  assert.ok(!sys.includes('参考延续强化') && !sys.includes('多轮脉络强化') && !sys.includes('开发向强化'), 'base 保持通用五步法');
 });
 
 // 2026-08-18（用户指令·每模式增量模板按场景定制 + 保守增量）：增量模板契约——
@@ -1121,7 +1121,7 @@ test('U39c 每模式增量模板契约（保守增量 + 方向差异化，2026-0
   assert.ok(incPub.includes('不补细节数值'), 'increment-publish.md 应禁止补细节数值');
   assert.ok(incPub.includes('不引入原文未提的新方向'), 'increment-publish.md 应禁止扩范围');
   // ② 每模式方向差异化（用户指令：使用场景不同 → 增量方向不同）
-  assert.ok(incLite.includes('上轮参考处理') && incLite.includes('上轮延续视角'), 'lite 增量应含「上轮参考处理/上轮延续视角」');
+  assert.ok(incLite.includes('参考处理（本模式核心）') && incLite.includes('参考延续视角'), 'lite 增量应含「参考处理/参考延续视角」（v3.2.28）');
   assert.ok(incLite.includes('不得以提问、征询、列出选项让用户确认'), 'lite 增量应禁止反问/征询');
   assert.ok(incLite.includes('来源可回溯'), 'lite 增量应含来源可回溯（防幻觉）');
   assert.ok(incLite.includes('上轮延续判别示例'), 'lite 增量应含【上轮延续判别示例】');
@@ -1152,7 +1152,7 @@ test('U39c 每模式增量模板契约（保守增量 + 方向差异化，2026-0
   assert.ok(incPub.includes('需求表述纪律'), 'increment-publish.md 应含需求表述纪律');
   assert.ok(incPub.includes('让界面更美观'), 'increment-publish.md 应含口语约束提炼范式（用户认可示例）');
   // base 为通用增量（无模式专属段）
-  assert.ok(!inc.includes('上轮参考处理') && !inc.includes('多轮脉络处理') && !inc.includes('项目事实优先'), 'base 增量保持通用（无模式专属段）');
+  assert.ok(!inc.includes('参考处理（本模式核心）') && !inc.includes('多轮脉络处理') && !inc.includes('项目事实优先'), 'base 增量保持通用（无模式专属段）');
   // ②c base 两版优化（2026-08-18·publish 方法论推广 + smart 跑偏教训）
   assert.ok(inc.includes('不得以提问、征询、列出选项让用户确认'), 'base 增量应禁止反问/征询（smart 跑偏教训推广）');
   assert.ok(inc.includes('来源可回溯'), 'base 增量应含来源可回溯（防幻觉）');
