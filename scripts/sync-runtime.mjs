@@ -9,7 +9,7 @@
 //
 // 运行环境目录优先级：环境变量 DSH_RUNTIME_DIR > $DSH_HOME/profiles/* 全量发现。
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, cpSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, cpSync, statSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -59,9 +59,20 @@ run('build-client.mjs', ['--check']);
 
 // 3. 同步运行环境（产物 + 运行必需文件）
 const targets = runtimeDirs();
-console.log('== 3/4 同步运行环境（' + targets.length + ' 个 profile）==');
+// v3.3.x（junction 守卫）：profile 插件目录可能是**指向本开发仓库的 junction**
+// （desktop profile 直连开发树加载）——realpath 相同则跳过，cpSync 自拷贝会
+// ERR_FS_CP_EINVAL 崩溃；且内容本就是最新，无需部署。
+const rootReal = realpathSync(root);
+const deployTargets = [];
+for (const t of targets) {
+  try {
+    if (realpathSync(t) === rootReal) { console.log('跳过（junction → 开发仓库，已是最新）：' + t); continue; }
+  } catch { /* realpath 失败按普通目录处理 */ }
+  deployTargets.push(t);
+}
+console.log('== 3/4 同步运行环境（' + deployTargets.length + ' 个 profile）==');
 const files = ['plugin-host.js', 'plugin-client.js', 'package.json', 'README.md', 'README.en.md', 'cordis.patch.yml'];
-for (const rt of targets) {
+for (const rt of deployTargets) {
   console.log('--- 目标：' + rt);
   for (const f of files) {
     const s = join(root, f);
@@ -100,7 +111,7 @@ for (const rt of targets) {
 // 4. md5 校验 + 提示
 console.log('== 4/4 校验 ==');
 let allOk = true;
-for (const rt of targets) {
+for (const rt of deployTargets) {
   console.log('--- ' + rt);
   for (const f of files.concat(['lib/index.cjs', 'lib/client.cjs', 'lib/updater-host.cjs', 'lib/sys.cjs'])) {
     const s = join(root, f);
@@ -114,7 +125,7 @@ for (const rt of targets) {
 }
 if (!allOk) { console.error('同步校验失败，请检查目标目录权限'); process.exit(1); }
 console.log('');
-console.log('✅ 运行环境已部署（' + targets.length + ' 个 profile）：');
-for (const rt of targets) console.log('   - ' + rt);
+console.log('✅ 运行环境已部署（' + deployTargets.length + ' 个 profile）：');
+for (const rt of deployTargets) console.log('   - ' + rt);
 console.log('   版本：' + require('../package.json').version);
 console.log('   生效要求：① 重启对应 DSH 实例（加载新 host/执行器）；② 浏览器 Ctrl+F5 强制刷新页面（加载新 client）。');
