@@ -62,6 +62,12 @@ const schemas = {
       return typeof args.id === 'string' && args.id.length > 0;
     },
   },
+  'voice/modelDelete': {
+    required: ['id'],
+    validate(args) {
+      return typeof args.id === 'string' && args.id.length > 0;
+    },
+  },
   'voice/modelList': {
     required: [],
     validate() {

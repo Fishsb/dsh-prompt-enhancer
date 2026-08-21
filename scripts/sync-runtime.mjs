@@ -73,6 +73,20 @@ cpSync(libSrc, libDst, {
   force: true,
   filter: (src) => statSync(src).isDirectory() || /\.cjs$/.test(src),
 });
+// v3.2.15（undici 重构·运行时依赖部署）：lib/net-proxy.cjs 依赖 undici（零运行时依赖，
+// 单目录拷贝即可）。DSH 组合树（profiles/web/node_modules/dsh-prompt-enhancer）内
+// require('undici') 沿 node_modules 逐级向上解析——必须把包放进插件自己的 node_modules。
+// 注：发布链路（dsh plugin add tarball → pnpm）会按 package.json dependencies 自动安装，
+// 本处只覆盖本地 sync-runtime 手工部署场景。
+const depSrc = join(root, 'node_modules', 'undici');
+if (existsSync(depSrc)) {
+  const depDst = join(rt, 'node_modules', 'undici');
+  mkdirSync(depDst, { recursive: true });
+  cpSync(depSrc, depDst, { recursive: true, force: true });
+  console.log('  已同步运行时依赖 undici → ' + depDst);
+} else {
+  console.warn('  警告：未找到 node_modules/undici（先 npm install undici@^7.23），运行时 require 将失败');
+}
 // prompts/assets 若存在
 for (const d of ['prompts', 'assets']) {
   const s = join(root, d);

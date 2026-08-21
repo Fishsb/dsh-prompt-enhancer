@@ -165,6 +165,17 @@ test('U54 wrapPublishText publish 中性包装（v2.8.0 实测修正）', () => 
 test('cleanOutput 剥离包装与成对引号', () => {
   // 回显包装前缀 + 尾部
   assert.equal(cleanOutput('请优化以下提示词：\n\n"""\n保留的正文\n"""'), '保留的正文');
+  // v3.2.18（完整回显含后续正文）：取正文而非残留原文
+  assert.equal(cleanOutput('请优化以下提示词：\n\n"""\n原始提示词\n"""\n\n优化后的结果文本'), '优化后的结果文本');
+  // v3.2.18（前缀说明行剥离）
+  assert.equal(cleanOutput('以下是优化后的提示词：\n优化后的正文'), '优化后的正文');
+  // v3.2.18（尾部附注剥离）
+  assert.equal(cleanOutput('优化后的正文内容\n\n以上是优化后的提示词'), '优化后的正文内容');
+  // v3.2.18（publish 包装回显）
+  assert.equal(cleanOutput('【用户输入】\n"""\n原始规格\n"""\n\n九章规格正文'), '九章规格正文');
+  // v3.2.19-fix（孤立前缀回显：无闭合包装，传原文剥离前缀+原文段）
+  assert.equal(cleanOutput('请优化以下提示词：\n\n原始内容。\n\n修复建议正文', '原始内容。'), '修复建议正文');
+  assert.equal(cleanOutput('请优化以下提示词：\n\n原始内容', '原始内容'), '原始内容');
   // 成对引号包裹剥离
   assert.equal(cleanOutput('"hello"'), 'hello');
   assert.equal(cleanOutput('```code```'), 'code');
@@ -951,24 +962,48 @@ test('U40 prompts 外置一致性（v2.4.6）：生成区 = prompts/*.md 逐行�
     return new Function('return [' + m[1] + '].join(\'\\n\');')();
   };
   const mdOf = (file) => {
-    const lines = readFileSync(join(__dirname, '..', 'prompts', file), 'utf8').split('\n');
+    // v3.2.23（技能集合化）：事实源迁移到 skills/enhance/（按相对路径）
+    const lines = readFileSync(join(__dirname, '..', 'skills', 'enhance', file), 'utf8').split('\n');
     while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
     return lines.join('\n');
   };
   // 生成区必须处于 ==PROMPTS-BEGIN== / ==PROMPTS-END== 标记内
   assert.ok(src.includes('// ==PROMPTS-BEGIN=='), '应含生成区起始标记');
   assert.ok(src.includes('// ==PROMPTS-END=='), '应含生成区结束标记');
-  // 逐文件核对：生成常量 === md 内容
-  assert.equal(extractConst('SYSTEM_PROMPT'), mdOf('system.md'), 'SYSTEM_PROMPT 应与 prompts/system.md 一致');
-  assert.equal(extractConst('TASK_ANALYSIS_PROMPT'), mdOf('task-analysis.md'), 'TASK_ANALYSIS_PROMPT 应与 prompts/task-analysis.md 一致');
-  assert.equal(extractConst('CONTEXT_GUARD'), mdOf('context-guard.md'), 'CONTEXT_GUARD 应与 prompts/context-guard.md 一致');
+  // 逐文件核对：生成常量 === md 内容（路径按技能包结构）
+  assert.equal(extractConst('SYSTEM_PROMPT'), mdOf('base/system.md'), 'SYSTEM_PROMPT 应与 skills/enhance/base/system.md 一致');
+  assert.equal(extractConst('TASK_ANALYSIS_PROMPT'), mdOf('assemble/task-analysis.md'), 'TASK_ANALYSIS_PROMPT 应与 skills/enhance/assemble/task-analysis.md 一致');
+  // v3.2.20（防回显护栏并入纪律模板）：CONTEXT_GUARD 移除，纪律模板为唯一事实源
+  assert.equal(extractConst('DISCIPLINE_PROMPT'), mdOf('discipline.md'), 'DISCIPLINE_PROMPT 应与 skills/enhance/discipline.md 一致');
   // 模板体系扩展（2026-08-18 修订）：T2 增量模板事实源——每模式专属（base/lite/standard/smart/publish）
-  assert.equal(extractConst('SYSTEM_INCREMENT_PROMPT'), mdOf('increment.md'), 'SYSTEM_INCREMENT_PROMPT 应与 prompts/increment.md 一致');
-  assert.equal(extractConst('SYSTEM_INCREMENT_LITE_PROMPT'), mdOf('increment-lite.md'), 'SYSTEM_INCREMENT_LITE_PROMPT 应与 prompts/increment-lite.md 一致');
-  assert.equal(extractConst('SYSTEM_INCREMENT_STANDARD_PROMPT'), mdOf('increment-standard.md'), 'SYSTEM_INCREMENT_STANDARD_PROMPT 应与 prompts/increment-standard.md 一致');
-  assert.equal(extractConst('SYSTEM_INCREMENT_SMART_PROMPT'), mdOf('increment-smart.md'), 'SYSTEM_INCREMENT_SMART_PROMPT 应与 prompts/increment-smart.md 一致');
-  assert.equal(extractConst('SYSTEM_INCREMENT_PUBLISH_PROMPT'), mdOf('increment-publish.md'), 'SYSTEM_INCREMENT_PUBLISH_PROMPT 应与 prompts/increment-publish.md 一致');
-  assert.equal(extractConst('CONTINUE_PROMPT'), mdOf('continue.md'), 'CONTINUE_PROMPT 应与 prompts/continue.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_PROMPT'), mdOf('base/increment.md'), 'SYSTEM_INCREMENT_PROMPT 应与 skills/enhance/base/increment.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_LITE_PROMPT'), mdOf('lite/increment.md'), 'SYSTEM_INCREMENT_LITE_PROMPT 应与 skills/enhance/lite/increment.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_STANDARD_PROMPT'), mdOf('standard/increment.md'), 'SYSTEM_INCREMENT_STANDARD_PROMPT 应与 skills/enhance/standard/increment.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_SMART_PROMPT'), mdOf('smart/increment.md'), 'SYSTEM_INCREMENT_SMART_PROMPT 应与 skills/enhance/smart/increment.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_PUBLISH_PROMPT'), mdOf('publish/increment.md'), 'SYSTEM_INCREMENT_PUBLISH_PROMPT 应与 skills/enhance/publish/increment.md 一致');
+  assert.equal(extractConst('CONTINUE_PROMPT'), mdOf('assemble/continue.md'), 'CONTINUE_PROMPT 应与 skills/enhance/assemble/continue.md 一致');
+});
+
+// v3.2.23（技能集合化）：SKILL_MANIFEST 结构断言——5 模式 + 模板引用 + retrieve 声明与 pure RETRIEVE_TABLE 等价
+test('U40c SKILL_MANIFEST 技能元数据契约（v3.2.23）', () => {
+  const mf = src.match(/const SKILL_MANIFEST = \{([\s\S]*?)\n\};/);
+  assert.ok(mf, 'SKILL_MANIFEST 未在生成区');
+  const body = mf[1];
+  for (const mode of ['base', 'lite', 'standard', 'smart', 'publish']) {
+    assert.ok(body.includes('"' + mode + '": { name: "enhance-' + mode + '"'), mode + ' 技能缺失');
+  }
+  assert.ok(body.includes('templates: { t1: SYSTEM_PROMPT, t2: SYSTEM_INCREMENT_PROMPT }'), 'base 模板引用');
+  assert.ok(body.includes('templates: { t1: SYSTEM_SMART_PROMPT, t2: SYSTEM_INCREMENT_SMART_PROMPT }'), 'smart 模板引用');
+  // v3.2.23-fix（审查补强）：5 模式 retrieve 与 pure RETRIEVE_TABLE deepEqual（此前仅文本断言 3 模式）
+  for (const mode of ['base', 'lite', 'standard', 'smart', 'publish']) {
+    const line = body.split(String.fromCharCode(10)).find((l) => l.indexOf('"' + mode + '": { name: "enhance-' + mode + '"') !== -1);
+    const rm = line && line.match(/retrieve: (\{[\s\S]*?\})/);
+    assert.ok(rm, mode + ' retrieve 未提取');
+    assert.deepEqual(JSON.parse(rm[1]), RETRIEVE_TABLE[mode], mode + ' retrieve 应与 pure RETRIEVE_TABLE 等价');
+  }
+  const bm = src.match(/const SKILL_RETRIEVE_BUDGETS = (\[[\s\S]*?\]);/);
+  assert.ok(bm, 'SKILL_RETRIEVE_BUDGETS 未在生成区');
+  assert.deepEqual(new Function('return ' + bm[1])(), BUDGET_RETRIEVE_TABLE, 'SKILL_RETRIEVE_BUDGETS 应与 pure BUDGET_RETRIEVE_TABLE 等价');
 });
 
 // 2026-08-17（参考吸收规则）：prompts 必须包含「吸收参考明确需求 + 禁止逐字复述」语义，
@@ -976,22 +1011,23 @@ test('U40 prompts 外置一致性（v2.4.6）：生成区 = prompts/*.md 逐行�
 test('U40b 参考吸收规则存在于全部参考相关 prompt（2026-08-17）', () => {
   const { readFileSync } = require('node:fs');
   const { join } = require('node:path');
-  const readPrompt = (file) => readFileSync(join(__dirname, '..', 'prompts', file), 'utf8');
-  const guard = readPrompt('context-guard.md');
-  assert.ok(guard.includes('吸收进优化后的提示词'), 'context-guard 应要求吸收参考明确需求');
-  assert.ok(guard.includes('禁止逐字复述'), 'context-guard 应禁止逐字复述参考');
-  for (const f of ['system.md', 'increment.md', 'increment-lite.md', 'increment-standard.md', 'increment-smart.md']) {
+  const readPrompt = (file) => readFileSync(join(__dirname, '..', 'skills', 'enhance', file), 'utf8');
+  // v3.2.20（防回显护栏并入纪律模板）：context-guard.md 已删，参考规则在 discipline.md
+  const guard = readPrompt('discipline.md');
+  assert.ok(guard.includes('吸收进优化后的提示词'), 'discipline 应要求吸收参考明确需求（原 context-guard 并入）');
+  assert.ok(guard.includes('禁止逐字复述'), 'discipline 应禁止逐字复述参考');
+  for (const f of ['base/system.md', 'base/increment.md', 'lite/increment.md', 'standard/increment.md', 'smart/increment.md']) {
     const text = readPrompt(f);
     assert.ok(text.includes('参考'), f + ' 应包含参考使用规则');
     assert.ok(text.includes('吸收进优化结果') || text.includes('吸收进完善后的提示词'), f + ' 应包含吸收参考需求');
   }
-  const pub = readPrompt('publish.md');
-  assert.ok(pub.includes('参考'), 'publish.md 应包含参考使用规则');
-  assert.ok(pub.includes('吸收进对应章节'), 'publish.md 应包含吸收参考需求');
-  const pubInc = readPrompt('increment-publish.md');
-  assert.ok(pubInc.includes('参考'), 'increment-publish.md 应包含参考使用规则');
-  assert.ok(pubInc.includes('吸收进对应章节'), 'increment-publish.md 应包含吸收参考需求');
-  assert.ok(src.includes('吸收进优化后的提示词'), 'plugin-host.js CONTEXT_GUARD 应与 prompts/context-guard.md 同步');
+  const pub = readPrompt('publish/system.md');
+  assert.ok(pub.includes('参考'), 'publish/system.md 应包含参考使用规则');
+  assert.ok(pub.includes('吸收进对应章节'), 'publish/system.md 应包含吸收参考需求');
+  const pubInc = readPrompt('publish/increment.md');
+  assert.ok(pubInc.includes('参考'), 'publish/increment.md 应包含参考使用规则');
+  assert.ok(pubInc.includes('吸收进对应章节'), 'publish/increment.md 应包含吸收参考需求');
+  assert.ok(src.includes('吸收进优化后的提示词'), 'plugin-host.js 纪律模板应含参考吸收规则（原 CONTEXT_GUARD 并入，v3.2.20）');
 });
 
 // v3.1.8（用户指令·每模式默认模板按场景定制）：模式专属默认模板契约——
@@ -1053,17 +1089,17 @@ test('U39b 模式专属默认模板契约（v3.1.8）', () => {
 test('U39c 每模式增量模板契约（保守增量 + 方向差异化，2026-08-18）', () => {
   const { readFileSync } = require('node:fs');
   const { join } = require('node:path');
-  const readPrompt = (file) => readFileSync(join(__dirname, '..', 'prompts', file), 'utf8');
-  const inc = readPrompt('increment.md');
-  const incLite = readPrompt('increment-lite.md');
-  const incStandard = readPrompt('increment-standard.md');
-  const incSmart = readPrompt('increment-smart.md');
-  const incPub = readPrompt('increment-publish.md');
-  const pub = readPrompt('publish.md');
-  const sys = readPrompt('system.md');
-  const liteSys = readPrompt('system-lite.md');
-  const standardSys = readPrompt('system-standard.md');
-  const smartSys = readPrompt('system-smart.md');
+  const readPrompt = (file) => readFileSync(join(__dirname, '..', 'skills', 'enhance', file), 'utf8');
+  const inc = readPrompt('base/increment.md');
+  const incLite = readPrompt('lite/increment.md');
+  const incStandard = readPrompt('standard/increment.md');
+  const incSmart = readPrompt('smart/increment.md');
+  const incPub = readPrompt('publish/increment.md');
+  const pub = readPrompt('publish/system.md');
+  const sys = readPrompt('base/system.md');
+  const liteSys = readPrompt('lite/system.md');
+  const standardSys = readPrompt('standard/system.md');
+  const smartSys = readPrompt('smart/system.md');
   // ① 全部增量模板：与默认分工 + 任务意图判断 + 保守增量红线
   for (const [name, text] of [['increment.md', inc], ['increment-lite.md', incLite], ['increment-standard.md', incStandard], ['increment-smart.md', incSmart]]) {
     assert.ok(text.includes('与默认模板的分工'), name + ' 应含【与默认模板的分工】');

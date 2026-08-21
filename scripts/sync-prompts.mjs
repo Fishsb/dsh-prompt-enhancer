@@ -27,36 +27,107 @@ const HOST = path.join(ROOT, 'src', 'host', 'app.js');
 const BEGIN = '// ==PROMPTS-BEGIN==';
 const END = '// ==PROMPTS-END==';
 
-const SOURCES = [
-  { md: 'prompts/system.md', name: 'SYSTEM_PROMPT' },
-  // v3.1.8（用户指令·每模式默认模板按场景定制）：lite/standard/smart 专属默认模板——
-  // 在通用语义重构骨架（system.md）上增加模式专属段（上轮参考处理 / 多轮脉络处理 / 项目事实优先）
-  { md: 'prompts/system-lite.md', name: 'SYSTEM_LITE_PROMPT' },
-  { md: 'prompts/system-standard.md', name: 'SYSTEM_STANDARD_PROMPT' },
-  { md: 'prompts/system-smart.md', name: 'SYSTEM_SMART_PROMPT' },
-  { md: 'prompts/task-analysis.md', name: 'TASK_ANALYSIS_PROMPT' },
-  { md: 'prompts/context-guard.md', name: 'CONTEXT_GUARD' },
-  { md: 'prompts/publish.md', name: 'SYSTEM_PUBLISH_PROMPT' },
-  // 模板体系扩展（2026-08-18 修订）：每模式 2 个内置模板——T1 默认（只清晰化重述、不扩展）/
-  // T2 增量（保守增量：理解任务意图 + 只补「未说的大逻辑/信息」，防执行模型误判；每模式方向不同）
-  // ——原 T2 增量补充完善/T3 增量完善（开发向）共享模板已按模式收敛为各模式专属增量模板
-  { md: 'prompts/increment.md', name: 'SYSTEM_INCREMENT_PROMPT' },
-  { md: 'prompts/increment-lite.md', name: 'SYSTEM_INCREMENT_LITE_PROMPT' },
-  { md: 'prompts/increment-standard.md', name: 'SYSTEM_INCREMENT_STANDARD_PROMPT' },
-  { md: 'prompts/increment-smart.md', name: 'SYSTEM_INCREMENT_SMART_PROMPT' },
-  { md: 'prompts/increment-publish.md', name: 'SYSTEM_INCREMENT_PUBLISH_PROMPT' },
-  // 模式重构（2026-08-16）：会话关联性判定提示词（占位符 {history}/{current} 运行时替换）
-  { md: 'prompts/relevance.md', name: 'RELEVANCE_PROMPT' },
-  // 模式重构 S3：smart 专业词汇优化段（追加到 smart 模式 system）
-  { md: 'prompts/smart.md', name: 'SMART_TAIL_PROMPT' },
-  // 模式重构 v2 修订：提示词开发意向判定 + 文档检索/项目地图合并分析（占位符运行时替换）
-  { md: 'prompts/intent.md', name: 'DEV_INTENT_PROMPT' },
-  { md: 'prompts/doc-analysis.md', name: 'DOC_ANALYSIS_PROMPT' },
-  // publish 多步检索（v3.0p）：检索主题规划提示词（占位符 {text}/{memo}/{scenario} 运行时替换）
-  { md: 'prompts/websearch.md', name: 'WEBSEARCH_PLAN_PROMPT' },
-  // 记忆链继续优化（2026-08-17）：基于本轮改动直接优化，不重新走完整检索流程
-  { md: 'prompts/continue.md', name: 'CONTINUE_PROMPT' },
-];
+// v3.2.23（用户需求·技能集合化）：事实源从平铺 prompts/ 迁移到技能包 skills/enhance/——
+// 常量名映射保持兼容（SYSTEM_PROMPT 等不变，供 enhance-handlers/pure 引用不改名）。
+const SKILL_ROOT = 'skills/enhance';
+const NAME_MAP = {
+  'base/system.md': 'SYSTEM_PROMPT',
+  'base/increment.md': 'SYSTEM_INCREMENT_PROMPT',
+  'lite/system.md': 'SYSTEM_LITE_PROMPT',
+  'lite/increment.md': 'SYSTEM_INCREMENT_LITE_PROMPT',
+  'standard/system.md': 'SYSTEM_STANDARD_PROMPT',
+  'standard/increment.md': 'SYSTEM_INCREMENT_STANDARD_PROMPT',
+  'smart/system.md': 'SYSTEM_SMART_PROMPT',
+  'smart/increment.md': 'SYSTEM_INCREMENT_SMART_PROMPT',
+  'publish/system.md': 'SYSTEM_PUBLISH_PROMPT',
+  'publish/increment.md': 'SYSTEM_INCREMENT_PUBLISH_PROMPT',
+  'retrieval/relevance.md': 'RELEVANCE_PROMPT',
+  'retrieval/intent.md': 'DEV_INTENT_PROMPT',
+  'retrieval/doc-analysis.md': 'DOC_ANALYSIS_PROMPT',
+  'retrieval/websearch.md': 'WEBSEARCH_PLAN_PROMPT',
+  'assemble/task-analysis.md': 'TASK_ANALYSIS_PROMPT',
+  'assemble/continue.md': 'CONTINUE_PROMPT',
+  'assemble/smart.md': 'SMART_TAIL_PROMPT',
+  'discipline.md': 'DISCIPLINE_PROMPT',
+};
+
+// 自动发现：扫描技能包内全部 .md（排除 SKILL.md），按相对路径查 NAME_MAP 得常量名；
+// 缺失映射直接报错（新增技能文件必须登记），保序按 NAME_MAP 声明顺序。
+function discoverSources() {
+  const found = [];
+  const walk = (dir, prefix) => {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const rel = prefix + ent.name;
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) walk(full, rel + '/');
+      else if (ent.name.endsWith('.md') && ent.name !== 'SKILL.md') {
+        if (!NAME_MAP[rel]) throw new Error('技能文件未在 NAME_MAP 登记: ' + rel);
+        found.push(rel);
+      }
+    }
+  };
+  walk(path.join(ROOT, SKILL_ROOT), '');
+  const byRel = new Map(found.map((rel) => [rel, { md: path.join(SKILL_ROOT, rel), name: NAME_MAP[rel], rel }]));
+  return Object.keys(NAME_MAP).map((rel) => byRel.get(rel)).filter(Boolean);
+}
+const SOURCES = discoverSources();
+
+// —— v3.2.23 技能元数据：解析 SKILL.md frontmatter（YAML 子集：顶层 key / 嵌套对象 / JSON 值）——
+function parseFrontmatter(relPath) {
+  const raw = fs.readFileSync(path.join(ROOT, relPath), 'utf8');
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw);
+  if (!m) return null;
+  const data = {};
+  const stack = [data];
+  let prevIndent = -1;
+  for (const ln of m[1].split(/\r?\n/)) {
+    if (ln.trim() === '' || ln.trim().startsWith('#')) continue;
+    const indent = (ln.match(/^\s*/)[0] || '').length;
+    // 子块缩进更深时入栈；回到同级/父级缩进时弹出（仅当新行缩进 < 前一行缩进）
+    while (stack.length > 1 && indent < prevIndent) stack.pop();
+    const kv = /^([A-Za-z0-9_]+):(?:\s*(.*))?$/.exec(ln.trim());
+    if (!kv) continue;
+    const val = kv[2] === undefined ? '' : kv[2].trim();
+    const parent = stack[stack.length - 1];
+    if (val === '') {
+      parent[kv[1]] = {};
+      stack.push(parent[kv[1]]);
+    } else {
+      parent[kv[1]] = tryJson(val);
+    }
+    prevIndent = indent;
+  }
+  return data;
+}
+function tryJson(v) {
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  if (/^-?\d+$/.test(v)) return Number(v);
+  if (/^[\[{]/.test(v)) { try { return JSON.parse(v); } catch (e) { return v; } }
+  return v;
+}
+
+// 生成 SKILL_MANIFEST（templates 直接引用同作用域常量）与 SKILL_RETRIEVE_BUDGETS（包级预算表）
+function buildSkillManifest() {
+  const pkg = parseFrontmatter(SKILL_ROOT + '/SKILL.md') || {};
+  const modes = Array.isArray(pkg.modes) ? pkg.modes : [];
+  const lines = ['// v3.2.23（技能集合化）：SKILL_MANIFEST 由 skills/enhance/*/SKILL.md frontmatter 生成',
+    'const SKILL_MANIFEST = {'];
+  for (const mode of modes) {
+    const fm = parseFrontmatter(SKILL_ROOT + '/' + mode + '/SKILL.md');
+    if (!fm) throw new Error(mode + '/SKILL.md 缺 frontmatter');
+    const t1 = NAME_MAP[mode + '/system.md'];
+    const t2 = NAME_MAP[mode + '/increment.md'];
+    lines.push('  ' + JSON.stringify(mode) + ': { name: ' + JSON.stringify(fm.name || 'enhance-' + mode) +
+      ', mode: ' + JSON.stringify(mode) +
+      ', templates: { t1: ' + t1 + ', t2: ' + t2 + ' }' +
+      ', retrieve: ' + JSON.stringify(fm.retrieve || { kind: 'none', windows: [] }) + ' },');
+  }
+  lines.push('};');
+  const budgets = (pkg.retrieve && Array.isArray(pkg.retrieve.budgets)) ? pkg.retrieve.budgets : [];
+  lines.push('const SKILL_RETRIEVE_BUDGETS = ' + JSON.stringify(budgets) + ';');
+  return lines.join('\n');
+}
 
 // md 行 → JS 字符串数组元素（转义反斜杠与单引号；行尾空行 trim 掉）
 function linesToArray(lines) {
@@ -81,6 +152,7 @@ function buildSection() {
     const body = elems.map((e) => '  ' + (e === '' ? "''" : "'" + e + "'")).join(',\n');
     blocks.push('const ' + src.name + ' = [\n' + body + ',\n].join(\'\\n\');');
   }
+  blocks.push(buildSkillManifest());
   return blocks.join('\n\n');
 }
 

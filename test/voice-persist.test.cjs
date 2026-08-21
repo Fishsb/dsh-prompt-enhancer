@@ -209,6 +209,21 @@ test('VOICE-P16 模型清单结构 + installed 判定 + sanitize model id', () =
 });
 
 // ---- 11. 模型管理 v2（多模型市场/自定义扫描/切换，2026-08-20）----
+test('VOICE-P20 多模型切换白名单：paraformer/自定义/空 保留，非法回退（v3.2.16 修复）', () => {
+  // 修复前：sanitizeVoiceCfg 模型白名单硬编码 sense-voice，任何非 sense-voice 选择被静默重置
+  // → 设置页「切换模型」保存无效、UI 永不反映当前模型。修复后按 [A-Za-z0-9._-] 动态校验保留。
+  const para = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { model: 'paraformer-zh' } } });
+  assert.equal(para.asr.local.model, 'paraformer-zh', '内置多模型 id 保留');
+  const custom = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { model: 'my-custom.model_v2' } } });
+  assert.equal(custom.asr.local.model, 'my-custom.model_v2', '自定义模型目录名保留');
+  const empty = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { model: '' } } });
+  assert.equal(empty.asr.local.model, '', '删除最后模型：空串保留（无当前模型）');
+  const legacy = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { model: 'sensevoice-q8' } } });
+  assert.equal(legacy.asr.local.model, 'sense-voice', '旧值兼容映射');
+  const bad = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { model: '../evil' } } });
+  assert.equal(bad.asr.local.model, 'sense-voice', '非法 id 回退默认');
+});
+
 test('VOICE-P17 模型市场多条目 + 自定义扫描 + modelApply 校验', () => {
   const am = require('../lib/asr-models.cjs');
   const list = am.modelList();
@@ -299,5 +314,81 @@ test('VOICE-P19 hotkey 配置白名单 + 产物含快捷键/双触发逻辑', ()
   const z = (zh.match(/voice[A-Za-z]+:/g) || []).length;
   const e = (en.match(/voice[A-Za-z]+:/g) || []).length;
   assert.ok(z >= 37, 'ZH voice 键不足 37（实际 ' + z + '）');
+  assert.equal(z, e, 'ZH/EN voice 键不平衡: ' + z + ' vs ' + e);
+});
+
+// ---- 13. v3.2.17 语音识别完自动触发增强（autoEnhance）----
+// 沙箱求值 client state.js chunk（mock localStorage/host，隔离模块级状态）
+function makeVoiceSandbox(store) {
+  const src = require('../src/client/voice/state.js');
+  const localStorage = {
+    getItem: (k) => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null),
+    setItem: (k, v) => { store[k] = String(v); },
+    removeItem: (k) => { delete store[k]; },
+  };
+  const host = { call: async () => ({ ok: true, config: null }) };
+  const fn = new Function('localStorage', 'host',
+    src + '\nreturn { mergeVoice, saveVoiceCfg, voiceCfgState, syncVoiceFromHost };');
+  return fn(localStorage, host);
+}
+
+test('VOICE-P21 client state.js：autoEnhance 默认 false + mergeVoice 校验（非法回退 false）', () => {
+  const store = {};
+  const sb = makeVoiceSandbox(store);
+  // 默认值（VOICE_CFG_DEFAULTS 展开 + mergeVoice 白名单双保险）
+  assert.equal(sb.voiceCfgState.value.autoEnhance, false, '初始默认 false');
+  const mv = sb.mergeVoice;
+  assert.equal(mv({ autoEnhance: true }).autoEnhance, true, 'true 保留');
+  assert.equal(mv({ autoEnhance: false }).autoEnhance, false, 'false 保留');
+  assert.equal(mv({}).autoEnhance, false, '缺省回退 false');
+  assert.equal(mv({ autoEnhance: 'yes' }).autoEnhance, false, '字符串非法回退 false');
+  assert.equal(mv({ autoEnhance: 1 }).autoEnhance, false, '数字非法回退 false');
+  assert.equal(mv(null).autoEnhance, false, 'null 输入安全');
+});
+
+test('VOICE-P22 client state.js：autoEnhance 持久化（save→load 保留 true/false）', () => {
+  const store = {};
+  const sb1 = makeVoiceSandbox(store);
+  sb1.saveVoiceCfg({ autoEnhance: true });
+  const raw1 = JSON.parse(store['dsh.prompt-enhancer.voice']);
+  assert.equal(raw1.autoEnhance, true, 'save true → localStorage 持久化 true');
+  // 模拟重启：新沙箱读同一 localStorage → 恢复 true
+  const sb2 = makeVoiceSandbox(store);
+  assert.equal(sb2.voiceCfgState.value.autoEnhance, true, 'load 恢复 true');
+  sb2.saveVoiceCfg({ autoEnhance: false });
+  const raw2 = JSON.parse(store['dsh.prompt-enhancer.voice']);
+  assert.equal(raw2.autoEnhance, false, 'save false → localStorage 持久化 false');
+  const sb3 = makeVoiceSandbox(store);
+  assert.equal(sb3.voiceCfgState.value.autoEnhance, false, 'load 恢复 false');
+});
+
+test('VOICE-P23 sanitizeVoiceCfg autoEnhance 白名单（host 透传存储）', () => {
+  const d = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' } });
+  assert.equal(d.autoEnhance, false, '默认 false');
+  const on = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, autoEnhance: true });
+  assert.equal(on.autoEnhance, true, 'true 保留');
+  const bad = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, autoEnhance: 'yes' });
+  assert.equal(bad.autoEnhance, false, '非法回退 false');
+});
+
+test('VOICE-P24 产物含 autoEnhance 触发链路 + i18n 键平衡（v3.2.17 +3 键 → 40）', () => {
+  const client = readFileSync(join(__dirname, '..', 'plugin-client.js'), 'utf8');
+  assert.ok(client.includes('autoEnhance'), '产物缺 autoEnhance 配置字段');
+  assert.ok(client.includes('voiceAutoEnhanceOn'), '产物缺自动增强开 i18n 引用');
+  assert.ok(client.includes('voiceAutoEnhanceOff'), '产物缺自动增强关 i18n 引用');
+  assert.ok(client.includes('voiceAutoEnhanceTip'), '产物缺自动增强提示 i18n 引用');
+  // 触发链路：insertVoiceText 返回后按 filled/pending/autoEnhance 判定调用 enhance
+  assert.ok(client.includes('fill.filled === true'), '产物缺 filled 判定');
+  assert.ok(client.includes('fill.pending'), '产物缺 pending 判定');
+  assert.ok(client.includes("enhance(sessionId, filledText, inputActions, draftRef)"), '产物缺 enhance 自动触发调用');
+  // i18n 键平衡（v3.2.17 +3 键 → 40）
+  const i18n = readFileSync(join(__dirname, '..', 'src', 'client', 'i18n.js'), 'utf8');
+  const m = i18n.match(/module\.exports = \"([\s\S]*)\"\s*;?\s*$/);
+  const body = m ? m[1] : i18n;
+  const zh = body.split('const EN = {')[0] || '';
+  const en = body.split('const EN = {')[1] || '';
+  const z = (zh.match(/voice[A-Za-z]+:/g) || []).length;
+  const e = (en.match(/voice[A-Za-z]+:/g) || []).length;
+  assert.ok(z >= 40, 'ZH voice 键不足 40（实际 ' + z + '）');
   assert.equal(z, e, 'ZH/EN voice 键不平衡: ' + z + ' vs ' + e);
 });
