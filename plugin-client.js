@@ -841,20 +841,29 @@ const ZH = {
   stageDetailProbe: '连通 {current}/{total}',
   voiceSectionTitle: '🎙 语音识别',
   voiceSectionSummary: '语音识别',
-  voiceAsrEngine: '识别引擎',
+  voiceAsrEngine: '引擎',
   voiceAsrLocal: '本地',
+  voiceAsrOff: '关闭',
+  voiceAutoEnhance: '自动增强',
+  voiceDisabledHint: '语音识别已关闭',
+  // #4（本地引擎运行时一键部署）
+  voiceLocalRuntimeMissing: '本地运行时未部署',
+  voiceDeployRuntime: '部署本地引擎',
+  voiceDeployRunning: '部署中…',
+  voiceDeployDone: '部署完成',
+  voiceDeployFail: '部署失败',
   voiceVadEnabled: '静音自动停',
   voiceHotkeyEnabled: '快捷键唤醒',
-  voiceHotkeyCombo: '快捷键',
+  voiceHotkeyCombo: '热键',
   voiceHotkeyCapturing: '请按组合键…（Esc 取消）',
   voiceHotkeyNone: '未设置',
   voiceHotkeyClear: '清除',
   voiceHotkeyHint: '按住说话：按下开始录音，松开后 0.5 秒自动识别；快速点按：再按一次结束或静音自动停',
-  voiceAutoEnhanceOn: '自动增强：开',
-  voiceAutoEnhanceOff: '自动增强：关',
+  voiceAutoEnhanceOn: '开',
+  voiceAutoEnhanceOff: '关',
   voiceAutoEnhanceTip: '开启后，语音识别完成自动触发提示词增强',
   voiceModelManage: '模型管理',
-  voiceModelCurrentTitle: '当前模型',
+  voiceModelCurrentTitle: '模型',
   voiceModelManageBtn: '管理模型',
   voiceModelNotInstalled: '未装',
   voiceLocalEngine: '本地引擎',
@@ -869,22 +878,22 @@ const ZH = {
   voiceLangYue: '粤语',
   voiceAsrCloud: '云端',
   voiceCloudProtocol: '协议',
-  voiceCloudBaseUrl: '接口地址',
+  voiceCloudBaseUrl: '地址',
   voiceCloudModel: '模型',
-  voiceCloudApiKey: 'API Key',
+  voiceCloudApiKey: '密钥',
   voiceCloudHint: '云端引擎：音频将上传至所配置的服务',
   voiceRefineEnabled: '规整开关',
-  voiceRefineSection: '文本规整',
+  voiceRefineSection: '规整',
   voiceRefineOff: '关闭',
-  voiceRefineBaseUrl: '规整接口',
-  voiceRefineModel: '规整模型',
+  voiceRefineBaseUrl: '地址',
+  voiceRefineModel: '模型',
   voiceRefineHint: '规整=去口水词（留空跳过；失败自动用原文）',
   voiceRefineSource: '模型来源',
-  voiceRefineChain: '跟随模型配置',
+  voiceRefineChain: '跟随',
   voiceRefineCustom: '自定义模型',
   voiceRefineChainModel: '模型',
   voiceRefineChainHint: '使用提示词增强的模型配置，无需重复填写 API Key',
-  voiceRefineApiKey: 'API Key',
+  voiceRefineApiKey: '密钥',
   voiceErrNoChain: '未找到可用模型，请在基座模型配置中添加模型',
   voiceStatusCheck: '检测状态',
   voiceStatusChecking: '检测中…',
@@ -1198,6 +1207,15 @@ const EN = {
   voiceSectionSummary: 'Voice',
   voiceAsrEngine: 'Engine',
   voiceAsrLocal: 'Local',
+  voiceAsrOff: 'Off',
+  voiceAutoEnhance: 'Auto-enhance',
+  voiceDisabledHint: 'Voice input is off',
+  // #4 (local engine runtime one-click deploy)
+  voiceLocalRuntimeMissing: 'Local runtime missing',
+  voiceDeployRuntime: 'Deploy local engine',
+  voiceDeployRunning: 'Deploying…',
+  voiceDeployDone: 'Deployed',
+  voiceDeployFail: 'Deploy failed',
   voiceVadEnabled: 'Auto-stop on silence',
   voiceHotkeyEnabled: 'Hotkey wake',
   voiceHotkeyCombo: 'Hotkey',
@@ -1205,11 +1223,11 @@ const EN = {
   voiceHotkeyNone: 'Not set',
   voiceHotkeyClear: 'Clear',
   voiceHotkeyHint: 'Press and hold to talk: release to transcribe after 0.5s; tap to start/stop',
-  voiceAutoEnhanceOn: 'Auto-enhance: ON',
-  voiceAutoEnhanceOff: 'Auto-enhance: OFF',
+  voiceAutoEnhanceOn: 'ON',
+  voiceAutoEnhanceOff: 'OFF',
   voiceAutoEnhanceTip: 'Auto-trigger prompt enhancement after speech recognition',
   voiceModelManage: 'Model management',
-  voiceModelCurrentTitle: 'Current model',
+  voiceModelCurrentTitle: 'Model',
   voiceModelManageBtn: 'Manage models',
   voiceModelNotInstalled: 'Not installed',
   voiceLocalEngine: 'Local engine',
@@ -1229,10 +1247,10 @@ const EN = {
   voiceCloudApiKey: 'API Key',
   voiceCloudHint: 'Cloud engine: audio is uploaded to the configured service',
   voiceRefineEnabled: 'Refine',
-  voiceRefineSection: 'Refinement',
+  voiceRefineSection: 'Refine',
   voiceRefineOff: 'Off',
-  voiceRefineBaseUrl: 'Refine URL',
-  voiceRefineModel: 'Refine Model',
+  voiceRefineBaseUrl: 'URL',
+  voiceRefineModel: 'Model',
   voiceRefineHint: 'Refine removes filler words (leave empty to skip; falls back to raw)',
   voiceRefineSource: 'Model source',
   voiceRefineChain: 'Use enhance models',
@@ -3901,7 +3919,7 @@ return RecordRTC}),RecordRTC.getFromDisk=function(type,callback){if(!callback)th
 const VOICE_CFG_KEY = 'dsh.prompt-enhancer.voice';
 const VOICE_CFG_DEFAULTS = {
   asr: {
-    engine: 'cloud',
+    engine: 'local',
     local: { model: 'sense-voice', language: 'auto' },
     cloud: { protocol: 'chat', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3-asr-flash' },
   },
@@ -3924,7 +3942,7 @@ function mergeVoice(v) {
   const hk = v && v.hotkey && typeof v.hotkey === 'object' ? v.hotkey : {};
   return {
     asr: {
-      engine: a.engine === 'local' ? 'local' : 'cloud',
+      engine: a.engine === 'off' ? 'off' : (a.engine === 'local' ? 'local' : 'cloud'),
       local: {
         // v3.2.16（多模型修复）：模型 id 白名单动态化——旧值 sensevoice-q8 映射 sense-voice；
         // '' = 删除最后模型（无当前模型）；其余合法模型 id（内置 sense-voice/paraformer-zh + 自定义目录名）
@@ -4230,6 +4248,7 @@ function matchVoiceHotkey(e, hk) {
 }
 function voiceHotkeyDisplay(combo) {
   const parts = String(combo || '').split('+').filter(Boolean);
+  if (!parts.length) return '';
   const last = parts[parts.length - 1];
   const key = last === 'Backquote' ? '`' : last;
   return parts.length > 1 ? parts.slice(0, -1).concat(key).join('+') : key;
@@ -4465,6 +4484,8 @@ function VoiceMicButton(props) {
   const hkTipCfg = voiceCfgState.value && voiceCfgState.value.hotkey ? voiceCfgState.value.hotkey : null;
   const hotkeyTip = status === 'idle' && hkTipCfg && hkTipCfg.enabled && hkTipCfg.combo ? ' (' + voiceHotkeyDisplay(hkTipCfg.combo) + ')' : '';
   const btnTitle = title + hotkeyTip;
+  const voiceOff = !!(voiceCfgState.value && voiceCfgState.value.asr && voiceCfgState.value.asr.engine === 'off');
+  if (voiceOff) return null;
   return React.createElement('button', {
     type: 'button',
     className: cls,
@@ -4493,12 +4514,34 @@ function VoiceSection(props) {
   const [checking, setChecking] = React.useState(false);
   // v3.2.9：快捷键录制模式（true=正在等待按键；期间暂停 mic 快捷键监听，避免抢走录制按键）
   const [hotkeyCapture, setHotkeyCapture] = React.useState(false);
+  // v3.2.9：快捷键录制——点击输入框进入捕获；keydown 捕获组合并保存（combo 存 e.code）；Esc/失焦取消；
+  // 捕获期间置 window.__voiceHotkeyCapturing 暂停 mic 快捷键监听（capture 阶段会抢走按键）
+  const startHotkeyCapture = () => { if (typeof window !== 'undefined') window.__voiceHotkeyCapturing = true; setHotkeyCapture(true); };
+  const cancelHotkeyCapture = () => { if (typeof window !== 'undefined') window.__voiceHotkeyCapturing = false; setHotkeyCapture(false); };
+  const onHotkeyKeyDown = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (e.key === 'Escape') { cancelHotkeyCapture(); return; }
+    const mods = ['Control', 'Alt', 'Shift', 'Meta'];
+    if (mods.indexOf(e.code) >= 0) return; // 纯修饰键按下：等待主键
+    const parts = [];
+    if (e.ctrlKey) parts.push('Ctrl');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+    if (e.metaKey) parts.push('Meta');
+    parts.push(e.code);
+    saveVoiceCfg({ hotkey: { enabled: true, combo: parts.join('+') } });
+    cancelHotkeyCapture();
+  };
+  const clearHotkey = () => { saveVoiceCfg({ hotkey: { enabled: false, combo: '' } }); };
   // v3.2.10：模型下拉选中（下载/删除目标；默认当前模型）
   const [selModel, setSelModel] = React.useState('');
   // v3.2.7（模型管理框架）：模型清单 + 下载进度（设置页选择/下载，不默认拉取）
   const [models, setModels] = React.useState([]);
   const [dlProgress, setDlProgress] = React.useState({});
   const [modelOpenErr, setModelOpenErr] = React.useState(false);
+  // #4（本地引擎运行时一键部署）：部署中标记 + 结果提示
+  const [deploying, setDeploying] = React.useState(false);
+  const [deployMsg, setDeployMsg] = React.useState('');
   const refreshModels = () => {
     host.call('voice/modelList', {}).then((r) => { if (r && r.ok && Array.isArray(r.models)) setModels(r.models); }).catch(() => {});
   };
@@ -4565,28 +4608,48 @@ function VoiceSection(props) {
     setSelModel(cur ? cur.id : (first ? first.id : ''));
   }, [models, selModel]);
   const isCloud = v.asr.engine === 'cloud';
-
-  const saveCloud = (patch) => saveVoiceCfg({ asr: { ...v.asr, cloud: { ...v.asr.cloud, ...patch } } });
+    // 行1：识别引擎 | 自动增强 | 快捷键——恢复上一版 grid 排列（.dsh-plg-row 横排）；
+    // 列 minmax(0,1fr) + 控件 minWidth:0 允许收缩，窄屏不再重叠
+    const row1 = React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr) minmax(0,1fr)', gap: '12px' } },
+      React.createElement('div', { className: 'dsh-plg-row' },
+        React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceAsrEngine')),
+        React.createElement(MarqueeSelect, {
+          className: 'dsh-plg-select dsh-plg-ms-content',
+          value: v.asr.engine,
+          onChange: (e) => saveVoiceCfg({ asr: { ...v.asr, engine: e.target.value } }),
+        },
+          React.createElement('option', { value: 'off' }, t('voiceAsrOff')),
+          React.createElement('option', { value: 'cloud' }, t('voiceAsrCloud')),
+          React.createElement('option', { value: 'local' }, t('voiceAsrLocal')),
+        ),
+      ),
+      // 自动增强：MarqueeSelect 开/关（q-1：与「记忆」开关同款）
+      React.createElement('div', { className: 'dsh-plg-row', style: { justifyContent: 'center' } },
+        React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceAutoEnhance')),
+        React.createElement(MarqueeSelect, {
+          className: 'dsh-plg-select dsh-plg-select-thinking dsh-plg-ms-fill',
+          value: v.autoEnhance ? 'on' : 'off',
+          onChange: (e) => saveVoiceCfg({ autoEnhance: e.target.value === 'on' }),
+        },
+          React.createElement('option', { value: 'off' }, t('voiceAutoEnhanceOff')),
+          React.createElement('option', { value: 'on' }, t('voiceAutoEnhanceOn')),
+        ),
+      ),
+      React.createElement('div', { className: 'dsh-plg-row' },
+        React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceHotkeyCombo')),
+        React.createElement('input', {
+          type: 'text', className: 'dsh-plg-input', readOnly: true,
+          style: { flex: '1 1 auto', minWidth: 0 },
+          value: hotkeyCapture ? t('voiceHotkeyCapturing') : voiceHotkeyDisplay(v.hotkey.combo),
+          placeholder: t('voiceHotkeyNone'),
+          onFocus: startHotkeyCapture, onKeyDown: onHotkeyKeyDown, onBlur: cancelHotkeyCapture,
+        }),
+        React.createElement('button', { type: 'button', className: 'dsh-plg-btn', style: { width: '92px', whiteSpace: 'nowrap' }, onClick: clearHotkey }, t('voiceHotkeyClear')),
+      ),
+    );
+const saveCloud = (patch) => saveVoiceCfg({ asr: { ...v.asr, cloud: { ...v.asr.cloud, ...patch } } });
   const saveRefine = (patch) => saveVoiceCfg({ refine: { ...v.refine, ...patch } });
-  // v3.2.9：快捷键录制——点击输入框进入捕获；keydown 捕获组合并保存（combo 存 e.code）；Esc/失焦取消；
-  // 捕获期间置 window.__voiceHotkeyCapturing 暂停 mic 快捷键监听（capture 阶段会抢走按键）
-  const startHotkeyCapture = () => { if (typeof window !== 'undefined') window.__voiceHotkeyCapturing = true; setHotkeyCapture(true); };
-  const cancelHotkeyCapture = () => { if (typeof window !== 'undefined') window.__voiceHotkeyCapturing = false; setHotkeyCapture(false); };
-  const onHotkeyKeyDown = (e) => {
-    e.preventDefault(); e.stopPropagation();
-    if (e.key === 'Escape') { cancelHotkeyCapture(); return; }
-    const mods = ['Control', 'Alt', 'Shift', 'Meta'];
-    if (mods.indexOf(e.code) >= 0) return; // 纯修饰键按下：等待主键
-    const parts = [];
-    if (e.ctrlKey) parts.push('Ctrl');
-    if (e.altKey) parts.push('Alt');
-    if (e.shiftKey) parts.push('Shift');
-    if (e.metaKey) parts.push('Meta');
-    parts.push(e.code);
-    saveVoiceCfg({ hotkey: { enabled: true, combo: parts.join('+') } });
-    cancelHotkeyCapture();
-  };
-  const clearHotkey = () => { saveVoiceCfg({ hotkey: { enabled: false, combo: '' } }); };
+
   // v3.2.8（修正·用户澄清）：规整「跟随模型配置」= 从基座 models/list 选已配置模型（含本地模型），
   // 与增强模块同款选择方式（厂家+模型双下拉），选中存 refine.provider/refine.model
   const [baseProviders, setBaseProviders] = React.useState([]);
@@ -4602,6 +4665,7 @@ function VoiceSection(props) {
     const l = status && status.asr && status.asr.local;
     if (!l) return '✗ ' + t('voiceStatusLocalNotInstalled');
     if (l.workerUp && l.modelReady) return '✓ ' + t('voiceStatusLocalReady');
+    if (!l.workerUp && l.runtime && (!l.runtime.workerFile || !l.runtime.sherpaPkg)) return '✗ ' + t('voiceLocalRuntimeMissing');
     if (l.installed && l.modelReady && !l.workerUp) return '✗ ' + t('voiceStatusLocalWorkerDown');
     if (l.installed && !l.modelReady) return '✗ ' + t('voiceStatusLocalModelMissing');
     return '✗ ' + t('voiceStatusLocalNotInstalled');
@@ -4614,6 +4678,29 @@ function VoiceSection(props) {
     }
     return localStatusText();
   }
+
+  // #4（本地引擎运行时一键部署）：运行时缺失（worker 文件 / sherpa-onnx）→ 显示部署按钮；
+  // 点击调 voice/deployRuntime（异步），轮询 voice/deployStatus 直到完成 → 刷新状态
+  const localSt = status && status.asr && status.asr.local;
+  const needDeploy = !!localSt && !localSt.workerUp && localSt.runtime && (!localSt.runtime.workerFile || !localSt.runtime.sherpaPkg);
+  const onDeployRuntime = () => {
+    setDeploying(true); setDeployMsg(t('voiceDeployRunning'));
+    host.call('voice/deployRuntime', {}).then((r) => {
+      const poll = () => {
+        host.call('voice/deployStatus', {}).then((s) => {
+          if (s && s.running) { setTimeout(poll, 2000); return; }
+          setDeploying(false);
+          if (s && s.error) { setDeployMsg(t('voiceDeployFail') + '：' + s.error); return; }
+          setDeployMsg(t('voiceDeployDone'));
+          check();
+        }).catch(() => { setDeploying(false); setDeployMsg(t('voiceDeployFail')); });
+      };
+      if (r && r.ok && r.skipped) { setDeploying(false); setDeployMsg(t('voiceDeployDone')); check(); return; }
+      if (r && r.ok && (r.started || r.running)) { setTimeout(poll, 1500); return; }
+      setDeploying(false);
+      setDeployMsg(r && r.error ? t('voiceDeployFail') + '：' + r.error : t('voiceDeployFail'));
+    }).catch(() => { setDeploying(false); setDeployMsg(t('voiceDeployFail')); });
+  };
 
   const check = () => {
     setChecking(true);
@@ -4628,49 +4715,12 @@ function VoiceSection(props) {
     : t('voiceSectionSummary') + ': local';
 
   const body = React.createElement('div', { className: 'dsh-vi-section' },
-    // 行1：识别引擎 | 自动增强开关 | 快捷键（框与清除按钮同尺寸）
-    React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '12px' } },
-      React.createElement('div', { className: 'dsh-plg-row' },
-        React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceAsrEngine')),
-        React.createElement('select', {
-          className: 'dsh-plg-select', style: { flex: '0 0 120px' },
-          value: v.asr.engine,
-          onChange: (e) => saveVoiceCfg({ asr: { ...v.asr, engine: e.target.value } }),
-        },
-          React.createElement('option', { value: 'cloud' }, t('voiceAsrCloud')),
-          React.createElement('option', { value: 'local' }, t('voiceAsrLocal')),
-        ),
-      ),
-      // v3.2.17（语音识别完自动触发增强）：两态开关——开启后识别完成填入草稿自动触发提示词增强
-      React.createElement('div', { className: 'dsh-plg-row', style: { justifyContent: 'center' } },
-        React.createElement('button', {
-          type: 'button',
-          className: 'dsh-plg-btn',
-          style: { whiteSpace: 'nowrap' },
-          title: t('voiceAutoEnhanceTip'),
-          onClick: () => saveVoiceCfg({ autoEnhance: !v.autoEnhance }),
-        }, t(v.autoEnhance ? 'voiceAutoEnhanceOn' : 'voiceAutoEnhanceOff')),
-      ),
-      React.createElement('div', { className: 'dsh-plg-row' },
-        React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceHotkeyCombo')),
-        React.createElement('input', {
-          type: 'text', className: 'dsh-plg-input', readOnly: true,
-          style: { width: '92px' },
-          value: hotkeyCapture ? t('voiceHotkeyCapturing') : voiceHotkeyDisplay(v.hotkey.combo),
-          placeholder: t('voiceHotkeyNone'),
-          onFocus: startHotkeyCapture,
-          onKeyDown: onHotkeyKeyDown,
-          onBlur: cancelHotkeyCapture,
-        }),
-        React.createElement('button', { type: 'button', className: 'dsh-plg-btn', style: { width: '92px', whiteSpace: 'nowrap' }, onClick: clearHotkey }, t('voiceHotkeyClear')),
-      ),
-    ),
-    isCloud ? React.createElement('div', { className: 'dsh-vi-cloud' },
+    row1,    isCloud ? React.createElement('div', { className: 'dsh-vi-cloud' },
       // 行2：协议 | 接口地址
-      React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '12px' } },
+      React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: '12px' } },
         React.createElement('div', { className: 'dsh-plg-row' },
           React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceCloudProtocol')),
-          React.createElement('select', { className: 'dsh-plg-select', style: { flex: '0 0 auto' }, value: v.asr.cloud.protocol, onChange: (e) => saveCloud({ protocol: e.target.value }) },
+          React.createElement(MarqueeSelect, { className: 'dsh-plg-select dsh-plg-ms-fill', value: v.asr.cloud.protocol, onChange: (e) => saveCloud({ protocol: e.target.value }) },
             React.createElement('option', { value: 'chat' }, 'Qwen3-ASR (chat)'),
             React.createElement('option', { value: 'openai' }, 'OpenAI (openai)'),
           ),
@@ -4681,7 +4731,7 @@ function VoiceSection(props) {
         ),
       ),
       // 行3：模型 | API Key
-      React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '12px' } },
+      React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: '12px' } },
         React.createElement('div', { className: 'dsh-plg-row' },
           React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceCloudModel')),
           React.createElement('input', { type: 'text', className: 'dsh-plg-input', value: v.asr.cloud.model, onBlur: (e) => saveCloud({ model: e.target.value }) }),
@@ -4694,14 +4744,16 @@ function VoiceSection(props) {
     ) : React.createElement('div', { className: 'dsh-vi-cloud' },
       // 行2：当前模型（模型▾ + 下载/切换/删除 + 语言▾ + 打开文件夹）——单行四控件，宽度随内容
       React.createElement('div', { className: 'dsh-plg-col', style: { gap: '4px' } },
-        React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceModelCurrentTitle')),
         React.createElement('div', { className: 'dsh-plg-row' },
-          React.createElement('select', { className: 'dsh-plg-select', style: { flex: '1 1 auto', minWidth: '150px' }, value: selModel, onChange: onModelPick },
+          React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0, whiteSpace: 'nowrap' } }, t('voiceModelCurrentTitle')),
+          React.createElement(MarqueeSelect, { className: 'dsh-plg-select dsh-plg-ms-fill', value: selModel, onChange: onModelPick },
             React.createElement('option', { value: '', disabled: true }, t('voiceModelEmpty')),
             models.map((m) => React.createElement('option', { key: m.id, value: m.id }, m.name + (m.sizeMB ? ' (' + m.sizeMB + 'MB)' : ''))),
           ),
           React.createElement('button', { type: 'button', className: 'dsh-plg-btn', style: { whiteSpace: 'nowrap' }, onClick: onModelAction }, btnLabel),
-          React.createElement('select', { className: 'dsh-plg-select', style: { flex: '0 0 120px', minWidth: '120px' }, value: v.asr.local.language, onChange: (e) => saveVoiceCfg({ asr: { ...v.asr, local: { ...v.asr.local, language: e.target.value } } }) },
+          React.createElement('button', { type: 'button', className: 'dsh-plg-btn', style: { whiteSpace: 'nowrap' }, onClick: () => host.call('voice/modelOpenDir', {}).then((r) => { if (!r || r.ok !== true) setModelOpenErr(true); }).catch(() => setModelOpenErr(true)) }, t('voiceModelOpenDir')),
+          modelOpenErr ? React.createElement('span', { className: 'dsh-plg-error', style: { whiteSpace: 'nowrap' } }, t('voiceModelOpenDirFail')) : null,
+          React.createElement(MarqueeSelect, { className: 'dsh-plg-select dsh-plg-ms-content', value: v.asr.local.language, onChange: (e) => saveVoiceCfg({ asr: { ...v.asr, local: { ...v.asr.local, language: e.target.value } } }) },
             React.createElement('option', { value: 'auto' }, t('voiceLangAuto')),
             React.createElement('option', { value: 'zh' }, t('voiceLangZh')),
             React.createElement('option', { value: 'en' }, t('voiceLangEn')),
@@ -4727,10 +4779,10 @@ function VoiceSection(props) {
           : null,
       )),
     // 文本规整（v3.2.10：合并为单一下拉——关闭 / 跟随模型配置 / 自定义模型）
-    React.createElement('div', { className: 'dsh-plg-row', style: { flexDirection: 'column', alignItems: 'stretch', gap: '2px' } },
-      React.createElement('label', { className: 'dsh-plg-label', style: { marginBottom: 0 } }, t('voiceRefineSection')),
-      React.createElement('select', {
-        className: 'dsh-plg-select', style: { width: '100%' },
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0, whiteSpace: 'nowrap' } }, t('voiceRefineSection')),
+      React.createElement(MarqueeSelect, {
+        className: 'dsh-plg-select dsh-plg-ms-fill',
         value: !v.refine.enabled ? 'off' : (v.refine.mode === 'chain' ? 'chain' : 'custom'),
         onChange: (e) => {
           const val = e.target.value;
@@ -4752,7 +4804,7 @@ function VoiceSection(props) {
             React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceRefineChainModel')),
             baseProviders.length === 0
               ? React.createElement('span', { className: 'dsh-plg-note' }, t('voiceErrNoChain'))
-              : React.createElement('select', { className: 'dsh-plg-select', style: { flex: '0 0 auto' }, value: v.refine.provider || '',
+              : React.createElement(MarqueeSelect, { className: 'dsh-plg-select dsh-plg-ms-fill', value: v.refine.provider || '',
                   onChange: (e) => { const p = e.target.value; const first = (baseProviders.find((x) => x.provider === p) || {}).models; saveRefine({ provider: p, model: (first && first[0] && first[0].id) || '' }); } },
                   React.createElement('option', { value: '' }, t('voiceRefineChainModel') + '...'),
                   baseProviders.map((p) => React.createElement('option', { key: p.provider, value: p.provider }, p.name || p.provider)),
@@ -4760,7 +4812,7 @@ function VoiceSection(props) {
           ),
           curProvider ? React.createElement('div', { className: 'dsh-plg-row' },
             React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceRefineChainModel')),
-            React.createElement('select', { className: 'dsh-plg-select', style: { flex: '0 0 auto' }, value: v.refine.model || '',
+            React.createElement(MarqueeSelect, { className: 'dsh-plg-select dsh-plg-ms-fill', value: v.refine.model || '',
               onChange: (e) => saveRefine({ model: e.target.value }) },
               React.createElement('option', { value: '' }, t('voiceRefineChainModel') + '...'),
               curModels.map((m) => React.createElement('option', { key: m.id, value: m.id }, m.name || m.id)),
@@ -4788,6 +4840,8 @@ function VoiceSection(props) {
           ? (status ? (status.asr.cloud.configured ? '\u2713 ' + t('voiceStatusCloudReady') : '\u2717 ' + t('voiceStatusNoKey')) : '')
           : localReadyNode(),
         (status && status.refine && status.refine.configured ? ' \u00b7 \u2713 ' + t('voiceRefineEnabled') : '')),
+      needDeploy ? React.createElement('button', { type: 'button', className: 'dsh-plg-btn', style: { whiteSpace: 'nowrap' }, disabled: deploying, onClick: onDeployRuntime }, deploying ? t('voiceDeployRunning') : t('voiceDeployRuntime')) : null,
+      deployMsg ? React.createElement('span', { className: 'dsh-plg-note', style: { whiteSpace: 'nowrap' } }, deployMsg) : null,
     ),
   );
   return React.createElement(CollapsibleSection, { title: t('voiceSectionTitle') }, body);
@@ -4848,12 +4902,13 @@ const CSS = [
   // 窄屏自动换行（flex-wrap）；label 不再强制 96px 以免挤占 select 空间
   '.dsh-plg-row-duo{display:flex;align-items:center;gap:12px;flex-wrap:wrap}',
   '.dsh-plg-field{display:flex;align-items:center;gap:8px;flex:1 1 200px;min-width:0}',
-  '.dsh-plg-field .dsh-plg-label{min-width:0;flex:none}',
+  '.dsh-plg-field .dsh-plg-label{min-width:0;flex:none;white-space:nowrap}',
   '.dsh-plg-col{display:flex;flex-direction:column;gap:4px}',
   '.dsh-plg-label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);flex:none;min-width:96px}',
   '.dsh-plg-muted{font-size:12px;line-height:16px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}',
   // v2.8.4（下拉箭头占位预算）：所有下拉框右侧预留 28px 箭头位；固定宽度窄下拉同步加宽，保持原内容宽度不变
   '.dsh-plg-select{flex:1;min-width:0;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;padding:5px 28px 5px 12px}',
+  'select.dsh-plg-select{-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%2212%22%20height=%2212%22%20viewBox=%220%200%2012%2012%22%3E%3Ctext%20x=%220%22%20y=%2210%22%20font-size=%2211%22%20fill=%22%238a8a8a%22%3E%E2%96%BE%3C/text%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}',
   '.dsh-plg-select:focus-visible{outline:none;border-color:var(--dsw-alias-brand-primary)}',
   // v2.8.4（下拉选项溢出动效）：闭合态与打开态悬停选项超长时均自动滚动
   // v3.1.7（用户反馈·双击选中内容）：下拉框与弹窗内容禁止文本选中——root user-select:none
@@ -4941,7 +4996,10 @@ const CSS = [
   '.dsh-plg-num{width:18px;text-align:right;flex:none}',
   '.dsh-plg-select-provider{flex:0 1 136px;min-width:104px;max-width:176px}',
   '.dsh-plg-select-model{flex:1 1 0;min-width:120px}',
-  '.dsh-plg-select-thinking{flex:0 0 auto;width:59px}',
+  '.dsh-plg-select-thinking{flex:0 0 auto;width:59px}'
+  ,'.dsh-plg-mselect.dsh-plg-ms-fill{flex:1 1 auto;width:auto}'
+  ,'.dsh-plg-mselect.dsh-plg-ms-content{flex:0 0 auto;width:auto}'
+  ,'.dsh-plg-mselect.dsh-plg-ms-fill .dsh-plg-mselect-trigger{width:100%}',
   '.dsh-plg-select-level{flex:0 0 auto;width:72px}',
   // v23.1（D4）：测试结果集中单点区（链列表下方、操作按钮上方；空态隐藏）
   // v3.1.5（双模式参考）：纵向布局——头部行独占一行，实测/历史结果逐行显示，字号与标题对齐（12px）。

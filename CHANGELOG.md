@@ -5,6 +5,18 @@
 
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
+## [Unreleased]
+
+### Added
+- **本地引擎运行时一键部署（GitHub #4 方案 A）**：新增 `lib/asr-deploy.cjs` + `voice/deployRuntime` / `voice/deployStatus` RPC——缺失 worker/sherpa-onnx 时设置页显示「部署本地引擎」按钮，一键复制 worker + npm install + 拉起 worker，并轮询部署状态；`voice/status` 增加 runtime 缺失诊断，普通用户无需手动运行部署脚本即可修复本地引擎「已下载却未就绪」。— [VOICE-003]
+- **语音总开关**：识别引擎新增 `off` 选项；关闭后隐藏输入框 🎤 按钮与语音子配置；默认引擎改为 `local`（仅新环境生效，已保存配置不受影响）。— [VOICE-003]
+
+### Changed
+- **语音设置 UI 精细化**：识别引擎/语言等 7 处原生下拉统一为 MarqueeSelect（内容宽/占满两态），原生 select 增加 `appearance:none` + SVG ▾ 箭头；行1 弹性布局窄屏不再重叠；标签两字化并恢复「打开文件夹」按钮。— [VOICE-003]
+
+### Fixed
+- **快捷键清除不立即显示**：空组合键显示逻辑返回 `undefined` 导致受控输入退化为非受控，修复为空串并立即渲染清空。— [VOICE-003]
+
 ## [3.3.0] - 2026-08-21
 
 > 🎙️ **v3.3.0 里程碑：语音识别正式发布**——本版本整合 v3.2.5~v3.2.36 全部语音识别迭代（云端/本地双引擎、VAD 静音自停、快捷键唤醒、模型管理）+ 界面精简（用户视角）+ 可靠性修复（host 启动自动拉起 worker）。
