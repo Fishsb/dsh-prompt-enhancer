@@ -4010,14 +4010,14 @@ function subscribeVoiceConfig(fn) { voiceCfgState.listeners.add(fn); return () =
 // 60s 上限由 mic-button 的 timerSvc.timeout 触发 stopVoiceRecording（本模块不管理时间）。
 // 音频仅内存中转、不落盘（隐私）；转换走 FileReader.readAsDataURL。
 // v3.2.6（P3·VAD）：静音自动停——AudioContext + AnalyserNode 实时 RMS 检测，
-// 首次检测到语音（heardSpeech）后静音持续 1200ms 触发 onAutoStop；未说话不触发（防误停）。
+// 首次检测到语音（heardSpeech）后静音持续 2000ms 触发 onAutoStop；未说话不触发（防误停）。
 let voiceRecorder = null;
 let voiceStream = null;
 let voiceVadTimer = null;
 let voiceVadCtx = null;
 
 const VAD_THRESHOLD = 0.025;   // RMS 阈值（归一化，环境噪声容忍）
-const VAD_SILENCE_MS = 1200;   // 静音持续时长（首次语音后）
+const VAD_SILENCE_MS = 2000;   // 静音持续时长（首次语音后）
 const VAD_POLL_MS = 100;       // 轮询间隔
 const VAD_REQUIRED_QUIET = Math.round(VAD_SILENCE_MS / VAD_POLL_MS); // 连续静音帧数（抗单帧噪声）
 
