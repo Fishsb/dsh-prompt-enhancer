@@ -4177,8 +4177,8 @@ return {
             // v2.7.0（publish）：maxTokens<=0 省略字段 → provider 默认上限（不设限制）
             // v2.9.0-fix（实测确证）：reasoning 模式（带 effort）下思考过程消耗 maxTokens
             // 预算——配置的 2000 在长输入 + effort=max 时耗尽 → 空流（EMPTY_RESPONSE）；
-            // 自动放宽到 >=8000（保守版；publish 不设限同策略，无 effort 行为不变）
-            ...(entry.reasoningEffort ? { maxTokens: Math.max(maxTokens, 8000) } : (maxTokens > 0 ? { maxTokens } : {})),
+            // 自动放宽到 >=8000（保守版；publish 九章规格长文同策略放宽——实测 maxTokens=2000 时空流，v3.2.27 修复）
+            ...(entry.reasoningEffort ? { maxTokens: Math.max(maxTokens, 8000) } : (isPublish ? { maxTokens: Math.max(maxTokens, 8000) } : (maxTokens > 0 ? { maxTokens } : {}))),
             // v3.2.21（用户需求·优化结果稳定）：确定性重述任务压低 temperature——不传时用平台默认
             // （随机性高，同一输入每次结果不同）；reasoning 链节由 effort 控制，不传 temperature
             ...(entry.reasoningEffort ? {} : { temperature: 0.3 }),
