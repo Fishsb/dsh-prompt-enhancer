@@ -139,6 +139,21 @@ if (up.status >= 300) { console.error('资产上传失败: ' + up.status + ' ' +
 const asset = JSON.parse(up.body);
 console.log('资产: ' + asset.browser_download_url);
 
+console.log('== 上传 .sha256 资产 ==');
+// v3.3.2（供应链加固）：发布同步上传 .sha256——更新器哈希门禁的备用可信通道
+// （主通道为 GitHub API 资产 digest；两通道均不经 ghproxy 类镜像）
+const { createHash } = require('node:crypto');
+const sha256 = createHash('sha256').update(readFileSync(tgz)).digest('hex');
+const shaName = packOut + '.sha256';
+const shaBody = sha256 + '  ' + packOut + '\n';
+const upSha = await http('https://uploads.github.com/repos/' + REPO + '/releases/' + release.id + '/assets?name=' + encodeURIComponent(shaName), {
+  method: 'POST',
+  headers: { 'content-type': 'text/plain; charset=utf-8', 'content-length': Buffer.byteLength(shaBody) },
+  body: shaBody,
+});
+if (upSha.status >= 300) { console.error('.sha256 资产上传失败: ' + upSha.status + ' ' + upSha.body.slice(0, 300)); process.exit(1); }
+console.log('sha256: ' + sha256);
+
 // ---- 7. 收尾 ----
 console.log('');
 console.log('✅ 发布完成：' + tag);

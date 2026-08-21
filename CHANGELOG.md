@@ -5,6 +5,11 @@
 
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
+## [Unreleased]
+
+### Changed
+- **一键更新供应链加固（哈希强校验）**：executor 下载 tgz 后强制过哈希门禁——期望 sha256 取自 GitHub Releases API 资产 digest（主通道，api.github.com TLS 不经镜像）或直连 `.sha256` 发布资产（备用）；哈希失配拒绝安装（`STAGE_HASH_MISMATCH`），镜像下载且无可信哈希拒绝（`STAGE_HASH_UNVERIFIED`，fail closed），直连无哈希放行（TLS 可信）。校验通过后在 staging 旁挂 `.sha256`，端口重启安装前二次复验（防下载与安装窗口内被替换）。release.mjs 发布时同步上传 `.sha256` 资产。— [PEN-002]
+
 ## [3.3.1] - 2026-08-21
 
 > 🔧 **v3.3.1：语音设置体验完善 + 本地引擎一键部署 + llm 注入修复**
