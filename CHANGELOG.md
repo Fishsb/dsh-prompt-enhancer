@@ -5,7 +5,9 @@
 
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
-## [Unreleased]
+## [3.3.1] - 2026-08-21
+
+> 🔧 **v3.3.1：语音设置体验完善 + 本地引擎一键部署 + llm 注入修复**
 
 ### Added
 - **本地引擎运行时一键部署（GitHub #4 方案 A）**：新增 `lib/asr-deploy.cjs` + `voice/deployRuntime` / `voice/deployStatus` RPC——缺失 worker/sherpa-onnx 时设置页显示「部署本地引擎」按钮，一键复制 worker + npm install + 拉起 worker，并轮询部署状态；`voice/status` 增加 runtime 缺失诊断，普通用户无需手动运行部署脚本即可修复本地引擎「已下载却未就绪」。— [VOICE-003]
@@ -493,6 +495,8 @@
 - 版本检测与一键更新（update/check + update/pull，contents API 下载）— [VU-001]
 - 插件管理页版本检测卡片；按钮三态字体锚点对齐模型选择器（13px/500/20px）— [VU-001]
 
+[3.3.1]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.3.1
+[3.3.0]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.3.0
 [3.2.4]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.2.4
 [3.2.3]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.2.3
 [3.2.2]: https://github.com/Fishsb/dsh-prompt-enhancer/releases/tag/v3.2.2

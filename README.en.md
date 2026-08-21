@@ -40,7 +40,7 @@ The 🎤 record button beside the composer starts listening; the transcript (clo
 ## 🚀 Install
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.3.0
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.3.1
 ```
 
 Restart DSH (`dsh web`) after installing — the ✨ button appears in the composer toolbar.
