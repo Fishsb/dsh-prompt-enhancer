@@ -4222,8 +4222,10 @@ function renderVoiceVisual(status, seconds) {
   if (status === 'recording') {
     const bars = [];
     for (let i = 0; i < 6; i++) bars.push(React.createElement('span', { className: 'dsh-vi-wave-bar', key: i }));
-    const labelEl = seconds > 0 ? React.createElement('span', { className: 'dsh-vi-label' }, seconds + 's') : null;
-    return React.createElement('span', { className: 'dsh-vi-wave' }, bars, labelEl);
+    // v3.2.32（用户需求）：录音计时隐藏——保留 seconds/labelEl 逻辑（60s 自动停止依赖），仅不渲染；
+// 恢复显示：把 return 行改回 React.createElement('span', { className: 'dsh-vi-wave' }, bars, labelEl)
+const labelEl = seconds > 0 ? React.createElement('span', { className: 'dsh-vi-label' }, seconds + 's') : null;
+    return React.createElement('span', { className: 'dsh-vi-wave' }, bars);
   }
   if (status === 'idle' || status === 'done') {
     const bars = [];
