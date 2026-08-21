@@ -1,6 +1,6 @@
 # dsh-prompt-enhancer
 
-DeepSeek Harness (DSH) 插件，两大核心能力：**提示词增强**（输入框草稿 → ✨ 一键改写，不满意可撤回）与 **DSH 服务异常一键重启**（网页打不开也能命令行恢复）。
+DeepSeek Harness (DSH) 插件，三大核心能力：**提示词增强**（输入框草稿 → ✨ 一键改写，不满意可撤回）、**语音输入**（🎤 说完自动停，云端/本地双引擎离线可用）与 **DSH 服务异常一键重启**（网页打不开也能命令行恢复）。
 
 [![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
 [![Release date](https://img.shields.io/github/release-date/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
@@ -19,7 +19,7 @@ DeepSeek Harness (DSH) 插件，两大核心能力：**提示词增强**（输�
 ## 🚀 安装
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.2.4
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.3.0
 ```
 
 安装后重启 DSH（`dsh web`），输入框工具行出现 ✨ 按钮即安装成功。
@@ -62,6 +62,14 @@ node "<DSH_HOME>\AppData\Local\dsh-prompt-enhancer\executor\0.1.11\lib\updater-h
 
 ![模型配置](docs/screenshots/settings-models.png)
 
+**语音输入**（输入框 🎤 录音按钮，说完自动停）：
+
+![语音输入](docs/screenshots/voice-main.png)
+
+**语音识别设置**（引擎切换 / 快捷键唤醒 / 模型下载 / 文本规整）：
+
+![语音识别设置](docs/screenshots/voice-settings.png)
+
 **一键重启 CLI**（服务异常时命令行恢复）：
 
 ![一键重启 CLI](docs/screenshots/restart-cli.png)
@@ -72,7 +80,7 @@ node "<DSH_HOME>\AppData\Local\dsh-prompt-enhancer\executor\0.1.11\lib\updater-h
 
 | Tab | 说明 |
 |---|---|
-| **模型配置** | 配置优化模型链，按序尝试、可增删改序 |
+| **模型配置** | 配置优化模型链，按序尝试、可增删改序；**语音识别**段落（引擎切换 / 快捷键唤醒 / 本地模型下载 / 文本规整） |
 | **优化参数** | 优化模式 / 记忆开关 / 上下文预算 / 超时与输出上限 / 模板 |
 
 ## 📚 文档

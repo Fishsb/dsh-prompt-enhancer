@@ -4709,9 +4709,7 @@ function VoiceSection(props) {
             React.createElement('option', { value: 'ko' }, t('voiceLangKo')),
             React.createElement('option', { value: 'yue' }, t('voiceLangYue')),
           ),
-          React.createElement('button', { type: 'button', className: 'dsh-plg-btn', style: { whiteSpace: 'nowrap' }, onClick: () => host.call('voice/modelOpenDir', {}).then((r) => { if (!r || r.ok !== true) setModelOpenErr(true); }).catch(() => setModelOpenErr(true)) }, t('voiceModelOpenDir')),
         ),
-        modelOpenErr ? React.createElement('span', { className: 'dsh-plg-error' }, t('voiceModelOpenDirFail')) : null,
         // v3.2.12（用户需求·下载反馈）：下载状态行——步骤 + 百分比 + 失败原因（不再静默）
         (dlProgress[selModel] && dlProgress[selModel].state !== 'idle')
           ? React.createElement('div', { className: 'dsh-plg-row', style: { marginTop: '2px' } },
@@ -4790,8 +4788,6 @@ function VoiceSection(props) {
           ? (status ? (status.asr.cloud.configured ? '\u2713 ' + t('voiceStatusCloudReady') : '\u2717 ' + t('voiceStatusNoKey')) : '')
           : localReadyNode(),
         (status && status.refine && status.refine.configured ? ' \u00b7 \u2713 ' + t('voiceRefineEnabled') : '')),
-      React.createElement('button', { type: 'button', className: 'dsh-plg-btn', style: { whiteSpace: 'nowrap' }, onClick: check, disabled: checking },
-        checking ? t('voiceStatusChecking') : t('voiceStatusCheck')),
     ),
   );
   return React.createElement(CollapsibleSection, { title: t('voiceSectionTitle') }, body);

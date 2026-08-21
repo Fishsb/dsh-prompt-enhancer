@@ -2236,9 +2236,9 @@ function estimateLiteModeSeconds(ttftMs, tokensPerSecond, inputChars) {
 // 方案「插件版本检测与一键更新方案.md」§1-§3：检测目标 / 版本比较 / 更新流程。
 // 本地版本单一事实源（发布时 bump；client 不另存副本，统一经 update/check 读取）
 // v3.2.1-t（架构调整·版本单一事实源）：PLUGIN_VERSION 由 build-host.mjs 从 package.json 构建注入
-// （'3.2.4' 占位符替换）——源码不再硬编码版本，杜绝「发版忘 bump → 检测永远旧版」漂移。
+// （'3.3.0' 占位符替换）——源码不再硬编码版本，杜绝「发版忘 bump → 检测永远旧版」漂移。
 // 测试/动态形态下占位符未替换 → typeof 未定义 → 回退 0.0.0（仅格式占位，构建产物始终为真实版本）。
-const PLUGIN_VERSION = typeof '3.2.4' !== 'undefined' ? '3.2.4' : '0.0.0';
+const PLUGIN_VERSION = typeof '3.3.0' !== 'undefined' ? '3.3.0' : '0.0.0';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
 const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）

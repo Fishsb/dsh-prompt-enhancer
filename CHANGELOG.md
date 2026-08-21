@@ -5,7 +5,9 @@
 
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
-## [Unreleased]
+## [3.3.0] - 2026-08-21
+
+> 🎙️ **v3.3.0 里程碑：语音识别正式发布**——本版本整合 v3.2.5~v3.2.36 全部语音识别迭代（云端/本地双引擎、VAD 静音自停、快捷键唤醒、模型管理）+ 界面精简（用户视角）+ 可靠性修复（host 启动自动拉起 worker）。
 
 ### Added
 - **语音识别模块（v3.2.9·快捷键唤醒 + 点按/长按双触发，2026-08-20 用户需求）**：新增键盘快捷键（默认 `` ` `` 键，可配置）唤醒语音——**点按** = 开始/再按结束（VAD 静音自动停不变）；**长按**（按住 ≥500ms）松开后 0.5s 立即识别。统一 `pressStart`/`pressEnd` 抽象（键盘 keydown/keyup + 鼠标 mousedown/mouseup，mouseup 抑制 click 防双重处理）；`getUserMedia` 未就绪时 `longReleaseRef` 兜底（startRec 完成后补触发）。设置「语音识别」段落新增**快捷键唤醒开关 + 组合键录制**（readonly 输入框，聚焦后按组合键即保存、Esc 取消、清除按钮）；配置 `voice.hotkey`（enabled/combo，e.code 格式）贯通 host sanitize + state.js 默认值 + i18n 中英文案。— [VOICE-003]
@@ -26,6 +28,7 @@
 - **优化按钮模型序号改为「设置链序号」（用户需求）**：按钮显示的「{n}正在优化」数字改为**用户模型链（设置里）的对应序号**——host 侧 `buildTryChain` 会去重/过滤导致 chain 索引与配置偏移，现在 llm 阶段按 fallback 原始数组匹配当前模型位置（第 N 条即显示 N，自动随设置数量 1..N）；进度 total 同步为设置模型总数。— [PEN-002]
 
 ### Changed
+- **设置页语音识别段落界面精简（v3.3.0，2026-08-21 用户指令「界面精简·用户视角·只展示对用户有效信息」）**：删除两个开发者向控件——① **「打开模型文件夹」按钮**（放第三方模型的开发者入口，普通用户不需要）；② **「检测状态」按钮**（挂载时已自动检测 + v3.2.36 worker 自动拉起，手动入口冗余）——状态行保留实时状态显示（本地引擎 ● 就绪 / 云端就绪 / 未配置提示）。i18n 键保留（ZH/EN 平衡不受影响）。**验证**：voice-section 内层 SYNTAX_OK + 构建产物（lib/client.cjs / plugin-client.js）含精简后代码 + git diff 确认按钮移除。— [VOICE-003]
 - **host 启动自动拉起本地 ASR worker（v3.2.36，2026-08-21 用户重启电脑后报「本地引擎未就绪」）**：根因 = worker 只在「模型下载完成 / `voice/modelApply`」时拉起，**host 启动无自动拉起逻辑** → 重启电脑后 3082 无监听 → 本地引擎未就绪（需手动切一次模型才恢复）。修复（asr-models.cjs + index.cjs）：新增 `ensureWorker()` —— host apply 延迟 **5s** 调用，读磁盘配置（`voice.asr.engine` 非 local 跳过 / `local.model` 或默认 `sense-voice` / 模型未安装跳过 / 3082 已监听跳过），否则 `restartWorker(modelId, type)`（detached 异步加载，不阻塞 host）；幂等。**验证**：node 直调两分支（在跑→`skipped:worker-already-up`；杀进程→`launched:true` 且 3s 后 3082 LISTENING）+ 语法 OK + 单测 192（191/0）+ 端到端：杀 worker 后重启 web → 7s 自动拉起 + `voice/status` 全绿（workerUp=true/modelReady=true）+ 地图无漂移。**生效**：web 重启；Harness/Desktop 重启。— [VOICE-003]
 - **VAD 自适应底噪校准（v3.2.35，2026-08-21 用户质疑「会不会把环境噪音当成说话导致静音自停失效」→ 确认风险后实施）**：原固定阈值 `VAD_THRESHOLD=0.025` 不感知环境——空调/风扇（RMS 0.02~0.04）临界、马路/嘈杂（>0.04）大概率把持续噪音当说话 → `heardSpeech` 恒真 → 2s 静音计数永不达标 → 静音自停失效（仅剩 60s 超时兜底）。**自适应校准**（recorder.js）：录音开始前 **500ms（5 帧 @100ms）采样环境底噪**（只统计 RMS 不判定，防说话前静音误停），取**中位数**作底噪基线（抗瞬时尖峰/采样混入语音），阈值 = `min(0.2, max(0.025, 底噪中位数 × 2.5))`——安静环境阈值不变（0.025 保灵敏度）、空调环境抬到 0.075、嘈杂环境 0.125、采样混入大噪声封顶 0.2；每轮录音独立校准，校准完成后才进入 heardSpeech/静音计数判定。**新增常量**：`VAD_CALIBRATE_FRAMES=5` / `VAD_NOISE_FACTOR=2.5` / `VAD_THRESHOLD_MAX=0.2`；判定从 `VAD_THRESHOLD` 改用运行时 `vadThreshold`。**验证**：recorder 内层 SYNTAX_OK + 常量断言 + 4 场景阈值计算模拟 PASS（安静 0.025/空调 0.075/嘈杂 0.125/封顶 0.2）+ 单测 192（191/0）+ 浏览器 e2e 页面 200 / rev ec3d8f19 / JS 错误 0 + 地图无漂移。— [VOICE-003]
 - **开始/停止逻辑核查 + VAD 静音 1.2s→2s（v3.2.34，2026-08-21 用户设定逻辑核对 + 调整）**：① **逻辑一致性核查（对照用户设定，全部一致）**——快捷键点按/按钮点按统一走 `pressStart`/`pressEnd` 抽象（按钮 mouseup 以 `suppressClickRef` 抑制 click 防双重）：点按（<500ms）只开始录音、不主动停，靠 **VAD 静音自停**（首次语音后静音持续 → `onAutoStop` → 立即识别）；快捷键长按（≥500ms）按住持续录音、松开 → `stopAndTranscribe(VOICE_RELEASE_BUFFER_MS=500)` → 0.5s 缓冲后识别；按钮与快捷键点按路径一致 ✓。② **VAD 静音时长**——用户以为 2s，**实际是 `VAD_SILENCE_MS = 1200`（1.2s）**，如实汇报后按用户决定调整到 **2000ms（2s）**（`recorder.js` 常量 + 注释；`VAD_REQUIRED_QUIET = round(2000/100) = 20` 帧自动推算）。**验证**：recorder 内层 SYNTAX_OK + 常量/推算断言 + 单测 192（191/0）+ 浏览器 e2e 页面 200 / rev b081f5f4 / JS 错误 0 + 地图无漂移。— [VOICE-003]
