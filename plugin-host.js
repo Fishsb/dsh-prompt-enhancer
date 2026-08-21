@@ -2954,7 +2954,8 @@ function summarize(reference) {
 }
 
 return {
-  inject: ['timer'],
+  // #3 修复（2026-08-21）：llm 服务声明为 inject 依赖，消除启动竞态下 ctx.get('llm') 为 undefined → enhance NO_LLM
+  inject: ['llm', 'timer'],
   apply(ctx) {
     const llm = ctx.get('llm');
     const pending = new Map();
