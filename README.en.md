@@ -79,10 +79,6 @@ Core logic lives in standalone Node modules, reusable from other scripts: `lib/s
 
 ## 📸 See it work
 
-**Model configuration** (try multiple models in order):
-
-![Model configuration](docs/screenshots/settings-models.png)
-
 **Voice recognition** (the 🎤 record button, stops on silence):
 
 ![Voice recognition](docs/screenshots/voice-main.png)
@@ -90,10 +86,6 @@ Core logic lives in standalone Node modules, reusable from other scripts: `lib/s
 **Voice recognition settings** (engine switch / hotkey wake / model download / refinement):
 
 ![Voice recognition settings](docs/screenshots/voice-settings.png)
-
-**One-click restart CLI** (recover from the CLI when the service is down):
-
-![One-click restart CLI](docs/screenshots/restart-cli.png)
 
 ## ⚙️ Configuration
 

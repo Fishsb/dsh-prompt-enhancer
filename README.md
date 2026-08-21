@@ -79,10 +79,6 @@ node "<DSH_HOME>\AppData\Local\dsh-prompt-enhancer\executor\0.1.11\lib\updater-h
 
 ## 📸 效果展示
 
-**模型配置**（按序尝试多个模型）：
-
-![模型配置](docs/screenshots/settings-models.png)
-
 **语音识别**（输入框 🎤 录音按钮，说完自动停）：
 
 ![语音识别](docs/screenshots/voice-main.png)
@@ -90,10 +86,6 @@ node "<DSH_HOME>\AppData\Local\dsh-prompt-enhancer\executor\0.1.11\lib\updater-h
 **语音识别设置**（引擎切换 / 快捷键唤醒 / 模型下载 / 文本规整）：
 
 ![语音识别设置](docs/screenshots/voice-settings.png)
-
-**一键重启 CLI**（服务异常时命令行恢复）：
-
-![一键重启 CLI](docs/screenshots/restart-cli.png)
 
 ## ⚙️ 配置
 
