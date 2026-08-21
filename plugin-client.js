@@ -4751,8 +4751,6 @@ const saveCloud = (patch) => saveVoiceCfg({ asr: { ...v.asr, cloud: { ...v.asr.c
             models.map((m) => React.createElement('option', { key: m.id, value: m.id }, m.name + (m.sizeMB ? ' (' + m.sizeMB + 'MB)' : ''))),
           ),
           React.createElement('button', { type: 'button', className: 'dsh-plg-btn', style: { whiteSpace: 'nowrap' }, onClick: onModelAction }, btnLabel),
-          React.createElement('button', { type: 'button', className: 'dsh-plg-btn', style: { whiteSpace: 'nowrap' }, onClick: () => host.call('voice/modelOpenDir', {}).then((r) => { if (!r || r.ok !== true) setModelOpenErr(true); }).catch(() => setModelOpenErr(true)) }, t('voiceModelOpenDir')),
-          modelOpenErr ? React.createElement('span', { className: 'dsh-plg-error', style: { whiteSpace: 'nowrap' } }, t('voiceModelOpenDirFail')) : null,
           React.createElement(MarqueeSelect, { className: 'dsh-plg-select dsh-plg-ms-content', value: v.asr.local.language, onChange: (e) => saveVoiceCfg({ asr: { ...v.asr, local: { ...v.asr.local, language: e.target.value } } }) },
             React.createElement('option', { value: 'auto' }, t('voiceLangAuto')),
             React.createElement('option', { value: 'zh' }, t('voiceLangZh')),
@@ -4761,6 +4759,8 @@ const saveCloud = (patch) => saveVoiceCfg({ asr: { ...v.asr, cloud: { ...v.asr.c
             React.createElement('option', { value: 'ko' }, t('voiceLangKo')),
             React.createElement('option', { value: 'yue' }, t('voiceLangYue')),
           ),
+React.createElement('button', { type: 'button', className: 'dsh-plg-btn', style: { whiteSpace: 'nowrap' }, onClick: () => host.call('voice/modelOpenDir', {}).then((r) => { if (!r || r.ok !== true) setModelOpenErr(true); }).catch(() => setModelOpenErr(true)) }, t('voiceModelOpenDir')),
+          modelOpenErr ? React.createElement('span', { className: 'dsh-plg-error', style: { whiteSpace: 'nowrap' } }, t('voiceModelOpenDirFail')) : null,
         ),
         // v3.2.12（用户需求·下载反馈）：下载状态行——步骤 + 百分比 + 失败原因（不再静默）
         (dlProgress[selModel] && dlProgress[selModel].state !== 'idle')

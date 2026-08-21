@@ -12,7 +12,7 @@
 - **语音总开关**：识别引擎新增 `off` 选项；关闭后隐藏输入框 🎤 按钮与语音子配置；默认引擎改为 `local`（仅新环境生效，已保存配置不受影响）。— [VOICE-003]
 
 ### Changed
-- **语音设置 UI 精细化**：识别引擎/语言等 7 处原生下拉统一为 MarqueeSelect（内容宽/占满两态），原生 select 增加 `appearance:none` + SVG ▾ 箭头；行1 弹性布局窄屏不再重叠；标签两字化并恢复「打开文件夹」按钮。— [VOICE-003]
+- **语音设置 UI 精细化**：识别引擎/语言等 7 处原生下拉统一为 MarqueeSelect（内容宽/占满两态），原生 select 增加 `appearance:none` + SVG ▾ 箭头；行1 弹性布局窄屏不再重叠；标签两字化并恢复「打开文件夹」按钮；本地模型行内「语言」下拉与「打开文件夹」按钮对调位置。— [VOICE-003]
 
 ### Fixed
 - **llm 服务声明为 inject 依赖（GitHub #3）**：host 插件 `inject` 列表由 `['timer']` 补为 `['llm','timer']`——cordis 等待 llm 服务就绪后才激活插件，消除启动竞态下 `ctx.get('llm')` 为 undefined、enhance 永远报「LLM 服务不可用」(NO_LLM) 的问题。— [PEN-002]
