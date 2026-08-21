@@ -4020,6 +4020,10 @@ const VAD_THRESHOLD = 0.025;   // RMS 阈值（归一化，环境噪声容忍）
 const VAD_SILENCE_MS = 2000;   // 静音持续时长（首次语音后）
 const VAD_POLL_MS = 100;       // 轮询间隔
 const VAD_REQUIRED_QUIET = Math.round(VAD_SILENCE_MS / VAD_POLL_MS); // 连续静音帧数（抗单帧噪声）
+// v3.2.35（自适应底噪校准）：录音前 500ms 采样环境底噪，阈值动态抬升——持续环境噪音不再被误判为说话导致静音自停失效
+const VAD_CALIBRATE_FRAMES = 5;    // 底噪采样帧数（5×100ms=500ms）
+const VAD_NOISE_FACTOR = 2.5;      // 自适应阈值 = 底噪中位数 × 2.5
+const VAD_THRESHOLD_MAX = 0.2;     // 阈值上限（防采样混入语音导致过抬）
 
 // VAD 静音检测：vadEnabled=false / 无 AudioContext 时静默跳过（60s 上限兜底）
 function startVoiceVad(stream, vadEnabled, onAutoStop) {
@@ -4039,6 +4043,9 @@ function startVoiceVad(stream, vadEnabled, onAutoStop) {
     let quietFrames = 0;
     let smoothRms = 0;
     let stopped = false;
+    let vadThreshold = VAD_THRESHOLD; // 自适应阈值（校准完成前用最低值，校准期不判定）
+    let calibrating = true;           // 底噪采样阶段（只统计 RMS，不判定说话/静音）
+    const noiseSamples = [];          // 采样帧 RMS 集合（取中位数作底噪基线）
     voiceVadCtx = ctx;
     voiceVadTimer = setInterval(() => {
       if (stopped) return;
@@ -4048,7 +4055,19 @@ function startVoiceVad(stream, vadEnabled, onAutoStop) {
         for (let i = 0; i < buf.length; i++) { const d = (buf[i] - 128) / 128; sum += d * d; }
         const rms = Math.sqrt(sum / buf.length);
         smoothRms = smoothRms * 0.7 + rms * 0.3; // EMA 平滑抗 mp3/底噪抖动
-        if (smoothRms >= VAD_THRESHOLD) { heardSpeech = true; quietFrames = 0; }
+        if (calibrating) {
+          // 采样阶段：收集原始 RMS（取中位数抗瞬时尖峰），满 5 帧算出自适应阈值后进入正常判定
+          noiseSamples.push(rms);
+          if (noiseSamples.length >= VAD_CALIBRATE_FRAMES) {
+            calibrating = false;
+            const sorted = noiseSamples.slice().sort((a, b) => a - b);
+            const baseline = sorted[Math.floor(sorted.length / 2)];
+            vadThreshold = Math.min(VAD_THRESHOLD_MAX, Math.max(VAD_THRESHOLD, baseline * VAD_NOISE_FACTOR));
+            try { console.log('[voice] VAD calibrated baseline=' + baseline.toFixed(3) + ' threshold=' + vadThreshold.toFixed(3)); } catch (e) {}
+          }
+          return;
+        }
+        if (smoothRms >= vadThreshold) { heardSpeech = true; quietFrames = 0; }
         else if (heardSpeech) {
           quietFrames++;
           if (quietFrames >= VAD_REQUIRED_QUIET) {
