@@ -289,16 +289,16 @@ test('VOICE-P18 refine chain 模式：基座模型选择（provider/model）+ ll
 
 // ---- 8. v3.2.9 快捷键唤醒（hotkey 白名单 + 产物含双触发逻辑）----
 test('VOICE-P19 hotkey 配置白名单 + 产物含快捷键/双触发逻辑', () => {
-  // sanitize：默认启用 Backquote；显式禁用/自定义 combo
+  // sanitize：默认关闭且 combo 空（v3.2.33）；显式启用/自定义 combo
   const d = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' } });
-  assert.equal(d.hotkey.enabled, true, '默认启用');
-  assert.equal(d.hotkey.combo, 'Backquote', '默认 Backquote');
+  assert.equal(d.hotkey.enabled, false, '默认关闭');
+  assert.equal(d.hotkey.combo, '', '默认空');
   const off = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, hotkey: { enabled: false } });
   assert.equal(off.hotkey.enabled, false, '显式禁用');
   const custom = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, hotkey: { enabled: true, combo: 'Ctrl+Shift+Backquote' } });
   assert.equal(custom.hotkey.combo, 'Ctrl+Shift+Backquote', '组合键保留');
   const bad = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, hotkey: { combo: 123 } });
-  assert.equal(bad.hotkey.combo, 'Backquote', '非法 combo 回退默认');
+  assert.equal(bad.hotkey.combo, '', '非法 combo 回退空');
   // 产物含快捷键/双触发逻辑
   const client = readFileSync(join(__dirname, '..', 'plugin-client.js'), 'utf8');
   assert.ok(client.includes('VOICE_LONG_PRESS_MS'), '产物缺长按阈值常量');

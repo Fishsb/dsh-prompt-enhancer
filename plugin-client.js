@@ -3908,7 +3908,7 @@ const VOICE_CFG_DEFAULTS = {
   refine: { enabled: true, mode: 'chain', provider: '', model: '', baseUrl: '', maxTokens: 300 },
   vad: { enabled: true },
   // v3.2.9（快捷键唤醒）：hotkey.enabled=快捷键开关；combo=组合键（e.code 格式，如 'Backquote'/'Ctrl+Shift+Backquote'）
-  hotkey: { enabled: true, combo: 'Backquote' },
+  hotkey: { enabled: false, combo: '' },
   // v3.2.17（语音识别完自动触发增强）：autoEnhance=识别完成填入草稿后自动触发提示词增强（默认关，不改变现有行为）
   autoEnhance: false,
 };
@@ -3949,8 +3949,8 @@ function mergeVoice(v) {
     },
     vad: { enabled: vd.enabled !== false },
     hotkey: {
-      enabled: hk.enabled !== false,
-      combo: typeof hk.combo === 'string' && hk.combo ? hk.combo : 'Backquote',
+      enabled: hk.enabled === true,
+      combo: typeof hk.combo === 'string' && hk.combo ? hk.combo : '',
     },
     // v3.2.17（自动触发增强）：autoEnhance 布尔白名单——true 保留，缺省/非法回退 false
     autoEnhance: (v && v.autoEnhance === true) ? true : false,
