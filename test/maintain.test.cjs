@@ -651,25 +651,32 @@ test('MAINT-25m up.lock 并发闸：第二实例 LOCK_BUSY；完成后锁文件�
   assert.ok(!fs.existsSync(lockP), '结束后锁文件应删除');
 });
 
-test('MAINT-26 「DSH Web」菜单壳契约：locale 双编码（zh=GBK 缓冲/en=ASCII）+ 3s 默认 1', () => {
-  // zh：GBK 字节缓冲——TextDecoder 回读必须含中文选项与倒计时提示；动态命令行为 ASCII 拼接
+test('MAINT-26 「DSH Web」菜单壳契约：locale 双编码 + 失败自动回菜单（NOAUTO 防倒计时死循环）', () => {
+  // zh：GBK 字节缓冲——回读含中文选项/倒计时/失败提示；命令行动态部分纯 ASCII
   const zh = indexMod.buildWebMenuCmdBody({ nodePath: 'C:\\n\\node.exe', target: 'C:\\x\\updater-host.cjs', svc: 'dsh-web', profile: 'web', locale: 'zh' });
   assert.ok(Buffer.isBuffer(zh));
   const zhText = new TextDecoder('gbk').decode(zh);
-  for (const mark of ['启动 Web', '端口修复', '一键更新', '默认启动']) assert.ok(zhText.includes(mark), 'zh 选项: ' + mark);
-  assert.ok(zhText.includes('choice /c 123 /t 3 /d 1'), '3s 倒计时');
-  assert.ok(!zhText.toUpperCase().includes('CHCP'), 'GBK 方案无需 chcp（UTF-8+chcp 是乱码根因）');
+  for (const mark of ['启动 Web', '端口修复', '一键更新', '默认启动', '启动失败']) assert.ok(zhText.includes(mark), 'zh 文案: ' + mark);
+  assert.ok(zhText.includes('choice /c 123 /t 3 /d 1'), '首跑 3s 倒计时');
+  assert.ok(zhText.includes('if defined NOAUTO (choice /c 123 /n /m'), '失败回菜单后关闭倒计时');
+  assert.ok(!zhText.toUpperCase().includes('CHCP'), 'GBK 方案无需 chcp');
   const zhLatin = zh.toString('latin1');
   for (const verb of ['--cli up ', '--cli repair ', '--cli update ']) assert.ok(zhLatin.includes(verb), 'zh 动词: ' + verb);
   const upLine = zhLatin.split('\r\n').find((l) => l.includes('--cli up')) || '';
-  assert.ok(/^[^\r]*$/.test(upLine) && /^[\x00-\x7F]*$/.test(upLine), '命令行动态部分必须纯 ASCII');
+  assert.ok(/^[\x00-\x7F]*$/.test(upLine), '命令行动态部分纯 ASCII');
 
-  // en：纯 ASCII
+  // 失败回环控制流：up → errorlevel 判定 → :upFail → 置 NOAUTO → goto menu
+  const at = (s) => zhLatin.indexOf(s);
+  assert.ok(at('if errorlevel 1 goto upFail') > at(upLine) && at(':upFail') > at('if errorlevel 1 goto upFail')
+    && at('set NOAUTO=1') > at(':upFail') && zhLatin.includes('goto menu\r\n'), '失败回环顺序正确');
+  assert.equal(zhLatin.split(':menu\r\n').length - 1, 1, ':menu 标签仅定义一次');
+  assert.equal((zhLatin.match(/goto menu\r\n/g) || []).length, 3, '三个分支都回到菜单');
+
+  // en：纯 ASCII 同构
   const en = indexMod.buildWebMenuCmdBody({ nodePath: 'C:\\n\\node.exe', target: 'C:\\x\\updater-host.cjs', svc: 'dsh-web', profile: 'web', locale: 'en' });
   const enText = en.toString('ascii');
   assert.ok(/^[\x00-\x7F]*$/.test(enText), 'en 壳纯 ASCII');
-  for (const mark of ['[1] Start Web', '[2] Repair port', '[3] One-click update']) assert.ok(enText.includes(mark), 'en 选项: ' + mark);
-  assert.ok(enText.includes('default [1] in 3s'));
+  assert.ok(enText.includes('[!] Start failed') && enText.includes('if defined NOAUTO'));
 });
 
 test('MAINT-26b 系统关键进程保护：killConflictingHolders 对 lsass 拒绝击杀', async () => {
