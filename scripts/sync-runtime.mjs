@@ -9,7 +9,7 @@
 //
 // 运行环境目录优先级：环境变量 DSH_RUNTIME_DIR > $DSH_HOME/profiles/* 全量发现。
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, cpSync, statSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, cpSync, statSync, realpathSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -18,6 +18,8 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const NODE = process.execPath;
+// v3.3.x（A5/A6）：快照与语法门原语复用运行时库 sys.cjs（单一事实源，host 侧同款）
+const sys = require('../lib/sys.cjs');
 
 function run(script, args) {
   execFileSync(NODE, [join(root, 'scripts', script), ...args], { stdio: 'inherit', cwd: root });
@@ -57,6 +59,27 @@ console.log('== 2/4 漂移校验（源码 ↔ 产物）==');
 run('build-host.mjs', ['--check']);
 run('build-client.mjs', ['--check']);
 
+// 2.5 产物语法门（A6·第三层）：构建产物零执行 `node --check`——组合/模块两层与本路径
+// 无关（sync 不改 bundles/patch），全三层见 scripts/dry-run-lib.mjs（救援流程用）。
+console.log('== 2.5/4 产物语法门（A6）==');
+{
+  const artifacts = ['plugin-host.js', 'plugin-client.js'];
+  const libDir = join(root, 'lib');
+  for (const f of readdirSync(libDir)) {
+    if (/\.cjs$/.test(f)) artifacts.push(join(libDir, f));
+  }
+  const gate = sys.syntaxCheckFiles(artifacts, NODE);
+  if (!gate.ok) {
+    for (const f of gate.failures) console.error('✗ ' + f.file + ': ' + String(f.message).split('\n')[0]);
+    throw new Error('产物语法门未通过（' + gate.failures.length + ' 个文件），中止部署');
+  }
+  console.log('✓ 语法门通过（' + artifacts.length + ' 个产物）');
+}
+
+// 2.6 安装即快照（A5）：部署覆盖前快照每个目标 profile 的可回退状态
+// （配置四文件 + 目标当前运行产物）。尽力而为，失败不阻断部署。
+console.log('== 2.6/4 安装即快照（A5）==');
+
 // 3. 同步运行环境（产物 + 运行必需文件）
 const targets = runtimeDirs();
 // v3.3.x（junction 守卫）：profile 插件目录可能是**指向本开发仓库的 junction**
@@ -71,6 +94,12 @@ for (const t of targets) {
   deployTargets.push(t);
 }
 console.log('== 3/4 同步运行环境（' + deployTargets.length + ' 个 profile）==');
+// A5 实际快照：逐部署目标，在覆盖前留回退锚点
+for (const rt of deployTargets) {
+  const profileName = (rt.match(/[\\/]profiles[\\/]([^\\/]+)[\\/]node_modules/) || [])[1] || 'web';
+  const snap = sys.rescueSnapshot({ profileName, runtimeDir: rt, reason: 'sync-runtime pre-deploy' });
+  console.log((snap.ok ? '✓ 快照 → ' : '⚠ 快照失败（不阻断）: ') + (snap.ok ? snap.dir + '（' + snap.files + ' files）' : snap.message));
+}
 const files = ['plugin-host.js', 'plugin-client.js', 'package.json', 'README.md', 'README.en.md', 'cordis.patch.yml'];
 for (const rt of deployTargets) {
   console.log('--- 目标：' + rt);

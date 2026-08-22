@@ -8,6 +8,14 @@
 ## [Unreleased]
 
 ### Fixed
+- **执行器端口发现（A1·端口红线修复）**：`executor-reloader`（M4 apply 路径）旧实现硬编码 3081 且从不读 `executor.port`——执行器 EADDRINUSE 漂移动态端口后恒 `EXECUTOR_UNREACHABLE`。现按「显式注入 → ping 3081 → 读 executor.port 再 ping」顺序发现真实端口；结果带 60s TTL 缓存，RPC 失联即作废重探（防中途换口缓存失真）。portFile 路径可注入（测试隔离）。— [PEN-002]
+
+### Added
+- **安装即快照（A5·救援底座）**：改写运行环境的安装动作前置快照到 `$DSH_HOME/rescue/<时间戳>/`——配置四文件（profile 三件套 + pnpm-workspace.yaml + home 级 cordis.patch.yml，官方前三层落盘物）+ 当前运行关键产物（plugin-host.js / lib/*.cjs 坏版本回滚锚点）；临时目录 rename 原子落位 + meta.json 清单 + 同秒多快照防撞名；保留最近 10 份自动清理。接入点：staging 安装、sync-runtime 部署。— [PEN-002]
+- **三层干跑拦截（A6·安装期爆炸前置）**：① `--dump-config` 组合语法层；② resolve-probe 模块层（解析 dump 输出全部 entry name 从 profile 与 dsh-install 双根 require.resolve——实测单层①拦不住引用不存在包的 patch）；③ `node --check` 产物语法层（拦包内损坏）。staging 安装与 sync-runtime 部署前强制过门：坏包在覆盖运行环境**之前**被拒（`STAGED_SYNTAX_CHECK_FAILED`），杜绝「装坏插件打死整个 Web 服务」。— [PEN-002]
+- **维护工具链复用导出**：`installStagedTarball/findStagedTarball` 显式导出（批次二 CLI 维护菜单与拦截演练复用同一实现，杜绝逻辑分叉）。— [PEN-002]
+
+### Fixed
 - **端口重启双实例隔离三连修（web+Desktop 共享 DSH_HOME）**：① 进程索引写入加 `kind`（web/desktop），`update/portRestart` 读取时 kind 与当前运行时不一致即整体不信任、回退当前进程事实值（pid/execPath/argv 第一手真相）——根治两实例互相覆盖索引导致的误杀对方进程/拉错应用；② staging 安装 profile 在 Desktop 下**无条件强制** `'desktop'`——旧三元优先信任 client 恒传的默认 `'web'`（client 无桌面检测），Desktop「一键更新→端口重启」装进 web profile、重启后版本不变；③ 生成的重启脚本 Desktop 分支杀前 tasklist 镜像名校验（非 DSH Desktop.exe 即中止防误杀）+ CLI 快捷方式脚本优先 kind 校验过的索引 pid 并校验存活镜像（防 tasklist 首个匹配命中 GPU/renderer 子进程）。— [PEN-002]
 - **portRestart TDZ ReferenceError 修复**：argv 兜底分支在 `const isDesktop` 声明前引用——桌面端索引 argv 缺失时整个 RPC 抛 `Cannot access 'isDesktop' before initialization`；声明提前至索引读取前。索引缺失同时不再硬失败（原 NO_INDEX → 现回退当前进程参数继续执行）。— [PEN-002]
 - **一键更新重试链桌面安全化**：apply 轮询中执行器连续失联的重试动作，由 executor `restart`（读共享进程索引 + 健康检查兜底固定 3080、无桌面守卫的后门路径）改为 host `update/portRestart` RPC——复用桌面适配全链路（kind 校验 + 身份校验 + profile 强制），语义更准（staged 安装+重启本就是 portRestart 职责）。— [PEN-002]
