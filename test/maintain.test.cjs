@@ -690,6 +690,15 @@ test('MAINT-26b 系统关键进程保护：killConflictingHolders 对 lsass 拒�
   assert.equal(killed, 0);
 });
 
+test('MAINT-26d pickRestartMode 端口重启模式判定（两实例 + DISABLED 降级）', () => {
+  const m = indexMod.pickRestartMode;
+  assert.equal(m({ isDesktop: true, serviceExists: true, startTypeNum: 2 }), 'default', '桌面端=关掉重开，无服务概念');
+  assert.equal(m({ isDesktop: false, serviceExists: false, startTypeNum: null }), 'default', '无 nssm=前台脚本');
+  assert.equal(m({ isDesktop: false, serviceExists: true, startTypeNum: 4 }), 'default', 'DISABLED 必败 1058，自动降级前台');
+  assert.equal(m({ isDesktop: false, serviceExists: true, startTypeNum: 2 }), 'service', 'AUTO 服务正常走调度');
+  assert.equal(m({ isDesktop: false, serviceExists: true, startTypeNum: 3 }), 'service', 'DEMAND 同样可调度');
+});
+
 test('MAINT-26c 一键更新全自动：安装→闸门→杀旧→拉起→一致性；闸门失败自动回滚', async () => {
   const seq = [];
   const okRun = await updater.runOneClickUpdate(silentIo(), 'web', {
