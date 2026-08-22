@@ -17,6 +17,7 @@ const sys = require('../lib/sys.cjs');
 const M = require('../lib/maintain-lib.cjs');
 const stageInstall = require('../lib/stage-install.cjs');
 const updater = require('../lib/updater-host.cjs');
+const indexMod = require('../lib/index.cjs');
 
 const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-maint-'));
 
@@ -384,4 +385,118 @@ test('MAINT-22 snapshotCleanCandidates 脏/干净分类（G16b）', () => {
 test('MAINT-23 svcStateRaw 对不存在服务返回 exists:false', () => {
   const r = updater.svcStateRaw('dsh-definitely-not-exist-xyz');
   assert.equal(r.exists, false);
+});
+
+/* ---------------- 一键拉起（--cli up · 桌面「DSH Web 启动」后端）---------------- */
+
+const silentIo = () => ({ out() {}, ask: async () => '' });
+
+test('MAINT-24 svcStateRaw 解析真实服务 START_TYPE（本机 dsh-web=DISABLED）', () => {
+  const r = updater.svcStateRaw('dsh-web');
+  if (!r.exists) return; // 服务未装的环境跳过
+  assert.equal(r.startType, 'DISABLED', JSON.stringify(r));
+});
+
+test('MAINT-25a ensureWebUp 健康即报：DSH 家族监听中 → ALREADY_UP 不动作', async () => {
+  let touched = false;
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    holderPidOverride: 4321, imageOverride: 'node.exe',
+    spawnImpl: () => { touched = true; return { ok: true }; },
+    forceStopImpl: () => { touched = true; },
+    startServiceImpl: () => { touched = true; },
+  });
+  assert.deepEqual([r.ok, r.code], [true, 'ALREADY_UP']);
+  assert.equal(touched, false, '健康态不得触碰任何进程/服务');
+});
+
+test('MAINT-25b ensureWebUp 异族占用：绝不误杀，报 FOREIGN_HOLDER', async () => {
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    holderPidOverride: 4321, imageOverride: 'chrome.exe',
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 'FOREIGN_HOLDER');
+  assert.equal(r.pid, 4321);
+});
+
+test('MAINT-25c ensureWebUp DISABLED 服务跳过必败 sc start，直接前台冷启', async () => {
+  let scStarted = false;
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'DISABLED' },
+    isAdminOverride: true,
+    startServiceImpl: () => { scStarted = true; },
+    coldStartCmd: ['node.exe', 'bin.js', 'web'],
+    spawnImpl: () => ({ ok: true, pid: 555 }),
+    waitFgImpl: async () => true,
+  });
+  assert.deepEqual([r.ok, r.code], [true, 'FOREGROUND_STARTED']);
+  assert.equal(r.pid, 555);
+  assert.equal(scStarted, false, 'DISABLED 的 sc start 必败，不得浪费');
+});
+
+test('MAINT-25d ensureWebUp 僵尸服务（RUNNING 无监听）管理员先强制停再冷启', async () => {
+  let stopped = 0;
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: true, state: 'RUNNING' },
+    isAdminOverride: true,
+    forceStopImpl: () => { stopped++; },
+    coldStartCmd: ['node.exe', 'bin.js', 'web'],
+    spawnImpl: () => ({ ok: true, pid: 556 }),
+    waitFgImpl: async () => true,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(stopped, 1, '僵尸处置恰好一次');
+});
+
+test('MAINT-25e ensureWebUp 非管理员遇僵尸：跳过服务处置直走前台', async () => {
+  let stopped = 0;
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: true, state: 'RUNNING' },
+    isAdminOverride: false,
+    forceStopImpl: () => { stopped++; },
+    coldStartCmd: ['node.exe', 'bin.js', 'web'],
+    spawnImpl: () => ({ ok: true }),
+    waitFgImpl: async () => true,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(stopped, 0, '非管理员不得尝试动 SYSTEM 服务树');
+});
+
+test('MAINT-25f ensureWebUp 服务路径：STOPPED+AUTO_START → sc start 成功即收', async () => {
+  let started = 0;
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
+    isAdminOverride: false,
+    startServiceImpl: () => { started++; },
+    waitServiceImpl: async () => true,
+    // 若错误落到前台分支会用到下面两个——用哨兵证明没走到
+    spawnImpl: () => { throw new Error('不应走到前台分支'); },
+    waitFgImpl: async () => { throw new Error('不应走到前台分支'); },
+  });
+  assert.deepEqual([r.ok, r.code], [true, 'SERVICE_STARTED']);
+  assert.equal(started, 1);
+});
+
+test('MAINT-25g ensureWebUp 无服务无索引且无冷启命令 → NO_COLD_START 如实失败', async () => {
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: false, state: 'MISSING' },
+    coldStartCmd: null,
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 'NO_COLD_START');
+});
+
+test('MAINT-26 双启动器 .cmd 体契约：维护菜单与一键拉起动词正确', () => {
+  const bodyOf = (cliArgs, title) => indexMod.buildLauncherCmdBody({ nodePath: 'C:\\n\\node.exe', target: 'C:\\x\\updater-host.cjs', title, cliArgs });
+  const maintain = bodyOf('--cli maintain --service dsh-web --profile web', 'DSH Web 维护');
+  const up = bodyOf('--cli up --service dsh-web --profile web --open', 'DSH Web 启动');
+  assert.ok(maintain.includes('--cli maintain') && !maintain.includes('--open'));
+  assert.ok(up.includes('--cli up') && up.includes('--open'));
+  for (const b of [maintain, up]) {
+    assert.ok(b.includes('chcp 65001') && b.endsWith('pause\r\n'), '回显壳完整');
+  }
 });

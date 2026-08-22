@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Added
+- **桌面双入口快捷方式（用户需求·任何情况可拉起 + 日常启动）**：「DSH Web 维护」（全功能菜单，保留 UAC 提权）+ 新增「DSH Web 启动」——`updater-host.cjs --cli up --open` 一键拉起，四级阶梯确保 3080 在线：健康即报（有监听即成功）→ 僵尸服务预处置（RUNNING-but-port-dead 且管理员才动；非管理员跳过）→ 服务路径（STOPPED 且 START_TYPE≠DISABLED 才 sc start——启动类型经 `sc qc` 解析，DISABLED 必败不浪费等待）→ 前台冷启兜底（60s 等待+失败报日志路径）；**异族进程占用绝不误杀**（报 FOREIGN_HOLDER 指向维护→3 人工确认）；「启动」入口刻意不打 RunAs 标志免每次 UAC。维护菜单同步新增第 6 项同款语义。— [PEN-002]
 - **端口原语单一事实源（B1）**：四处重复的 netstat/taskkill/pid 探测实现收编 `lib/sys.cjs` 五个自包含原语函数（dshPrimNetstat/PortHolder/TaskKill/PidImage/PidHasListening），并经 `scriptPortPrims()` 以源码块发射嵌入生成式重启脚本（独立 node 进程无法 require，嵌源码是唯一共享形态）；port/service 两类重启脚本与维护菜单共用同一探测/击杀语义。— [PEN-002]
 - **Web 维护子命令（A4·G4 定案）**：`updater-host.cjs --cli maintain` 五项菜单——①立即重启（staging 提示 + G11 重启后一致性自检）②应用 staged 更新（G5 版本方向门 + G9 干跑双层 + 失败自动快照回滚）③端口占用修复（G6 进程家族自动杀/异族确认 + 冷启动分支）④环境审计（probeEnv + bundles 基座/第三方/patch-disabled 分层标注 + @dsh-external 与 link: 依赖可见性）⑤故障救援五步；支持 `--run N` 非交互单项模式；io 注入可测。CLI 重启脚本（~190 行生成式）随之退役——updater-host.cjs 本身即部署态静态文件，快捷方式降级为逻辑-free `.cmd` 启动器「DSH Web 维护」。— [PEN-002]
 - **救援五步全流程（A4·G12-G18）**：只读诊断（nssm 日志注册表发现 → 元凶扫描 → 指认宿主包，指认名≠禁用名）→ 无条件快照 → 三档处置（精准禁用[patch disabled+bundles 移除双保险、依赖声明保留]/快照回退[G16 脏候选预检+逐候选干跑验证自动退更旧]/二分定位[判定代数：通过⟺嫌疑⊂禁用集，≤6 轮秒级]）→ 干跑冒烟闸门（G14）→ 验证拉起（sc start→waitWebReady→前台兜底）；rescue-report.json 附恢复指引；EXECUTOR_ROOT/rescue.lock 互斥锁（活 pid 拒绝/死 pid 或 >10min 陈旧接管）。红线：pnpm rebuild 绝不代跑（冻结 host 事件循环），仅入报告指引。— [PEN-002]
