@@ -7,8 +7,17 @@
 
 ## [Unreleased]
 
+### Added
+- **端口原语单一事实源（B1）**：四处重复的 netstat/taskkill/pid 探测实现收编 `lib/sys.cjs` 五个自包含原语函数（dshPrimNetstat/PortHolder/TaskKill/PidImage/PidHasListening），并经 `scriptPortPrims()` 以源码块发射嵌入生成式重启脚本（独立 node 进程无法 require，嵌源码是唯一共享形态）；port/service 两类重启脚本与维护菜单共用同一探测/击杀语义。— [PEN-002]
+- **Web 维护子命令（A4·G4 定案）**：`updater-host.cjs --cli maintain` 五项菜单——①立即重启（staging 提示 + G11 重启后一致性自检）②应用 staged 更新（G5 版本方向门 + G9 干跑双层 + 失败自动快照回滚）③端口占用修复（G6 进程家族自动杀/异族确认 + 冷启动分支）④环境审计（probeEnv + bundles 基座/第三方/patch-disabled 分层标注 + @dsh-external 与 link: 依赖可见性）⑤故障救援五步；支持 `--run N` 非交互单项模式；io 注入可测。CLI 重启脚本（~190 行生成式）随之退役——updater-host.cjs 本身即部署态静态文件，快捷方式降级为逻辑-free `.cmd` 启动器「DSH Web 维护」。— [PEN-002]
+- **救援五步全流程（A4·G12-G18）**：只读诊断（nssm 日志注册表发现 → 元凶扫描 → 指认宿主包，指认名≠禁用名）→ 无条件快照 → 三档处置（精准禁用[patch disabled+bundles 移除双保险、依赖声明保留]/快照回退[G16 脏候选预检+逐候选干跑验证自动退更旧]/二分定位[判定代数：通过⟺嫌疑⊂禁用集，≤6 轮秒级]）→ 干跑冒烟闸门（G14）→ 验证拉起（sc start→waitWebReady→前台兜底）；rescue-report.json 附恢复指引；EXECUTOR_ROOT/rescue.lock 互斥锁（活 pid 拒绝/死 pid 或 >10min 陈旧接管）。红线：pnpm rebuild 绝不代跑（冻结 host 事件循环），仅入报告指引。— [PEN-002]
+- **干跑三层 CJS 版 + 装配面工具（maintain-lib.cjs）**：dumpCompose/resolveProbe/dryRunAll（救援运行态只有 lib/ 无 scripts/，故 CJS 单一事实源 + scripts/dry-run-lib.mjs ESM 薄委托）；profile bundle/patch 读写（静态 `disabled:true`，防 !!js 恒 truthy）；nssm 日志发现与元凶指认；compareSemver/decideUpdateAction 版本方向决策。dryRunAll 支持 extraNames 补录无 scope 裸包名（extractEntryNames 保守口径只收含 '/' 名字，宁漏勿误杀好安装）。— [PEN-002]
+- **staging 安装抽取面（stage-install.cjs）**：installStagedTarball/findStagedTarball/peekTarballVersion 从 index.cjs 抽出（裸 require index.cjs 有 20s 进程索引副作用，CLI 不能复用）——index.cjs 经模块委托保持同一实现（单测断言函数引用相等防分叉）。— [PEN-002]
+- **救援演练锚点（test/a4-drill.cjs）**：三档真实链路演练——隔离 DSH_HOME + 假 dsh bin（DSH_BIN/DSH_BIN_NODE_SCRIPT 注入，绕开 spawnSync .cmd EINVAL）+ bringUpImpl/logPathsOverride 注入绝不触真实服务；精准禁用→闸门转绿→报告齐备 / 二分收敛元凶不误伤 / 快照回退含 home patch 忠实删除。— [PEN-002]
+
 ### Fixed
 - **执行器端口发现（A1·端口红线修复）**：`executor-reloader`（M4 apply 路径）旧实现硬编码 3081 且从不读 `executor.port`——执行器 EADDRINUSE 漂移动态端口后恒 `EXECUTOR_UNREACHABLE`。现按「显式注入 → ping 3081 → 读 executor.port 再 ping」顺序发现真实端口；结果带 60s TTL 缓存，RPC 失联即作废重探（防中途换口缓存失真）。portFile 路径可注入（测试隔离）。— [PEN-002]
+- **进程索引污染守卫**：裸 require lib/index.cjs 会执行模块级进程索引写入（实测 20.5s 兜底且死 pid 覆盖真值）——现受 `DSH_ENHANCER_NO_INDEX=1` 环境变量守卫，测试/维护 CLI 复用安全。— [PEN-002]
 
 ### Added
 - **安装即快照（A5·救援底座）**：改写运行环境的安装动作前置快照到 `$DSH_HOME/rescue/<时间戳>/`——配置四文件（profile 三件套 + pnpm-workspace.yaml + home 级 cordis.patch.yml，官方前三层落盘物）+ 当前运行关键产物（plugin-host.js / lib/*.cjs 坏版本回滚锚点）；临时目录 rename 原子落位 + meta.json 清单 + 同秒多快照防撞名；保留最近 10 份自动清理。接入点：staging 安装、sync-runtime 部署。— [PEN-002]
