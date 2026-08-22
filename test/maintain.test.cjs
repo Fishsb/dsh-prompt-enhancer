@@ -651,23 +651,54 @@ test('MAINT-25m up.lock 并发闸：第二实例 LOCK_BUSY；完成后锁文件�
   assert.ok(!fs.existsSync(lockP), '结束后锁文件应删除');
 });
 
-test('MAINT-26 「DSH Web」单快捷方式菜单壳契约：双选项 + 3s 倒计时 + 选2按需自提权', () => {
-  const body = indexMod.buildWebMenuCmdBody({ nodePath: 'C:\\n\\node.exe', target: 'C:\\x\\updater-host.cjs', title: 'DSH Web', svc: 'dsh-web', profile: 'web' });
-  assert.ok(body.includes('[1] 启动 Web') && body.includes('[2] 维护菜单'), '两选项齐备');
-  assert.ok(body.includes('choice /c 12 /t 3 /d 1 /n /m'), '3 秒倒计时默认 [1]');
-  const upLine = body.split('\r\n').find((l) => l.includes('--cli up'));
-  assert.ok(upLine && upLine.includes('--open'), '选项 1 = 一键拉起并开浏览器');
-  assert.ok(body.includes('--cli maintain --service dsh-web --profile web'), '选项 2 = 维护菜单');
-  // 权限设计：快捷方式不带 RunAs；选 2 时 net session 探测 → 未提权则自重启 UAC，取消降级继续
-  assert.ok(body.includes('if /i "%~1"=="maintain" goto maintainRun'), '提权子进程直跳维护段');
-  assert.ok(body.includes('net session >nul 2>&1'), '管理员探测');
-  assert.ok(body.includes('-Verb RunAs'), 'UAC 自提权');
-  assert.ok(body.includes('goto :eof\r\n:maintainAsk'), '提权成功父窗口即退出（不双开）');
-  // 控制流顺序：choice → errorlevel 分流 → up 行 → 父退出 → :maintainAsk 探测 → :maintainRun
+test('MAINT-26 「DSH Web」菜单壳契约：纯 ASCII 三选项 + choice 3s 默认 1', () => {
+  const body = indexMod.buildWebMenuCmdBody({ nodePath: 'C:\\n\\node.exe', target: 'C:\\x\\updater-host.cjs', svc: 'dsh-web', profile: 'web' });
+  assert.ok(/^[\x00-\x7F]*$/.test(body), '壳必须纯 ASCII（中文+chcp 是 cmd 解析错位乱码根因）');
+  assert.ok(!body.includes('chcp'), '不再需要 chcp');
+  for (const mark of ['[1] Start Web', '[2] Repair port', '[3] One-click update']) assert.ok(body.includes(mark), '三选项: ' + mark);
+  assert.ok(body.includes('choice /c 123 /t 3 /d 1 /n /m'), '3s 倒计时默认 [1]');
   const at = (s) => body.indexOf(s);
-  assert.ok(at('choice /c 12') < at('if errorlevel 2 goto maintainAsk')
-    && at('if errorlevel 2 goto maintainAsk') < at(upLine)
-    && at(upLine) < at('goto :eof')
-    && at('goto :eof') < at(':maintainAsk')
-    && at(':maintainRun') > at(':maintainAsk'), 'cmd 控制流顺序正确');
+  assert.ok(at('if errorlevel 3 goto upd') < at('if errorlevel 2 goto rep') && at('if errorlevel 2 goto rep') < at('--cli up'),
+    'errorlevel 从大到小判断');
+  for (const verb of ['--cli up ', '--cli repair ', '--cli update ']) assert.ok(body.includes(verb), '动词: ' + verb);
+});
+
+test('MAINT-26b 系统关键进程保护：killConflictingHolders 对 lsass 拒绝击杀', async () => {
+  let killed = 0;
+  const r = await updater.killConflictingHolders(silentIo(), {
+    holderPidOverride: 4321, imageOverride: 'lsass.exe',
+    killImpl: async () => { killed++; },
+  });
+  assert.equal(r.killed, false);
+  assert.equal(r.reason, 'protected');
+  assert.equal(killed, 0);
+});
+
+test('MAINT-26c 一键更新全自动：安装→闸门→杀旧→拉起→一致性；闸门失败自动回滚', async () => {
+  const seq = [];
+  const okRun = await updater.runOneClickUpdate(silentIo(), 'web', {
+    findTgzImpl: () => 'C:\\staged\\pkg.tgz',
+    peekVerImpl: () => '9.9.9',
+    curVerImpl: () => '3.3.1',
+    installImpl: async () => { seq.push('install'); return { ok: true, snapshotDir: 'C:\\snap\\x' }; },
+    gateImpl: async () => { seq.push('gate'); return { ok: true }; },
+    oldPidOverride: 1001,
+    oldImageOverride: 'node.exe',
+    killOldImpl: async () => { seq.push('killOld'); },
+    ensureUpImpl: async () => { seq.push('ensureUp'); return { ok: true, code: 'ALREADY_UP' }; },
+    consistencyImpl: async () => { seq.push('consistency'); },
+  });
+  assert.equal(okRun.code, 'UPDATED');
+  assert.deepEqual(seq, ['install', 'gate', 'killOld', 'ensureUp', 'consistency']);
+
+  const rolled = await updater.runOneClickUpdate(silentIo(), 'web', {
+    findTgzImpl: () => 'C:\\staged\\bad.tgz',
+    peekVerImpl: () => '9.9.9',
+    curVerImpl: () => '3.3.1',
+    installImpl: async () => ({ ok: true, snapshotDir: 'C:\\snap\\y' }),
+    gateImpl: async () => ({ ok: false, layer: 'resolve', detail: 'missing x' }),
+    oldPidOverride: 0,
+  });
+  assert.equal(rolled.ok, false);
+  assert.equal(rolled.code, 'GATE_FAILED_ROLLED_BACK');
 });
