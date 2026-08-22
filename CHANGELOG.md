@@ -8,7 +8,7 @@
 ## [Unreleased]
 
 ### Added
-- **桌面双入口快捷方式（用户需求·任何情况可拉起 + 日常启动）**：「DSH Web 维护」（全功能菜单，保留 UAC 提权）+ 新增「DSH Web 启动」——`updater-host.cjs --cli up --open` 一键拉起；「启动」入口刻意不打 RunAs 标志免每次 UAC。**全局唯一语义=管理 Web 3080：桌面宿主里创建的也是同一对 web 快捷方式**（移除 DESKTOP_UNSUPPORTED 门 + RPC 钳制 dsh-web/web）；维护菜单第 6 项同款语义。— [PEN-002]
+- **单快捷方式「DSH Web」（用户需求·第三次修订：一个图标 + 双选项 + 3s 倒计时）**：桌面只创建一枚「DSH Web」——双击进菜单 `[1] 启动 Web（确保 3080 在线并打开网页）/ [2] 维护菜单（重启/更新/端口修复/体检/救援）`，`choice /t 3 /d 1` 三秒倒计时默认执行 [1]；全局唯一语义=管理 Web 端口（桌面宿主里创建的也是它，移除 DESKTOP_UNSUPPORTED 门 + RPC 钳制 dsh-web/web）；刻意不打 RunAs 免日常 UAC，维护需管理员时按提示右键运行；旧名（重启DSH 系列/DSH Web 维护/启动 等）创建时自动清理。— [PEN-002]
 - **nssm 异常自愈阶梯（v4.6·卸载仅兜底）**：端口异常时先穷尽恢复手段——P0 配置体检（Application 二进制缺失=配置性死亡取证跳级）→ P1 软重启（stop≤5s+start+等15s）→ P2 强停僵尸树借力 nssm AppExit 自动拉起（等15s）→ P3 末次一发（≤28s，StartLimitBurst 式预算硬顶）→ 全穷尽且管理员才 `sc delete` 降级回归默认前台（留痕 web-port-recovery.log，设置页可重装=可逆）。DISABLED 服务视为机器显式配置永不自动卸载；权限类失败绝不卸载；宽限二次探测防误杀慢启服务（R1）。时间预算：典型成功 <25s，最坏全失败链 ≈2 分钟。并发闸 `up.lock`（pid 探活+同进程重入同样拒绝）杜绝双击双实例抢 3080/索引双写。单测矩阵 MAINT-25a~25m 十三项全覆盖（含 resolve→delete→spawn 顺序断言）。— [PEN-002]
 - **端口原语单一事实源（B1）**：四处重复的 netstat/taskkill/pid 探测实现收编 `lib/sys.cjs` 五个自包含原语函数（dshPrimNetstat/PortHolder/TaskKill/PidImage/PidHasListening），并经 `scriptPortPrims()` 以源码块发射嵌入生成式重启脚本（独立 node 进程无法 require，嵌源码是唯一共享形态）；port/service 两类重启脚本与维护菜单共用同一探测/击杀语义。— [PEN-002]
 - **Web 维护子命令（A4·G4 定案）**：`updater-host.cjs --cli maintain` 五项菜单——①立即重启（staging 提示 + G11 重启后一致性自检）②应用 staged 更新（G5 版本方向门 + G9 干跑双层 + 失败自动快照回滚）③端口占用修复（G6 进程家族自动杀/异族确认 + 冷启动分支）④环境审计（probeEnv + bundles 基座/第三方/patch-disabled 分层标注 + @dsh-external 与 link: 依赖可见性）⑤故障救援五步；支持 `--run N` 非交互单项模式；io 注入可测。CLI 重启脚本（~190 行生成式）随之退役——updater-host.cjs 本身即部署态静态文件，快捷方式降级为逻辑-free `.cmd` 启动器「DSH Web 维护」。— [PEN-002]

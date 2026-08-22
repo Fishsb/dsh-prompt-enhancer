@@ -651,13 +651,15 @@ test('MAINT-25m up.lock 并发闸：第二实例 LOCK_BUSY；完成后锁文件�
   assert.ok(!fs.existsSync(lockP), '结束后锁文件应删除');
 });
 
-test('MAINT-26 双启动器 .cmd 体契约：维护菜单与一键拉起动词正确', () => {
-  const bodyOf = (cliArgs, title) => indexMod.buildLauncherCmdBody({ nodePath: 'C:\\n\\node.exe', target: 'C:\\x\\updater-host.cjs', title, cliArgs });
-  const maintain = bodyOf('--cli maintain --service dsh-web --profile web', 'DSH Web 维护');
-  const up = bodyOf('--cli up --service dsh-web --profile web --open', 'DSH Web 启动');
-  assert.ok(maintain.includes('--cli maintain') && !maintain.includes('--open'));
-  assert.ok(up.includes('--cli up') && up.includes('--open'));
-  for (const b of [maintain, up]) {
-    assert.ok(b.includes('chcp 65001') && b.endsWith('pause\r\n'), '回显壳完整');
-  }
+test('MAINT-26 「DSH Web」单快捷方式菜单壳契约：双选项 + 3s 倒计时默认 1', () => {
+  const body = indexMod.buildWebMenuCmdBody({ nodePath: 'C:\\n\\node.exe', target: 'C:\\x\\updater-host.cjs', title: 'DSH Web', svc: 'dsh-web', profile: 'web' });
+  assert.ok(body.includes('[1] 启动 Web') && body.includes('[2] 维护菜单'), '两选项齐备');
+  assert.ok(body.includes('choice /c 12 /t 3 /d 1 /n /m'), '3 秒倒计时默认 [1]（choice /t 3 /d 1）');
+  assert.ok(body.includes('if errorlevel 2 goto maintain'), '选 2 转维护分支');
+  const upLine = body.split('\r\n').find((l) => l.includes('--cli up'));
+  assert.ok(upLine && upLine.includes('--open'), '选项 1 = 一键拉起并开浏览器');
+  assert.ok(body.includes('--cli maintain --service dsh-web --profile web'), '选项 2 = 维护菜单');
+  // 分流正确性：up 行必须位于 errorlevel 判断之后、goto :eof 之前；maintain 段在 :maintain 标签后
+  const iErr = body.indexOf('if errorlevel 2'), iUp = body.indexOf(upLine), iEof = body.indexOf('goto :eof'), iTag = body.indexOf(':maintain');
+  assert.ok(iErr < iUp && iUp < iEof && iEof < iTag, 'cmd 控制流顺序: ' + JSON.stringify([iErr, iUp, iEof, iTag]));
 });
