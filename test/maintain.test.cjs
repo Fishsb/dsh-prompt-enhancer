@@ -397,9 +397,13 @@ test('MAINT-24 svcStateRaw 解析真实服务 START_TYPE（本机 dsh-web=DISABL
   assert.equal(r.startType, 'DISABLED', JSON.stringify(r));
 });
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const NL = { noLock: true }; // 单测统一免锁；锁行为由 25m 专项验证
+
 test('MAINT-25a ensureWebUp 健康即报：DSH 家族监听中 → ALREADY_UP 不动作', async () => {
   let touched = false;
   const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
     holderPidOverride: 4321, imageOverride: 'node.exe',
     spawnImpl: () => { touched = true; return { ok: true }; },
     forceStopImpl: () => { touched = true; },
@@ -411,6 +415,7 @@ test('MAINT-25a ensureWebUp 健康即报：DSH 家族监听中 → ALREADY_UP �
 
 test('MAINT-25b ensureWebUp 异族占用：绝不误杀，报 FOREIGN_HOLDER', async () => {
   const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
     holderPidOverride: 4321, imageOverride: 'chrome.exe',
   });
   assert.equal(r.ok, false);
@@ -418,58 +423,82 @@ test('MAINT-25b ensureWebUp 异族占用：绝不误杀，报 FOREIGN_HOLDER', a
   assert.equal(r.pid, 4321);
 });
 
-test('MAINT-25c ensureWebUp DISABLED 服务跳过必败 sc start，直接前台冷启', async () => {
-  let scStarted = false;
+test('MAINT-25c ensureWebUp DISABLED 服务跳过必败 sc start，且永不卸载', async () => {
+  let scStarted = false; let deleted = 0;
   const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
     holderPidOverride: 0,
     svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'DISABLED' },
     isAdminOverride: true,
+    cfgStateImpl: () => ({ present: false }),
+    deleteImpl: () => { deleted++; },
     startServiceImpl: () => { scStarted = true; },
-    coldStartCmd: ['node.exe', 'bin.js', 'web'],
+    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
     spawnImpl: () => ({ ok: true, pid: 555 }),
     waitFgImpl: async () => true,
   });
   assert.deepEqual([r.ok, r.code], [true, 'FOREGROUND_STARTED']);
   assert.equal(r.pid, 555);
   assert.equal(scStarted, false, 'DISABLED 的 sc start 必败，不得浪费');
+  assert.equal(deleted, 0, 'DISABLED=机器显式配置，永不自动卸载');
 });
 
-test('MAINT-25d ensureWebUp 僵尸服务（RUNNING 无监听）管理员先强制停再冷启', async () => {
-  let stopped = 0;
+test('MAINT-25d 僵尸+管理员：阶梯穷尽才降级，顺序 resolve→delete→spawn', async () => {
+  const order = [];
   const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
     holderPidOverride: 0,
     svcInfoOverride: { exists: true, state: 'RUNNING' },
     isAdminOverride: true,
-    forceStopImpl: () => { stopped++; },
-    coldStartCmd: ['node.exe', 'bin.js', 'web'],
-    spawnImpl: () => ({ ok: true, pid: 556 }),
+    cfgStateImpl: () => ({ present: false }),
+    resolveCmdImpl: async () => { order.push('resolve'); return { execPath: 'node.exe', argv: ['bin.js', 'web'] }; },
+    cycleStopImpl: () => { order.push('stop'); },
+    startServiceImpl: () => { order.push('start'); },
+    waitServiceImpl: async () => false,
+    waitServiceImpl2: async () => false,
+    waitServiceImpl3: async () => false,
+    forceStopImpl: () => { order.push('forceStop'); },
+    deleteImpl: () => { order.push('delete'); },
+    spawnImpl: () => { order.push('spawn'); return { ok: true, pid: 556 }; },
     waitFgImpl: async () => true,
   });
   assert.equal(r.ok, true);
-  assert.equal(stopped, 1, '僵尸处置恰好一次');
+  assert.equal(r.code, 'FOREGROUND_STARTED');
+  assert.equal(order.filter((x) => x === 'delete').length, 1, '降级恰好一次');
+  const idx = (x) => order.indexOf(x);
+  assert.ok(idx('resolve') < idx('delete') && idx('delete') < idx('spawn'),
+    '顺序必须 resolve→delete→spawn: ' + order.join(','));
+  assert.ok(order.includes('start'), '阶梯应先穷尽重启尝试');
 });
 
-test('MAINT-25e ensureWebUp 非管理员遇僵尸：跳过服务处置直走前台', async () => {
-  let stopped = 0;
+test('MAINT-25e 僵尸+非管理员：零服务触碰直走前台', async () => {
+  let touched = 0;
   const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
     holderPidOverride: 0,
     svcInfoOverride: { exists: true, state: 'RUNNING' },
     isAdminOverride: false,
-    forceStopImpl: () => { stopped++; },
-    coldStartCmd: ['node.exe', 'bin.js', 'web'],
+    cfgStateImpl: () => ({ present: false }),
+    forceStopImpl: () => { touched++; },
+    cycleStopImpl: () => { touched++; },
+    startServiceImpl: () => { touched++; },
+    deleteImpl: () => { touched++; },
+    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
     spawnImpl: () => ({ ok: true }),
     waitFgImpl: async () => true,
   });
   assert.equal(r.ok, true);
-  assert.equal(stopped, 0, '非管理员不得尝试动 SYSTEM 服务树');
+  assert.equal(touched, 0, '非管理员不得触碰 SYSTEM 服务树');
 });
 
 test('MAINT-25f ensureWebUp 服务路径：STOPPED+AUTO_START → sc start 成功即收', async () => {
   let started = 0;
   const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
     holderPidOverride: 0,
     svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
     isAdminOverride: false,
+    cfgStateImpl: () => ({ present: false }),
     startServiceImpl: () => { started++; },
     waitServiceImpl: async () => true,
     // 若错误落到前台分支会用到下面两个——用哨兵证明没走到
@@ -482,12 +511,144 @@ test('MAINT-25f ensureWebUp 服务路径：STOPPED+AUTO_START → sc start 成�
 
 test('MAINT-25g ensureWebUp 无服务无索引且无冷启命令 → NO_COLD_START 如实失败', async () => {
   const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
     holderPidOverride: 0,
     svcInfoOverride: { exists: false, state: 'MISSING' },
     coldStartCmd: null,
   });
   assert.equal(r.ok, false);
   assert.equal(r.code, 'NO_COLD_START');
+});
+
+test('MAINT-25h P2 借力监督者：强停后 nssm 自动拉起即成功，不进 P3/降级', async () => {
+  let starts = 0; let deleted = 0; let spawned = 0;
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: true, state: 'RUNNING' },
+    isAdminOverride: true,
+    cfgStateImpl: () => ({ present: false }),
+    startServiceImpl: () => { starts++; },          // 仅 P1 用
+    waitServiceImpl: async () => false,             // P1 失败
+    forceStopImpl: () => {},                        // P2 强停树
+    waitServiceImpl2: async () => true,             // nssm 拉起后端口活了
+    deleteImpl: () => { deleted++; },
+    spawnImpl: () => { spawned++; return { ok: true }; },
+    waitFgImpl: async () => true,
+  });
+  assert.deepEqual([r.ok, r.code], [true, 'SERVICE_STARTED']);
+  assert.equal(r.recovered, true);
+  assert.equal(starts, 1, '只有 P1 那一次显式 start（P2 靠 nssm 自动拉起）');
+  assert.equal(deleted + spawned, 0, 'P2 成功即短路，不降级不前台');
+});
+
+test('MAINT-25i 配置性死亡跳级：二进制缺失+管理员 → 不浪费重启周期直接降级', async () => {
+  let started = 0; let deleted = 0;
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
+    isAdminOverride: true,
+    cfgStateImpl: () => ({ present: true, alive: false, app: 'C:\\gone\\node.exe' }),
+    startServiceImpl: () => { started++; },
+    waitServiceImpl: async () => true,
+    deleteImpl: () => { deleted++; },
+    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
+    spawnImpl: () => ({ ok: true }),
+    waitFgImpl: async () => true,
+  });
+  assert.deepEqual([r.ok, r.code], [true, 'FOREGROUND_STARTED']);
+  assert.equal(deleted, 1, '配置性死亡直接降级');
+  assert.equal(started, 0, '跳过一切重启周期');
+});
+
+test('MAINT-25j STOPPED 超时+非管理员：宽限仍死但不卸载，直走前台', async () => {
+  let deleted = 0;
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
+    isAdminOverride: false,
+    cfgStateImpl: () => ({ present: false }),
+    startServiceImpl: () => {},
+    waitServiceImpl: async () => false,
+    graceProbeImpl: async () => false,
+    deleteImpl: () => { deleted++; },
+    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
+    spawnImpl: () => ({ ok: true }),
+    waitFgImpl: async () => true,
+  });
+  assert.equal(r.code, 'FOREGROUND_STARTED');
+  assert.equal(deleted, 0, '非管理员不卸载');
+});
+
+test('MAINT-25k STOPPED 超时+管理员+宽限仍死：降级恰好一次再前台', async () => {
+  let deleted = 0; const reasons = [];
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'DEMAND_START' },
+    isAdminOverride: true,
+    cfgStateImpl: () => ({ present: false }),
+    startServiceImpl: () => {},
+    waitServiceImpl: async () => false,
+    graceProbeImpl: async () => false,
+    deleteImpl: (s) => { deleted++; reasons.push(s); },
+    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
+    spawnImpl: () => ({ ok: true }),
+    waitFgImpl: async () => true,
+  });
+  assert.equal(r.code, 'FOREGROUND_STARTED');
+  assert.equal(deleted, 1);
+  assert.equal(reasons[0], 'svc-x');
+});
+
+test('MAINT-25l 权限类启动失败+管理员：绝不卸载，前台兜底', async () => {
+  let deleted = 0;
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
+    isAdminOverride: true,
+    permLike: true,
+    cfgStateImpl: () => ({ present: false }),
+    startServiceImpl: () => {},
+    waitServiceImpl: async () => false,
+    graceProbeImpl: async () => false,
+    deleteImpl: () => { deleted++; },
+    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
+    spawnImpl: () => ({ ok: true }),
+    waitFgImpl: async () => true,
+  });
+  assert.equal(r.code, 'FOREGROUND_STARTED');
+  assert.equal(deleted, 0, '权限类失败不动服务配置');
+});
+
+test('MAINT-25m up.lock 并发闸：第二实例 LOCK_BUSY；完成后锁文件清理', async () => {
+  const lockP = path.join(tmpRoot(), 'up.lock');
+  let releaseGate;
+  const gate = new Promise((res) => { releaseGate = res; });
+  const p1 = updater.ensureWebUp(silentIo(), 's', 'w', {
+    lockPathOverride: lockP,
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: false, state: 'MISSING' },
+    coldStartCmd: { execPath: 'node.exe', argv: ['a'] },
+    spawnImpl: () => ({ ok: true, pid: 1 }),
+    waitFgImpl: async () => { await gate; return true; },
+  });
+  await sleep(150); // 让 p1 先拿到锁
+  assert.ok(fs.existsSync(lockP), '持锁期间锁文件应在盘');
+  const p2 = await updater.ensureWebUp(silentIo(), 's', 'w', {
+    lockPathOverride: lockP,
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: false, state: 'MISSING' },
+    coldStartCmd: null,
+  });
+  assert.equal(p2.code, 'LOCK_BUSY');
+  releaseGate();
+  const r1 = await p1;
+  assert.equal(r1.code, 'FOREGROUND_STARTED');
+  assert.ok(!fs.existsSync(lockP), '结束后锁文件应删除');
 });
 
 test('MAINT-26 双启动器 .cmd 体契约：维护菜单与一键拉起动词正确', () => {
