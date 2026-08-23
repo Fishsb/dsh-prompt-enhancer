@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Changed
+- **卸载 nssm 兜底加确认门（用户需求·2026-08-23 实测「端口修复把服务卸了」驱动）**：`degradeNssmService`（恢复阶梯穷尽/配置性死亡的唯一破坏性动作）执行 `sc delete` 前必须过 `confirmNssmUninstall` 确认门——交互控制台 y/N 定时提问（30s 无响应=**默认保留**）；stdin 非 TTY（`--run N` 非交互）默认拒绝；自动化显式放行 `DSH_MAINT_ALLOW_UNINSTALL=1`；单测缝 `confirmImpl`。拒绝/超时均保留服务并留痕 web-port-recovery.log（uninstall declined by user），照走前台冷启兜底，服务可随时经设置页「服务化安装」重装。覆盖桌面快捷方式 [1]/[2] 与维护菜单 6 全部降级路径（含 P0 跳级）。测试：MAINT-25d/i/k 补 confirmImpl 放行 + 新增 MAINT-25n/o/p 三用例，全量 215/215。— [PEN-002]（flow: service-and-env）
+- **设置页端口重启过程提醒阶段化（用户需求·找回 v2.9.x 时代的详细变动反馈）**：v3.2.1 独立化后轮询期恒为单一「正在重启端口（Xs）」，现按阶段切换——①准备（RPC 应答前，含 staging 安装窗口）②host 应答消息直显（如「服务模式·nssm 存在，重启服务 dsh-web」）+ `serviceMode` 兜底文案 ③sawDown 后「旧实例已停止，等待新实例监听…」④完成「✓ 端口重启完成（Xs）」。i18n 新增 updRs* 四键（ZH/EN 成对），RPC 契约零变化（仅消费既有 message/serviceMode 字段）。— [PEN-002]（flow: port-restart）
+
 ### Added
 - **单快捷方式「DSH Web」·三功能全自动（用户需求·最终版）**：桌面一枚「DSH Web」——`[1] Start Web / [2] Repair port / [3] One-click update`，`choice /t 3 /d 1` 三秒默认启动。**壳纯 ASCII**（UTF-8 中文+chcp 是 cmd 解析错位把行片段当命令执行的乱码根因，实测抓出）；**零用户决策**：[1]=ensureWebUp 恢复阶梯自动自愈；[2]=`--cli repair` 自动清理占用者（系统关键进程保护名单 lsass/svchost 等绝不击杀）后重新拉起；[3]=`--cli update` 安装→干跑闸门（失败自动快照回滚）→杀旧实例→重启生效→一致性自检，版本方向全部自动继续并打印决策行；维护菜单同步瘦身为同三项。全局唯一语义=管理 Web 3080（桌面宿主创建的也是它）。— [PEN-002]
 - **nssm 异常自愈阶梯（v4.6·卸载仅兜底）**：端口异常时先穷尽恢复手段——P0 配置体检（Application 二进制缺失=配置性死亡取证跳级）→ P1 软重启（stop≤5s+start+等15s）→ P2 强停僵尸树借力 nssm AppExit 自动拉起（等15s）→ P3 末次一发（≤28s，StartLimitBurst 式预算硬顶）→ 全穷尽且管理员才 `sc delete` 降级回归默认前台（留痕 web-port-recovery.log，设置页可重装=可逆）。DISABLED 服务视为机器显式配置永不自动卸载；权限类失败绝不卸载；宽限二次探测防误杀慢启服务（R1）。时间预算：典型成功 <25s，最坏全失败链 ≈2 分钟。并发闸 `up.lock`（pid 探活+同进程重入同样拒绝）杜绝双击双实例抢 3080/索引双写。单测矩阵 MAINT-25a~25m 十三项全覆盖（含 resolve→delete→spawn 顺序断言）。— [PEN-002]

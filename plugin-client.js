@@ -723,6 +723,11 @@ const ZH = {
   // v3.2.1（独立化·端口重启）：重启中/完成文案
   updPortRestarting: '正在重启端口…',
   updPortRestartDone: '✓ 端口重启完成，请刷新页面',
+  // v3.3.x（过程提醒细化·用户需求）：端口重启轮询阶段文案
+  updRsPreparing: '正在触发端口重启…',
+  updRsSvcScheduled: '服务模式：已调度重启任务，旧实例即将停止',
+  updRsProcScheduled: '前台模式：辅助脚本已启动，即将拉起新实例',
+  updRsOldStopped: '旧实例已停止，等待新实例监听…',
   // v2.9.x（一键更新不重启·修复）：旧执行器无 restart:false 支持，阻止执行并提示重启 dsh-web
   updExecutorTooOld: '更新执行器版本过旧（v{v}），不支持「只安装不重启」——请重启 dsh-web 完成执行器升级（≥0.1.7）后重试',
   updCheckFirst: '请先点击「检测版本」确认有新版本后再更新',
@@ -1088,6 +1093,11 @@ const EN = {
   // v3.2.1 (independent port-restart): in-progress / done texts
   updPortRestarting: 'Restarting port…',
   updPortRestartDone: '✓ Port restarted — refresh the page',
+  // v3.3.x phased progress during port-restart polling
+  updRsPreparing: 'Triggering port restart…',
+  updRsSvcScheduled: 'Service mode: restart task scheduled, stopping old instance soon',
+  updRsProcScheduled: 'Foreground mode: helper script started, launching new instance',
+  updRsOldStopped: 'Old instance stopped, waiting for the new one to listen…',
   // v2.9.x (install-without-restart fix): old executor lacks restart:false — block and ask to restart dsh web
   updExecutorTooOld: 'Update executor is too old (v{v}) and does not support install-without-restart — restart dsh web to upgrade the executor (≥0.1.7), then retry',
   updCheckFirst: 'Run "Check version" first to confirm a new version before updating',
@@ -2393,10 +2403,13 @@ function UpdaterCard(props) {
     if (applyPhase !== 'confirm' || action !== 'restart') return;
     setApplyPhase('restarting');
     setApplyErr(null);
-    setApplyStatus(t('updPortRestarting'));
+    setApplyStatus(t('updRsPreparing'));
     const startedAt = Date.now();
     let doneFlag = false; // v3.2.1-u3（作用域修复）：声明移回 runRestart（原错插 runPullApply → pollRestored 闭包 ReferenceError）
     let sawDown = false;
+    // v3.3.x（过程提醒细化·用户需求）：阶段化状态——host 返回消息/模式 + 客户端观测断开
+    let hostMsg = '';
+    let svcMode = null;
 
     // v3.2.1（独立化·用户指令）：端口重启 = host update/portRestart 独立 RPC——host 读
     // 进程索引 → 生成自包含 .cmd 脚本 detached 执行（杀旧 DSH + 拉起新 DSH），不再依赖
@@ -2405,7 +2418,14 @@ function UpdaterCard(props) {
     const pollRestored = () => {
       if (doneFlag) return;
       const elapsed = Math.round((Date.now() - startedAt) / 1000);
-      setApplyStatus(t('updPortRestarting') + '（' + elapsed + 's）');
+      // v3.3.x（过程提醒细化）：准备 → host 模式/详细消息 → 已停止等待拉起，逐阶段切换
+      let stat;
+      if (sawDown) stat = t('updRsOldStopped');
+      else if (hostMsg) stat = hostMsg;
+      else if (svcMode === true) stat = t('updRsSvcScheduled');
+      else if (svcMode === false) stat = t('updRsProcScheduled');
+      else stat = t('updRsPreparing');
+      setApplyStatus(stat + '（' + elapsed + 's）');
       if (Date.now() - startedAt > 90000) {
         setApplyErr(t('updApplyExecutorDown'));
         setApplyStatus(null);
@@ -2433,7 +2453,7 @@ function UpdaterCard(props) {
               const pm = (its.find((i) => i.key === 'port-mode') || {}).detail;
               setSvcNeedInstall(pm === 'default' || pm === 'no-listener');
             }).catch(() => setSvcNeedInstall(false));
-            setApplyStatus(t('updPortRestartDone'));
+            setApplyStatus(t('updPortRestartDone') + '（' + elapsed + 's）');
             setApplyPhase('done');
             return;
           }
@@ -2454,7 +2474,12 @@ function UpdaterCard(props) {
     const ensure = () => {
       trigger().then((r) => {
         const rr = r && typeof r === 'object' ? r : {};
-        if (rr.ok === true) { return; } // v3.2.1-t（A）：轮询已独立启动，这里无需动作
+        if (rr.ok === true) {
+          // v3.3.x（过程提醒细化）：记录 host 选定的重启模式与详细消息，供轮询期间展示
+          hostMsg = typeof rr.message === 'string' ? rr.message : '';
+          svcMode = rr.serviceMode === true ? true : (rr.serviceMode === false ? false : null);
+          return; // v3.2.1-t（A）：轮询已独立启动，这里无需动作
+        }
         if (rr.code === 'NO_INDEX' || rr.code === 'PORT_RESTART_EXCEPTION' || rr.code === 'STAGED_INSTALL_FAILED' || rr.code === 'SCHEDULE_FAILED') {
           doneFlag = true; // v3.2.1-t（A）：明确失败 → 终止轮询
           setApplyErr((rr.message || rr.code || t('updError')));

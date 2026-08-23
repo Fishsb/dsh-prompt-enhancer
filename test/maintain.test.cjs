@@ -468,6 +468,7 @@ test('MAINT-25d 僵尸+管理员：阶梯穷尽才降级，顺序 resolve→dele
     waitServiceImpl2: async () => false,
     waitServiceImpl3: async () => false,
     forceStopImpl: () => { order.push('forceStop'); },
+    confirmImpl: async () => true, // v3.3.1-u1 确认门：既有降级用例显式放行
     deleteImpl: () => { order.push('delete'); },
     spawnImpl: () => { order.push('spawn'); return { ok: true, pid: 556 }; },
     waitFgImpl: async () => true,
@@ -562,6 +563,7 @@ test('MAINT-25i 配置性死亡跳级：二进制缺失+管理员 → 不浪费�
     cfgStateImpl: () => ({ present: true, alive: false, app: 'C:\\gone\\node.exe' }),
     startServiceImpl: () => { started++; },
     waitServiceImpl: async () => true,
+    confirmImpl: async () => true, // v3.3.1-u1
     deleteImpl: () => { deleted++; },
     coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
     spawnImpl: () => ({ ok: true }),
@@ -603,6 +605,7 @@ test('MAINT-25k STOPPED 超时+管理员+宽限仍死：降级恰好一次再前
     startServiceImpl: () => {},
     waitServiceImpl: async () => false,
     graceProbeImpl: async () => false,
+    confirmImpl: async () => true, // v3.3.1-u1
     deleteImpl: (s) => { deleted++; reasons.push(s); },
     coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
     spawnImpl: () => ({ ok: true }),
@@ -634,6 +637,74 @@ test('MAINT-25l 权限类启动失败+管理员：绝不卸载，前台兜底', 
   assert.equal(deleted, 0, '权限类失败不动服务配置');
 });
 
+test('MAINT-25n 确认门·拒绝卸载：服务保留、留痕、照走前台冷启', async () => {
+  let deleted = 0;
+  const outs = [];
+  const io = { out: (s) => outs.push(String(s)), ask: async () => 'n' };
+  const r = await updater.ensureWebUp(io, 'svc-x', 'web', {
+    ...NL,
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
+    isAdminOverride: true,
+    cfgStateImpl: () => ({ present: false }),
+    startServiceImpl: () => {},
+    waitServiceImpl: async () => false,
+    graceProbeImpl: async () => false,
+    confirmImpl: async () => false, // 用户拒绝
+    deleteImpl: () => { deleted++; },
+    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
+    spawnImpl: () => ({ ok: true }),
+    waitFgImpl: async () => true,
+  });
+  assert.equal(r.code, 'FOREGROUND_STARTED');
+  assert.equal(deleted, 0, '拒绝后不得删除服务');
+  assert.ok(outs.some((x) => x.includes('保留 nssm 服务')), '输出应明示保留服务（v3.3.1-u1）');
+});
+
+test('MAINT-25o 确认门·非交互默认拒绝（无 confirmImpl，stdin 非 TTY）', async () => {
+  let deleted = 0;
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
+    holderPidOverride: 0,
+    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
+    isAdminOverride: true,
+    cfgStateImpl: () => ({ present: false }),
+    startServiceImpl: () => {},
+    waitServiceImpl: async () => false,
+    graceProbeImpl: async () => false,
+    isTtyImpl: () => false,
+    deleteImpl: () => { deleted++; },
+    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
+    spawnImpl: () => ({ ok: true }),
+    waitFgImpl: async () => true,
+  });
+  assert.equal(r.code, 'FOREGROUND_STARTED');
+  assert.equal(deleted, 0, '非交互默认保留服务');
+});
+
+test('MAINT-25p 确认门·DSH_MAINT_ALLOW_UNINSTALL=1 显式放行自动化', async () => {
+  let deleted = 0;
+  process.env.DSH_MAINT_ALLOW_UNINSTALL = '1';
+  try {
+    const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+      ...NL,
+      holderPidOverride: 0,
+      svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
+      isAdminOverride: true,
+      cfgStateImpl: () => ({ present: false }),
+      startServiceImpl: () => {},
+      waitServiceImpl: async () => false,
+      graceProbeImpl: async () => false,
+      isTtyImpl: () => false,
+      deleteImpl: () => { deleted++; },
+      coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
+      spawnImpl: () => ({ ok: true }),
+      waitFgImpl: async () => true,
+    });
+    assert.equal(r.code, 'FOREGROUND_STARTED');
+    assert.equal(deleted, 1, 'env 放行后应执行卸载');
+  } finally { delete process.env.DSH_MAINT_ALLOW_UNINSTALL; }
+});
 test('MAINT-25m up.lock 并发闸：第二实例 LOCK_BUSY；完成后锁文件清理', async () => {
   const lockP = path.join(tmpRoot(), 'up.lock');
   let releaseGate;
