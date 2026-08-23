@@ -743,6 +743,43 @@ test('MAINT-25r waitWebReady 带标签逐秒 tick：立即就绪零打扰，超�
   assert.ok(c2 >= 1, '结束应清屏');
   assert.ok(/\d+s\/2s$/.test(String(t2[t2.length - 1]).split('… ').pop() || ''), 'tick 应含 Xs/2s 进度');
 });
+test('MAINT-25s 运行中询问·非交互默认保持现状：不重启、ALREADY_UP', async () => {
+  let restarted = 0;
+  const outs = [];
+  const io = { out: (s) => outs.push(String(s)), ask: async () => '' };
+  const r = await updater.ensureWebUp(io, 'svc-x', 'web', {
+    ...NL,
+    holderPidOverride: 4321, imageOverride: 'node.exe',
+    isTtyImpl: () => false,
+    restartCoreImpl: async () => { restarted++; return { ok: true, message: 'x' }; },
+  });
+  assert.deepEqual([r.ok, r.code], [true, 'ALREADY_UP']);
+  assert.equal(restarted, 0, '非交互默认不重启');
+  assert.ok(outs.some((x) => x.includes('已保持现状')), '应提示保持现状');
+});
+
+test('MAINT-25t 运行中确认 y：调用原地重启核心并返回 RESTARTED', async () => {
+  let called = 0;
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
+    holderPidOverride: 4321, imageOverride: 'node.exe',
+    restartConfirmImpl: async () => true,
+    restartCoreImpl: async () => { called++; return { ok: true, message: '已重启完成' }; },
+  });
+  assert.deepEqual([r.ok, r.code], [true, 'RESTARTED']);
+  assert.equal(called, 1, '应恰好调用一次重启核心');
+});
+
+test('MAINT-25u 运行中确认但重启失败：RESTART_FAILED 明确失败不误报成功', async () => {
+  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
+    ...NL,
+    holderPidOverride: 4321, imageOverride: 'node.exe',
+    restartConfirmImpl: async () => true,
+    restartCoreImpl: async () => ({ ok: false, message: 'boom' }),
+  });
+  assert.deepEqual([r.ok, r.code], [false, 'RESTART_FAILED']);
+  assert.equal(r.detail, 'boom');
+});
 test('MAINT-25m up.lock 并发闸：第二实例 LOCK_BUSY；完成后锁文件清理', async () => {
   const lockP = path.join(tmpRoot(), 'up.lock');
   let releaseGate;
