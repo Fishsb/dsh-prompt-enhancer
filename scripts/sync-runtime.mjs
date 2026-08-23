@@ -49,6 +49,18 @@ function md5(p) {
   return createHash('md5').update(readFileSync(p)).digest('hex');
 }
 
+// v4.9（2026-08-23 事故根治）：部署文本文件自动剥离 UTF-8 BOM——仓库清单若带 BOM，
+// 原样进运行时会使 DSH 启动 JSON.parse 直接崩溃（当日"端口重启后起不来"事故根因）。
+function stripBomIfPresent(p) {
+  const b = readFileSync(p);
+  if (b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) {
+    writeFileSync(p, b.subarray(3));
+    return true;
+  }
+  return false;
+}
+const TEXT_DEPLOY_EXT = /\.(json|cjs|js|mjs|md|ya?ml|cmd)$/;
+
 // 1. 构建（含版本注入）
 console.log('== 1/4 构建 host + client ==');
 run('build-host.mjs', []);
@@ -105,7 +117,10 @@ for (const rt of deployTargets) {
   console.log('--- 目标：' + rt);
   for (const f of files) {
     const s = join(root, f);
-    if (existsSync(s)) { cpSync(s, join(rt, f), { force: true }); }
+    if (existsSync(s)) {
+      cpSync(s, join(rt, f), { force: true });
+      if (TEXT_DEPLOY_EXT.test(f)) stripBomIfPresent(join(rt, f));
+    }
   }
   // lib 目录级同步（排除测试/源码）
   const libSrc = join(root, 'lib');
@@ -116,6 +131,15 @@ for (const rt of deployTargets) {
     force: true,
     filter: (src) => statSync(src).isDirectory() || /\.cjs$/.test(src),
   });
+  // v4.9：lib 文本产物去 BOM（与仓库侧清理对齐，防再次注入）
+  const walkStrip = (dir) => {
+    for (const e of readdirSync(dir)) {
+      const p = join(dir, e);
+      if (statSync(p).isDirectory()) walkStrip(p);
+      else if (TEXT_DEPLOY_EXT.test(e)) stripBomIfPresent(p);
+    }
+  };
+  walkStrip(libDst);
   // v3.2.15（undici 重构·运行时依赖部署）：lib/net-proxy.cjs 依赖 undici（零运行时依赖，
   // 单目录拷贝即可）。DSH 组合树（profiles/<profile>/node_modules/dsh-prompt-enhancer）内
   // require('undici') 沿 node_modules 逐级向上解析——必须把包放进插件自己的 node_modules。

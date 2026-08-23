@@ -1,4 +1,4 @@
-﻿// Build lib/client.cjs from plugin-client.js: inlines the dynamic client
+// Build lib/client.cjs from plugin-client.js: inlines the dynamic client
 // body into the static __ModuleLoader__ bundle. Run: node scripts/build-client.mjs
 //
 // v3.2.1-t（架构调整·漂移检测）：--check 模式重建到内存，与磁盘产物（lib/client.cjs

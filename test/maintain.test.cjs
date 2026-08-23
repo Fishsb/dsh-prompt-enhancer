@@ -399,6 +399,14 @@ test('MAINT-24 svcStateRaw 解析真实服务 START_TYPE（存在即验枚举合
   assert.ok(KNOWN.includes(r.startType), `START_TYPE 枚举外: ${JSON.stringify(r)}`);
 });
 
+// v4.9（2026-08-23 端口重启事故回归）：仓库清单带 UTF-8 BOM 会使 DSH 启动 JSON.parse
+// 直接崩溃（Unexpected token '\ufeff'）——本用例守住 package.json 永远无 BOM。
+test('PKG-BOM package.json 禁止 UTF-8 BOM（启动崩溃根因回归守卫）', () => {
+  const b = fs.readFileSync(path.join(__dirname, '..', 'package.json'));
+  const hasBom = b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf;
+  assert.equal(hasBom, false, 'package.json 带 UTF-8 BOM（EF BB BF）——DSH 启动解析会崩溃');
+});
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const NL = { noLock: true }; // 单测统一免锁；锁行为由 25m 专项验证
 
