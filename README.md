@@ -103,3 +103,11 @@ node "<DSH_HOME>\AppData\Local\dsh-prompt-enhancer\executor\0.1.11\lib\updater-h
 - [兼容性说明](docs/compatibility-matrix.md)
 
 > 隐私：插件不记录、不上报任何数据；增强结果来自外部 LLM，发送前请自行核对。
+
+### 🌐 网络受限环境下载语音模型
+
+本地模型托管于 Hugging Face。若你的网络无法直连（大陆网络常见）：
+
+1. **走本地代理**：代理软件保持运行（系统代理开关可不打开）；在配置文件 `%DSH_HOME%\dsh-prompt-enhancer.config.json` 加入顶层字段 `"download": { "proxy": "http://127.0.0.1:10808" }`（或 `socks5://…`），保存后重新点下载即走代理；
+2. **手动放置**：从 [hf-mirror.com](https://hf-mirror.com) 下载模型文件放入 `%DSH_HOME%\dsh-prompt-enhancer-asr\models\<模型id>\`（sense-voice 需 `model.int8.onnx` + `tokens.txt`），刷新设置页即识别为已安装；
+3. 下载内置**断点续传与多源自动切换**（HuggingFace ↔ hf-mirror），偶发中断重试即可续传。
