@@ -686,7 +686,14 @@ test('MAINT-26 「DSH Web」菜单壳契约：locale 双编码 + 失败自动回
   const en = indexMod.buildWebMenuCmdBody({ nodePath: 'C:\\n\\node.exe', target: 'C:\\x\\updater-host.cjs', svc: 'dsh-web', profile: 'web', locale: 'en' });
   const enText = en.toString('ascii');
   assert.ok(/^[\x00-\x7F]*$/.test(enText), 'en 壳纯 ASCII');
-  assert.ok(enText.includes('[!] Start failed') && enText.includes('if defined NOAUTO'));
+  assert.ok(enText.includes('[x] Start failed') && enText.includes('if defined NOAUTO'));
+
+  // v4.9.1 自愈壳 + 裸救援（runtimeRoot 模式）：heal/minfix 分支在位；全 body 禁 ASCII [!]（延迟展开吞 ! 实测教训）
+  const zhHeal = indexMod.buildWebMenuCmdBody({ nodePath: 'C:\\n\\node.exe', target: 'C:\\x\\updater-host.cjs', svc: 'dsh-web', profile: 'web', locale: 'zh', runtimeRoot: 'C:\\rt' });
+  const zhHealText = new TextDecoder('gbk').decode(zhHeal);
+  assert.ok(zhHealText.includes(':minfix') && zhHealText.includes(':killguarded') && zhHealText.includes('net session'), '自愈壳含 :minfix/:killguarded/net session 预检');
+  assert.ok(zhHealText.includes(':heal') && zhHealText.includes('dsh-prompt-enhancer-tgz'), 'heal 分支指向持久插件包缓存');
+  assert.ok(!/\[!\]/.test(zhHealText), '全 body 禁 ASCII [!]（延迟展开会吞字符）');
 });
 
 test('MAINT-26b 系统关键进程保护：killConflictingHolders 对 lsass 拒绝击杀', async () => {
