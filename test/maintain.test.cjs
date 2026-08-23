@@ -705,6 +705,44 @@ test('MAINT-25p 确认门·DSH_MAINT_ALLOW_UNINSTALL=1 显式放行自动化', a
     assert.equal(deleted, 1, 'env 放行后应执行卸载');
   } finally { delete process.env.DSH_MAINT_ALLOW_UNINSTALL; }
 });
+test('MAINT-25q 过程计时：timed io 每行带 [+Xs] 戳 + runWithTiming 开始/总耗时收尾', async () => {
+  const outs = []; const ticks = [];
+  const base = { out: (s) => outs.push(String(s)), tick: (l) => ticks.push(String(l)), clearTick: () => {} };
+  const tio = updater.createTimedIo(base);
+  tio.out('步骤A');
+  assert.ok(/^\[\d+s\] 步骤A$/.test(outs[outs.length - 1]), '输出应自动带耗时戳');
+  tio.tick('等待中');
+  assert.ok(/^\[\d+s\] 等待中$/.test(ticks[ticks.length - 1]), 'tick 应透传并带戳');
+  const r = await updater.runWithTiming(base, '测试动作', async (io2) => { io2.out('内部行'); return { ok: true }; });
+  assert.equal(r.ok, true);
+  assert.ok(outs.some((x) => x.includes('▶ 开始：测试动作')), '应打印开始行');
+  assert.ok(outs.some((x) => x === '[0s] 内部行' || /^\[\d+s\] 内部行$/.test(x)), '内部行应经包装输出');
+  assert.ok(outs.some((x) => x.includes('■ 结束：测试动作（总耗时 ') && x.endsWith('s）')), '应打印总耗时行');
+});
+
+test('MAINT-25r waitWebReady 带标签逐秒 tick：立即就绪零打扰，超时路径有倒计时并清屏', async () => {
+  const net = require('node:net');
+  const srv = net.createServer(() => {});
+  await new Promise((res) => srv.listen(0, '127.0.0.1', res));
+  const livePort = srv.address().port;
+  const t1 = []; let c1 = 0;
+  const ok1 = await updater.waitWebReady({ out: () => {}, tick: (l) => t1.push(l), clearTick: () => { c1++; } }, 2000, livePort, 'X');
+  srv.close();
+  assert.equal(ok1, true);
+  assert.equal(t1.length, 0, '立即就绪不应产生 tick');
+  assert.equal(c1, 0, '未 tick 则无需清屏');
+  // 死端口：超时路径应至少一次倒计时 tick 且以清屏收尾
+  const deadPort = await new Promise((res) => {
+    const s2 = net.createServer(() => {});
+    s2.listen(0, '127.0.0.1', () => { const pp = s2.address().port; s2.close(() => res(pp)); });
+  });
+  const t2 = []; let c2 = 0;
+  const ok2 = await updater.waitWebReady({ out: () => {}, tick: (l) => t2.push(l), clearTick: () => { c2++; } }, 1600, deadPort, '延迟拉起');
+  assert.equal(ok2, false);
+  assert.ok(t2.length >= 1, '等待期应有倒计时 tick，实际 ' + t2.length);
+  assert.ok(c2 >= 1, '结束应清屏');
+  assert.ok(/\d+s\/2s$/.test(String(t2[t2.length - 1]).split('… ').pop() || ''), 'tick 应含 Xs/2s 进度');
+});
 test('MAINT-25m up.lock 并发闸：第二实例 LOCK_BUSY；完成后锁文件清理', async () => {
   const lockP = path.join(tmpRoot(), 'up.lock');
   let releaseGate;
