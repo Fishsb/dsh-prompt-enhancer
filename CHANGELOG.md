@@ -18,6 +18,7 @@
 - **救援演练锚点（test/a4-drill.cjs）**：三档真实链路演练——隔离 DSH_HOME + 假 dsh bin（DSH_BIN/DSH_BIN_NODE_SCRIPT 注入，绕开 spawnSync .cmd EINVAL）+ bringUpImpl/logPathsOverride 注入绝不触真实服务；精准禁用→闸门转绿→报告齐备 / 二分收敛元凶不误伤 / 快照回退含 home patch 忠实删除。— [PEN-002]
 
 ### Fixed
+- **测试环境自适应化（CI 门禁修复）**：MAINT-24 不再硬编码旧开发机的 `dsh-web=DISABLED`——服务存在时改验 START_TYPE 落在 Windows 已知枚举（本机 AUTO_START 亦绿），未装服务的环境维持跳过；VOICE-P17 的 modelApply 断言按模型安装状态走双向分支（未装→验 `MODEL_NOT_INSTALLED` 拒绝路径，已装→验成功路径），干净机器与 CI runner 不再因缺模型必红。修复后本地 211/211 全绿，push 触发的 CI 门禁恢复有效。— [PEN-002]
 - **执行器端口发现（A1·端口红线修复）**：`executor-reloader`（M4 apply 路径）旧实现硬编码 3081 且从不读 `executor.port`——执行器 EADDRINUSE 漂移动态端口后恒 `EXECUTOR_UNREACHABLE`。现按「显式注入 → ping 3081 → 读 executor.port 再 ping」顺序发现真实端口；结果带 60s TTL 缓存，RPC 失联即作废重探（防中途换口缓存失真）。portFile 路径可注入（测试隔离）。— [PEN-002]
 - **进程索引污染守卫**：裸 require lib/index.cjs 会执行模块级进程索引写入（实测 20.5s 兜底且死 pid 覆盖真值）——现受 `DSH_ENHANCER_NO_INDEX=1` 环境变量守卫，测试/维护 CLI 复用安全。— [PEN-002]
 

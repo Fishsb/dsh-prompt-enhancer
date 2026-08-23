@@ -391,10 +391,12 @@ test('MAINT-23 svcStateRaw 对不存在服务返回 exists:false', () => {
 
 const silentIo = () => ({ out() {}, ask: async () => '' });
 
-test('MAINT-24 svcStateRaw 解析真实服务 START_TYPE（本机 dsh-web=DISABLED）', () => {
+test('MAINT-24 svcStateRaw 解析真实服务 START_TYPE（存在即验枚举合法·环境自适应）', () => {
   const r = updater.svcStateRaw('dsh-web');
-  if (!r.exists) return; // 服务未装的环境跳过
-  assert.equal(r.startType, 'DISABLED', JSON.stringify(r));
+  if (!r.exists) return; // 服务未装的环境跳过（CI / 未装 nssm 的机器）
+  // 不硬编码具体档位（旧开发机 DISABLED / 本机 AUTO_START 均合法）：解析器只要吐出已知枚举即算通过
+  const KNOWN = ['BOOT_START', 'SYSTEM_START', 'AUTO_START', 'DEMAND_START', 'DISABLED'];
+  assert.ok(KNOWN.includes(r.startType), `START_TYPE 枚举外: ${JSON.stringify(r)}`);
 });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

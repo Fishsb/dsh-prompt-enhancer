@@ -239,16 +239,25 @@ test('VOICE-P17 模型市场多条目 + 自定义扫描 + modelApply 校验', ()
     assert.equal(typeof m.installed, 'boolean');
     assert.equal(typeof m.custom, 'boolean');
   }
-  // modelApply：未安装拒绝 / 已安装 ok
+  // modelApply：未安装拒绝 / 已安装 ok（环境自适应：模型是否已装因机器而异，两个方向都要能验）
   const paraInstalled = para.installed;
   if (!paraInstalled) {
     const bad = am.modelApply('paraformer-zh');
     assert.equal(bad.code, 'MODEL_NOT_INSTALLED', '未安装模型切换应拒绝');
+  } else {
+    const okp = am.modelApply('paraformer-zh');
+    assert.equal(okp.ok, true, JSON.stringify(okp));
+    assert.equal(okp.model, 'paraformer-zh');
   }
-  const ok = am.modelApply('sense-voice');
-  assert.equal(ok.ok, true);
-  assert.equal(ok.model, 'sense-voice');
-  assert.equal(ok.type, 'sense-voice');
+  if (sense.installed) {
+    const ok = am.modelApply('sense-voice');
+    assert.equal(ok.ok, true, JSON.stringify(ok));
+    assert.equal(ok.model, 'sense-voice');
+    assert.equal(ok.type, 'sense-voice');
+  } else {
+    const bad2 = am.modelApply('sense-voice');
+    assert.equal(bad2.code, 'MODEL_NOT_INSTALLED', '默认模型未安装时同样应拒绝');
+  }
 });
 
 // ---- 12. 规整复用模型配置（2026-08-20 用户需求）：chain 模式走基座 llm ----
