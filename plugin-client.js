@@ -719,6 +719,8 @@ const ZH = {
   updRsSvcScheduled: '服务模式：已调度重启任务，旧实例即将停止',
   updRsProcScheduled: '前台模式：辅助脚本已启动，即将拉起新实例',
   updRsOldStopped: '旧实例已停止，等待新实例监听…',
+  // 批次A（P2-6）：防抖合并提示（状态行「已排队」）
+  updRsDebounced: '重启已排队：已有待触发的重启任务，本次请求已合并（稍后自动完成）',
   updRsPluginLoadWarn: '⚠ 重启完成，但检测到「插件加载失败」——刚装的第三方插件可能与核心不兼容，请到 设置→插件 禁用它后再刷新',
   // v2.9.x（一键更新不重启·修复）：旧执行器无 restart:false 支持，阻止执行并提示重启 dsh-web
   updExecutorTooOld: '更新执行器版本过旧（v{v}），不支持「只安装不重启」——请重启 dsh-web 完成执行器升级（≥0.1.7）后重试',
@@ -1061,6 +1063,8 @@ const EN = {
   updRsSvcScheduled: 'Service mode: restart task scheduled, stopping old instance soon',
   updRsProcScheduled: 'Foreground mode: helper script started, launching new instance',
   updRsOldStopped: 'Old instance stopped, waiting for the new one to listen…',
+  // Batch A (P2-6): debounce merge hint (status line shows queued)
+  updRsDebounced: 'Restart queued: a scheduled restart is already pending; request merged',
   updRsPluginLoadWarn: '⚠ Restarted, but detected a plugin load failure — a newly installed third-party plugin may be incompatible; disable it under Settings→Plugins and refresh',
   // v2.9.x (install-without-restart fix): old executor lacks restart:false — block and ask to restart dsh web
   updExecutorTooOld: 'Update executor is too old (v{v}) and does not support install-without-restart — restart dsh web to upgrade the executor (≥0.1.7), then retry',
@@ -2253,7 +2257,7 @@ function UpdaterCard(props) {
               // v3.2（动态端口 fallback）：重发 restart 用 executorEnsure 返回的真实端口
               const ap = (en.port && en.port > 0) ? en.port : port;
               // v3.3.x（桌面安全·重试链换 RPC）：旧实现重发 executor 'restart'（读共享进程索引 + 健康检查兜底固定 3080、无桌面守卫，Desktop 下会杀错进程/死等 3080）——改走 host update/portRestart（v3.2.1 独立化 + v3.3.x 桌面适配：kind 校验索引 + 杀前身份校验 + profile 强制，web/desktop 双安全，语义更准：staged 安装+重启正是 portRestart 职责）。
-              return host.call('update/portRestart', { serviceName, profile });
+              return host.call('update/portRestart', { serviceName, profile, auto: true });
             }
             return Promise.resolve(null);
           }).then((rr) => {
@@ -2261,6 +2265,13 @@ function UpdaterCard(props) {
               failCount = 0;
               setApplyErr(null);
               setTimeout(tick, 1000);
+              return;
+            }
+            // 批次A（P0-1）：自动链被 host 闸拦截（kill-switch/退避中）→ 状态行显示原因并停止本轮自动重试（不弹错误横幅，区别于手动失败）
+            const rrc = rr && typeof rr.code === 'string' ? rr.code : '';
+            if (rrc === 'BACKOFF_WAITING' || rrc === 'AUTO_DISABLED') {
+              setApplyStatus((rr && typeof rr.message === 'string' && rr.message) || rrc);
+              setApplyPhase('idle');
               return;
             }
             setApplyErr(t('updApplyExecutorDown'));
@@ -2473,7 +2484,8 @@ function UpdaterCard(props) {
         const rr = r && typeof r === 'object' ? r : {};
         if (rr.ok === true) {
           // v3.3.x（过程提醒细化）：记录 host 选定的重启模式与详细消息，供轮询期间展示
-          hostMsg = typeof rr.message === 'string' ? rr.message : '';
+                    // 批次A（P2-6）：防抖命中（已有待触发重启任务）→ 状态行按「已排队」处理而非错误
+          hostMsg = rr.debounced === true ? t('updRsDebounced') : (typeof rr.message === 'string' ? rr.message : '');
           svcMode = rr.serviceMode === true ? true : (rr.serviceMode === false ? false : null);
           return; // v3.2.1-t（A）：轮询已独立启动，这里无需动作
         }

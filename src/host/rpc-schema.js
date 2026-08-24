@@ -32,6 +32,14 @@ const schemas = {
       return true;
     },
   },
+  'update/portRestart': {
+    // v4.12 批次A（P0-1）：auto 为宽松可选布尔——仅 client 自愈链显式传 true 时走
+    // host 自动链闸门（kill-switch/退避）；手动调用不带该字段，行为与现状一致。
+    required: [],
+    validate(args) {
+      return args.auto === undefined || typeof args.auto === 'boolean';
+    },
+  },
   'plugins/run': {
     required: ['sessionId', 'pluginId'],
     validate(args) {
