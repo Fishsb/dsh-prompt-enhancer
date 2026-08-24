@@ -4595,10 +4595,18 @@ function VoiceSection(props) {
   // 切换当前模型：保存配置 + host 重启 worker 加载该模型
   const selectModel = (mid) => {
     saveVoiceCfg({ asr: { ...v.asr, local: { ...v.asr.local, model: mid } } });
-    host.call('voice/modelApply', { id: mid }).catch(() => {});
+    host.call('voice/modelApply', { id: mid }).then(() => { setTimeout(check, 2500); }).catch(() => {}); // v3.3.x-fix：重启 worker 后延迟复查状态
   };
 
   React.useEffect(() => subscribeVoiceConfig(() => setVer((v) => v + 1)), []);
+  // v3.3.x-fix（用户需求）：设置一变即刷新状态——任何 config/set 经 notifyVoice 触发本效果，
+  // 防抖 350ms 合并连续改动；首次触发跳过（挂载流程已检测），避免重复请求
+  const skipFirstVerRef = React.useRef(true);
+  React.useEffect(() => {
+    if (skipFirstVerRef.current) { skipFirstVerRef.current = false; return; }
+    const tmr = setTimeout(() => { check(); }, 350);
+    return () => clearTimeout(tmr);
+  }, [ver]);
   // 启动磁盘同步 + apiKey 回显（仅内存）
   React.useEffect(() => {
     syncVoiceFromHost();
