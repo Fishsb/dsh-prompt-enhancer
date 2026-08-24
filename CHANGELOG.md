@@ -1,5 +1,9 @@
 # Changelog
 
+[Unreleased]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.2...HEAD
+[3.3.2]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.1...v3.3.2
+[3.3.1]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.0...v3.3.1
+
 本项目所有重要变更记录于此文件。
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。完整发布说明见 [GitHub Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases)。
 
@@ -8,6 +12,8 @@
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
 ## [Unreleased]
+
+## [3.3.2] - 2026-08-24
 
 ### Changed
 - **环境检测 unsupported-platform 态接入文案（只读审查补漏·2026-08-24）**：lib/sys.cjs 在非 win32/linux 平台返回 detail='unsupported-platform'，client ENV_DETAIL_TEXT 无映射导致界面直显英文原文；i18n 新增 envUnsupportedPlatform（ZH/EN 成对）并纳入映射表。— [PEN-002]（flow: service-and-env）
