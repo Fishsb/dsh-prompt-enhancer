@@ -3,6 +3,8 @@
 本项目所有重要变更记录于此文件。
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。完整发布说明见 [GitHub Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases)。
 
+> 实测标注纪律：每条变更须在文末标注「已实测：<方式/等级>」；未实测不得合入（2026-08-24 门禁化）。
+
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
 ## [Unreleased]
@@ -21,6 +23,7 @@
 - **增强过程/结果与会话切换解耦（用户需求·「切走再回来就没了」修复）**：①**切走不再取消在途优化**——移除组件卸载副作用里的 cancel+清空，优化后台继续完成，回到原会话即见结果与「可撤回」态；②**完成回调按活动会话守卫注入**：全局登记当前活动会话（`setActiveSession`），用户已切走时只暂存结果不写草稿（杜绝 A 的结果串进 B 的输入框），回归时由恢复效应自动补应用；③**草稿被还原自动重应用**：返回时草稿=优化前原文（服务端回灌场景）→ 自动重新注入增强结果，仅当草稿被真实编辑为其他内容才按原语义消费清理；④**localStorage 结果持久化**（`dsh-enh-result:<sessionId>`）：整页刷新后仍恢复「可撤回」结果态。纯 client 改动，RPC/host 零变化。— [PEN-002]（flow: prompt-enhance）
 
 ### Added
+- **治理加固四件套（「优化完成但草稿未替换」事故驱动）**：①`scripts/enhance-verify.mjs` L2 浏览器端到端门禁（零依赖 CDP 直连 headless Chrome：填草稿→点✨→**断言草稿被替换**→撤回还原，真实模型调用）；②`scripts/dead-code-gate.mjs` 提交前死代码门禁（R1 diff 新声明必须全仓有调用点 / R2 client chunk 未声明标识符扫描，支持 --range/--allow，updater-card 字符串密集文件降级 WARN）；③client 完成回调行为级单测 `test/client-enhance-flow.test.cjs` 8 项（写回/暂存/丢弃/失败/取消五路 + button/bar 接线契约断言）；④CHANGELOG「已实测」标注惯例（本条起执行）。已实测：gate 合成红样 FAIL+默认绿；flow 单测 8/8；模板 E2E `.internal/e2e-main.cjs` 35 断言绿；L2 真机 `verify:enhance` 全绿（writeback+undo）；全量 229/229。— [PEN-002]（flow: prompt-enhance）
 - **单快捷方式「DSH Web」·三功能全自动（用户需求·最终版）**：桌面一枚「DSH Web」——`[1] Start Web / [2] Repair port / [3] One-click update`，`choice /t 3 /d 1` 三秒默认启动。**壳纯 ASCII**（UTF-8 中文+chcp 是 cmd 解析错位把行片段当命令执行的乱码根因，实测抓出）；**零用户决策**：[1]=ensureWebUp 恢复阶梯自动自愈；[2]=`--cli repair` 自动清理占用者（系统关键进程保护名单 lsass/svchost 等绝不击杀）后重新拉起；[3]=`--cli update` 安装→干跑闸门（失败自动快照回滚）→杀旧实例→重启生效→一致性自检，版本方向全部自动继续并打印决策行；维护菜单同步瘦身为同三项。全局唯一语义=管理 Web 3080（桌面宿主创建的也是它）。— [PEN-002]
 - **nssm 异常自愈阶梯（v4.6·卸载仅兜底）**：端口异常时先穷尽恢复手段——P0 配置体检（Application 二进制缺失=配置性死亡取证跳级）→ P1 软重启（stop≤5s+start+等15s）→ P2 强停僵尸树借力 nssm AppExit 自动拉起（等15s）→ P3 末次一发（≤28s，StartLimitBurst 式预算硬顶）→ 全穷尽且管理员才 `sc delete` 降级回归默认前台（留痕 web-port-recovery.log，设置页可重装=可逆）。DISABLED 服务视为机器显式配置永不自动卸载；权限类失败绝不卸载；宽限二次探测防误杀慢启服务（R1）。时间预算：典型成功 <25s，最坏全失败链 ≈2 分钟。并发闸 `up.lock`（pid 探活+同进程重入同样拒绝）杜绝双击双实例抢 3080/索引双写。单测矩阵 MAINT-25a~25m 十三项全覆盖（含 resolve→delete→spawn 顺序断言）。— [PEN-002]
 - **端口原语单一事实源（B1）**：四处重复的 netstat/taskkill/pid 探测实现收编 `lib/sys.cjs` 五个自包含原语函数（dshPrimNetstat/PortHolder/TaskKill/PidImage/PidHasListening），并经 `scriptPortPrims()` 以源码块发射嵌入生成式重启脚本（独立 node 进程无法 require，嵌源码是唯一共享形态）；port/service 两类重启脚本与维护菜单共用同一探测/击杀语义。— [PEN-002]
