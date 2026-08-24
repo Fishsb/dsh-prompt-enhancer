@@ -5103,7 +5103,7 @@ const CSS = [
   ,'.dsh-vi-section{display:flex;flex-direction:column;gap:6px}'
   ,'.dsh-vi-cloud{display:flex;flex-direction:column;gap:8px}'
   ,'.dsh-vi-wave{display:inline-flex;align-items:flex-end;gap:1.5px;height:14px}'
-  ,'.dsh-vi-wave-bar{width:2px;background:currentColor;border-radius:1px;opacity:.6;transform-origin:50% 100%}'
+  ,'.dsh-vi-wave-bar{width:2px;background:currentColor;border-radius:1px;opacity:.9;transform-origin:50% 100%}'
   ,'.dsh-vi-wave-bar:nth-child(1){height:5px}'
   ,'.dsh-vi-wave-bar:nth-child(2){height:9px}'
   ,'.dsh-vi-wave-bar:nth-child(3){height:12px}'
@@ -5126,7 +5126,7 @@ const CSS = [
   '.dsh-plg-tgl-on{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}',
   '.dsh-enh-btn{margin-right:-12px}',
   '.dsh-vi-btn{margin-right:-12px}',
-  '.dsh-vi-wave{transform:translateY(-2px)}'
+  '.dsh-vi-wave{transform:translateY(-1.5px)}'
 ].join('\n');
 
 return {
