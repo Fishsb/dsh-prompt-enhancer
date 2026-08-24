@@ -780,6 +780,14 @@ test('MAINT-25u 运行中确认但重启失败：RESTART_FAILED 明确失败不�
   assert.deepEqual([r.ok, r.code], [false, 'RESTART_FAILED']);
   assert.equal(r.detail, 'boom');
 });
+test('MAINT-25w 重启服务·非管理员预检：NOT_ADMIN 早失败不盲等', async () => {
+  if (process.platform !== 'win32') return;
+  updater.state.busy = false;
+  const t0 = Date.now();
+  const r = await updater.restartService('svc-x', { adminOverride: false, onLine: () => {} });
+  assert.equal(r.code, 'NOT_ADMIN');
+  assert.ok(Date.now() - t0 < 3000, '应立即返回而非空等 20s');
+});
 test('MAINT-25m up.lock 并发闸：第二实例 LOCK_BUSY；完成后锁文件清理', async () => {
   const lockP = path.join(tmpRoot(), 'up.lock');
   let releaseGate;

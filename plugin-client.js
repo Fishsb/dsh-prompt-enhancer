@@ -728,6 +728,7 @@ const ZH = {
   updRsSvcScheduled: '服务模式：已调度重启任务，旧实例即将停止',
   updRsProcScheduled: '前台模式：辅助脚本已启动，即将拉起新实例',
   updRsOldStopped: '旧实例已停止，等待新实例监听…',
+  updRsPluginLoadWarn: '⚠ 重启完成，但检测到「插件加载失败」——刚装的第三方插件可能与核心不兼容，请到 设置→插件 禁用它后再刷新',
   // v2.9.x（一键更新不重启·修复）：旧执行器无 restart:false 支持，阻止执行并提示重启 dsh-web
   updExecutorTooOld: '更新执行器版本过旧（v{v}），不支持「只安装不重启」——请重启 dsh-web 完成执行器升级（≥0.1.7）后重试',
   updCheckFirst: '请先点击「检测版本」确认有新版本后再更新',
@@ -1100,6 +1101,7 @@ const EN = {
   updRsSvcScheduled: 'Service mode: restart task scheduled, stopping old instance soon',
   updRsProcScheduled: 'Foreground mode: helper script started, launching new instance',
   updRsOldStopped: 'Old instance stopped, waiting for the new one to listen…',
+  updRsPluginLoadWarn: '⚠ Restarted, but detected a plugin load failure — a newly installed third-party plugin may be incompatible; disable it under Settings→Plugins and refresh',
   // v2.9.x (install-without-restart fix): old executor lacks restart:false — block and ask to restart dsh web
   updExecutorTooOld: 'Update executor is too old (v{v}) and does not support install-without-restart — restart dsh web to upgrade the executor (≥0.1.7), then retry',
   updCheckFirst: 'Run "Check version" first to confirm a new version before updating',
@@ -2458,6 +2460,11 @@ function UpdaterCard(props) {
               setSvcNeedInstall(pm === 'default' || pm === 'no-listener');
             }).catch(() => setSvcNeedInstall(false));
             setApplyStatus(t('updPortRestartDone') + '（' + elapsed + 's）');
+            // v3.3.x（2026-08-24 实测·市场装插件→重启成功但页崩）：完成后嗅探首页是否带「插件加载失败」横幅，
+            // 有则显式警告而非纯 ✓——机械成功≠可用
+            window.fetch('/', { cache: 'no-store' }).then((r2) => r2.text()).then((tx) => {
+              if (tx && tx.indexOf('Failed to load plugins') >= 0) setApplyErr(t('updRsPluginLoadWarn'));
+            }).catch(() => {});
             setApplyPhase('done');
             return;
           }
