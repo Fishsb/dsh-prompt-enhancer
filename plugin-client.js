@@ -5125,7 +5125,8 @@ const CSS = [
   '.dsh-plg-tgl{text-align:center}',
   '.dsh-plg-tgl-on{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}',
   '.dsh-enh-btn{margin-right:-12px}',
-  '.dsh-vi-btn{margin-right:-12px}'
+  '.dsh-vi-btn{margin-right:-12px}',
+  '.dsh-vi-wave{transform:translateY(-2px)}'
 ].join('\n');
 
 return {
