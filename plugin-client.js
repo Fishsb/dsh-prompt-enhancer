@@ -5095,11 +5095,11 @@ const CSS = [
   ,'.dsh-vi-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}'
   ,'.dsh-vi-btn.dsh-vi-rec{color:#e5484d;background:color-mix(in srgb,#e5484d 6%,transparent)}'
   ,'.dsh-vi-btn.dsh-vi-busy{opacity:.7;cursor:default}'
-  ,'.dsh-vi-btn.dsh-vi-err{color:#e5484d;background:color-mix(in srgb,#e5484d 6%,transparent)}'
+  ,'.dsh-vi-btn.dsh-vi-err{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 6%,transparent)}'
   // 2026-08-20（用户需求）：🎤 与 ✨ 按钮间距最小（紧邻时 -8px 收近，留 4px 视觉间隔）
   ,'.dsh-enh-btn + .dsh-vi-btn{}'
   ,'.dsh-vi-label{font-weight:500}'
-  ,'.dsh-vi-err-msg{font-size:11px;margin-left:4px}'
+  ,'.dsh-vi-err-msg{font-size:12px;margin-left:4px}'
   ,'.dsh-vi-section{display:flex;flex-direction:column;gap:6px}'
   ,'.dsh-vi-cloud{display:flex;flex-direction:column;gap:8px}'
   ,'.dsh-vi-wave{display:inline-flex;align-items:flex-end;gap:1.5px;height:14px}'
