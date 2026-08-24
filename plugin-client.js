@@ -5132,7 +5132,7 @@ const CSS = [
   ,'@keyframes dsh-vi-spin{to{transform:rotate(360deg)}}'
   ,'@media (prefers-reduced-motion: reduce){.dsh-vi-btn.dsh-vi-rec .dsh-vi-wave-bar,.dsh-vi-spin{animation:none}}'
   ,'.dsh-vi-privacy{color:rgba(128,128,128,.8);font-size:11px;margin:0}',
-  '.dsh-plg-tgl{min-width:56px;text-align:center;border-radius:16px;font-weight:600}',
+  '.dsh-plg-tgl{text-align:center}',
   '.dsh-plg-tgl-on{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}'
 ].join('\n');
 
