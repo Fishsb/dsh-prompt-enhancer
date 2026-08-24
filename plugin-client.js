@@ -1360,6 +1360,19 @@ function storeFor(sessionId) {
   let s = sessionStores.get(sessionId);
   if (!s) {
     s = { phase: 'idle', backup: '', enhanced: '', error: null, seq: 0, listeners: new Set(), memoryRounds: [], optimized: false, lastModel: '', fallbackUsed: false };
+    // v3.3.x（会话切换增强保持）：整页刷新后从 localStorage 恢复未消费的结果态
+    try {
+      const raw = localStorage.getItem(resultKey(sessionId));
+      if (raw) {
+        const rr = JSON.parse(raw);
+        if (rr && typeof rr.b === 'string' && typeof rr.e === 'string' && rr.e !== '') {
+          s.phase = 'result';
+          s.backup = rr.b;
+          s.enhanced = rr.e;
+          s.optimized = true;
+        }
+      }
+    } catch (e) { /* 忽略 */ }
     sessionStores.set(sessionId, s);
   }
   return s;
@@ -1390,6 +1403,28 @@ function notify(sessionId) {
 
 // v21（P1-3）：组件卸载且状态空闲时释放 store 条目，防止 sessionStores 无限增长（内存泄漏修复）
 // v3.2.5（语音模块）：只读查询——供 voice 填入时序防护（不共享内部状态、不调用功能）。
+// v3.3.x（会话切换增强保持）：全局活动会话跟踪 + 结果持久化（localStorage 跨刷新）
+let activeSessionId = null;
+
+function setActiveSession(id) { activeSessionId = id || null; }
+
+function getActiveSession() { return activeSessionId; }
+
+function resultKey(sessionId) { return 'dsh-enh-result:' + sessionId; }
+
+function saveResultStore(sessionId, backup, enhanced) {
+
+  try { localStorage.setItem(resultKey(sessionId), JSON.stringify({ b: backup, e: enhanced })); } catch (e) { /* 忽略 */ }
+
+}
+
+function clearResultStore(sessionId) {
+
+  try { localStorage.removeItem(resultKey(sessionId)); } catch (e) { /* 忽略 */ }
+
+}
+
+
 function isEnhancing(sessionId) {
   const s = sessionStores.get(sessionId);
   return !!(s && s.phase === 'enhancing');
@@ -1413,6 +1448,7 @@ function cancelEnhance(sessionId, inputActions) {
   if (s.phase !== 'enhancing') return;
   const seq = s.seq;
   s.seq += 1;
+  clearResultStore(sessionId); // v3.3.x
   safeSetDraft(inputActions, s.backup);
   s.phase = 'idle';
   s.enhanced = '';
@@ -1472,6 +1508,7 @@ function enhance(sessionId, draft, inputActions, draftRef) {
   s.seq += 1;
   const seq = s.seq;
   s.phase = 'enhancing';
+  clearResultStore(sessionId); // v3.3.x 新一轮覆盖旧结果
   s.enhanced = '';
   s.error = null;
   notify(sessionId);
@@ -1488,14 +1525,16 @@ function enhance(sessionId, draft, inputActions, draftRef) {
     if (seq !== s.seq) return;
     const r = res && typeof res === 'object' ? res : {};
     if (r.ok && typeof r.text === 'string' && r.text !== '') {
-      if (draftRef.current !== s.backup) {
+      const finalText = parts.prefix + r.text;
+      const away = getActiveSession() !== sessionId;
+      if (!away && draftRef.current !== s.backup) {
         // 结果被丢弃（增强中用户编辑草稿）：不替换、不写记忆、不打标记（L1）
         s.phase = 'idle';
         s.enhanced = '';
         s.error = null;
       } else {
         const finalText = parts.prefix + r.text;
-        safeSetDraft(inputActions, finalText);
+        if (!away) safeSetDraft(inputActions, finalText); // v3.3.x：切走时不注入（防串会话），结果暂存待回归应用
         s.phase = 'result';
         s.enhanced = finalText;
         s.error = null;
@@ -1504,6 +1543,7 @@ function enhance(sessionId, draft, inputActions, draftRef) {
         // v3.1.3（按钮反馈）：记录实际执行模型与是否 fallback（非首个模型完成）——result 态按钮据此显示「模型X 优化，可撤回」
         s.lastModel = r.model || '';
         s.fallbackUsed = r.fallbackUsed === true;
+        // v3.3.x：结果持久化（跨刷新可恢复）
         // v2.2（§6.5/R1）：仅结果已应用且记忆开关开启时写入记忆（斜杠命令存正文）并打标；
         // v2.6.1（记忆链）：追加本轮 {input, output} 并截断到最近 MEMORY_ROUNDS_MAX 轮
         if (config.memory) {
@@ -1517,6 +1557,7 @@ function enhance(sessionId, draft, inputActions, draftRef) {
       s.phase = 'idle';
       s.enhanced = '';
       s.error = r.code && errorKey(r.code) !== 'errUNKNOWN' ? r.code : 'UNKNOWN';
+      clearResultStore(sessionId);
     }
     notify(sessionId);
   }).catch(() => {
@@ -1525,6 +1566,7 @@ function enhance(sessionId, draft, inputActions, draftRef) {
     s.phase = 'idle';
     s.enhanced = '';
     s.error = 'NETWORK';
+    clearResultStore(sessionId);
     notify(sessionId);
   });
 }
@@ -1541,6 +1583,7 @@ function undo(sessionId, inputActions) {
   s.memoryRounds.pop();
   // v2.6.2（继续优化标记）：撤回 = 回到起点，重新开始算「首次优化」
   s.optimized = false;
+  clearResultStore(sessionId); // v3.3.x
   notify(sessionId);
 }
 
@@ -1566,6 +1609,7 @@ function EnhanceButton(props) {
   const [, setVersion] = React.useState(0);
   const draftRef = React.useState({ current: draft })[0];
   draftRef.current = draft;
+  // v3.3.x（会话切换增强保持）：effect 内安全使用最新 inputActions
 
   // 2026-08-17（连通性测试预计耗时）：同步当前草稿长度到全局，供设置页测试连通性读取。
   React.useEffect(() => { setLastDraft(draft); }, [draft]);
@@ -1575,15 +1619,24 @@ function EnhanceButton(props) {
   // v2.3（§7.2/T25）：订阅配置——模式/记忆切换后按钮标签即时同步
   const [, setCfg] = React.useState(0);
   React.useEffect(() => subscribeConfig(() => setCfg((v) => v + 1)), []);
+  // v3.3.x（会话切换增强保持）：向全局登记当前活动会话——完成回调据此决定是否直接注入
 
+  // v3.3.x（会话切换增强保持）：草稿被外部还原为原始文本（切走期间服务端回灌）时，
+  // 自动重新应用增强结果而非丢弃；用户真实编辑了其他内容才按原语义消费。
   React.useEffect(() => {
     const s = storeFor(sessionId);
-    if (s.phase === 'result' && draft !== s.enhanced) {
-      s.phase = 'idle';
-      s.enhanced = '';
-      s.error = null;
+    if (!s || s.phase !== 'result') return;
+    if (draft === s.enhanced) return;
+    if (s.backup !== '' && draft === s.backup) {
+      safeSetDraft(inputActionsRef.current, s.enhanced);
       notify(sessionId);
+      return;
     }
+    s.phase = 'idle';
+    s.enhanced = '';
+    s.error = null;
+    clearResultStore(sessionId);
+    notify(sessionId);
   }, [draft, sessionId]);
 
   // v3.0s（用户修正·发送清空记忆链）：发送（基座 submit 成功，draft 随之清空）→ 清空
@@ -1616,18 +1669,9 @@ function EnhanceButton(props) {
     }
   }, [draft, input && input.phase, sessionId]);
 
+  // v3.3.x（会话切换增强保持）：切走不再取消在途优化——后台继续完成，回到该会话即见结果。
   React.useEffect(() => () => {
-    const s = storeFor(sessionId);
-    if (s.phase === 'enhancing') {
-      const seq = s.seq;
-      s.seq += 1;
-      host.call('cancel', { sessionId, seq }).catch(() => {});
-      s.phase = 'idle';
-      s.enhanced = '';
-      s.error = null;
-      notify(sessionId);
-    }
-    // v21（P1-3）：卸载后空闲即释放，防内存泄漏
+    // 卸载后仅回收空闲条目（enhancing/result 态保留）
     releaseStoreIfIdle(sessionId);
   }, [sessionId]);
 
