@@ -859,6 +859,7 @@ const ZH = {
   voiceDeployDone: '部署完成',
   voiceDeployFail: '部署失败',
   voiceVadEnabled: '静音自动停',
+  voiceVadShort: '静音监测',
   voiceHotkeyEnabled: '快捷键唤醒',
   voiceHotkeyCombo: '热键',
   voiceHotkeyCapturing: '请按组合键…（Esc 取消）',
@@ -1229,6 +1230,7 @@ const EN = {
   voiceDeployDone: 'Deployed',
   voiceDeployFail: 'Deploy failed',
   voiceVadEnabled: 'Auto-stop on silence',
+  voiceVadShort: 'Silence detect',
   voiceHotkeyEnabled: 'Hotkey wake',
   voiceHotkeyCombo: 'Hotkey',
   voiceHotkeyCapturing: 'Press keys... (Esc to cancel)',
@@ -4652,10 +4654,10 @@ function VoiceSection(props) {
       className: 'dsh-plg-btn dsh-plg-tgl' + (p.on ? ' dsh-plg-tgl-on' : ''),
       onClick: p.onToggle,
       title: p.title || '',
-      style: { minWidth: '52px', textAlign: 'center' },
+      style: { minWidth: '76px', textAlign: 'center', whiteSpace: 'nowrap' },
     }, p.onText);    // 行1：识别引擎 | 自动增强 | 静音自动停 | 快捷键——恢复上一版 grid 排列（.dsh-plg-row 横排）；
     // 列 minmax(0,1fr) + 控件 minWidth:0 允许收缩，窄屏不再重叠
-    const row1 = React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)', gap: '12px' } },
+    const row1 = React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'auto auto auto minmax(0,1fr)', gap: '12px' } },
       React.createElement('div', { className: 'dsh-plg-row' },
         React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceAsrEngine')),
         React.createElement(MarqueeSelect, {
@@ -4668,27 +4670,22 @@ function VoiceSection(props) {
           React.createElement('option', { value: 'local' }, t('voiceAsrLocal')),
         ),
       ),
-      // 自动增强：按钮切换样式（v3.3.x 用户需求：开/关 下拉 → 切换按钮）
-      React.createElement('div', { className: 'dsh-plg-row', style: { justifyContent: 'center' } },
-        React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceAutoEnhance')),
-        React.createElement(ToggleChip, {
-          on: !!v.autoEnhance,
-          onText: t(v.autoEnhance ? 'voiceAutoEnhanceOn' : 'voiceAutoEnhanceOff'),
-          title: t('voiceAutoEnhanceTip'),
-          onToggle: () => saveVoiceCfg({ autoEnhance: !v.autoEnhance }),
-        }),
-      ),
+      // 自动增强：自述式切换按钮（按钮直显「自动增强开/关」，无前置标签）
+      React.createElement(ToggleChip, {
+        on: !!v.autoEnhance,
+        onText: t('voiceAutoEnhance') + t(v.autoEnhance ? 'voiceAutoEnhanceOn' : 'voiceAutoEnhanceOff'),
+        title: t('voiceAutoEnhanceTip'),
+        onToggle: () => saveVoiceCfg({ autoEnhance: !v.autoEnhance }),
+      }),
 
-      // 静音自动停（VAD·静音监测停止录音）：同排同款切换按钮（v3.3.x 用户需求）
-      React.createElement('div', { className: 'dsh-plg-row', style: { justifyContent: 'center' } },
-        React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceVadEnabled')),
-        React.createElement(ToggleChip, {
-          on: !!(v.vad && v.vad.enabled !== false),
-          onText: t(v.vad && v.vad.enabled !== false ? 'voiceAutoEnhanceOn' : 'voiceAutoEnhanceOff'),
-          title: t('voiceVadEnabled'),
-          onToggle: () => saveVoiceCfg({ vad: { enabled: !(v.vad && v.vad.enabled !== false) } }),
-        }),
-      ),
+
+      // 静音监测（原「静音自动停」）：自述式切换按钮「静音监测开/关」
+      React.createElement(ToggleChip, {
+        on: !!(v.vad && v.vad.enabled !== false),
+        onText: t('voiceVadShort') + t(v.vad && v.vad.enabled !== false ? 'voiceAutoEnhanceOn' : 'voiceAutoEnhanceOff'),
+        title: t('voiceVadEnabled'),
+        onToggle: () => saveVoiceCfg({ vad: { enabled: !(v.vad && v.vad.enabled !== false) } }),
+      }),
       React.createElement('div', { className: 'dsh-plg-row' },
         React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceHotkeyCombo')),
         React.createElement('input', {
