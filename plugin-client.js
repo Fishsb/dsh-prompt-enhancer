@@ -1391,6 +1391,7 @@ function cancelEnhance(sessionId, inputActions) {
   s.phase = 'idle';
   s.enhanced = '';
   s.error = null;
+  clearResultStore(sessionId); // v3.3.x-fix：取消即失效持久化结果
   notify(sessionId);
   host.call('cancel', { sessionId, seq }).catch(() => {});
 }
@@ -1463,16 +1464,17 @@ function enhance(sessionId, draft, inputActions, draftRef) {
     if (seq !== s.seq) return;
     const r = res && typeof res === 'object' ? res : {};
     if (r.ok && typeof r.text === 'string' && r.text !== '') {
-      const finalText = parts.prefix + r.text;
       const away = getActiveSession() !== sessionId;
       if (!away && draftRef.current !== s.backup) {
         // 结果被丢弃（增强中用户编辑草稿）：不替换、不写记忆、不打标记（L1）
         s.phase = 'idle';
         s.enhanced = '';
         s.error = null;
+        clearResultStore(sessionId); // v3.3.x-fix：丢弃即失效持久化
       } else {
         const finalText = parts.prefix + r.text;
         if (!away) safeSetDraft(inputActions, finalText); // v3.3.x：切走时不注入（防串会话），结果暂存待回归应用
+        saveResultStore(sessionId, s.backup, finalText); // v3.3.x-fix：持久化此前从未接线
         s.phase = 'result';
         s.enhanced = finalText;
         s.error = null;
@@ -1543,6 +1545,10 @@ function EnhanceButton(props) {
   const input = props.input || {};
   const draft = typeof input.draft === 'string' ? input.draft : '';
   const inputActions = props.inputActions;
+  // v3.3.x-fix：effect 内安全使用最新 actions——此前回注分支引用了未声明的
+  // inputActionsRef，一旦执行即 ReferenceError（f6fa822 半成品缺陷）
+  const inputActionsRef = React.useRef(inputActions);
+  inputActionsRef.current = inputActions;
 
   const [, setVersion] = React.useState(0);
   const draftRef = React.useState({ current: draft })[0];
@@ -1558,6 +1564,11 @@ function EnhanceButton(props) {
   const [, setCfg] = React.useState(0);
   React.useEffect(() => subscribeConfig(() => setCfg((v) => v + 1)), []);
   // v3.3.x（会话切换增强保持）：向全局登记当前活动会话——完成回调据此决定是否直接注入
+  // v3.3.x-fix：登记调用此前缺失（activeSessionId 恒 null → 每次完成都判「已切走」→ 草稿永不写回）
+  React.useEffect(() => {
+    setActiveSession(sessionId);
+    return () => { if (getActiveSession() === sessionId) setActiveSession(null); };
+  }, [sessionId]);
 
   // v3.3.x（会话切换增强保持）：草稿被外部还原为原始文本（切走期间服务端回灌）时，
   // 自动重新应用增强结果而非丢弃；用户真实编辑了其他内容才按原语义消费。
@@ -1779,23 +1790,15 @@ function EnhanceBar(props) {
   React.useEffect(() => subscribe(sessionId, () => setVersion((v) => v + 1)), [sessionId]);
 
   // v21（P1-3）：卸载后空闲即释放，防内存泄漏（与 EnhanceButton 对称）
+  // v3.3.x-fix：切走/卸载不再取消在途优化（原 v21 取消逻辑与「后台继续完成」冲突，
+  // 会话切换即中断——与 EnhanceButton 卸载语义对齐，仅回收空闲条目）
   React.useEffect(() => () => {
-    const s = storeFor(sessionId);
-    if (s.phase === 'enhancing') {
-      const seq = s.seq;
-      s.seq += 1;
-      host.call('cancel', { sessionId, seq }).catch(() => {});
-      s.phase = 'idle';
-      s.enhanced = '';
-      s.error = null;
-      notify(sessionId);
-    }
     releaseStoreIfIdle(sessionId);
   }, [sessionId]);
 
   React.useEffect(() => {
     const s = storeFor(sessionId);
-    if (s.phase === 'result' && draft !== s.enhanced) {
+    if (s.phase === 'result' && draft !== s.enhanced && draft !== s.backup) { // v3.3.x-fix：暂存未写回态（draft 停留在 backup）不得消费
       s.phase = 'idle';
       s.enhanced = '';
       s.error = null;
