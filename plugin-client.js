@@ -812,6 +812,7 @@ const ZH = {
   cfgContextBudget0: '0（关闭注入）',
   // v3.1.7（用户需求·参数无限制）：下拉框「无限制」选项文案（超时/Token/字符=0；上下文预算=16000 档）
   cfgUnlimited: '无限制',
+  cfgParamsModeDefault: '当前模式默认：超时 {t} · Token {k} · 输出上限 {o}',
   // v3.1.8（预算真正生效·每模式独立档位）：说明各模式档位范围与「预算越大注入越多」语义
   cfgContextNote: '上下文预算控制本模式可注入的参考量：0 = 不注入；预算越大，会话/文档检索范围越广',
   // v2.3（§7.2/§7.3）：模式短标签 + 步骤进度文案 + 记忆开关
@@ -1181,6 +1182,7 @@ const EN = {
   cfgContextBudget: 'Context budget',
   cfgContextBudget0: '0 (no injection)',
   cfgUnlimited: 'Unlimited',
+  cfgParamsModeDefault: 'Mode defaults: timeout {t} · max tokens {k} · output limit {o}',
   // v3.1.8（预算真正生效·每模式独立档位）：说明各模式档位范围与「预算越大注入越多」语义
   cfgContextNote: 'Context budget controls how much reference may be injected: 0 = none; higher = wider session/doc retrieval',
   // v2.3（§7.2/§7.3）：模式短标签 + 步骤进度文案 + 记忆开关
@@ -3628,8 +3630,12 @@ function ParamsTab(props) {
   const modeTimeoutOptions = MODE_TIMEOUT_OPTIONS[cfg.mode] || MODE_TIMEOUT_OPTIONS.base;
   const modeMaxTokensOptions = MODE_MAXTOKENS_OPTIONS[cfg.mode] || MODE_MAXTOKENS_OPTIONS.base;
   const modeOutputLimitOptions = MODE_OUTPUTLIMIT_OPTIONS[cfg.mode] || MODE_OUTPUTLIMIT_OPTIONS.base;
-  const clampParamDisplay = (value, opts) => {
+  // v3.3.x（用户反馈）：当前模式的真实默认档（MODE_PARAMS_DEFAULT），供回退显示与提示行使用
+  const pDef = MODE_PARAMS_DEFAULT[cfg.mode] || MODE_PARAMS_DEFAULT.base;
+  const clampParamDisplay = (value, opts, modeDefault) => {
     if (opts.includes(value)) return String(value);
+    // v3.3.x（用户反馈·修复）：未设置/越界时回退「当前模式默认档」，不再误显示首档（0=无限制）
+    if (modeDefault !== undefined && opts.includes(modeDefault)) return String(modeDefault);
     const pick = opts.filter((v) => v <= value).pop();
     return String(typeof pick === 'number' ? pick : opts[0]);
   };
@@ -3771,7 +3777,7 @@ function ParamsTab(props) {
       React.createElement(MarqueeSelect, {
         id: ids.timeout,
         className: 'dsh-plg-select',
-        value: clampParamDisplay(cfg.params.timeoutMs, modeTimeoutOptions),
+        value: clampParamDisplay(cfg.params.timeoutMs, modeTimeoutOptions, pDef.timeoutMs),
         onChange: onNumber('timeoutMs'),
         children: modeTimeoutOptions.map((v) => React.createElement('option', { key: v, value: String(v) }, v === 0 ? t('cfgUnlimited') : (v / 1000) + 's')),
       }),
@@ -3781,7 +3787,7 @@ function ParamsTab(props) {
       React.createElement(MarqueeSelect, {
         id: ids.maxTokens,
         className: 'dsh-plg-select',
-        value: clampParamDisplay(cfg.params.maxTokens, modeMaxTokensOptions),
+        value: clampParamDisplay(cfg.params.maxTokens, modeMaxTokensOptions, pDef.maxTokens),
         onChange: onNumber('maxTokens'),
         children: modeMaxTokensOptions.map((v) => React.createElement('option', { key: v, value: String(v) }, v === 0 ? t('cfgUnlimited') : String(v))),
       }),
@@ -3791,11 +3797,17 @@ function ParamsTab(props) {
       React.createElement(MarqueeSelect, {
         id: ids.outputLimit,
         className: 'dsh-plg-select',
-        value: clampParamDisplay(cfg.params.outputLimit, modeOutputLimitOptions),
+        value: clampParamDisplay(cfg.params.outputLimit, modeOutputLimitOptions, pDef.outputLimit),
         onChange: onNumber('outputLimit'),
         children: modeOutputLimitOptions.map((v) => React.createElement('option', { key: v, value: String(v) }, v === 0 ? t('cfgUnlimited') : String(v))),
       }),
     ),
+    // v3.3.x（用户反馈）：显式展示当前模式默认档——各模式默认一目了然
+    React.createElement('p', { className: 'dsh-plg-hint' },
+      t('cfgParamsModeDefault')
+        .replace('{t}', String(Math.round((Number(pDef.timeoutMs) || 0) / 1000)) + 's')
+        .replace('{k}', String(pDef.maxTokens))
+        .replace('{o}', String(pDef.outputLimit))),
     // 模板体系扩展（2026-08-17）：模板选择已并入上方下拉（每模式独立）；下方为自定义模板编辑区
     //（选中 custom:<index> 时显示 名称+内容+删除）+「新建自定义模板」按钮（可添加多个）
     React.createElement('div', { className: 'dsh-plg-col' },
@@ -4634,9 +4646,16 @@ function VoiceSection(props) {
     setSelModel(cur ? cur.id : (first ? first.id : ''));
   }, [models, selModel]);
   const isCloud = v.asr.engine === 'cloud';
-    // 行1：识别引擎 | 自动增强 | 快捷键——恢复上一版 grid 排列（.dsh-plg-row 横排）；
+    // v3.3.x（用户需求）：按钮切换样式开关（替代 开/关 下拉；绿=开 灰=关，点击翻转）
+    const ToggleChip = (p) => React.createElement('button', {
+      type: 'button',
+      className: 'dsh-plg-btn dsh-plg-tgl' + (p.on ? ' dsh-plg-tgl-on' : ''),
+      onClick: p.onToggle,
+      title: p.title || '',
+      style: { minWidth: '52px', textAlign: 'center' },
+    }, p.onText);    // 行1：识别引擎 | 自动增强 | 静音自动停 | 快捷键——恢复上一版 grid 排列（.dsh-plg-row 横排）；
     // 列 minmax(0,1fr) + 控件 minWidth:0 允许收缩，窄屏不再重叠
-    const row1 = React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr) minmax(0,1fr)', gap: '12px' } },
+    const row1 = React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)', gap: '12px' } },
       React.createElement('div', { className: 'dsh-plg-row' },
         React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceAsrEngine')),
         React.createElement(MarqueeSelect, {
@@ -4649,17 +4668,26 @@ function VoiceSection(props) {
           React.createElement('option', { value: 'local' }, t('voiceAsrLocal')),
         ),
       ),
-      // 自动增强：MarqueeSelect 开/关（q-1：与「记忆」开关同款）
+      // 自动增强：按钮切换样式（v3.3.x 用户需求：开/关 下拉 → 切换按钮）
       React.createElement('div', { className: 'dsh-plg-row', style: { justifyContent: 'center' } },
         React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceAutoEnhance')),
-        React.createElement(MarqueeSelect, {
-          className: 'dsh-plg-select dsh-plg-select-thinking dsh-plg-ms-fill',
-          value: v.autoEnhance ? 'on' : 'off',
-          onChange: (e) => saveVoiceCfg({ autoEnhance: e.target.value === 'on' }),
-        },
-          React.createElement('option', { value: 'off' }, t('voiceAutoEnhanceOff')),
-          React.createElement('option', { value: 'on' }, t('voiceAutoEnhanceOn')),
-        ),
+        React.createElement(ToggleChip, {
+          on: !!v.autoEnhance,
+          onText: t(v.autoEnhance ? 'voiceAutoEnhanceOn' : 'voiceAutoEnhanceOff'),
+          title: t('voiceAutoEnhanceTip'),
+          onToggle: () => saveVoiceCfg({ autoEnhance: !v.autoEnhance }),
+        }),
+      ),
+
+      // 静音自动停（VAD·静音监测停止录音）：同排同款切换按钮（v3.3.x 用户需求）
+      React.createElement('div', { className: 'dsh-plg-row', style: { justifyContent: 'center' } },
+        React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceVadEnabled')),
+        React.createElement(ToggleChip, {
+          on: !!(v.vad && v.vad.enabled !== false),
+          onText: t(v.vad && v.vad.enabled !== false ? 'voiceAutoEnhanceOn' : 'voiceAutoEnhanceOff'),
+          title: t('voiceVadEnabled'),
+          onToggle: () => saveVoiceCfg({ vad: { enabled: !(v.vad && v.vad.enabled !== false) } }),
+        }),
       ),
       React.createElement('div', { className: 'dsh-plg-row' },
         React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceHotkeyCombo')),
@@ -5106,7 +5134,9 @@ const CSS = [
   ,'.dsh-vi-spin{width:12px;height:12px;border-radius:50%;border:2px solid currentColor;border-top-color:transparent;display:inline-block;animation:dsh-vi-spin .8s linear infinite}'
   ,'@keyframes dsh-vi-spin{to{transform:rotate(360deg)}}'
   ,'@media (prefers-reduced-motion: reduce){.dsh-vi-btn.dsh-vi-rec .dsh-vi-wave-bar,.dsh-vi-spin{animation:none}}'
-  ,'.dsh-vi-privacy{color:rgba(128,128,128,.8);font-size:11px;margin:0}'
+  ,'.dsh-vi-privacy{color:rgba(128,128,128,.8);font-size:11px;margin:0}',
+  '.dsh-plg-tgl{min-width:56px;text-align:center;border-radius:16px;font-weight:600}',
+  '.dsh-plg-tgl-on{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}'
 ].join('\n');
 
 return {
