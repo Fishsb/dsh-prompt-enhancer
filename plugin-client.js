@@ -4538,7 +4538,7 @@ function VoiceMicButton(props) {
 // 字段 blur/change 即 config/set（无保存按钮）；engine=cloud 常显隐私提示。
 function VoiceSection(props) {
   const t = makeT(props);
-  const [, setVer] = React.useState(0);
+  const [ver, setVer] = React.useState(0);
   const [apiKey, setApiKey] = React.useState('');
   const [apiKeyLoaded, setApiKeyLoaded] = React.useState(false);
   // v3.2.8（规整复用模型配置）：custom 模式 apiKey 回显（仅内存+磁盘，同 asr cloud 模式）
