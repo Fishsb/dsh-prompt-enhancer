@@ -177,6 +177,16 @@ for (const rt of deployTargets) {
   }
 }
 if (!allOk) { console.error('同步校验失败，请检查目标目录权限'); process.exit(1); }
+// v4.13 批次B（P0-2 写入点①）：md5 全过后逐 profile 记部署账本——部署成功事实最硬的时刻。
+// source='sync-runtime'，version 取 package.json（构建注入同一事实源）。账本失败不阻断（旁路记录）。
+{
+  const version = require('../package.json').version;
+  for (const rt of deployTargets) {
+    const profileName = (rt.match(/[\\/]profiles[\\/]([^\\/]+)[\\/]node_modules/) || [])[1] || 'web';
+    const w = sys.writeDeployLedgerEntry(profileName, version, 'sync-runtime');
+    console.log((w.ok ? '✓ 部署账本 → ' : '⚠ 账本写入失败（不阻断）: ') + (w.ok ? sys.deployLedgerFile() + ' [' + profileName + '@' + version + ']' : w.message));
+  }
+}
 console.log('');
 console.log('✅ 运行环境已部署（' + deployTargets.length + ' 个 profile）：');
 for (const rt of deployTargets) console.log('   - ' + rt);
