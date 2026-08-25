@@ -113,8 +113,9 @@
 // —— v14 诊断日志：环形缓冲（最近 300 行），供 logs/last RPC 读取 ——
 const LOG_RING = [];
 const LOG_RING_MAX = 300;
+// 批次D（P2-5·optimization-plan-20260824 §D.1）：每行统一 ISO 时间戳前缀（[YYYY-MM-DDTHH:mm:ss.sssZ]）——在行组装处一次性前置，bundle 内全部调用点零编辑覆盖；调用点字面量前缀（如 [enhance]）原样保留在时间戳之后（grep 兼容：关键 token 不动）。格式先例借自 logger.js（ISO ts）；createLogger 结构化接线维持不采纳（M5 大改非最小解）。
 function hlog() {
-  const line = Array.prototype.map.call(arguments, (a) => {
+  const line = '[' + new Date().toISOString() + '] ' + Array.prototype.map.call(arguments, (a) => {
     if (typeof a === 'string') return a;
     try { return JSON.stringify(a); } catch (e) { return String(a); }
   }).join(' ');
@@ -123,7 +124,7 @@ function hlog() {
   console.log(line);
 }
 function herr() {
-  const line = Array.prototype.map.call(arguments, (a) => {
+  const line = '[' + new Date().toISOString() + '] ' + Array.prototype.map.call(arguments, (a) => {
     if (typeof a === 'string') return a;
     try { return JSON.stringify(a); } catch (e) { return String(a); }
   }).join(' ');
