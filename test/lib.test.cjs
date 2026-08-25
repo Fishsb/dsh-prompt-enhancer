@@ -1712,3 +1712,24 @@ test('U-parity config-schema vs 运行时 validateConfig（F4 语义奇偶）', 
   assert.equal(tpl.mode, 'custom', 'template.mode 不得被脚手架丢弃');
   assert.equal(tpl.texts.base, 'B', 'template.texts 不得被脚手架丢弃');
 });
+
+/* ================= LIB 接线锚点（t7 回归防护：「引用有声明」源文本 grep 断言） =================
+ * 背景：commit 89577aa（批次D logT 包装插入）曾误删 lib/index.cjs 的 asrDeploy 与
+ * lib/stage-install.cjs 的 sys 两个 require 绑定——node --check 只验语法、调用点懒执行
+ * 使既有单测假绿，终审才发现。本组用纯源文本 grep 锁定「引用有声明」不变量
+ * （不 require 目标模块，零副作用；调用点数量下限防「绑定在位但被孤立」漂移）。 */
+const libSrc = (rel) => readFileSync(join(__dirname, '..', rel), 'utf8');
+
+test('LIBWIRE-01 index.cjs 的 asrDeploy require 绑定在位且调用点 ≥2', () => {
+  const src = libSrc('lib/index.cjs');
+  assert.match(src, /const asrDeploy = require\('\.\/asr-deploy\.cjs'\);/, 'asrDeploy require 绑定必须在位（voice/deployRuntime、voice/deployStatus 消费）');
+  const calls = (src.match(/asrDeploy\./g) || []).length;
+  assert.ok(calls >= 2, 'asrDeploy 调用点应 ≥2，实测 ' + calls);
+});
+
+test('LIBWIRE-02 stage-install.cjs 的 sys require 绑定在位且调用点 ≥3', () => {
+  const src = libSrc('lib/stage-install.cjs');
+  assert.match(src, /const sys = require\('\.\/sys\.cjs'\);/, 'sys require 绑定必须在位（rescueSnapshot/writeDeployLedgerEntry/EXECUTOR_ROOT 等消费）');
+  const calls = (src.match(/\bsys\./g) || []).length;
+  assert.ok(calls >= 3, 'stage-install 对 sys.* 调用点应 ≥3，实测 ' + calls);
+});
