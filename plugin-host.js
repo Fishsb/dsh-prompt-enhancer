@@ -3483,7 +3483,7 @@ return {
       }
     });
 
-    // v2.5.0（方案「一键更新并重启方案.md」）：环境检测——只读探测 7 项，
+    // v2.5.0（方案「一键更新并重启方案.md」）：环境检测——只读探测 4 项（批次C 异步化）；
     // 探测执行在 lib/index.cjs（probeEnv，bundle 形态注入）；本侧仅转发 + 合并展示元数据。
     harness.handle('update/envcheck', async (args) => {
       if (!harness.probeEnv) {
