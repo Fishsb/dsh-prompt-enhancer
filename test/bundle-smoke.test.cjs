@@ -700,7 +700,7 @@ test('SMK-17 progress exposes fine-grained detail during publish (v3.0r)', async
 
 // ---- v3.1.3 看门狗 + 延迟连通性预检（base 模式直通 llm，无检索干扰） ----
 const REAL_TIMER = { timeout: (cb, ms) => { const id = setTimeout(cb, ms); return () => clearTimeout(id); } };
-const WATCHDOG_WAIT = 5600; // 略大于 bundle 内 WATCHDOG_TIMEOUT_MS=5000
+const WATCHDOG_WAIT = 15600; // 参考值（当前未消费）：略大于 bundle 内 WATCHDOG_TIMEOUT_MS=15000（v3.3.3）
 
 // SMK-17：首条生成流静默挂起（看门狗 3s 触发）→ 探测剩余链 → 第二条可达 → 用第二条生成成功
 test('SMK-17 watchdog: silent head → probe next → fallback generation (fallbackUsed)', async () => {
@@ -752,7 +752,9 @@ test('SMK-18 watchdog: all probes fail → ALL_MODELS_UNAVAILABLE fast', async (
   const elapsed = Date.now() - t0;
   assert.equal(out.ok, false);
   assert.equal(out.code, 'ALL_MODELS_UNAVAILABLE');
-  assert.ok(elapsed < 15000, '秒级报错（远小于 30s 总超时），实际 ' + elapsed + 'ms');
+  // v3.3.3（常量放大适配）：WATCHDOG_TIMEOUT_MS 5000→15000——挂起首条需等满看门狗窗口
+  // 才进入探测（探测本身毫秒级返回 QUOTA 失败），故窗口从 <15s 放宽到 <25s（30s 总超时内）
+  assert.ok(elapsed < 25000, '看门狗窗口内报错（远小于 30s 总超时），实际 ' + elapsed + 'ms');
   // 探测了两条（m-b 失败后回头探 m-a）
   const probe = seen.filter((p) => String(p.system || '').includes('connectivity probe'));
   assert.ok(probe.length >= 2, '至少探测 m-b 与回头探 m-a');
@@ -781,4 +783,47 @@ test('SMK-19 healthy head: no probe, no fallbackUsed', async () => {
   const probe = seen.filter((p) => String(p.system || '').includes('connectivity probe'));
   assert.equal(probe.length, 0, '健康路径零探测');
   assert.equal(seen.length, 1, '仅一次生成调用');
+});
+
+// SMK-20（v3.3.3 新增）：生成级失败耗尽 → 整链重试一次 → 第二轮命中 m-b（链耗尽重试轮）
+test('SMK-20 chain exhausted → one whole-chain retry reaches m-b (v3.3.3)', async () => {
+  const seen = [];
+  let bGenCount = 0;
+  const okStream = streamOf([
+    { type: 'text-delta', text: 'ENH' },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ]);
+  const failStream = (model) => streamOf([{
+    type: 'finish',
+    reason: { kind: 'error', failure: { code: model === 'm-a' ? 'EMPTY' : 'QUOTA', message: 'gen failed' } },
+  }]);
+  const { handlers } = boot({
+    llm: {
+      stream(params) {
+        seen.push(params);
+        if (String(params.system || '').includes('connectivity probe')) return okStream;
+        if (params.model === 'm-a') return failStream('m-a'); // 恒失败
+        bGenCount += 1;                                        // m-b：第一轮失败、第二轮成功
+        return bGenCount === 1 ? failStream('m-b') : okStream;
+      },
+    },
+    timer: REAL_TIMER,
+  });
+  const out = await handlers.get('enhance')({
+    sessionId: 's',
+    seq: 1,
+    text: '优化一下',
+    config: {
+      mode: 'base',
+      fallback: [{ provider: 'p', model: 'm-a' }, { provider: 'p', model: 'm-b' }],
+      params: { maxTokens: 2000, timeoutMs: 30000 },
+    },
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.model, 'm-b', '重试轮第二模型完成');
+  assert.equal(out.fallbackUsed, true, '非首个模型完成 → fallbackUsed');
+  const gen = seen.filter((p) => !String(p.system || '').includes('connectivity probe'));
+  assert.deepEqual(gen.map((p) => p.model), ['m-a', 'm-b', 'm-a', 'm-b'], '两轮 × 两模型（耗尽后整链重试一次）');
+  const probe = seen.filter((p) => String(p.system || '').includes('connectivity probe'));
+  assert.equal(probe.length, 0, '生成级失败不触发连通性探测');
 });

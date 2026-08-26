@@ -1098,9 +1098,14 @@ const V2_MSG_SEQ_SCAN = 16;
 // 对齐 standard 最深窗口 [6,10]；旧 16 事件上限在会话 >8 轮时令 [6,10] 静默滑向旧轮）
 const V2_ROUNDS_SCAN_MAX = 10;
 // v3.1.3（看门狗 + 延迟连通性预检）：模型响应看门狗阈值 / 单次连通探测超时 / 探测结果缓存 TTL
-const WATCHDOG_TIMEOUT_MS = 5000;
-const PROBE_TIMEOUT_MS = 3000;
-const PROBE_CACHE_TTL_MS = 30000;
+// v3.3.3（2026-08-27 用户实测·增强易断链修复）：实测链上模型 TTFT——
+// 链1 completions/deepseek-v4-flash 2.8s、链2 responses-proxy/muse-spark 9.3s；
+// 旧值 5s 看门狗 + 3s 探测会把「慢但健康」模型误判不可达并冻结 30s（增强直调
+// llm.stream 无宿主 retryPolicy(always) 兜底）——本组放宽对齐实测；
+// 探测失败缓存缩至 5s 免整链冻僵。
+const WATCHDOG_TIMEOUT_MS = 15000;
+const PROBE_TIMEOUT_MS = 12000;
+const PROBE_CACHE_TTL_MS = 5000;
 // 2026-08-18（用户需求）：会话历史显式内容提取上限 1200 → 2400（覆盖长回复/表格，避免截断显式内容）
 const V2_MSG_TEXT_MAX = 2400;
 const V2_WORKSPACE_TIMEOUT_MS = 2000;
@@ -4155,6 +4160,11 @@ return {
         state.result = { ok: false, code: 'NO_MODEL', message: friendlyMessage({ code: 'NO_MODEL' }) };
         return state;
       }
+      // v3.3.3（2026-08-27 用户实测·增强易断链修复）：外层 pass 循环——首轮整链耗尽后
+      // 整体重试一次（最多 2 pass），瞬时限流/慢首字/网络抖动自愈；重试轮不再挂看门狗、
+      // 不走探测缓存（直接真实生成），杜绝「探测判死 → 冻结整链 → 连续失败」；
+      // 总预算仍由外层 timeoutMs 计时器兜底（rec.timedOut 立即中断，不无限重试）。
+      for (let pass = 0; pass < 2; pass++) {
       for (let i = 0; i < chain.length; i++) {
         const entry = chain[i];
         if (rec.cancelled || rec.timedOut) {
@@ -4233,6 +4243,9 @@ return {
             const headOk = await probeEntry(entry);
             if (!headOk) {
               hlog('[enhance] chain all unavailable session=' + sessionId + ' last code=' + (lastFailure ? lastFailure.code : '?'));
+              // v3.3.3（设计决策）：探测窗口已按实测放大（PROBE_TIMEOUT_MS=12s）——探测全败
+              // = 实测全不可达（慢模型不再被误杀），立即报错不进入重试轮（避免无望的二次等待）；
+              // 重试轮只覆盖生成级失败耗尽（EMPTY/STREAM_THROW/QUOTA/瞬时错误等自愈场景）。
               state.result = { ok: false, code: 'ALL_MODELS_UNAVAILABLE', message: friendlyMessage({ code: 'ALL_MODELS_UNAVAILABLE' }) };
               return state;
             }
@@ -4268,9 +4281,16 @@ return {
         hlog('[enhance] fail session=' + sessionId + ' model=' + entry.model + ' code=' + (result.failure ? result.failure.code : '?'));
         lastFailure = result.failure || { code: 'LLM_FAILED', message: 'unknown failure' };
       }
+      // v3.3.3（链耗尽）：pass 0 且未被取消/超时 → 整链重试一次（watchdogDone=true 免看门狗）
+      if (pass === 0 && !rec.cancelled && !rec.timedOut) {
+        hlog('[enhance] chain exhausted retry pass=2 session=' + sessionId + ' last code=' + (lastFailure ? lastFailure.code : '?'));
+        state.watchdogDone = true;
+        continue;
+      }
       hlog('[enhance] chain exhausted session=' + sessionId + ' last code=' + (lastFailure ? lastFailure.code : '?'));
       state.result = { ok: false, code: lastFailure.code || 'LLM_FAILED', message: friendlyMessage(lastFailure) };
       return state;
+      }
     }
 
     // v3.1.3（看门狗 + 延迟连通性预检）：连通性探测——缓存优先，pingStream 短输入探测
