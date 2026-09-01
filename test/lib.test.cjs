@@ -1733,3 +1733,33 @@ test('LIBWIRE-02 stage-install.cjs 的 sys require 绑定在位且调用点 ≥3
   const calls = (src.match(/\bsys\./g) || []).length;
   assert.ok(calls >= 3, 'stage-install 对 sys.* 调用点应 ≥3，实测 ' + calls);
 });
+
+// v3.3.4（一键更新 executor 崩溃修复·P1）：以下锚点防止「executor 依赖缺失 / 端口链路回退」
+// 类修复被后续改动误删——2026-09-01 实锤：executor 独立目录缺 undici → MODULE_NOT_FOUND
+// 启动即崩 → EXECUTOR_START_FAILED；executor.port 陈旧且==请求口时动态口验证被跳过。
+test('LIBWIRE-03 ensureExternalExecutor 必须同步 undici 至 executor 独立目录', () => {
+  const src = libSrc('lib/index.cjs');
+  assert.match(src, /require\.resolve\('undici'\)/, 'ensureExternalExecutor 必须以 require.resolve 定位 undici 并复制（executor 自包含依赖，防 MODULE_NOT_FOUND）');
+  assert.match(src, /path\.join\(root, 'node_modules', 'undici'\)/, 'undici 必须复制到 executorRoot/node_modules/undici（零传递依赖，单目录即可）');
+});
+
+test('LIBWIRE-04 executorEnsure 对 executor.port 无条件验证（陈旧端口==请求口陷阱）', () => {
+  const src = libSrc('lib/index.cjs');
+  assert.match(src, /Number\.isInteger\(pf\.port\) && pf\.port > 0 && pf\.port <= 65535/, '读 executor.port 后必须做合法端口校验（不再以 pf.port!==port 为前提跳过——陈旧 3081 实锤）');
+  const calls = (src.match(/await executorCall\(pf\.port, 'ping'\)/g) || []).length;
+  assert.ok(calls >= 1, 'executor.port 命中必须经 ping 验证，实测 ' + calls);
+});
+
+test('LIBWIRE-05 net-proxy.cjs undici 惰性加载与降级直连在位', () => {
+  const src = libSrc('lib/net-proxy.cjs');
+  assert.match(src, /try \{\s*\n\s*const u = require\('undici'\)/, 'undici 必须 try/catch 惰性加载（缺失不崩进程）');
+  assert.match(src, /undici unavailable, proxy disabled/, '降级必须留痕（日志可取证）');
+  assert.match(src, /function httpsGetDirect/, '降级直连实现必须在位（内置 https.request，无代理可用）');
+});
+
+test('LIBWIRE-06 updater-host.cjs EADDRINUSE 动态口 fallback 在位（写 executor.port）', () => {
+  const src = libSrc('lib/updater-host.cjs');
+  assert.match(src, /e\.code === 'EADDRINUSE' && PORT !== 0/, '固定口被占必须走动态口 fallback（EADDRINUSE 不再直接退出）');
+  assert.match(src, /server\.listen\(0, '127\.0\.0\.1', onListen\)/, '动态口必须 listen(0) 交由 OS 分配');
+  assert.match(src, /JSON\.stringify\(\{ port: actual, pid: process\.pid, ts: Date\.now\(\) \}\)/, 'onListen 必须写 executor.port {port,pid,ts} 供 executorEnsure 发现（动态口链路收口）');
+});
