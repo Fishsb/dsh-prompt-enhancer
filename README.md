@@ -9,7 +9,7 @@ DeepSeek Harness (DSH) 插件。**两大核心能力**：
 
 [![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
 [![Release date](https://img.shields.io/github/release-date/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
-[![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer)
+[![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers)
 
 ## ✨ 两大核心功能
 
@@ -27,7 +27,7 @@ DeepSeek Harness (DSH) 插件。**两大核心能力**：
 输入框旁的 🎤 录音按钮开始说话，识别（**云端** Qwen3-ASR / **本地离线** SenseVoice 双引擎）→ 可选规整（去口水词）→ 填入草稿 → 可一键优化。**说完停顿自动停止**（VAD 静音检测），录音仅内存中转不落盘。
 
 - **双引擎** — 云端 Qwen3-ASR / 本地离线 SenseVoice（框架 + 可选下载，发布物精简）
-- **说完自动停** — VAD 静音检测，无需手动停止
+- **说完自动停** — VAD 静音检测，无需手动停止（最长 60 秒自动结束）
 - **快捷键唤醒** — 可录制全局快捷键，点按 / 长按双触发
 - **文本规整** — 识别结果可选经基座 LLM 规整，去口语化
 - **自动增强** — 开启后识别填入草稿即自动触发提示词增强
