@@ -40,7 +40,7 @@ DeepSeek Harness (DSH) 插件。**两大核心能力**：
 ## 🚀 安装
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.3.2
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.3.3
 ```
 
 安装后重启 DSH（`dsh web`），输入框工具行出现 ✨ 按钮即安装成功。

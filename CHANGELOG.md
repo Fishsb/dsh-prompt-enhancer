@@ -1,6 +1,7 @@
 # Changelog
 
-[Unreleased]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.2...HEAD
+[3.3.3]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.2...v3.3.3
+[Unreleased]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.3...HEAD
 [3.3.2]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.1...v3.3.2
 [3.3.1]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.0...v3.3.1
 
@@ -12,6 +13,8 @@
 > 🗺️ 本日志与项目地图[`docs/map/`](docs/map/index.md)交叉引用：新条目标注涉及 map/flow-id（PEN/VU/DG）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
 ## [Unreleased]
+
+## [3.3.3] - 2026-09-01
 
 - **package-lock.json 根版本同步（审查发现·2026-09-01）**：lock（lockfileVersion 3）根 `version` 3.2.4 → 3.3.2，与 package.json 单一事实源对齐——此前存在 1 版漂移（`npm ci` 会告警），依赖树本体一致（`npm ls` 无 error），零依赖变更。— 发布物元数据一致性
 - **外部贡献处理（fork/PR 评估·2026-09-01）**：①**Poeagle fork（ymchen c7c2c0c）**「watchdog 超时修复」评估——其修复根因（看门狗/探测硬编码 5s/3s 窗口误杀慢模型）与本仓库 2026-08-27 已合入的「增强易断链修复」（下文条目，WATCHDOG 15s / PROBE 12s / 缓存 5s / 链耗尽整链重试）**同根因、方向一致且已被覆盖**，且其补丁基于旧基线（v3.3.1-era，同步改 package.json bump/emoji 乱码等本仓库已处理项）与当前生成物/测试大面积冲突，**不合并**（以本记录替代，避免引入旧基线回退）；②**webbrain-one PR#7**「docs: improve README」——PR 记录已删除（GitHub 仅存僵尸 `refs/pull/7` 引用），其中两处有效改动（Stars badge 链接补 `/stargazers`、VAD 说明补「最长 60 秒自动结束」）经核属实，**手动采纳**入 README.md（忽略其文件头两空行的无效噪音）；③其余 fork 提交（tt-a1i lockfile 规范化、wuseyangg/Doraemon `.gitignore` 微调）为琐碎/无价值改动，不采纳。纯文档变更，无代码/构建影响。— [PEN-002]（flow: prompt-enhance）
