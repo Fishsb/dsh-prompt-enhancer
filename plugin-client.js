@@ -1545,10 +1545,19 @@ function guardPasses(draft, input) {
 
 function EnhanceButton(props) {
   const t = makeT(props);
-  const sessionId = props.session && props.session.sessionId;
-  const input = props.input || {};
+  // v3.4.x（Issue #8 官方槽位契约）：会话级槽位条目由渲染器注入 sessionId prop + useSession/useInput 选择器 hook
+  // （@deepseek-ai/dsh-client-ui-renderer 0.1.2-rc.1 将 uiSession hooks 合成为 use<Name> hook、props 原样展开，
+  //   对 conversation.input.right 恒无 props.session/props.input —— 旧实现令 ✨/🎤 拿不到会话致永不渲染或降级）；
+  //   旧宿主（提供 props.session / props.input）回退保持兼容。hook 以 props 上是否存在函数为恒定条件，hook 序稳定。
+  const useSessionHook = typeof props.useSession === 'function' ? props.useSession : null;
+  const useInputHook = typeof props.useInput === 'function' ? props.useInput : null;
+  const sessionSnap = useSessionHook ? useSessionHook((s) => s) : null;
+  const inputSnap = useInputHook ? useInputHook((s) => s) : null;
+  const sessionId = (sessionSnap && sessionSnap.sessionId) || (props.session && props.session.sessionId) || props.sessionId;
+  const input = inputSnap || props.input || {};
   const draft = typeof input.draft === 'string' ? input.draft : '';
   const inputActions = props.inputActions;
+
   // v3.3.x-fix：effect 内安全使用最新 actions——此前回注分支引用了未声明的
   // inputActionsRef，一旦执行即 ReferenceError（f6fa822 半成品缺陷）
   const inputActionsRef = React.useRef(inputActions);
@@ -1785,10 +1794,19 @@ function EnhanceButton(props) {
 
 function EnhanceBar(props) {
   const t = makeT(props);
-  const sessionId = props.session && props.session.sessionId;
-  const input = props.input || {};
+  // v3.4.x（Issue #8 官方槽位契约）：会话级槽位条目由渲染器注入 sessionId prop + useSession/useInput 选择器 hook
+  // （@deepseek-ai/dsh-client-ui-renderer 0.1.2-rc.1 将 uiSession hooks 合成为 use<Name> hook、props 原样展开，
+  //   对 conversation.input.right 恒无 props.session/props.input —— 旧实现令 ✨/🎤 拿不到会话致永不渲染或降级）；
+  //   旧宿主（提供 props.session / props.input）回退保持兼容。hook 以 props 上是否存在函数为恒定条件，hook 序稳定。
+  const useSessionHook = typeof props.useSession === 'function' ? props.useSession : null;
+  const useInputHook = typeof props.useInput === 'function' ? props.useInput : null;
+  const sessionSnap = useSessionHook ? useSessionHook((s) => s) : null;
+  const inputSnap = useInputHook ? useInputHook((s) => s) : null;
+  const sessionId = (sessionSnap && sessionSnap.sessionId) || (props.session && props.session.sessionId) || props.sessionId;
+  const input = inputSnap || props.input || {};
   const draft = typeof input.draft === 'string' ? input.draft : '';
   const inputActions = props.inputActions;
+
 
   const [, setVersion] = React.useState(0);
   React.useEffect(() => subscribe(sessionId, () => setVersion((v) => v + 1)), [sessionId]);
@@ -4320,10 +4338,19 @@ const labelEl = seconds > 0 ? React.createElement('span', { className: 'dsh-vi-l
 
 function VoiceMicButton(props) {
   const t = makeT(props);
-  const sessionId = props.session && props.session.sessionId;
-  const input = props.input || {};
+  // v3.4.x（Issue #8 官方槽位契约）：会话级槽位条目由渲染器注入 sessionId prop + useSession/useInput 选择器 hook
+  // （@deepseek-ai/dsh-client-ui-renderer 0.1.2-rc.1 将 uiSession hooks 合成为 use<Name> hook、props 原样展开，
+  //   对 conversation.input.right 恒无 props.session/props.input —— 旧实现令 ✨/🎤 拿不到会话致永不渲染或降级）；
+  //   旧宿主（提供 props.session / props.input）回退保持兼容。hook 以 props 上是否存在函数为恒定条件，hook 序稳定。
+  const useSessionHook = typeof props.useSession === 'function' ? props.useSession : null;
+  const useInputHook = typeof props.useInput === 'function' ? props.useInput : null;
+  const sessionSnap = useSessionHook ? useSessionHook((s) => s) : null;
+  const inputSnap = useInputHook ? useInputHook((s) => s) : null;
+  const sessionId = (sessionSnap && sessionSnap.sessionId) || (props.session && props.session.sessionId) || props.sessionId;
+  const input = inputSnap || props.input || {};
   const draft = typeof input.draft === 'string' ? input.draft : '';
   const inputActions = props.inputActions;
+
   const [status, setStatus] = React.useState('idle');
   const [errKey, setErrKey] = React.useState('');
   const [seconds, setSeconds] = React.useState(0);
