@@ -647,12 +647,10 @@ const ZH = {
   updUnknown: '状态未知',
   updDir: '目标目录',
   updPull: '一键更新',
-  // v2.9.x（按钮拆分·用户指令）：一键更新（执行器 apply restart:false，原「一键拉取更新」合并「一键更新」改名）+ 端口重启（执行器 restart）
-  updPortRestart: '端口重启',
   updPullApplyConfirm: '确认更新？',
-  // v3.1.x（职责划分·用户指令）：一键更新仅下载（staged）——安装+重启由「端口重启」完成
-  updStaged: '✓ 新版本已下载，请点击「端口重启」完成安装并重启',
-  updStagedShort: '已下载',
+  // v3.3.x（用户指令·移除插件内重启）：一键更新 = 执行器下载+校验（staged）→ host 安装 → 提示用户手动重启 DSH 生效
+  updStaged: '✓ 已安装完成，请手动重启 DSH 使新版本生效',
+  updStagedShort: '已安装',
   updError: '操作失败，请重试',
   updRepoNotFound: '仓库不存在或无法访问（HTTP 404）',
   // v2.5.0（一键更新并重启 + 环境检测）
@@ -677,51 +675,22 @@ const ZH = {
   envUnsupportedPlatform: '当前平台不受支持——环境检测仅支持 Windows/Linux',
   envPortModeNoListener: '未运行（无端口监听）',
   envPortPid: '当前端口 PID',
-  updApplyConfirm: '确认',
-  // v3.2（用户需求·桌面快捷方式 CLI 重启）：端口重启确认态「桌面」按钮 + 悬停提示 + 创建结果提示
-  updMakeShortcut: '桌面',
-  updShortcutTooltip: '创建桌面快捷方式',
-  updShortcutOk: '已在桌面创建「重启DSH」快捷方式（DeepSeek 鲸鱼图标）——以后网页打不开时双击它即可在命令行窗口重启服务',
-  updShortcutFail: '创建桌面快捷方式失败：{msg}',
   updApplying: '正在安装更新…（10–60 秒）',
   updApplyStaging: '正在下载更新资源…',
   updApplyEnvcheck: '正在检查环境…',
   updApplyPreparing: '正在准备安装…',
   updApplyRollingBack: '重启失败，正在回滚旧版本…',
   updApplyRolledBack: '✓ 已回滚到旧版本，请刷新页面',
-  updApplyRestarting: '正在重启服务…（第 {round} 次 · 剩余 {sec} 秒）',
-  // v2.9.x（重启反馈优化·用户需求）：执行器 message 阶段文案（1s 轮询展示）
-  updRestartStopping: '正在停止服务',
-  updRestartSettling: '服务已停止，等待稳定',
-  updRestartRound: '第 {n} 次重启：停止+启动',
-  updRestartNotListening: '端口未就绪，准备重试',
-  // v3.1.6（用户反馈·文案误导）：attempt=1 时 round 1 正在执行（健康探测最长 20s）并未失败，
-  // 旧文案「第 N 次重启未恢复」让用户误以为第一次失败——改为中性「正在尝试第 N 次重启」，
-  // 轮次更新保留；真正失败（failed 终态 / 5 轮全败）才显示失败文案
-  updApplyRetry: '正在尝试第 {n} 次重启（服务启动中，最长 20 秒）…',
-  updApplyRestartFailed: '5 次重启均未恢复——请手动执行 net start dsh-web 后刷新',
+  updApplyRestartFailed: '安装失败，请重试；若仍失败请手动重启 DSH 服务后刷新页面',
   // v3.1.6（用户反馈·文案误导）：bundle 安装但执行器未拉起/中途不可达时，旧文案
   // 「请确认插件为 bundle 安装」会让用户误以为是安装问题——改为准确提示自动重试结果
   updDiagTitle: 'dsh-web 错误日志尾部（疑似根因，已脱敏）',
-  updApplyExecutorDown: '端口重启超时：DSH 服务未在 90 秒内恢复，请刷新页面重试；若仍失败请重启 dsh-web 服务',
+  updApplyExecutorDown: '更新失败：更新执行器不可达或安装未完成，请确认执行器正常后重试',
 
 
-  // v3.2.1（独立化·端口重启）：重启中/完成文案
-  updPortRestarting: '正在重启端口…',
-  updPortRestartDone: '✓ 端口重启完成，请刷新页面',
-  // v3.3.x（过程提醒细化·用户需求）：端口重启轮询阶段文案
-  updRsPreparing: '正在触发端口重启…',
-  updRsSvcScheduled: '服务模式：已调度重启任务，旧实例即将停止',
-  updRsProcScheduled: '前台模式：辅助脚本已启动，即将拉起新实例',
-  updRsOldStopped: '旧实例已停止，等待新实例监听…',
-  // 批次A（P2-6）：防抖合并提示（状态行「已排队」）
-  updRsDebounced: '重启已排队：已有待触发的重启任务，本次请求已合并（稍后自动完成）',
-  updRsPluginLoadWarn: '⚠ 重启完成，但检测到「插件加载失败」——刚装的第三方插件可能与核心不兼容，请到 设置→插件 禁用它后再刷新',
   // v2.9.x（一键更新不重启·修复）：旧执行器无 restart:false 支持，阻止执行并提示重启 dsh-web
   updExecutorTooOld: '更新执行器版本过旧（v{v}），不支持「只安装不重启」——请重启 dsh-web 完成执行器升级（≥0.1.7）后重试',
   updCheckFirst: '请先点击「检测版本」确认有新版本后再更新',
-  updApplyDone: '✓ 重启成功，请刷新页面',
-  updApplyReload: '刷新页面',
   updApplyBlocked: '环境检测未通过，请先处理：',
   cfgTimeout: '超时时间',
   cfgMaxTokens: '输出 Token 上限',
@@ -991,12 +960,10 @@ const EN = {
   updUnknown: 'Unknown',
   updDir: 'Target directory',
   updPull: 'Update',
-  // v2.9.x (button split): one-click update (executor apply restart:false; renamed from pull & install) + port restart (executor restart)
-  updPortRestart: 'Restart port',
   updPullApplyConfirm: 'Confirm update?',
-  // v3.1.x (role split): one-click update downloads only; install+restart via port-restart button
-  updStaged: '✓ New version downloaded — click "Restart port" to install and restart',
-  updStagedShort: 'Downloaded',
+  // v3.3.x (user directive · plugin-side restart removed): one-click update = executor download+verify (staged) → host install → prompt the user to restart DSH manually
+  updStaged: '✓ Installed — restart DSH manually to activate the new version',
+  updStagedShort: 'Installed',
   updError: 'Operation failed, please retry',
   updRepoNotFound: 'Repository not found or unreachable (HTTP 404)',
   // v2.5.0 (one-click update & restart + environment check)
@@ -1021,46 +988,20 @@ const EN = {
   envUnsupportedPlatform: 'Unsupported platform — environment detection supports Windows/Linux only',
   envPortModeNoListener: 'Not running (no port listener)',
   envPortPid: 'Port PID',
-  updApplyConfirm: 'Confirm',
-  // v3.2：桌面快捷方式 CLI 重启
-  updMakeShortcut: 'Desktop',
-  updShortcutTooltip: 'Create a desktop shortcut',
-  updShortcutOk: 'Desktop shortcut "Restart DSH" created (DeepSeek whale icon) — double-click it (even when the web UI is down) to restart the service in a CLI window',
-  updShortcutFail: 'Failed to create desktop shortcut: {msg}',
   updApplying: 'Installing update… (10–60s)',
   updApplyStaging: 'Downloading update resources…',
   updApplyEnvcheck: 'Checking environment…',
   updApplyPreparing: 'Preparing install…',
   updApplyRollingBack: 'Restart failed — rolling back to previous version…',
   updApplyRolledBack: '✓ Rolled back to the previous version — refresh the page',
-  updApplyRestarting: 'Restarting service… (attempt {round} · {sec}s left)',
-  // v2.9.x (restart feedback): executor message stage texts (1s polling)
-  updRestartStopping: 'Stopping service',
-  updRestartSettling: 'Service stopped, waiting for stability',
-  updRestartRound: 'Restart attempt {n}: stop+start',
-  updRestartNotListening: 'Port not ready, about to retry',
-  updApplyRetry: 'Attempt {n} in progress (service starting, up to 20s)…',
-  updApplyRestartFailed: 'Still down after 5 attempts — run `net start dsh-web` manually, then refresh',
+  updApplyRestartFailed: 'Install failed — retry; if it still fails, restart the DSH service manually and refresh',
   updDiagTitle: 'dsh-web error log tail (likely root cause, redacted)',
-  updApplyExecutorDown: 'Port restart timed out: the DSH service did not recover within 90s. Refresh the page and retry, or restart the dsh-web service',
+  updApplyExecutorDown: 'Update failed: the update executor is unreachable or the install did not complete. Make sure the executor is running and retry',
 
 
-  // v3.2.1 (independent port-restart): in-progress / done texts
-  updPortRestarting: 'Restarting port…',
-  updPortRestartDone: '✓ Port restarted — refresh the page',
-  // v3.3.x phased progress during port-restart polling
-  updRsPreparing: 'Triggering port restart…',
-  updRsSvcScheduled: 'Service mode: restart task scheduled, stopping old instance soon',
-  updRsProcScheduled: 'Foreground mode: helper script started, launching new instance',
-  updRsOldStopped: 'Old instance stopped, waiting for the new one to listen…',
-  // Batch A (P2-6): debounce merge hint (status line shows queued)
-  updRsDebounced: 'Restart queued: a scheduled restart is already pending; request merged',
-  updRsPluginLoadWarn: '⚠ Restarted, but detected a plugin load failure — a newly installed third-party plugin may be incompatible; disable it under Settings→Plugins and refresh',
   // v2.9.x (install-without-restart fix): old executor lacks restart:false — block and ask to restart dsh web
   updExecutorTooOld: 'Update executor is too old (v{v}) and does not support install-without-restart — restart dsh web to upgrade the executor (≥0.1.7), then retry',
   updCheckFirst: 'Run "Check version" first to confirm a new version before updating',
-  updApplyDone: '✓ Restarted — refresh the page',
-  updApplyReload: 'Refresh',
   updApplyBlocked: 'Environment check failed, resolve first: ',
   cfgTimeout: 'Timeout',
   cfgMaxTokens: 'Max output tokens',
@@ -1860,7 +1801,6 @@ function stateKey(state) {
 const UPDATER_DEFAULT_REPO = 'Fishsb/dsh-prompt-enhancer';
 // 与 host PURE UPDATE_MANIFEST 同步（host 侧 validateManifestFiles 为权威校验）
 const UPDATER_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'cordis.patch.yml'];
-const updaterContentsUrl = (repo, tag, file) => 'https://api.github.com/repos/' + repo + '/contents/' + file + '?ref=' + tag;
 const updaterTagsUrl = (repo) => 'https://api.github.com/repos/' + repo + '/tags?per_page=100';
 const updaterReleaseUrl = (repo) => 'https://api.github.com/repos/' + repo + '/releases/latest';
 
@@ -1956,24 +1896,8 @@ function saveUpdaterConfig(patch) {
   try { localStorage.setItem(UPDATER_CFG_KEY, JSON.stringify(updaterCfgState.value)); } catch (e) { /* 忽略 */ }
   for (const fn of [...updaterCfgState.listeners]) fn();
 }
-function subscribeUpdaterConfig(fn) {
-  updaterCfgState.listeners.add(fn);
-  return () => { updaterCfgState.listeners.delete(fn); };
-}
 loadUpdaterConfig();
 
-// v2.9.x（重启反馈优化·用户需求）：执行器 message → 中文阶段文案（兜底原文，保证任何时刻有显式反馈）
-function restartStageText(t, message) {
-  const msg = typeof message === 'string' ? message : '';
-  if (/stopping/.test(msg)) return t('updRestartStopping');
-  if (/settling/.test(msg)) return t('updRestartSettling');
-  if (/not listening/.test(msg)) return t('updRestartNotListening');
-  if (/round/i.test(msg)) {
-    const m = /round\s+(\d+)/i.exec(msg);
-    return t('updRestartRound').replace('{n}', m ? m[1] : '?');
-  }
-  return msg !== '' ? msg : t('updApplyRestarting').replace('{round}', '?').replace('{sec}', '10');
-}
 
 function UpdaterCard(props) {
   const t = makeT(props);
@@ -1986,31 +1910,17 @@ function UpdaterCard(props) {
   const [envItems, setEnvItems] = React.useState(null);
   const [envChecking, setEnvChecking] = React.useState(false);
   const [envError, setEnvError] = React.useState(null);
-  // v3.2（用户需求·桌面快捷方式 CLI 重启）：确认态「快捷」按钮——创建桌面快捷方式
-  const [shortcutBusy, setShortcutBusy] = React.useState(false);
-  // v2.9.x（按钮拆分）：idle|confirm|applying|installed|restarting|done|rolledback；
-  // action 区分当前动作（apply=一键更新 / restart=端口重启）
+  // v3.3.x（用户指令·移除插件内重启）：idle|confirm|applying|installed|staged|rolledback；
+  // action 区分当前动作（apply=一键更新）
   const [applyPhase, setApplyPhase] = React.useState('idle');
   const [action, setAction] = React.useState(null);
   const [applyErr, setApplyErr] = React.useState(null);
   const [diagLog, setDiagLog] = React.useState(null);
   // 2026-09-12（审查修复·D2）：diagLog 缓存必须放组件作用域——runPullApply 的 .catch 与
-  // pollRestored 的超时分支都要读它，原 `let lastDiag` 声明在 pollExecutorStatus 内属越作用域
-  // 引用（ReferenceError → 失败文案不显示、按钮卡死）。
+  // pollExecutorStatus 的失败分支都要读它，原 `let lastDiag` 声明在 pollExecutorStatus 内属
+  // 越作用域引用（ReferenceError → 失败文案不显示、按钮卡死）。
   const lastDiagRef = React.useRef('');
-  // 2026-09-12（D1 修复）：端口重启超时/执行器不可达时轮询拿不到任何执行器 diagLog——
-  // 主动补取一次 host 侧 DSH err 日志尾部（RPC update/diagTail，只读）；仅当本地无根因时写入，
-  // 不覆盖执行器已给出的根因。旧 host/动态形态无此 RPC → 静默。
-  const pullDiagTail = () => {
-    host.call('update/diagTail', { serviceName }).then((r) => {
-      const dt = r && typeof r.diagLog === 'string' ? r.diagLog.trim() : '';
-      if (dt && !lastDiagRef.current) setDiagLog(dt);
-    }).catch(() => { /* 旧 host/动态形态无此 RPC → 静默 */ });
-  };
   const [applyStatus, setApplyStatus] = React.useState(null);
-  // v2.5.5：重启自检倒计时（秒）与重试轮次（首次 1 / 自动重试 2）
-  const [restartLeft, setRestartLeft] = React.useState(0);
-  const [restartRound, setRestartRound] = React.useState(1);
   // v2.7.0：更新未重启提醒（null=无提醒；命中显示横幅 + 重启命令）
   const [restartNotice, setRestartNotice] = React.useState(null);
   // 2026-08-16（方案「设置界面样式与交互对齐官方」）：repo/目录输入 label htmlFor 关联（稳定 id）
@@ -2109,9 +2019,9 @@ function UpdaterCard(props) {
     });
   };
 
-  // v2.6.0：独立执行器（executorEnsure 版本对齐拉起）→ 两个动作共用：
-  // 「一键拉取更新」= 执行器 apply restart:false（下载 + 校验 + 停服 + 安装，不重启）；
-  // 「端口重启」= 执行器 restart（仅重启循环）。服务重启期间执行器独立存活。
+  // v2.6.0：独立执行器（executorEnsure 版本对齐拉起）→ 一键更新使用：
+  // 执行器 apply restart:false（下载 + 校验到 staging，不停服/不安装/不重启）；
+  // 安装由 host update/install 执行，服务重启由用户手动完成。执行器独立存活，不受 DSH 重启影响。
   const executorPort = () => {
     const p = Number.isInteger(updaterCfgState.value.executorPort)
       ? updaterCfgState.value.executorPort : 3081;
@@ -2121,8 +2031,8 @@ function UpdaterCard(props) {
   // v3.1.6（用户指令·执行器独立化）：更新执行器是独立端口（3081）的独立功能——
   // 除影响**执行器自身链路执行**的检查（exec-port 端口可用、tools 重启工具）外，
   // 服务相关检查（service/svc-type/svc-bin）不再 block 一键更新——apply 为 staged
-  // 下载+校验、零端口操作、不依赖服务状态；真正安装重启时执行器内部自行校验报错
-  // （STOP_FAILED 等）。服务相关项仍展示在环境检测结果里（warn 提示），不阻止执行器使用。
+  // 下载+校验、零端口操作、不依赖服务状态；安装由 host update/install 执行（不触碰端口）。
+  // 服务相关项仍展示在环境检测结果里（warn 提示），不阻止执行器使用。
   // v3.2（动态端口 fallback）：exec-port 端口冲突不再 block——执行器会自动 fallback
   // 动态端口（listen 0 + executor.port），executorEnsure 返回真实端口；仅 tools 缺失阻断。
   const EXECUTOR_LINK_BLOCKS = ['tools'];
@@ -2145,18 +2055,39 @@ function UpdaterCard(props) {
       return host.call('update/executorEnsure', { port: executorPort() });
     });
   };
-  // status 轮询（每 2s；倒计时每轮 10s；每轮结束反馈「第 N 次未恢复，自动重试中」）——
-  // 用于 apply(restart:false) 的安装进度（终态 installed / failed）；restart 动作
-  // 由执行器等待完成直接返回，不走轮询
+
+  // v3.3.x（用户指令·移除插件内重启）：一键更新终态 = 安装已 staged 的包
+  // （host update/install：纯安装，零端口操作、不重启任何东西）→ 提示用户手动重启 DSH 生效
+  const installStaged = () => {
+    setApplyErr(null);
+    setApplyStatus(t('updApplying'));
+    host.call('update/install', { profile, serviceName }).then((res) => {
+      const r = res && typeof res === 'object' ? res : {};
+      if (r.ok !== true) {
+        setApplyStatus(null);
+        setApplyErr((r.message ? r.message + ' ' : '') + t('updApplyRestartFailed'));
+        setApplyPhase('idle');
+        setAction(null);
+        return;
+      }
+      // 终态：已安装，等用户手动重启 DSH（updStaged 文案）
+      setApplyErr(null);
+      setApplyStatus(null);
+      setApplyPhase('staged');
+    }).catch(() => {
+      setApplyStatus(null);
+      setApplyErr(t('updApplyExecutorDown'));
+      setApplyPhase('idle');
+      setAction(null);
+    });
+  };
+  // status 轮询（每 1s）：观察 apply(restart:false) 的下载/校验进度与终态（staged / failed）
   const pollExecutorStatus = (port) => {
-    // v2.9.x（重启反馈优化·用户需求）：轮询 2s→1s——倒计时每秒更新（原每 2s 跳 2 秒）；
-    // restarting 阶段展示执行器 message 阶段（停止/等待稳定/第 N 次尝试/端口未就绪）+
-    // 轮次 + 剩余秒 + 已用秒；轮询连续失败 15 次（约 15s 无响应）→ 判定执行器不可达并终止
+    // v3.3.x（用户指令·移除插件内重启）：轮询只用于观察安装进度——1s 一 tick，
+    // 用 elapsed 展示已用秒（旧「重启倒计时/轮次」随重启链一并移除）；
+    // 连续失败 15 次（约 15s 无响应）→ 判定执行器不可达并终止
     const startedAt = Date.now();
-    let localLeft = 10;
     let failCount = 0;
-    setRestartLeft(localLeft);
-    setRestartRound(1);
     const tick = () => {
       executor.call('status', {}, port).then((st) => {
         const s = st && typeof st === 'object' ? st : {};
@@ -2171,8 +2102,10 @@ function UpdaterCard(props) {
             setApplyStatus(t('updApplyRolledBack'));
             setApplyPhase('rolledback');
           } else {
-            setApplyStatus(t('updApplyDone'));
-            setApplyPhase('done');
+            // v3.3.x（用户指令·移除插件内重启）：不再有「重启成功」终态——
+            // 执行器空闲（未在安装/重启）时回到可操作状态
+            setApplyStatus(null);
+            setApplyPhase('idle');
           }
           return;
         }
@@ -2184,15 +2117,13 @@ function UpdaterCard(props) {
           setApplyPhase('idle');
           return;
         }
-        // v3.1.x（职责划分·用户指令）：一键更新终态——新版本已下载到 staging，零端口操作；
-        // 安装与重启由「端口重启」按钮（restart RPC）执行
+        // v3.3.x（用户指令·移除插件内重启）：执行器已把新版本 staged（下载 + 校验完成）
+        // → 交给 host update/install 安装（不重启任何东西）；装完提示用户手动重启 DSH 生效
         if (s.phase === 'staged') {
-          setApplyErr(null);
-          setApplyStatus(null);
-          setApplyPhase('staged');
+          installStaged();
           return;
         }
-        // 防御：旧执行器/历史状态残留的 installed（服务已停止待重启）
+        // 防御：旧执行器/历史状态残留的 installed（已安装，等用户手动重启）
         if (s.phase === 'installed') {
           setApplyErr(null);
           setApplyStatus(null);
@@ -2225,76 +2156,18 @@ function UpdaterCard(props) {
           setTimeout(tick, 1000);
           return;
         }
-        // restarting：阶段文案 + 轮次 + 秒级倒计时 + 已用秒——每秒更新
-        // v3.1.5（用户反馈·重试提示轮次不更新）：不再每 tick setApplyErr(null) 清空红色提示
-        // （旧逻辑只在 10s 倒计时归零瞬间 flash 一次，下一秒又被清掉 → 用户看到的总是「第 1 次」）；
-        // 改为每次轮询**持续显示当前轮次**的重试提示（跟随执行器 s.attempt），轮次递增立即可见。
-        // attempt=0（stopping/settling 阶段，尚未开始 stop+start 重试）不显示红色，避免「第 1 次」误报过早。
-        setApplyPhase('restarting');
-        const round = s.attempt || 0;
-        setRestartRound(Math.max(1, round));
-        if (round >= 1) {
-          // 执行器已在重试（attempt≥1 即 stop+start 已开始）→ 红色提示持续显示当前轮次
-          setApplyErr(t('updApplyRetry').replace('{n}', String(round)));
-        } else {
-          setApplyErr(null);
-        }
-        localLeft -= 1;
-        if (localLeft <= 0) localLeft = 10;
-        setRestartLeft(localLeft);
-        setApplyStatus(restartStageText(t, s.message) + (round >= 1 ? '（第 ' + round + ' 次 · 剩余 ' + localLeft + ' 秒 · 已用 ' + elapsed + 's）' : '（已用 ' + elapsed + 's）'));
-        setTimeout(tick, 1000);
       }).catch(() => {
-        // 执行器暂时不可达（重启窗口或执行器被重建）——连续失败 15 次才终止
+        // 执行器暂时不可达（执行器未起/被重建）——连续失败 15 次才终止
         failCount += 1;
         if (failCount >= 15) {
-          // v3.1.6（用户反馈·执行器中途不可达误报）：报错前最后一次尝试——经 host
-          // executorEnsure 重新拉起执行器；拉起成功则重发 restart（进度可能已丢失）
-          // 并重置失败计数继续轮询，只有拉起失败才报错终止
-          setApplyErr(null);
-          const installTag = result && result.remoteTag ? result.remoteTag : '';
-          host.call('update/executorEnsure', { port }).then((en) => {
-            if (en && en.ok === true) {
-              // v3.2（动态端口 fallback）：重发 restart 用 executorEnsure 返回的真实端口
-              const ap = (en.port && en.port > 0) ? en.port : port;
-              // v3.3.x（桌面安全·重试链换 RPC）：旧实现重发 executor 'restart'（读共享进程索引 + 健康检查兜底固定 3080、无桌面守卫，Desktop 下会杀错进程/死等 3080）——改走 host update/portRestart（v3.2.1 独立化 + v3.3.x 桌面适配：kind 校验索引 + 杀前身份校验 + profile 强制，web/desktop 双安全，语义更准：staged 安装+重启正是 portRestart 职责）。
-              return host.call('update/portRestart', { serviceName, profile, auto: true });
-            }
-            return Promise.resolve(null);
-          }).then((rr) => {
-            if (rr && rr.ok === true) {
-              failCount = 0;
-              setApplyErr(null);
-              setTimeout(tick, 1000);
-              return;
-            }
-            // 批次A（P0-1）：自动链被 host 闸拦截（kill-switch/退避中）→ 状态行显示原因并停止本轮自动重试（不弹错误横幅，区别于手动失败）
-            const rrc = rr && typeof rr.code === 'string' ? rr.code : '';
-            if (rrc === 'BACKOFF_WAITING' || rrc === 'AUTO_DISABLED') {
-              setApplyStatus((rr && typeof rr.message === 'string' && rr.message) || rrc);
-              setApplyPhase('idle');
-              return;
-            }
-pullDiagTail();
-            setDiagLog(lastDiagRef.current || null);
-            setApplyErr(t('updApplyExecutorDown'));
-            setApplyStatus(null);
-            setApplyPhase('idle');
-          }).catch(() => {
-pullDiagTail();
-            setDiagLog(lastDiagRef.current || null);
-            setApplyErr(t('updApplyExecutorDown'));
-            setApplyStatus(null);
-            setApplyPhase('idle');
-          });
+          // v3.3.x（用户指令·移除插件内重启）：不再经 host 自愈重拉执行器/重发重启 RPC——
+          // 直接呈现错误（执行器不可达 = 更新无法继续），保留缓存 diagLog 作为根因线索
+          setDiagLog(lastDiagRef.current || null);
+          setApplyErr(t('updApplyExecutorDown'));
+          setApplyStatus(null);
+          setApplyPhase('idle');
           return;
         }
-        // v3.1.5（用户反馈·重试提示轮次不更新）：执行器暂不可达时也持续显示重试提示，
-        // 不再等倒计时归零才 flash
-        setApplyErr(t('updApplyRetry').replace('{n}', String('?')));
-        localLeft -= 1;
-        if (localLeft <= 0) localLeft = 10;
-        setRestartLeft(localLeft);
         setTimeout(tick, 1000);
       });
     };
@@ -2302,40 +2175,16 @@ pullDiagTail();
   };
 
   const startConfirm = (which) => {
-    // v3.1.2（用户报告·一键更新后端口重启点不了）：一键更新（staged 模式）完成后
-    // applyPhase='staged'，新版本已下载——端口重启按钮应可点（放行 restart，进入确认态安装+重启）；
-    // 其余阶段（applying/restarting/done 等）仍禁止进入确认态
-    if (applyPhase !== 'idle' && applyPhase !== 'installed'
-      && !(applyPhase === 'staged' && which === 'restart')) return;
+    // v3.3.x（用户指令·移除插件内重启）：确认态只剩「一键更新」——idle 与防守性 installed 可进入
+    if (applyPhase !== 'idle' && applyPhase !== 'installed') return;
     setAction(which);
     setApplyPhase('confirm');
   };
   const cancelApply = () => {
     if (applyPhase === 'confirm') { setApplyPhase('idle'); setAction(null); }
   };
-  // v3.2（用户需求·桌面快捷方式 CLI 重启）：创建桌面快捷方式（host RPC 写 .cmd + .lnk）。
-  // 快捷方式名跟随当前 UI 语言：t('updMakeShortcut') 中文「桌面」→ zh，英文「Desktop」→ en。
-  const makeShortcut = () => {
-    if (shortcutBusy) return;
-    setShortcutBusy(true);
-    setApplyErr(null);
-    setApplyStatus(null);
-    const locale = t('updMakeShortcut') === '桌面' ? 'zh' : 'en';
-    host.call('update/makeShortcut', { serviceName, profile, locale }).then((r) => {
-      const rr = r && typeof r === 'object' ? r : {};
-      if (rr.ok === true) {
-        setApplyStatus(t('updShortcutOk'));
-      } else {
-        setApplyErr(t('updShortcutFail').replace('{msg}', (rr.message || rr.code || '')));
-      }
-    }).catch(() => {
-      setApplyErr(t('updShortcutFail').replace('{msg}', 'host unreachable'));
-    }).then(() => {
-      setShortcutBusy(false);
-    });
-  };
 
-  // 一键拉取更新：执行器 apply restart:false（下载 + 校验 + 停服 + 安装，不重启）
+  // 一键更新：执行器 apply restart:false（下载 + 校验到 staging，不停服/不安装/不重启）
   const runPullApply = () => {
     if (applyPhase !== 'confirm' || action !== 'apply') return;
     // v2.9.x：防御——未检测版本（result 缺失）时直接提示，避免 result.remoteTag 抛 TypeError
@@ -2386,119 +2235,11 @@ pullDiagTail();
       setApplyStatus(t('updApplying'));
       pollExecutorStatus(applyPort);
     }).catch(() => {
-pullDiagTail();
       setDiagLog(lastDiagRef.current || null);
-            setApplyErr(t('updApplyExecutorDown'));
+      setApplyErr(t('updApplyExecutorDown'));
       setApplyPhase('idle');
       setAction(null);
     });
-  };
-
-  // 端口重启：执行器 restart（仅重启循环）——v2.9.x（反馈优化）：fire-and-forget，
-  // 不 await 执行器完成（挂起模式 1-2 分钟无响应），立即进入 1s 轮询获取秒级进度
-  const runRestart = () => {
-    if (applyPhase !== 'confirm' || action !== 'restart') return;
-    setApplyPhase('restarting');
-    setApplyErr(null);
-    setApplyStatus(t('updRsPreparing'));
-    const startedAt = Date.now();
-    let doneFlag = false; // v3.2.1-u3（作用域修复）：声明移回 runRestart（原错插 runPullApply → pollRestored 闭包 ReferenceError）
-    let sawDown = false;
-    // v3.3.x（过程提醒细化·用户需求）：阶段化状态——host 返回消息/模式 + 客户端观测断开
-    let hostMsg = '';
-    let svcMode = null;
-
-    // v3.2.1（独立化·用户指令）：端口重启 = host update/portRestart 独立 RPC——host 读
-    // 进程索引 → 生成自包含 .cmd 脚本 detached 执行（杀旧 DSH + 拉起新 DSH），不再依赖
-    // 执行器/executorEnsure/schtasks/冷启动时序。DSH 被杀时页面短暂断连，轮询自身恢复。
-    const trigger = () => host.call('update/portRestart', { serviceName, profile });
-    const pollRestored = () => {
-      if (doneFlag) return;
-      const elapsed = Math.round((Date.now() - startedAt) / 1000);
-      // v3.3.x（过程提醒细化）：准备 → host 模式/详细消息 → 已停止等待拉起，逐阶段切换
-      let stat;
-      if (sawDown) stat = t('updRsOldStopped');
-      else if (hostMsg) stat = hostMsg;
-      else if (svcMode === true) stat = t('updRsSvcScheduled');
-      else if (svcMode === false) stat = t('updRsProcScheduled');
-      else stat = t('updRsPreparing');
-      setApplyStatus(stat + '（' + elapsed + 's）');
-      if (Date.now() - startedAt > 90000) {
-pullDiagTail();
-        setDiagLog(lastDiagRef.current || null);
-        setApplyErr(t('updApplyExecutorDown'));
-        setApplyStatus(null);
-        setApplyPhase('idle');
-        setAction(null);
-        return;
-      }
-      // v3.2.1-s（用户需求·倒计时 1 秒一更新）：fetch('') 可能挂起（DSH 被杀时 TCP 断开未必立即
-      // reject，AbortController 5s 超时）——旧实现把递归放在 fetch 回调里，fetch 挂起→下一轮 5s 后
-      // 才跑→倒计时 3~5s 一跳。改为：doneFlag + fetch 检查独立于倒计时节奏——每轮 1s 后无条件
-      // 递归（fetch 结果只决定成功/继续，不阻塞计时）。
-      const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const abortTimer = ctrl ? setTimeout(() => ctrl.abort(), 5000) : null;
-      window.fetch('', { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
-        .then((res) => {
-          if (abortTimer) clearTimeout(abortTimer);
-          if (res && res.ok) {
-          if ((sawDown || elapsed >= 12) && !doneFlag) { // v3.2.1-t（A）+v3.2.1-u2：曾断开→恢复 或 超任务窗口(12s)后稳定恢复 判完成
-            doneFlag = true;
-            setApplyErr(null);
-            setApplyStatus(t('updPortRestartDone') + '（' + elapsed + 's）');
-            // v3.3.x（2026-08-24 实测·市场装插件→重启成功但页崩）：完成后嗅探首页是否带「插件加载失败」横幅，
-            // 有则显式警告而非纯 ✓——机械成功≠可用
-            window.fetch('/', { cache: 'no-store' }).then((r2) => r2.text()).then((tx) => {
-              if (tx && tx.indexOf('Failed to load plugins') >= 0) setApplyErr(t('updRsPluginLoadWarn'));
-            }).catch(() => {});
-            setApplyPhase('done');
-            return;
-          }
-          } else {
-            // v3.2.1-u2（UI 卡住根因修复）：服务优雅停止时 fetch 收 FIN 会 resolve(非ok) 而非 reject——
-            // 原实现只在 catch 置 sawDown，优雅停止永远不触发 → 永不判完成（一直「正在重启端口」）。
-            // 修复：非 200 / 空响应同样视为服务断开。
-            sawDown = true;
-          }
-        })
-        .catch(() => { if (abortTimer) clearTimeout(abortTimer); sawDown = true; });
-        // v3.2.1-u4（倒计时 1 秒修复）：递归独立于 fetch——旧实现把 setTimeout 放在 fetch
-        // promise 链末尾，fetch 挂起（5s 超时中断）时递归同样推迟 → 倒计时 5s 一跳。
-        // 改为独立定时器：每 1s 无条件下一轮（fetch 结果只经 doneFlag/sawDown 影响状态）。
-        if (!doneFlag) setTimeout(pollRestored, 1000);
-    };
-    let ensureAttempts = 0;
-    const ensure = () => {
-      trigger().then((r) => {
-        const rr = r && typeof r === 'object' ? r : {};
-        if (rr.ok === true) {
-          // v3.3.x（过程提醒细化）：记录 host 选定的重启模式与详细消息，供轮询期间展示
-                    // 批次A（P2-6）：防抖命中（已有待触发重启任务）→ 状态行按「已排队」处理而非错误
-          hostMsg = rr.debounced === true ? t('updRsDebounced') : (typeof rr.message === 'string' ? rr.message : '');
-          svcMode = rr.serviceMode === true ? true : (rr.serviceMode === false ? false : null);
-          return; // v3.2.1-t（A）：轮询已独立启动，这里无需动作
-        }
-        if (rr.code === 'NO_INDEX' || rr.code === 'PORT_RESTART_EXCEPTION' || rr.code === 'STAGED_INSTALL_FAILED' || rr.code === 'SCHEDULE_FAILED') {
-          doneFlag = true; // v3.2.1-t（A）：明确失败 → 终止轮询
-          setApplyErr((rr.message || rr.code || t('updError')));
-          setApplyStatus(null);
-          setApplyPhase('idle');
-          setAction(null);
-          return;
-        }
-        ensureAttempts += 1;
-        if (ensureAttempts >= 10) return; // v3.2.1-t（A）：停止重试，轮询 90s 超时兜底
-        setTimeout(ensure, 2000);
-      }).catch(() => {
-        ensureAttempts += 1;
-        if (ensureAttempts >= 10) return; // v3.2.1-t（A）：停止重试，轮询 90s 超时兜底
-        setTimeout(ensure, 2000);
-      });
-    };
-    // v3.2.1-t（架构修复 A·fire-and-forget）：轮询立即启动，不等待 RPC 响应——
-    // host 服务模式重启时可能被杀导致响应丢失，若轮询启动门控在响应上会永远卡住
-    setTimeout(pollRestored, 1000);
-    ensure();
   };
 
   let statusNode = null;
@@ -2511,15 +2252,11 @@ pullDiagTail();
     }, text);
   }
 
-  const busy = applyPhase === 'applying' || applyPhase === 'restarting';
+  const busy = applyPhase === 'applying';
   const outdated = !!(result && result.status === 'outdated');
-  // 拉取按钮：busy/已安装/完成/他方确认/未检出新版本时禁用
-  const pullApplyDisabled = busy || applyPhase === 'staged' || applyPhase === 'installed' || applyPhase === 'done'
-    || (applyPhase === 'confirm' && action === 'restart') || checking || envChecking || !outdated;
-  // 端口重启按钮：busy/完成/他方确认时禁用——不依赖「检测到新版本」（纯重启服务本就不需新版本；
-  // v3.0.1（用户指令·端口重启默认可用）：去掉 !outdated 依赖，端口重启始终可点，点击即拉起执行器执行重启）
-  const portRestartDisabled = busy || applyPhase === 'done'
-    || (applyPhase === 'confirm' && action === 'apply') || checking || envChecking;
+  // 更新按钮：busy/已安装/确认中/未检出新版本时禁用
+  const pullApplyDisabled = busy || applyPhase === 'staged' || applyPhase === 'installed'
+    || checking || envChecking || !outdated;
 
   return React.createElement('div', { className: 'dsh-plg-card dsh-plg-upd' },
     React.createElement('div', { className: 'dsh-plg-head' },
@@ -2595,9 +2332,8 @@ pullDiagTail();
     result && result.body
       ? React.createElement('div', { className: 'dsh-plg-upd-body' }, result.body)
       : null,
-    // 行 3：目标目录 + 一键拉取更新 + 端口重启（v2.9.x 用户指令：原「一键拉取更新」与
-    // 「一键更新」合并为一键拉取更新（执行器 apply restart:false，只安装不重启）；
-    // 重启拆为独立「端口重启」（执行器 restart）——两按钮同放目标目录行末）
+    // 行 3：目标目录 + 一键更新（v3.3.x 用户指令·移除插件内重启：执行器 apply 下载+校验 →
+    // host update/install 安装 → 提示用户手动重启 DSH 生效；确认/取消两态同放本行行末）
     React.createElement('div', { className: 'dsh-plg-row' },
       React.createElement('label', { className: 'dsh-plg-label', htmlFor: updIds.dir }, t('updDir')),
       React.createElement('input', {
@@ -2617,26 +2353,6 @@ pullDiagTail();
         : applyPhase === 'applying' ? t('updApplying')
         : (applyPhase === 'staged' || applyPhase === 'installed') ? t('updStagedShort')
         : t('updPull')),
-      // v3.2（用户需求）：端口重启确认态「桌面」按钮——创建桌面快捷方式（脱 Web CLI 重启）；
-      // 悬停提示（title）说明用途
-      applyPhase === 'confirm' && action === 'restart'
-        ? React.createElement('button', {
-            type: 'button',
-            className: 'dsh-plg-btn',
-            disabled: shortcutBusy,
-            onClick: makeShortcut,
-            title: t('updShortcutTooltip'),
-          }, shortcutBusy ? '…' : t('updMakeShortcut'))
-        : null,
-      React.createElement('button', {
-        type: 'button',
-        className: 'dsh-plg-btn' + (applyPhase === 'confirm' && action === 'restart' ? ' dsh-plg-btn-danger' : ''),
-        disabled: portRestartDisabled,
-        onClick: applyPhase === 'confirm' && action === 'restart' ? runRestart : () => startConfirm('restart'),
-      }, applyPhase === 'confirm' && action === 'restart' ? t('updApplyConfirm')
-        : applyPhase === 'restarting' ? t('updPortRestarting')
-        : applyPhase === 'done' ? t('updApplyDone')
-        : t('updPortRestart')),
 
       applyPhase === 'confirm'
         ? React.createElement('button', {
@@ -2645,15 +2361,8 @@ pullDiagTail();
             onClick: cancelApply,
           }, t('cancel'))
         : null,
-      applyPhase === 'done'
-        ? React.createElement('button', {
-            type: 'button',
-            className: 'dsh-plg-btn dsh-plg-btn-primary',
-            onClick: () => window.location.reload(),
-          }, t('updApplyReload'))
-        : null,
     ),
-    // v3.1.x：新版本已下载（未安装/未重启）提示——引导点「端口重启」完成安装并重启
+    // v3.3.x：已安装（未重启）提示——新版本已落地，等用户手动重启 DSH 生效
     (applyPhase === 'staged' || applyPhase === 'installed')
       ? React.createElement('div', { className: 'dsh-plg-save dsh-plg-save-ok', role: 'status' }, t('updStaged'))
       : null,

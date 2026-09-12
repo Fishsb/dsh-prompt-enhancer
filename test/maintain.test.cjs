@@ -1,7 +1,24 @@
 'use strict';
 // 批次二（B1 + A4）维护/救援体系契约测试。
 // 覆盖：sys 端口原语集（含源码嵌入形态）、stage-install 抽取面、maintain-lib
-// （干跑三层 CJS 版/装配面改写/指认/决策纯函数）、生成式脚本原语嵌入、rescue 快照回滚。
+// （干跑三层 CJS 版/装配面改写/指认/决策纯函数）、进程计时层、rescue 快照回滚、一键更新（安装侧）。
+//
+// 2026-09-13（用户指令·移除插件内重启能力）——以下用例的受测对象已随重启/救援链删除，整段移除：
+//   MAINT-19 buildPortRestartScript / buildServiceRestartScript（脚本生成器）、
+//   MAINT-21 acquireRescueLock / releaseRescueLock（救援互斥锁）、
+//   MAINT-23 / MAINT-24 svcStateRaw（服务状态解析）、
+//   MAINT-25a~25p / 25s / 25t / 25u / 25w ensureWebUp 阶梯与确认门 / restartService 预检、
+//   MAINT-25r waitWebReady、MAINT-26 buildWebMenuCmdBody（菜单壳生成器）、
+//   MAINT-26b killConflictingHolders、MAINT-26d pickRestartMode。
+//   保留（受测对象仍在）：MAINT-20（buildCliRestartScript 退役断言——正是「不得复活」守卫）、
+//   MAINT-25q（createTimedIo / runWithTiming 进程计时层）、MAINT-26c（runOneClickUpdate，按新契约改写）。
+//
+// 挂起根因（本次修复·全量 npm test 曾 300s 超时）：MAINT-25r 先 `const srv = net.createServer()`
+//   监听动态口，随后 `await updater.waitWebReady(...)`——waitWebReady 已随重启链删除 ⇒ 该行抛
+//   TypeError，其后的 `srv.close()` 永不执行，仍处于 listening 的 server 句柄把 node --test 的
+//   测试文件子进程永久吊住（测试早已全部跑完/失败，进程却不退出）。删掉该用例即消除挂起；
+//   其余用例的抛错都不持有存活句柄（25m 的未 await promise 无句柄）。
+//
 // 隔离纪律：所有落盘用例走临时目录；require index.cjs 前置 DSH_ENHANCER_NO_INDEX=1
 // 防 20s 兜底把真实进程索引污染成测试进程（2026-08-22 实测坑）。
 process.env.DSH_ENHANCER_NO_INDEX = '1';
@@ -291,68 +308,25 @@ test('MAINT-16 rescueSnapshot → 破坏 → rescueRestore 忠实回写（含 ex
 
 /* ---------------- stage-install 抽取面与 G5 探针 ---------------- */
 
-test('MAINT-17 index 与 stage-install 同一实现（杜绝逻辑分叉）', () => {
-  const indexMod = require('../lib/index.cjs');
+test('MAINT-17 update/install 与 stage-install 同一实现（杜绝逻辑分叉）', () => {
   assert.equal(indexMod.installStagedTarball, stageInstall.installStagedTarball);
   assert.equal(indexMod.findStagedTarball, stageInstall.findStagedTarball);
+  // 2026-09-13：原 update/portRestart（安装+重启）已拆成非重启的 update/install——
+  // 新 RPC 必须复用 lib/stage-install.cjs 同一实现，且重启 RPC 不得残留。
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'index.cjs'), 'utf8');
+  assert.match(src, /harness\.handle\('update\/install'/, '新安装 RPC 必须注册');
+  // 只锚「注册」形态：注释里的说明性提及不算残留接线
+  assert.ok(!/harness\.handle\('update\/portRestart'/.test(src), '已移除的重启 RPC 不得残留注册');
+  assert.match(src, /installStagedTarball\(staged, profile\)/, 'update/install 必须调用 stage-install 的同一实现');
+  assert.match(src, /findStagedTarball\(\)/, 'update/install 必须复用同一 staging 发现实现');
 });
 
 test('MAINT-18 peekTarballVersion 缺失文件返回空串不抛', () => {
   assert.equal(stageInstall.peekTarballVersion('C:\\definitely\\missing.tgz'), '');
 });
 
-/* ---------------- 生成式脚本模板契约（B1 嵌入形态）---------------- */
-
-test('MAINT-19 buildPortRestartScript / buildServiceRestartScript 嵌入原语块且可解析', () => {
-  const indexMod = require('../lib/index.cjs');
-  const primsMark = '==dsh-port-prims';
-  const s1 = indexMod.buildPortRestartScript({ execPath: 'node.exe', argv: ['bin.js', 'web'], cwd: 'C:\\', oldPid: 1, outLog: 'o.log', errLog: 'e.log', isDesktop: false });
-  assert.ok(s1.includes(primsMark), 'port-restart 脚本须嵌原语块');
-  const s2 = indexMod.buildServiceRestartScript('svc-x', 'TASK-X', 3080);
-  assert.ok(s2.includes(primsMark), 'service 重启脚本须嵌原语块');
-  // netstat 调用只允许出现在嵌入的原语块内（dshPrimNetstat 一处）——本地重复实现必须为零
-  for (const body of [s1, s2]) {
-    const count = body.split("spawnSync('netstat'").length - 1;
-    assert.equal(count, 1, 'netstat 只能来自原语块（实际 ' + count + ' 处）');
-    assert.ok(!body.includes('const holderPid = () => {'), '不得残留本地 holderPid 实现');
-  }
-  // 组合产物零执行语法检查（第三层干跑同款）
-  for (const [name, body] of [['pr1.cjs', s1], ['sv1.cjs', s2]]) {
-    const f = path.join(tmpRoot(), name);
-    fs.writeFileSync(f, body, 'utf8');
-    const r = spawnSync(process.execPath, ['--check', f], { encoding: 'utf8', timeout: 15000 });
-    assert.equal(r.status, 0, name + ': ' + r.stderr);
-  }
-});
-
 test('MAINT-20 buildCliRestartScript 已随 G4 退役', () => {
-  const indexMod = require('../lib/index.cjs');
   assert.equal(indexMod.buildCliRestartScript, undefined);
-});
-
-/* ---------------- 救援互斥锁（G17）与候选预检（G16b）---------------- */
-
-test('MAINT-21 救援锁：正常获取/活实例拒绝/死pid陈旧锁接管', async () => {
-  // 锁路径固定为 EXECUTOR_ROOT/rescue.lock（本机工具目录）——用后必清
-  const lockPath = path.join(sys.EXECUTOR_ROOT, 'rescue.lock');
-  try { fs.unlinkSync(lockPath); } catch { /* 无残留 */ }
-  // ① 无锁 → 获取成功，落盘自己的 pid
-  const g1 = updater.acquireRescueLock();
-  assert.equal(g1.ok, true);
-  assert.equal(JSON.parse(fs.readFileSync(lockPath, 'utf8')).pid, process.pid);
-  // ② 活着的**其他**实例持锁 → 拒绝
-  const alive = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
-  await new Promise((r) => setTimeout(r, 300));
-  fs.writeFileSync(lockPath, JSON.stringify({ pid: alive.pid, ts: Date.now() }), 'utf8');
-  const g2 = updater.acquireRescueLock();
-  assert.equal(g2.ok, false, '活实例持锁必须拒绝');
-  alive.kill('SIGKILL');
-  // ③ 死 pid 陈旧锁 → 可接管
-  fs.writeFileSync(lockPath, JSON.stringify({ pid: 999999, ts: Date.now() }), 'utf8');
-  const g3 = updater.acquireRescueLock();
-  assert.equal(g3.ok, true);
-  updater.releaseRescueLock();
-  assert.ok(!fs.existsSync(lockPath), '释放应删除锁文件');
 });
 
 test('MAINT-22 snapshotCleanCandidates 脏/干净分类（G16b）', () => {
@@ -380,25 +354,6 @@ test('MAINT-22 snapshotCleanCandidates 脏/干净分类（G16b）', () => {
   }
 });
 
-/* ---------------- CLI 状态解析 ---------------- */
-
-test('MAINT-23 svcStateRaw 对不存在服务返回 exists:false', () => {
-  const r = updater.svcStateRaw('dsh-definitely-not-exist-xyz');
-  assert.equal(r.exists, false);
-});
-
-/* ---------------- 一键拉起（--cli up · 桌面「DSH Web 启动」后端）---------------- */
-
-const silentIo = () => ({ out() {}, ask: async () => '' });
-
-test('MAINT-24 svcStateRaw 解析真实服务 START_TYPE（存在即验枚举合法·环境自适应）', () => {
-  const r = updater.svcStateRaw('dsh-web');
-  if (!r.exists) return; // 服务未装的环境跳过（CI / 未装 nssm 的机器）
-  // 不硬编码具体档位（旧开发机 DISABLED / 本机 AUTO_START 均合法）：解析器只要吐出已知枚举即算通过
-  const KNOWN = ['BOOT_START', 'SYSTEM_START', 'AUTO_START', 'DEMAND_START', 'DISABLED'];
-  assert.ok(KNOWN.includes(r.startType), `START_TYPE 枚举外: ${JSON.stringify(r)}`);
-});
-
 // v4.9（2026-08-23 端口重启事故回归）：仓库清单带 UTF-8 BOM 会使 DSH 启动 JSON.parse
 // 直接崩溃（Unexpected token '\ufeff'）——本用例守住 package.json 永远无 BOM。
 test('PKG-BOM package.json 禁止 UTF-8 BOM（启动崩溃根因回归守卫）', () => {
@@ -407,304 +362,8 @@ test('PKG-BOM package.json 禁止 UTF-8 BOM（启动崩溃根因回归守卫）'
   assert.equal(hasBom, false, 'package.json 带 UTF-8 BOM（EF BB BF）——DSH 启动解析会崩溃');
 });
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const NL = { noLock: true }; // 单测统一免锁；锁行为由 25m 专项验证
+const silentIo = () => ({ out() {}, ask: async () => '' });
 
-test('MAINT-25a ensureWebUp 健康即报：DSH 家族监听中 → ALREADY_UP 不动作', async () => {
-  let touched = false;
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 4321, imageOverride: 'node.exe',
-    spawnImpl: () => { touched = true; return { ok: true }; },
-    forceStopImpl: () => { touched = true; },
-    startServiceImpl: () => { touched = true; },
-  });
-  assert.deepEqual([r.ok, r.code], [true, 'ALREADY_UP']);
-  assert.equal(touched, false, '健康态不得触碰任何进程/服务');
-});
-
-test('MAINT-25b ensureWebUp 异族占用：绝不误杀，报 FOREIGN_HOLDER', async () => {
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 4321, imageOverride: 'chrome.exe',
-  });
-  assert.equal(r.ok, false);
-  assert.equal(r.code, 'FOREIGN_HOLDER');
-  assert.equal(r.pid, 4321);
-});
-
-test('MAINT-25c ensureWebUp DISABLED 服务跳过必败 sc start，且永不卸载', async () => {
-  let scStarted = false; let deleted = 0;
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'DISABLED' },
-    isAdminOverride: true,
-    cfgStateImpl: () => ({ present: false }),
-    deleteImpl: () => { deleted++; },
-    startServiceImpl: () => { scStarted = true; },
-    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
-    spawnImpl: () => ({ ok: true, pid: 555 }),
-    waitFgImpl: async () => true,
-  });
-  assert.deepEqual([r.ok, r.code], [true, 'FOREGROUND_STARTED']);
-  assert.equal(r.pid, 555);
-  assert.equal(scStarted, false, 'DISABLED 的 sc start 必败，不得浪费');
-  assert.equal(deleted, 0, 'DISABLED=机器显式配置，永不自动卸载');
-});
-
-test('MAINT-25d 僵尸+管理员：阶梯穷尽才降级，顺序 resolve→delete→spawn', async () => {
-  const order = [];
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: true, state: 'RUNNING' },
-    isAdminOverride: true,
-    cfgStateImpl: () => ({ present: false }),
-    resolveCmdImpl: async () => { order.push('resolve'); return { execPath: 'node.exe', argv: ['bin.js', 'web'] }; },
-    cycleStopImpl: () => { order.push('stop'); },
-    startServiceImpl: () => { order.push('start'); },
-    waitServiceImpl: async () => false,
-    waitServiceImpl2: async () => false,
-    waitServiceImpl3: async () => false,
-    forceStopImpl: () => { order.push('forceStop'); },
-    confirmImpl: async () => true, // v3.3.1-u1 确认门：既有降级用例显式放行
-    deleteImpl: () => { order.push('delete'); },
-    spawnImpl: () => { order.push('spawn'); return { ok: true, pid: 556 }; },
-    waitFgImpl: async () => true,
-  });
-  assert.equal(r.ok, true);
-  assert.equal(r.code, 'FOREGROUND_STARTED');
-  assert.equal(order.filter((x) => x === 'delete').length, 1, '降级恰好一次');
-  const idx = (x) => order.indexOf(x);
-  assert.ok(idx('resolve') < idx('delete') && idx('delete') < idx('spawn'),
-    '顺序必须 resolve→delete→spawn: ' + order.join(','));
-  assert.ok(order.includes('start'), '阶梯应先穷尽重启尝试');
-});
-
-test('MAINT-25e 僵尸+非管理员：零服务触碰直走前台', async () => {
-  let touched = 0;
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: true, state: 'RUNNING' },
-    isAdminOverride: false,
-    cfgStateImpl: () => ({ present: false }),
-    forceStopImpl: () => { touched++; },
-    cycleStopImpl: () => { touched++; },
-    startServiceImpl: () => { touched++; },
-    deleteImpl: () => { touched++; },
-    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
-    spawnImpl: () => ({ ok: true }),
-    waitFgImpl: async () => true,
-  });
-  assert.equal(r.ok, true);
-  assert.equal(touched, 0, '非管理员不得触碰 SYSTEM 服务树');
-});
-
-test('MAINT-25f ensureWebUp 服务路径：STOPPED+AUTO_START → sc start 成功即收', async () => {
-  let started = 0;
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
-    isAdminOverride: false,
-    cfgStateImpl: () => ({ present: false }),
-    startServiceImpl: () => { started++; },
-    waitServiceImpl: async () => true,
-    // 若错误落到前台分支会用到下面两个——用哨兵证明没走到
-    spawnImpl: () => { throw new Error('不应走到前台分支'); },
-    waitFgImpl: async () => { throw new Error('不应走到前台分支'); },
-  });
-  assert.deepEqual([r.ok, r.code], [true, 'SERVICE_STARTED']);
-  assert.equal(started, 1);
-});
-
-test('MAINT-25g ensureWebUp 无服务无索引且无冷启命令 → NO_COLD_START 如实失败', async () => {
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: false, state: 'MISSING' },
-    coldStartCmd: null,
-  });
-  assert.equal(r.ok, false);
-  assert.equal(r.code, 'NO_COLD_START');
-});
-
-test('MAINT-25h P2 借力监督者：强停后 nssm 自动拉起即成功，不进 P3/降级', async () => {
-  let starts = 0; let deleted = 0; let spawned = 0;
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: true, state: 'RUNNING' },
-    isAdminOverride: true,
-    cfgStateImpl: () => ({ present: false }),
-    startServiceImpl: () => { starts++; },          // 仅 P1 用
-    waitServiceImpl: async () => false,             // P1 失败
-    forceStopImpl: () => {},                        // P2 强停树
-    waitServiceImpl2: async () => true,             // nssm 拉起后端口活了
-    deleteImpl: () => { deleted++; },
-    spawnImpl: () => { spawned++; return { ok: true }; },
-    waitFgImpl: async () => true,
-  });
-  assert.deepEqual([r.ok, r.code], [true, 'SERVICE_STARTED']);
-  assert.equal(r.recovered, true);
-  assert.equal(starts, 1, '只有 P1 那一次显式 start（P2 靠 nssm 自动拉起）');
-  assert.equal(deleted + spawned, 0, 'P2 成功即短路，不降级不前台');
-});
-
-test('MAINT-25i 配置性死亡跳级：二进制缺失+管理员 → 不浪费重启周期直接降级', async () => {
-  let started = 0; let deleted = 0;
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
-    isAdminOverride: true,
-    cfgStateImpl: () => ({ present: true, alive: false, app: 'C:\\gone\\node.exe' }),
-    startServiceImpl: () => { started++; },
-    waitServiceImpl: async () => true,
-    confirmImpl: async () => true, // v3.3.1-u1
-    deleteImpl: () => { deleted++; },
-    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
-    spawnImpl: () => ({ ok: true }),
-    waitFgImpl: async () => true,
-  });
-  assert.deepEqual([r.ok, r.code], [true, 'FOREGROUND_STARTED']);
-  assert.equal(deleted, 1, '配置性死亡直接降级');
-  assert.equal(started, 0, '跳过一切重启周期');
-});
-
-test('MAINT-25j STOPPED 超时+非管理员：宽限仍死但不卸载，直走前台', async () => {
-  let deleted = 0;
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
-    isAdminOverride: false,
-    cfgStateImpl: () => ({ present: false }),
-    startServiceImpl: () => {},
-    waitServiceImpl: async () => false,
-    graceProbeImpl: async () => false,
-    deleteImpl: () => { deleted++; },
-    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
-    spawnImpl: () => ({ ok: true }),
-    waitFgImpl: async () => true,
-  });
-  assert.equal(r.code, 'FOREGROUND_STARTED');
-  assert.equal(deleted, 0, '非管理员不卸载');
-});
-
-test('MAINT-25k STOPPED 超时+管理员+宽限仍死：降级恰好一次再前台', async () => {
-  let deleted = 0; const reasons = [];
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'DEMAND_START' },
-    isAdminOverride: true,
-    cfgStateImpl: () => ({ present: false }),
-    startServiceImpl: () => {},
-    waitServiceImpl: async () => false,
-    graceProbeImpl: async () => false,
-    confirmImpl: async () => true, // v3.3.1-u1
-    deleteImpl: (s) => { deleted++; reasons.push(s); },
-    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
-    spawnImpl: () => ({ ok: true }),
-    waitFgImpl: async () => true,
-  });
-  assert.equal(r.code, 'FOREGROUND_STARTED');
-  assert.equal(deleted, 1);
-  assert.equal(reasons[0], 'svc-x');
-});
-
-test('MAINT-25l 权限类启动失败+管理员：绝不卸载，前台兜底', async () => {
-  let deleted = 0;
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
-    isAdminOverride: true,
-    permLike: true,
-    cfgStateImpl: () => ({ present: false }),
-    startServiceImpl: () => {},
-    waitServiceImpl: async () => false,
-    graceProbeImpl: async () => false,
-    deleteImpl: () => { deleted++; },
-    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
-    spawnImpl: () => ({ ok: true }),
-    waitFgImpl: async () => true,
-  });
-  assert.equal(r.code, 'FOREGROUND_STARTED');
-  assert.equal(deleted, 0, '权限类失败不动服务配置');
-});
-
-test('MAINT-25n 确认门·拒绝卸载：服务保留、留痕、照走前台冷启', async () => {
-  let deleted = 0;
-  const outs = [];
-  const io = { out: (s) => outs.push(String(s)), ask: async () => 'n' };
-  const r = await updater.ensureWebUp(io, 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
-    isAdminOverride: true,
-    cfgStateImpl: () => ({ present: false }),
-    startServiceImpl: () => {},
-    waitServiceImpl: async () => false,
-    graceProbeImpl: async () => false,
-    confirmImpl: async () => false, // 用户拒绝
-    deleteImpl: () => { deleted++; },
-    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
-    spawnImpl: () => ({ ok: true }),
-    waitFgImpl: async () => true,
-  });
-  assert.equal(r.code, 'FOREGROUND_STARTED');
-  assert.equal(deleted, 0, '拒绝后不得删除服务');
-  assert.ok(outs.some((x) => x.includes('保留 nssm 服务')), '输出应明示保留服务（v3.3.1-u1）');
-});
-
-test('MAINT-25o 确认门·非交互默认拒绝（无 confirmImpl，stdin 非 TTY）', async () => {
-  let deleted = 0;
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
-    isAdminOverride: true,
-    cfgStateImpl: () => ({ present: false }),
-    startServiceImpl: () => {},
-    waitServiceImpl: async () => false,
-    graceProbeImpl: async () => false,
-    isTtyImpl: () => false,
-    deleteImpl: () => { deleted++; },
-    coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
-    spawnImpl: () => ({ ok: true }),
-    waitFgImpl: async () => true,
-  });
-  assert.equal(r.code, 'FOREGROUND_STARTED');
-  assert.equal(deleted, 0, '非交互默认保留服务');
-});
-
-test('MAINT-25p 确认门·DSH_MAINT_ALLOW_UNINSTALL=1 显式放行自动化', async () => {
-  let deleted = 0;
-  process.env.DSH_MAINT_ALLOW_UNINSTALL = '1';
-  try {
-    const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-      ...NL,
-      holderPidOverride: 0,
-      svcInfoOverride: { exists: true, state: 'STOPPED', startType: 'AUTO_START' },
-      isAdminOverride: true,
-      cfgStateImpl: () => ({ present: false }),
-      startServiceImpl: () => {},
-      waitServiceImpl: async () => false,
-      graceProbeImpl: async () => false,
-      isTtyImpl: () => false,
-      deleteImpl: () => { deleted++; },
-      coldStartCmd: { execPath: 'node.exe', argv: ['bin.js', 'web'] },
-      spawnImpl: () => ({ ok: true }),
-      waitFgImpl: async () => true,
-    });
-    assert.equal(r.code, 'FOREGROUND_STARTED');
-    assert.equal(deleted, 1, 'env 放行后应执行卸载');
-  } finally { delete process.env.DSH_MAINT_ALLOW_UNINSTALL; }
-});
 test('MAINT-25q 过程计时：timed io 每行带 [+Xs] 戳 + runWithTiming 开始/总耗时收尾', async () => {
   const outs = []; const ticks = [];
   const base = { out: (s) => outs.push(String(s)), tick: (l) => ticks.push(String(l)), clearTick: () => {} };
@@ -720,157 +379,7 @@ test('MAINT-25q 过程计时：timed io 每行带 [+Xs] 戳 + runWithTiming 开�
   assert.ok(outs.some((x) => x.includes('■ 结束：测试动作（总耗时 ') && x.endsWith('s）')), '应打印总耗时行');
 });
 
-test('MAINT-25r waitWebReady 带标签逐秒 tick：立即就绪零打扰，超时路径有倒计时并清屏', async () => {
-  const net = require('node:net');
-  const srv = net.createServer(() => {});
-  await new Promise((res) => srv.listen(0, '127.0.0.1', res));
-  const livePort = srv.address().port;
-  const t1 = []; let c1 = 0;
-  const ok1 = await updater.waitWebReady({ out: () => {}, tick: (l) => t1.push(l), clearTick: () => { c1++; } }, 2000, livePort, 'X');
-  srv.close();
-  assert.equal(ok1, true);
-  assert.equal(t1.length, 0, '立即就绪不应产生 tick');
-  assert.equal(c1, 0, '未 tick 则无需清屏');
-  // 死端口：超时路径应至少一次倒计时 tick 且以清屏收尾
-  const deadPort = await new Promise((res) => {
-    const s2 = net.createServer(() => {});
-    s2.listen(0, '127.0.0.1', () => { const pp = s2.address().port; s2.close(() => res(pp)); });
-  });
-  const t2 = []; let c2 = 0;
-  const ok2 = await updater.waitWebReady({ out: () => {}, tick: (l) => t2.push(l), clearTick: () => { c2++; } }, 1600, deadPort, '延迟拉起');
-  assert.equal(ok2, false);
-  assert.ok(t2.length >= 1, '等待期应有倒计时 tick，实际 ' + t2.length);
-  assert.ok(c2 >= 1, '结束应清屏');
-  assert.ok(/\d+s\/2s$/.test(String(t2[t2.length - 1]).split('… ').pop() || ''), 'tick 应含 Xs/2s 进度');
-});
-test('MAINT-25s 运行中询问·非交互默认保持现状：不重启、ALREADY_UP', async () => {
-  let restarted = 0;
-  const outs = [];
-  const io = { out: (s) => outs.push(String(s)), ask: async () => '' };
-  const r = await updater.ensureWebUp(io, 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 4321, imageOverride: 'node.exe',
-    isTtyImpl: () => false,
-    restartCoreImpl: async () => { restarted++; return { ok: true, message: 'x' }; },
-  });
-  assert.deepEqual([r.ok, r.code], [true, 'ALREADY_UP']);
-  assert.equal(restarted, 0, '非交互默认不重启');
-  assert.ok(outs.some((x) => x.includes('已保持现状')), '应提示保持现状');
-});
-
-test('MAINT-25t 运行中确认 y：调用原地重启核心并返回 RESTARTED', async () => {
-  let called = 0;
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 4321, imageOverride: 'node.exe',
-    restartConfirmImpl: async () => true,
-    restartCoreImpl: async () => { called++; return { ok: true, message: '已重启完成' }; },
-  });
-  assert.deepEqual([r.ok, r.code], [true, 'RESTARTED']);
-  assert.equal(called, 1, '应恰好调用一次重启核心');
-});
-
-test('MAINT-25u 运行中确认但重启失败：RESTART_FAILED 明确失败不误报成功', async () => {
-  const r = await updater.ensureWebUp(silentIo(), 'svc-x', 'web', {
-    ...NL,
-    holderPidOverride: 4321, imageOverride: 'node.exe',
-    restartConfirmImpl: async () => true,
-    restartCoreImpl: async () => ({ ok: false, message: 'boom' }),
-  });
-  assert.deepEqual([r.ok, r.code], [false, 'RESTART_FAILED']);
-  assert.equal(r.detail, 'boom');
-});
-test('MAINT-25w 重启服务·非管理员预检：NOT_ADMIN 早失败不盲等', async () => {
-  if (process.platform !== 'win32') return;
-  updater.state.busy = false;
-  const t0 = Date.now();
-  const r = await updater.restartService('svc-x', { adminOverride: false, onLine: () => {} });
-  assert.equal(r.code, 'NOT_ADMIN');
-  assert.ok(Date.now() - t0 < 3000, '应立即返回而非空等 20s');
-});
-test('MAINT-25m up.lock 并发闸：第二实例 LOCK_BUSY；完成后锁文件清理', async () => {
-  const lockP = path.join(tmpRoot(), 'up.lock');
-  let releaseGate;
-  const gate = new Promise((res) => { releaseGate = res; });
-  const p1 = updater.ensureWebUp(silentIo(), 's', 'w', {
-    lockPathOverride: lockP,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: false, state: 'MISSING' },
-    coldStartCmd: { execPath: 'node.exe', argv: ['a'] },
-    spawnImpl: () => ({ ok: true, pid: 1 }),
-    waitFgImpl: async () => { await gate; return true; },
-  });
-  await sleep(150); // 让 p1 先拿到锁
-  assert.ok(fs.existsSync(lockP), '持锁期间锁文件应在盘');
-  const p2 = await updater.ensureWebUp(silentIo(), 's', 'w', {
-    lockPathOverride: lockP,
-    holderPidOverride: 0,
-    svcInfoOverride: { exists: false, state: 'MISSING' },
-    coldStartCmd: null,
-  });
-  assert.equal(p2.code, 'LOCK_BUSY');
-  releaseGate();
-  const r1 = await p1;
-  assert.equal(r1.code, 'FOREGROUND_STARTED');
-  assert.ok(!fs.existsSync(lockP), '结束后锁文件应删除');
-});
-
-test('MAINT-26 「DSH Web」菜单壳契约：locale 双编码 + 失败自动回菜单（NOAUTO 防倒计时死循环）', () => {
-  // zh：GBK 字节缓冲——回读含中文选项/倒计时/失败提示；命令行动态部分纯 ASCII
-  const zh = indexMod.buildWebMenuCmdBody({ nodePath: 'C:\\n\\node.exe', target: 'C:\\x\\updater-host.cjs', svc: 'dsh-web', profile: 'web', locale: 'zh' });
-  assert.ok(Buffer.isBuffer(zh));
-  const zhText = new TextDecoder('gbk').decode(zh);
-  for (const mark of ['启动 Web', '端口修复', '一键更新', '默认启动', '启动失败']) assert.ok(zhText.includes(mark), 'zh 文案: ' + mark);
-  assert.ok(zhText.includes('choice /c 123 /t 3 /d 1'), '首跑 3s 倒计时');
-  assert.ok(zhText.includes('if defined NOAUTO (choice /c 123 /n /m'), '失败回菜单后关闭倒计时');
-  assert.ok(!zhText.toUpperCase().includes('CHCP'), 'GBK 方案无需 chcp');
-  const zhLatin = zh.toString('latin1');
-  for (const verb of ['--cli up ', '--cli repair ', '--cli update ']) assert.ok(zhLatin.includes(verb), 'zh 动词: ' + verb);
-  const upLine = zhLatin.split('\r\n').find((l) => l.includes('--cli up')) || '';
-  assert.ok(/^[\x00-\x7F]*$/.test(upLine), '命令行动态部分纯 ASCII');
-
-  // 失败回环控制流：up → errorlevel 判定 → :upFail → 置 NOAUTO → goto menu
-  const at = (s) => zhLatin.indexOf(s);
-  assert.ok(at('if errorlevel 1 goto upFail') > at(upLine) && at(':upFail') > at('if errorlevel 1 goto upFail')
-    && at('set NOAUTO=1') > at(':upFail') && zhLatin.includes('goto menu\r\n'), '失败回环顺序正确');
-  assert.equal(zhLatin.split(':menu\r\n').length - 1, 1, ':menu 标签仅定义一次');
-  assert.equal((zhLatin.match(/goto menu\r\n/g) || []).length, 3, '三个分支都回到菜单');
-
-  // en：纯 ASCII 同构
-  const en = indexMod.buildWebMenuCmdBody({ nodePath: 'C:\\n\\node.exe', target: 'C:\\x\\updater-host.cjs', svc: 'dsh-web', profile: 'web', locale: 'en' });
-  const enText = en.toString('ascii');
-  assert.ok(/^[\x00-\x7F]*$/.test(enText), 'en 壳纯 ASCII');
-  assert.ok(enText.includes('[x] Start failed') && enText.includes('if defined NOAUTO'));
-
-  // v4.9.1 自愈壳 + 裸救援（runtimeRoot 模式）：heal/minfix 分支在位；全 body 禁 ASCII [!]（延迟展开吞 ! 实测教训）
-  const zhHeal = indexMod.buildWebMenuCmdBody({ nodePath: 'C:\\n\\node.exe', target: 'C:\\x\\updater-host.cjs', svc: 'dsh-web', profile: 'web', locale: 'zh', runtimeRoot: 'C:\\rt' });
-  const zhHealText = new TextDecoder('gbk').decode(zhHeal);
-  assert.ok(zhHealText.includes(':minfix') && zhHealText.includes(':killguarded') && zhHealText.includes('net session'), '自愈壳含 :minfix/:killguarded/net session 预检');
-  assert.ok(zhHealText.includes(':heal') && zhHealText.includes('dsh-prompt-enhancer-tgz'), 'heal 分支指向持久插件包缓存');
-  assert.ok(!/\[!\]/.test(zhHealText), '全 body 禁 ASCII [!]（延迟展开会吞字符）');
-});
-
-test('MAINT-26b 系统关键进程保护：killConflictingHolders 对 lsass 拒绝击杀', async () => {
-  let killed = 0;
-  const r = await updater.killConflictingHolders(silentIo(), {
-    holderPidOverride: 4321, imageOverride: 'lsass.exe',
-    killImpl: async () => { killed++; },
-  });
-  assert.equal(r.killed, false);
-  assert.equal(r.reason, 'protected');
-  assert.equal(killed, 0);
-});
-
-test('MAINT-26d pickRestartMode 端口重启模式判定（两实例 + DISABLED 降级）', () => {
-  const m = indexMod.pickRestartMode;
-  assert.equal(m({ isDesktop: true, serviceExists: true, startTypeNum: 2 }), 'default', '桌面端=关掉重开，无服务概念');
-  assert.equal(m({ isDesktop: false, serviceExists: false, startTypeNum: null }), 'default', '无 nssm=前台脚本');
-  assert.equal(m({ isDesktop: false, serviceExists: true, startTypeNum: 4 }), 'default', 'DISABLED 必败 1058，自动降级前台');
-  assert.equal(m({ isDesktop: false, serviceExists: true, startTypeNum: 2 }), 'service', 'AUTO 服务正常走调度');
-  assert.equal(m({ isDesktop: false, serviceExists: true, startTypeNum: 3 }), 'service', 'DEMAND 同样可调度');
-});
-
-test('MAINT-26c 一键更新全自动：安装→闸门→杀旧→拉起→一致性；闸门失败自动回滚', async () => {
+test('MAINT-26c 一键更新（安装侧）：安装→干跑闸门，装完须手动重启；闸门失败自动回滚', async () => {
   const seq = [];
   const okRun = await updater.runOneClickUpdate(silentIo(), 'web', {
     findTgzImpl: () => 'C:\\staged\\pkg.tgz',
@@ -878,15 +387,14 @@ test('MAINT-26c 一键更新全自动：安装→闸门→杀旧→拉起→一�
     curVerImpl: () => '3.3.1',
     installImpl: async () => { seq.push('install'); return { ok: true, snapshotDir: 'C:\\snap\\x' }; },
     gateImpl: async () => { seq.push('gate'); return { ok: true }; },
-    oldPidOverride: 1001,
-    oldImageOverride: 'node.exe',
-    killOldImpl: async () => { seq.push('killOld'); },
-    ensureUpImpl: async () => { seq.push('ensureUp'); return { ok: true, code: 'ALREADY_UP' }; },
-    consistencyImpl: async () => { seq.push('consistency'); },
   });
-  assert.equal(okRun.code, 'UPDATED');
-  assert.deepEqual(seq, ['install', 'gate', 'killOld', 'ensureUp', 'consistency']);
+  // 2026-09-13：终态不再是 UPDATED（重启能力已移除）—— 只安装并就位，交用户手动重启
+  assert.equal(okRun.code, 'INSTALLED_NEEDS_MANUAL_RESTART');
+  assert.equal(okRun.needsManualRestart, true, '一律如实报告需用户手动重启');
+  assert.deepEqual([okRun.from, okRun.to], ['3.3.1', '9.9.9']);
+  assert.deepEqual(seq, ['install', 'gate'], '只安装+过闸，不再杀旧进程/拉起服务/重启后自检');
 
+  // 闸门失败 → 自动快照回滚（既有语义不变；快照目录缺失时回滚如实失败但绝不抛出）
   const rolled = await updater.runOneClickUpdate(silentIo(), 'web', {
     findTgzImpl: () => 'C:\\staged\\bad.tgz',
     peekVerImpl: () => '9.9.9',
@@ -897,4 +405,5 @@ test('MAINT-26c 一键更新全自动：安装→闸门→杀旧→拉起→一�
   });
   assert.equal(rolled.ok, false);
   assert.equal(rolled.code, 'GATE_FAILED_ROLLED_BACK');
+  assert.equal(rolled.detail, 'missing x');
 });

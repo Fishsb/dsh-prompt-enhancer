@@ -26,6 +26,7 @@ const RPC_METHODS = [
   'update/diagTail',
   'update/executorEnsure',
   'update/restartNeeded',
+  'update/install',
   // diagnostics
   'logs/last',
   // plugins

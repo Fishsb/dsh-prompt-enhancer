@@ -34,15 +34,15 @@
 | `update/check` | client → host | 版本检测（local 运行时读运行环境 package.json） | 只读 |
 | `update/pull` | client → host | 拉取清单文件 | 用户触发 |
 | `update/envcheck` | client → host | 环境检测 | 只读 |
-| `update/portRestart` | client → host | 端口重启（服务模式 schtasks / 默认模式 detached 脚本） | 用户触发 |
-| `update/makeShortcut` | client → host | 创建桌面快捷方式（RunAs lnk + CLI 脚本） | 用户触发 |
 | `logs/last` | client → host | 诊断日志 | 只读 |
 | `plugins/inventory` | client → host | 插件清单 | 只读 |
 | `plugins/run` | client → host | 运行插件 | 管理 |
 | `plugins/stop` | client → host | 停止插件 | 管理 |
 | `plugins/undefine` | client → host | 取消定义 | 管理 |
 | `update/executorEnsure` | client → host | 拉起/对齐执行器（版本+内容哈希） | 用户触发 |
+| `update/install` | client → host | 安装已下载的 staged 包（sha256 校验 → 解包覆盖运行环境 → 写部署账本，返回 `{ok, installed, version, restartNeeded:true}`；**不重启**，装完提示手动重启 DSH） | 用户触发 |
 | `update/restartNeeded` | client → host | 检测未重启 | 只读 |
+| `update/diagTail` | client → host | 诊断日志尾部补取（只读·脱敏；更新/重启失败路径补 DSH err 日志根因） | 只读 |
 | `config/get` | client → host | 读取磁盘配置（$DSH_HOME/dsh-prompt-enhancer.config.json；DSH Desktop 动态端口配置恢复） | 只读 |
 | `config/set` | client → host | 写入磁盘配置（原子写 tmp+rename，≤1MB） | 用户触发 |
 | `voice/modelList` | client → host | 本地模型清单（含已下载状态） | 只读 |
@@ -56,9 +56,9 @@
 | `voice/status` | client → host | 语音引擎 / 规整就绪状态（local 字段实时探测 worker） | 只读 |
 | `voice/transcribe` | client → host | 音频（data URL）→ 云端/本地识别 → 可选规整，返回 `{text,raw,refined}`；apiKey 不进 RPC 请求 | 用户触发 |
 
-> 注：`models/*` / `plugins/*` / `logs/*` / `template/*` / `update/check`·`update/pull`·`update/envcheck` / `enhance*` / `cancel` 共 18 条注册于 `plugin-host.js`（经 `lib/index.cjs` 桥接）；`config/*` / `voice/*` / `update/executorEnsure`·`update/restartNeeded`·`update/makeShortcut`·`update/portRestart` 共 16 条直接注册于 `lib/index.cjs`。两侧同挂 `/dsh-prompt-enhancer/rpc`，合计 **34** 条（2026-09-12 以两文件 `harness.handle(` 实测全集逐条对照）。
+> 注：`models/*` / `plugins/*` / `logs/*` / `template/*` / `update/check`·`update/pull`·`update/envcheck` / `enhance*` / `cancel` 共 18 条注册于 `plugin-host.js`（经 `lib/index.cjs` 桥接）；`config/*` / `voice/*` / `update/executorEnsure`·`update/install`·`update/restartNeeded`·`update/diagTail` 共 16 条直接注册于 `lib/index.cjs`。两侧同挂 `/dsh-prompt-enhancer/rpc`，合计 **34** 条（插件内重启能力退役后重算：`update/portRestart` / `update/makeShortcut` 两条 RPC 已移除，`update/install` 与 `update/diagTail` 为现行集合；以两文件 `harness.handle(` 枚举逐条对照）。
 
-> 注：`update/executorEnsure` / `update/restartNeeded` 在 host RPC 清单中保留（部分版本由 client 直连执行器 3081），见 executor RPC。
+> 注：`update/executorEnsure` / `update/install` / `update/restartNeeded` 在 host RPC 清单中保留（部分版本由 client 直连执行器 3081），见 executor RPC；执行器自插件内重启能力退役后只负责**下载 / 校验 / 安装 / 回滚**，不再重启。
 
 ### executor RPC（`127.0.0.1:3081/rpc`）
 
@@ -66,8 +66,7 @@
 |---|---|
 | `ping` | 心跳 / 版本 |
 | `status` | 当前状态 |
-| `apply` | 安装 + 重启 |
-| `restart` | 仅重启 |
+| `apply` | 安装（下载 → sha256 校验 → 落 staging → 安装 → 失败回滚；**不含重启**） |
 
 ---
 
@@ -114,8 +113,8 @@
 |---|---|---|---|
 | ≤ 2.8.3 | 隐式 | 0.1.5 / 0.1.6 | 无显式协议版本 |
 | 3.0.0（重构目标） | `protocolVersion: 1` | `protocolVersion: 1` | 显式协商 |
-| 3.2.x | `protocolVersion: 1` | 0.1.12+（内容哈希重建） | update/portRestart 独立化（服务模式 schtasks / 默认模式脚本）；执行器专注一键更新/watchdog |
-| 3.3.x（当前） | `protocolVersion: 1` | 0.1.12+（内容哈希重建） | v3.3.3 起执行器副本同步 `undici` 依赖（缺失时代理能力降级为直连，进程不崩）；`update/serviceInstall` 已移除（不再提供 nssm 服务化安装入口） |
+| 3.2.x | `protocolVersion: 1` | 0.1.12+（内容哈希重建） | update/portRestart 独立化（服务模式 schtasks / 默认模式脚本）；执行器专注一键更新/watchdog（该 RPC 与 watchdog 已于 3.3.x 之后的迭代退役，此处仅作历史版本对照） |
+| 3.3.x（当前） | `protocolVersion: 1` | 0.1.12+（内容哈希重建） | v3.3.3 起执行器副本同步 `undici` 依赖（缺失时代理能力降级为直连，进程不崩）；`update/serviceInstall` 已移除（不再提供 nssm 服务化安装入口）；**插件内重启能力退役**——`update/portRestart` / `update/makeShortcut`、执行器 `restart` 方法、watchdog 与维护救援 CLI 全部移除；新增 `update/install`（安装已下载的 staged 包），**装完提示手动重启 DSH 生效** |
 
 兼容策略：
 
@@ -133,7 +132,7 @@
 | `@deepseek-ai/dsh-client-ui-renderer` | **不在** `peerDependencies`，由宿主自带 | 会话级槽位条目契约自 `0.1.2-rc.1` 起 | 更早渲染器只提供 `props.session` / `props.input` 形态 → 插件走旧形态回退兼容；两种形态都无 → ✨/🎤 不渲染 |
 | 客户端 `inputActions`（草稿插入能力） | 宿主 client 注入（能力判定，无版本号） | — | 无 `setDraft` → 识别结果追加到草稿末尾；完全不注入 → 🎤 禁用并提示 |
 
-说明：`package.json` `dependencies` 实测仅 `undici`（执行器副本由 `ensureExternalExecutor` 同步 `node_modules/undici`）；host 半部与执行器不声明 peerDependency。上表由 `package.json` `peerDependencies` 与 README「输入框工具行（✨/🎤）客户端契约」段落实读得出，改 peerDependency 或槽位契约时须同步本节。
+说明：`package.json` `dependencies` 实测仅 `undici`（执行器副本由 `ensureExternalExecutor` 同步 `node_modules/undici`）；**undici 亦服务语音模型下载**（`asr-models.cjs` → `net-proxy`）；host 半部与执行器不声明 peerDependency。上表由 `package.json` `peerDependencies` 与 README「输入框工具行（✨/🎤）客户端契约」段落实读得出，改 peerDependency 或槽位契约时须同步本节。
 
 ---
 

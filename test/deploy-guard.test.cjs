@@ -1,8 +1,11 @@
 'use strict';
-// 批次B（P0-2 部署账本 + 自愈守卫 + P1-3 一致性自检）契约测试。
-// 覆盖：账本读写原子性与注入缝、heal 守卫决策矩阵（含账本陈旧/双空盲区/BOM 拒绝/旁路旋钮）、
-// B-5 探针比较器与 compareSemver 行为一致锚、profileDir 口径统一与 BOM 容错、
-// 五项自检 PASS/WARN/FAIL 夹具、菜单渲染层接线。
+// 批次B（P0-2 部署账本 + P1-3 一致性自检）契约测试。
+// 覆盖：账本读写原子性与注入缝、profileDir 口径统一与 BOM 容错、
+// 五项自检 PASS/WARN/FAIL 夹具、自检渲染层接线。
+// 2026-09-13（用户指令·移除插件内重启能力）：heal 守卫生成器 buildHealGuardScript 与
+// 菜单壳生成器 buildWebMenuCmdBody 已随重启/自愈链一并删除 → 原 DGRD-06~15（守卫决策矩阵
+// e2e + 决策比较器漂移锚 + 壳接线契约）的受测对象不存在，整段移除（不复用其夹具）。
+// 保留：DGRD-01~05（账本/profileDir/BOM 容错）、DGRD-16~19（五项一致性自检，零重启依赖）。
 // 隔离纪律：全部落盘走临时目录（DSH_HOME 注入），绝不触真实环境。
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -15,7 +18,6 @@ process.env.DSH_ENHANCER_NO_INDEX = '1';
 
 const sys = require('../lib/sys.cjs');
 const M = require('../lib/maintain-lib.cjs');
-const indexMod = require('../lib/index.cjs');
 const updater = require('../lib/updater-host.cjs');
 
 const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-dguard-'));
@@ -108,144 +110,6 @@ test('DGRD-05 readInstalledPluginVersion BOM 容错（B-7）：带 BOM 包仍出
   assert.equal(sys.readInstalledPluginVersion('web', home), '3.3.3');
   fs.writeFileSync(path.join(runtimeDir, 'package.json'), 'broken', 'utf8');
   assert.equal(sys.readInstalledPluginVersion('web', home), null);
-});
-
-/* ---------------- heal 守卫探针（生成物 e2e + 决策矩阵） ---------------- */
-
-const GUARD_DIR = (() => {
-  const d = tmpRoot();
-  fs.writeFileSync(path.join(d, 'dsh-heal-guard.cjs'), indexMod.buildHealGuardScript(), 'utf8');
-  return d;
-})();
-function runGuard(homeArgs) {
-  const guardPath = path.join(GUARD_DIR, 'dsh-heal-guard.cjs');
-  const env = Object.assign({}, process.env, homeArgs.env || {});
-  const r = require('node:child_process').spawnSync(
-    process.execPath, [guardPath].concat(homeArgs.args),
-    { encoding: 'utf8', timeout: 60000, env, windowsHide: true });
-  return r;
-}
-
-test('DGRD-06 守卫决策矩阵·缓存旧于基线 → 拒绝(exit 1) + heal-refused.log 留痕', () => {
-  const home = tmpRoot();
-  const rtRoot = tmpRoot();
-  fs.mkdirSync(path.join(rtRoot, 'profiles'), { recursive: true }); // 占位
-  fs.writeFileSync(path.join(rtRoot, 'package.json'), '{"version":"3.3.2"}', 'utf8');
-  sys.writeDeployLedgerEntry('web', '3.3.2', 'sync-runtime', { dshHome: home });
-  const tgz = makeRealTgz(path.join(tmpRoot(), 'cache-3.3.1.tgz'), '3.3.1');
-  const r = runGuard({ args: [tgz, rtRoot], env: { DSH_HOME: home } });
-  assert.equal(r.status, 1, 'stdout=' + r.stdout + ' stderr=' + r.stderr);
-  assert.match(String(r.stdout), /REFUSED/);
-  const logFile = path.join(GUARD_DIR, 'heal-refused.log');
-  const logText = fs.readFileSync(logFile, 'utf8');
-  assert.match(logText, /refuse DOWNGRADE cache=3\.3\.1 baseline=3\.3\.2/);
-});
-
-test('DGRD-07 守卫决策矩阵·缓存==基线放行 / 缓存>基线放行', () => {
-  const home = tmpRoot();
-  const rtRoot = tmpRoot();
-  fs.writeFileSync(path.join(rtRoot, 'package.json'), '{"version":"3.3.2"}', 'utf8');
-  sys.writeDeployLedgerEntry('web', '3.3.2', 'sync-runtime', { dshHome: home });
-  const eq = runGuard({ args: [makeRealTgz(path.join(tmpRoot(), 'eq.tgz'), '3.3.2'), rtRoot], env: { DSH_HOME: home } });
-  assert.equal(eq.status, 0, eq.stdout);
-  const gt = runGuard({ args: [makeRealTgz(path.join(tmpRoot(), 'gt.tgz'), '3.4.0'), rtRoot], env: { DSH_HOME: home } });
-  assert.equal(gt.status, 0, gt.stdout);
-});
-
-test('DGRD-08 守卫决策矩阵·双空盲区放行（首次安装场景不砖机）', () => {
-  const home = tmpRoot(); // 无账本
-  const rtRoot = tmpRoot(); // 无运行环境 package.json
-  const r = runGuard({ args: [makeRealTgz(path.join(tmpRoot(), 'blind.tgz'), '3.3.2'), rtRoot], env: { DSH_HOME: home } });
-  assert.equal(r.status, 0, r.stdout);
-  assert.match(String(r.stdout), /blind spot/);
-});
-
-test('DGRD-09 守卫决策矩阵·账本陈旧时以现读版本抬高基线（评审修正③核心向量）', () => {
-  const home = tmpRoot();
-  const rtRoot = tmpRoot();
-  fs.writeFileSync(path.join(rtRoot, 'package.json'), '{"version":"3.4.0"}', 'utf8'); // 带外装了新版
-  sys.writeDeployLedgerEntry('web', '3.3.2', 'sync-runtime', { dshHome: home }); // 账本陈旧
-  // 若只比账本，缓存 3.3.3 ≥ 3.3.2 会被放行降级到 3.3.3——基线取 max 后必须拒绝
-  const r = runGuard({ args: [makeRealTgz(path.join(tmpRoot(), 'stale.tgz'), '3.3.3'), rtRoot], env: { DSH_HOME: home } });
-  assert.equal(r.status, 1, '陈旧账本不构成放行依据 stdout=' + r.stdout);
-  assert.match(fs.readFileSync(path.join(GUARD_DIR, 'heal-refused.log'), 'utf8'), /baseline=3\.4\.0/);
-});
-
-test('DGRD-10 守卫决策矩阵·缓存版本不可读(损坏 tgz) → 拒绝（空版本分支显性失败）', () => {
-  const home = tmpRoot();
-  const rtRoot = tmpRoot();
-  fs.writeFileSync(path.join(rtRoot, 'package.json'), '{"version":"3.3.2"}', 'utf8');
-  sys.writeDeployLedgerEntry('web', '3.3.2', 'sync-runtime', { dshHome: home });
-  const bad = path.join(tmpRoot(), 'corrupt.tgz');
-  fs.writeFileSync(bad, Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0xde, 0xad, 0xbe, 0xef]), 'utf8'); // gzip 头+垃圾
-  const r = runGuard({ args: [bad, rtRoot], env: { DSH_HOME: home } });
-  assert.equal(r.status, 1);
-  assert.match(String(r.stdout), /CACHE_VERSION_UNREADABLE|unreadable/i);
-});
-
-test('DGRD-11 守卫决策矩阵·缓存不存在 → 放行 exit 0（壳自身 no-package 分支处理）', () => {
-  const home = tmpRoot();
-  const r = runGuard({ args: [path.join(tmpRoot(), 'nope.tgz'), tmpRoot()], env: { DSH_HOME: home } });
-  assert.equal(r.status, 0);
-});
-
-test('DGRD-12 紧急旁路旋钮：DSH_PE_HEAL_OVERRIDE=1 对必拒场景放行并留痕 bypass', () => {
-  const home = tmpRoot();
-  const rtRoot = tmpRoot();
-  fs.writeFileSync(path.join(rtRoot, 'package.json'), '{"version":"3.3.2"}', 'utf8');
-  sys.writeDeployLedgerEntry('web', '3.3.2', 'sync-runtime', { dshHome: home });
-  const tgz = makeRealTgz(path.join(tmpRoot(), 'ovr.tgz'), '3.3.1');
-  const r = runGuard({ args: [tgz, rtRoot], env: { DSH_HOME: home, DSH_PE_HEAL_OVERRIDE: '1' } });
-  assert.equal(r.status, 0, '旁路必须放行 stdout=' + r.stdout);
-  assert.match(String(r.stdout), /bypassed/);
-  assert.match(fs.readFileSync(path.join(GUARD_DIR, 'heal-refused.log'), 'utf8'), /\] bypass DSH_PE_HEAL_OVERRIDE=1/);
-});
-
-test('DGRD-13 --mark 写入点④：恢复成功后回写账本 source=heal（tmp+rename 幂等覆盖）', () => {
-  const home = tmpRoot();
-  const rtRoot = tmpRoot();
-  fs.writeFileSync(path.join(rtRoot, 'package.json'), '{"version":"3.5.0"}', 'utf8');
-  sys.writeDeployLedgerEntry('web', '3.3.2', 'sync-runtime', { dshHome: home });
-  const r = runGuard({ args: ['--mark', rtRoot], env: { DSH_HOME: home } });
-  assert.equal(r.status, 0, r.stdout);
-  const led = sys.readDeployLedger({ dshHome: home });
-  assert.equal(led.profiles.web.version, '3.5.0');
-  assert.equal(led.profiles.web.source, 'heal');
-  assert.ok(Number.isInteger(led.profiles.web.ts));
-});
-
-test('DGRD-14 B-5 漂移锚：守卫内联 cmpVersions 与 maintain-lib.compareSemver 向量行为一致', () => {
-  const src = indexMod.buildHealGuardScript();
-  const m = /function cmpVersions\(a, b\) \{[\s\S]*?\n\}/.exec(src);
-  assert.ok(m, '守卫脚本缺 cmpVersions 函数文本');
-  const cmp = new Function(m[0] + '\nreturn cmpVersions;')();
-  const vectors = [
-    ['3.3.1', '3.3.2'], ['3.3.2', '3.3.2'], ['3.4.0', '3.3.99'],
-    ['v3.0.0', '2.9.9'], ['0.1.0', '0.1.0'], ['10.0.0', '9.99.99'],
-  ];
-  for (const [a, b] of vectors) {
-    assert.equal(cmp(a, b), M.compareSemver(a, b), '向量不一致: ' + a + ' vs ' + b);
-  }
-  for (const bad of ['', 'abc', '1.2']) {
-    assert.equal(cmp(bad, '3.3.2'), null, '非法输入应 null: ' + JSON.stringify(bad));
-    assert.equal(M.compareSemver(bad, '3.3.2') === null || typeof M.compareSemver(bad, '3.3.2') === 'number', true);
-  }
-});
-
-test('DGRD-15 壳接线契约：buildWebMenuCmdBody :heal 段含守卫前置/拒绝跳转/--mark 回写', () => {
-  const buf = indexMod.buildWebMenuCmdBody({
-    nodePath: 'C:\\Program Files\\nodejs\\node.exe',
-    target: 'C:\\rt\\lib\\updater-host.cjs',
-    svc: 'dsh-web', profile: 'web', locale: 'en',
-    runtimeRoot: 'C:\\rt',
-  });
-  const body = buf.toString('ascii');
-  assert.ok(body.includes('dsh-heal-guard.cjs'), '壳未引用守卫脚本');
-  assert.ok(body.includes('"GUARD=%~dp0dsh-heal-guard.cjs"'), '守卫路径变量缺失');
-  assert.ok(/if exist "%GUARD%" .* "%NEWEST%" "C:\\rt"/.test(body), '判定调用缺失');
-  assert.ok(body.includes('goto minfix'), '拒绝路径未跳转裸救援');
-  assert.ok(/--mark "C:\\rt"/.test(body), '恢复成功后未回写账本');
-  assert.ok(!/[^\x00-\x7F]/.test(body.toString('latin1')), '壳必须纯 ASCII');
 });
 
 /* ---------------- 五项一致性自检 ---------------- */

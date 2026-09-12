@@ -5,8 +5,6 @@ A DeepSeek Harness (DSH) plugin with **two core capabilities**:
 - ✨ **Prompt enhancement** — rewrite composer drafts in place with one click, fully undoable
 - 💬 **Voice recognition** — speech-to-text that stops on silence, with cloud / local dual engines; the transcript is filled into the draft
 
-Plus a bundled standalone utility 🔁 **one-click restart for DSH service failures** (recover from the CLI even when the web UI is down).
-
 [![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
 [![Release date](https://img.shields.io/github/release-date/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
 [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers)
@@ -35,7 +33,6 @@ The 🎤 record button beside the composer starts listening; the transcript (clo
 ## 🔧 Other capabilities
 
 - 🌐 **i18n** — follows the DSH interface language (中文 / English)
-- 🔁 **One-click restart (standalone)** — restart DSH even when the web UI is down: double-click the desktop shortcut (whale icon) or invoke the CLI directly; supports service-managed and process-level fallback restart
 
 ## 🚀 Install
 
@@ -61,18 +58,12 @@ dsh plugin --profile web remove dsh-prompt-enhancer
 ```
 
 > After `remove`, restart DSH to fully unload the running instance.
-
-## 🔁 One-click restart (standalone)
-
-Restart DSH even when the service is broken and the web UI is unreachable — no browser, no 3080 port required. In plugin settings, click "**Desktop**" on the "Restart port" confirmation to create a whale-icon "Restart DSH" shortcut; double-click it to restart with live progress. No shortcut needed either — run from any command window:
-
-```sh
-node "<DSH_HOME>\AppData\Local\dsh-prompt-enhancer\executor\0.1.12\lib\updater-host.cjs" --cli restart --service dsh-web --profile web
-```
+>
+> After an update is installed, restart DSH manually for it to take effect (the plugin no longer restarts DSH for you).
 
 ## 📦 Library notes
 
-Core logic lives in standalone Node modules, reusable from other scripts: `lib/shortcut-win.cjs` (Windows shortcut generation), `lib/updater-host.cjs` (CLI restart / update executor), `lib/platform-service.cjs` (cross-platform service management), `lib/sys.cjs` (env & paths). See each module's header comments.
+Core logic lives in standalone Node modules, reusable from other scripts: `lib/updater-host.cjs` (update executor: download / verify / install / rollback), `lib/platform-service.cjs` (cross-platform service management), `lib/sys.cjs` (env & paths). See each module's header comments.
 
 ## 🎯 Usage (prompt enhancement)
 

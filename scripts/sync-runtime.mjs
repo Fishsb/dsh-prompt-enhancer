@@ -164,9 +164,14 @@ for (const rt of deployTargets) {
 // 4. md5 校验 + 提示
 console.log('== 4/4 校验 ==');
 let allOk = true;
+// md5 校验清单按 lib 实际文件集动态枚举（与第 3 步 lib 目录级同步同口径）：
+// 手写白名单会随 lib 增删漂移——漏列 = 假绿，列出已删除文件 = 校验阶段读源失败。
+const libArtifacts = readdirSync(join(root, 'lib'))
+  .filter((n) => n.endsWith('.cjs'))
+  .map((n) => 'lib/' + n);
 for (const rt of deployTargets) {
   console.log('--- ' + rt);
-  for (const f of files.concat(['lib/index.cjs', 'lib/client.cjs', 'lib/updater-host.cjs', 'lib/sys.cjs'])) {
+  for (const f of files.concat(libArtifacts)) {
     const s = join(root, f);
     if (!existsSync(s)) continue;
     const a = md5(s);

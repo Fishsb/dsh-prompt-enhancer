@@ -5,8 +5,6 @@ DeepSeek Harness (DSH) 插件。**两大核心能力**：
 - ✨ **提示词增强** — 输入框草稿一键改写，不满意可撤回
 - 💬 **语音识别** — 说完自动停，云端 / 本地双引擎离线可用，识别结果填入草稿
 
-另附 🔁 **DSH 服务异常一键重启**（网页打不开也能命令行恢复）。
-
 [![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
 [![Release date](https://img.shields.io/github/release-date/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
 [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers)
@@ -35,7 +33,6 @@ DeepSeek Harness (DSH) 插件。**两大核心能力**：
 ## 🔧 其他能力
 
 - 🌐 **多语言** — 按钮与文案跟随 DSH 界面语言（中文 / English）
-- 🔁 **一键重启（独立功能）** — 网页打不开也能重启 DSH：桌面快捷方式（鲸鱼图标）双击，或命令行直接调用；支持服务化重启与进程级降级
 
 ## 🚀 安装
 
@@ -62,18 +59,12 @@ dsh plugin --profile web remove dsh-prompt-enhancer
 ```
 
 > 卸载后必须重启 DSH 才能从运行中移除。
-
-## 🔁 一键重启（独立功能）
-
-DSH 服务异常、网页打不开时，仍可一键恢复——不依赖浏览器、不依赖 3080 端口。插件设置「端口重启」确认态点击「**桌面**」生成带鲸鱼图标的「重启DSH」快捷方式，双击即重启并显示进度；不生成快捷方式也能用，任意命令窗口直接调用：
-
-```sh
-node "<DSH_HOME>\AppData\Local\dsh-prompt-enhancer\executor\0.1.12\lib\updater-host.cjs" --cli restart --service dsh-web --profile web
-```
+>
+> 更新安装完成后需**手动重启 DSH** 生效（插件不再代为重启）。
 
 ## 📦 库说明
 
-核心逻辑拆分为独立 Node 模块，可复用：`lib/shortcut-win.cjs`（Windows 快捷方式生成）、`lib/updater-host.cjs`（CLI 重启 / 更新执行器）、`lib/platform-service.cjs`（跨平台服务管理）、`lib/sys.cjs`（环境与路径）。详见各模块头注释。
+核心逻辑拆分为独立 Node 模块，可复用：`lib/updater-host.cjs`（更新执行器：下载 / 校验 / 安装 / 回滚）、`lib/platform-service.cjs`（跨平台服务管理）、`lib/sys.cjs`（环境与路径）。详见各模块头注释。
 
 ## 🎯 使用（提示词增强）
 

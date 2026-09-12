@@ -1,10 +1,17 @@
 'use strict';
 // 批次A（optimization-plan-20260824 §A.1/A.2）·更新器熔断防抖契约测试。
-// 覆盖：computeBackoff/shouldGateAuto/isDebounceBlocked 决策矩阵、kill-switch 三态、
-// auto 闸门四态、rpc-schema 可选 auto、状态文件原子写、rollbackToVersion 退避闸两分支、
-// scheduleServiceRestart 防抖双闸+先判后写+过期清理、janitor 陈旧任务清扫注入演练。
-// 隔离纪律：EXECUTOR_ROOT/DSH_HOME 指临时目录 + DSH_ENHANCER_NO_INDEX=1；
-// scheduleServiceRestart 一律经 seam.spawnSyncImpl 注入——绝不触真实服务/schtasks（红线②）。
+// 覆盖：computeBackoff/shouldGateAuto/isDebounceBlocked 决策矩阵、rpc-schema update/install 契约、
+// 状态文件原子写与容错读、rollbackToVersion 退避闸两分支、失败回退写、代理降级、诊断日志脱敏。
+// 2026-09-13（用户指令·移除插件内重启能力）——受测对象已随重启/自愈链删除，整段移除：
+//   UGATE-10/11（index.cjs kill-switch 三态 / autoGateDecision 四态：自动重启链已删）、
+//   UGATE-23/24（scheduleServiceRestart 防抖调度）、UGATE-25/26（sweepStaleExecTasks janitor）、
+//   UGATE-31（restartService 清空陈旧 diagLog + HTTP restart 入口）、UGATE-32（killConflictingHolders 留痕）。
+// 改写（受测对象仍在，仅契约变化）：
+//   UGATE-12~14 portRestart schema/handler/client 接线 → 新 RPC update/install + 重启 RPC 不得残留；
+//   UGATE-15/16 index.cjs read/writeUpdateStateSafe → 存活的 updater-host read/writeUpdateState
+//   （同一「tmp+rename 原子写 / 损坏按空状态 fail-open」不变式）；UGATE-19 → 新 rollbackToVersion
+//   契约（只重装旧版本，不再停/启服务）。
+// 隔离纪律：EXECUTOR_ROOT/DSH_HOME 指临时目录 + DSH_ENHANCER_NO_INDEX=1，绝不触真实服务/下载（红线②）。
 process.env.DSH_ENHANCER_NO_INDEX = '1';
 process.env.DSH_ENHANCER_EXECUTOR_ROOT = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'dsh-ugate-root-'));
 const test = require('node:test');
@@ -16,11 +23,13 @@ const path = require('node:path');
 const sys = require('../lib/sys.cjs');
 const M = require('../lib/maintain-lib.cjs');
 const updater = require('../lib/updater-host.cjs');
-const indexMod = require('../lib/index.cjs');
 const { schemas, validateRpcArgs } = require('../lib/rpc-schema.cjs');
 
 const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-ugate-'));
 const todayKey = () => M.localDayKey(Date.now());
+// isDebounceBlocked(state, now, windowMs) 的窗口由调用方传入；原 index.cjs 的 RESTART_DEBOUNCE_MS
+// 随重启调度链删除，故按 maintain-lib 文档口径（写入时 pendingRestartAt = now + 120s）内联同值。
+const RESTART_DEBOUNCE_WINDOW_MS = 120 * 1000;
 
 /* ---------------- ① computeBackoff 决策矩阵 ---------------- */
 
@@ -86,7 +95,7 @@ test('UGATE-07 computeBackoff+shouldGateAuto 闭环：封顶后当日拒绝、�
 
 test('UGATE-08 isDebounceBlocked：窗口内阻塞（含未来兜底时刻）/ 窗外放行 / 缺损放行', () => {
   const now = Date.now();
-  const W = indexMod.RESTART_DEBOUNCE_MS;
+  const W = RESTART_DEBOUNCE_WINDOW_MS;
   assert.equal(M.isDebounceBlocked({ pendingRestartAt: now + 120 * 1000 }, now, W), true, '写入后 120s 兜底时刻属未来，负龄期仍在窗口内');
   assert.equal(M.isDebounceBlocked({ pendingRestartAt: now - (W + 1000) }, now, W), false, 'now-ts = W+1s ≥ W → 窗外放行');
   assert.equal(M.isDebounceBlocked({ pendingRestartAt: now - (W - 1000) }, now, W), true, 'now-ts < W 窗口内阻塞');
@@ -97,90 +106,56 @@ test('UGATE-08 isDebounceBlocked：窗口内阻塞（含未来兜底时刻）/ �
 
 test('UGATE-09 isDebounceBlocked 时钟回拨容忍：超前超过一个完整窗口视为立即过期（防死锁）', () => {
   const now = Date.now();
-  const W = indexMod.RESTART_DEBOUNCE_MS;
+  const W = RESTART_DEBOUNCE_WINDOW_MS;
   assert.equal(M.isDebounceBlocked({ pendingRestartAt: now + W + 60000 }, now, W), false, '超前 > windowMs 的脏数据放行');
   assert.equal(M.isDebounceBlocked({ pendingRestartAt: now + W - 60000 }, now, W), true, '正常未来兜底时刻（≤windowMs 内）仍阻塞');
 });
 
-/* ---------------- kill-switch 三态 + auto 闸门 ---------------- */
+/* ---------------- rpc-schema：新安装 RPC 契约 ---------------- */
 
-test('UGATE-10 kill-switch 三态：env=0 拒绝 / config false 拒绝 / 都未设放行', () => {
-  // env=0
-  assert.equal(indexMod.readAutoUpdateKillSwitch({ envValue: '0', configFile: '' }), 'env');
-  assert.equal(indexMod.readAutoUpdateKillSwitch({ envValue: ' 0 ', configFile: '' }), 'env', '容忍空白');
-  // config=false
-  const dir = tmpRoot();
-  const cfgFile = path.join(dir, 'cfg.json');
-  fs.writeFileSync(cfgFile, JSON.stringify({ update: { autoUpdate: false } }), 'utf8');
-  assert.equal(indexMod.readAutoUpdateKillSwitch({ envValue: undefined, configFile: cfgFile }), 'config');
-  // config=true 不算关闭
-  fs.writeFileSync(cfgFile, JSON.stringify({ update: { autoUpdate: true } }), 'utf8');
-  assert.equal(indexMod.readAutoUpdateKillSwitch({ envValue: undefined, configFile: cfgFile }), '');
-  // 都未设
-  assert.equal(indexMod.readAutoUpdateKillSwitch({ envValue: '', configFile: path.join(dir, 'missing.json') }), '');
-  // 损坏配置容错
-  fs.writeFileSync(cfgFile, '{broken json', 'utf8');
-  assert.equal(indexMod.readAutoUpdateKillSwitch({ envValue: undefined, configFile: cfgFile }), '');
+test('UGATE-12 rpc-schema：update/install 宽松可选 profile 校验（重启 RPC 已移除）', () => {
+  assert.ok(schemas['update/install'], 'schema 必须注册');
+  assert.equal(schemas['update/portRestart'], undefined, '已移除的重启 RPC 不得残留在 schema 表');
+  assert.deepEqual(schemas['update/install'].required, []);
+  assert.equal(validateRpcArgs('update/install', {}).ok, true, '不带参数合法（profile 缺省）');
+  assert.equal(validateRpcArgs('update/install', { profile: 'web', serviceName: 'dsh-web' }).ok, true);
+  assert.equal(validateRpcArgs('update/install', { profile: 123 }).ok, false, 'profile 非字符串拒绝');
 });
 
-test('UGATE-11 autoGateDecision 四态：AUTO_DISABLED / BACKOFF_WAITING / 放行 / 手动豁免', () => {
-  const dir = tmpRoot();
-  const cfgOff = path.join(dir, 'off.json');
-  fs.writeFileSync(cfgOff, JSON.stringify({ update: { autoUpdate: false } }), 'utf8');
-  // ① config kill-switch → AUTO_DISABLED
-  const g1 = indexMod.autoGateDecision(true, { configFile: cfgOff });
-  assert.ok(g1 && g1.code === 'AUTO_DISABLED');
-  // ② 退避中 → BACKOFF_WAITING 且 message 带剩余秒数
-  const g2 = indexMod.autoGateDecision(true, { envValue: '', configFile: '', state: { nextRetryAt: Date.now() + 65000, dayCount: 2, dayKey: todayKey() } });
-  assert.ok(g2 && g2.code === 'BACKOFF_WAITING');
-  assert.ok(/65 秒|64 秒/.test(g2.message), 'message 应带剩余秒数：' + g2.message);
-  // ③ 空状态 → 放行（null）
-  assert.equal(indexMod.autoGateDecision(true, { envValue: '', configFile: '', state: {} }), null);
-  // ④ 手动调用（非 auto）即使 kill-switch 开启也豁免
-  assert.equal(indexMod.autoGateDecision(false, { configFile: cfgOff }), null);
-});
-
-test('UGATE-12 rpc-schema：update/portRestart 宽松可选布尔 auto 校验', () => {
-  assert.ok(schemas['update/portRestart'], 'schema 必须注册');
-  assert.deepEqual(schemas['update/portRestart'].required, []);
-  assert.equal(validateRpcArgs('update/portRestart', { serviceName: 'dsh-web' }).ok, true, '不带 auto 合法（手动）');
-  assert.equal(validateRpcArgs('update/portRestart', { serviceName: 'dsh-web', auto: true }).ok, true);
-  assert.equal(validateRpcArgs('update/portRestart', { serviceName: 'dsh-web', auto: false }).ok, true);
-  assert.equal(validateRpcArgs('update/portRestart', { serviceName: 'dsh-web', auto: 'yes' }).ok, false, 'auto 非布尔拒绝');
-  assert.equal(validateRpcArgs('update/portRestart', { serviceName: 'dsh-web', auto: 1 }).ok, false);
-});
-
-test('UGATE-13 双侧 schema 同步：src/host/rpc-schema.js 与 lib/rpc-schema.cjs 均含 portRestart 规则', () => {
+test('UGATE-13 双侧 schema 同步：src/host/rpc-schema.js 与 lib/rpc-schema.cjs 均含 update/install 规则且无 portRestart', () => {
   for (const f of ['src/host/rpc-schema.js', 'lib/rpc-schema.cjs']) {
     const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
-    assert.ok(src.includes("'update/portRestart'"), f + ' 缺 update/portRestart 规则');
-    assert.ok(src.includes("args.auto === undefined || typeof args.auto === 'boolean'"), f + ' 缺宽松可选布尔校验');
+    assert.ok(src.includes("'update/install'"), f + ' 缺 update/install 规则');
+    assert.ok(!src.includes('update/portRestart'), f + ' 残留已移除的重启 RPC');
+    assert.ok(src.includes("args.profile === undefined || typeof args.profile === 'string'"), f + ' 缺 profile 宽松可选校验');
   }
 });
 
-test('UGATE-14 handler 接线断言：portRestart 消费 autoGateDecision 且 client 自愈链传 auto:true', () => {
+test('UGATE-14 接线断言：host 注册 update/install 且 client 安装链调用它（重启 RPC 全链不复存在）', () => {
   const idxSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'index.cjs'), 'utf8');
-  assert.ok(idxSrc.includes('const gate = autoGateDecision(args && args.auto === true);'), 'host handler 未接线 auto 闸');
+  assert.ok(idxSrc.includes("harness.handle('update/install'"), 'host 未注册 update/install');
+  // 只锚「注册」形态：index.cjs 的注释里仍会提到被删的 RPC 名（说明性文字），不构成残留接线
+  assert.ok(!/harness\.handle\('update\/portRestart'/.test(idxSrc), 'host 残留已移除的重启 RPC 注册');
   const cardRaw = fs.readFileSync(path.join(__dirname, '..', 'src', 'client', 'components', 'updater-card.js'), 'utf8');
   const cm = /module\.exports = ("(?:[^"\\]|\\.)*");?\s*$/.exec(cardRaw);
   const card = JSON.parse(cm[1]);
-  assert.ok(card.includes("'update/portRestart', { serviceName, profile, auto: true }"), 'client 自愈链未标记 auto:true');
-  assert.ok(card.includes("'BACKOFF_WAITING' || rrc === 'AUTO_DISABLED'"), 'client 未处理闸拦截响应');
+  assert.ok(card.includes("host.call('update/install', { profile, serviceName })"), 'client 安装链未接线 update/install');
+  assert.ok(!card.includes('update/portRestart'), 'client 残留已移除的重启 RPC');
 });
 
 /* ---------------- ⑥ 状态文件原子写 ---------------- */
 
-test('UGATE-15 writeUpdateStateSafe 原子性：rename 中途失败不留半截 JSON（目标保持上一份完整状态）', () => {
+test('UGATE-15 writeUpdateState 原子性：rename 中途失败不留半截 JSON（目标保持上一份完整状态）', () => {
   const dir = tmpRoot();
   const p = path.join(dir, 'state.json');
-  indexMod.writeUpdateStateSafe({ schema: 1, failCount: 1 }, { stateFileOverride: p });
+  updater.writeUpdateState({ schema: 1, failCount: 1 }, { stateFileOverride: p });
   const before = JSON.parse(fs.readFileSync(p, 'utf8'));
   assert.equal(before.failCount, 1);
   // 模拟中途崩溃：writeFileSync 成功、renameSync 抛错（fs 为同一核心模块对象，patch 生效）
   const origRename = fs.renameSync;
   fs.renameSync = () => { throw new Error('simulated crash between write and rename'); };
   try {
-    assert.throws(() => indexMod.writeUpdateStateSafe({ schema: 1, failCount: 99 }, { stateFileOverride: p }));
+    assert.throws(() => updater.writeUpdateState({ schema: 1, failCount: 99 }, { stateFileOverride: p }));
   } finally {
     fs.renameSync = origRename;
   }
@@ -193,14 +168,14 @@ test('UGATE-15 writeUpdateStateSafe 原子性：rename 中途失败不留半截 
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, orphans[0]), 'utf8')).failCount, 99);
 });
 
-test('UGATE-16 readUpdateStateSafe 容错：缺失/损坏/数组均按空状态（闸门 fail-open 放行）', () => {
+test('UGATE-16 readUpdateState 容错：缺失/损坏/数组均按空状态（闸门 fail-open 放行）', () => {
   const dir = tmpRoot();
-  assert.deepEqual(indexMod.readUpdateStateSafe({ stateFileOverride: path.join(dir, 'nope.json') }), {});
+  assert.deepEqual(updater.readUpdateState(path.join(dir, 'nope.json')), {});
   const p = path.join(dir, 'bad.json');
   fs.writeFileSync(p, '{{{', 'utf8');
-  assert.deepEqual(indexMod.readUpdateStateSafe({ stateFileOverride: p }), {});
+  assert.deepEqual(updater.readUpdateState(p), {});
   fs.writeFileSync(p, '[1,2]', 'utf8');
-  assert.deepEqual(indexMod.readUpdateStateSafe({ stateFileOverride: p }), {}, '数组形态按空处理');
+  assert.deepEqual(updater.readUpdateState(p), {}, '数组形态按空处理');
 });
 
 test('UGATE-17 sys 路径助手：pluginConfigFile/updateStateFile 同源 DSH_HOME 口径', () => {
@@ -231,7 +206,7 @@ test('UGATE-18 rollbackToVersion：backoff 命中 → 放弃回滚且不触发 s
   assert.deepEqual(calls, [], '闸命中时不得触碰 stopService/install');
 });
 
-test('UGATE-19 rollbackToVersion：backoff 未命中 → 行为与现状一致（stop→install→start）', async () => {
+test('UGATE-19 rollbackToVersion：backoff 未命中 → 只重装旧版本，不再停/启服务（needsManualRestart）', async () => {
   const calls = [];
   const r = await updater.rollbackToVersion('fake-svc', 'web', '3.3.1', {
     readState: () => ({}),
@@ -239,8 +214,8 @@ test('UGATE-19 rollbackToVersion：backoff 未命中 → 行为与现状一致�
     install: async () => { calls.push('install'); return { ok: true }; },
     startService: () => { calls.push('start'); },
   });
-  assert.deepEqual(r, { ok: true, version: '3.3.1' });
-  assert.deepEqual(calls, ['stop', 'install', 'start']);
+  assert.deepEqual(r, { ok: true, version: '3.3.1', needsManualRestart: true }, '装回后必须如实报告需用户手动重启');
+  assert.deepEqual(calls, ['install'], '重启能力已移除：安装之外不得触碰 stop/start 服务');
 });
 
 test('UGATE-20 rollbackToVersion：NO_OLD_VERSION 早退语义不回退；install 失败仍终态 failed', async () => {
@@ -296,122 +271,6 @@ test('UGATE-22 显式代理读取与降级标记：readDlProxy 容错 + effectiv
   }
 });
 
-/* ---------------- ⑨ scheduleServiceRestart 防抖（seam 隔离，绝不触真服务）---------------- */
-
-test('UGATE-23 scheduleServiceRestart：首次放行写记录；立即二调 debounced 且 cli 目录仅一个脚本（先判后写）', () => {
-  const dir = tmpRoot();
-  const stateFile = path.join(dir, 'update-state.json');
-  const fakeSpawn = () => ({ status: 0, stderr: '', stdout: '' }); // create/run 全成功，零真实副作用
-  const realCliDir = path.join(process.env.DSH_ENHANCER_EXECUTOR_ROOT, 'cli');
-  const opts = { spawnSyncImpl: fakeSpawn, stateFileOverride: stateFile, lastScheduleAt: 0 };
-  // lastScheduleAt:0 显式注入——本用例不依赖执行顺序，双闸①状态完全可控
-  const r1 = indexMod.scheduleServiceRestart('fake-svc', opts);
-  assert.equal(r1.ok, true, '首次调用应放行');
-  assert.notEqual(r1.debounced, true);
-  const st = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-  assert.ok(Number.isInteger(st.pendingRestartAt) && st.pendingRestartAt > Date.now() + 60 * 1000, '记录应含约 120s 兜底时刻');
-  assert.ok(/restart-service-\d+\.cjs$/.test(st.restartScript), '记录应含 restartScript 绝对路径');
-  assert.ok(fs.existsSync(st.restartScript), '脚本应已生成');
-  assert.equal(fs.readdirSync(realCliDir).filter((f) => /^restart-service-/.test(f)).length, 1);
-  // 立即二调：双闸①命中 → debounced，且不得生成第二个脚本
-  const r2 = indexMod.scheduleServiceRestart('fake-svc', { spawnSyncImpl: fakeSpawn, stateFileOverride: stateFile, lastScheduleAt: Date.now() - 1000 });
-  assert.equal(r2.ok, true);
-  assert.equal(r2.debounced, true, '窗口内重复调用必须防抖');
-  assert.equal(fs.readdirSync(realCliDir).filter((f) => /^restart-service-/.test(f)).length, 1, '跳过路径不得产生新脚本');
-  // 记录未被二调改写（先判后写）
-  const st2 = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-  assert.equal(st2.restartScript, st.restartScript);
-});
-
-test('UGATE-24 scheduleServiceRestart 过期清理路径①：窗口过期后放行写入前清理旧脚本并覆盖记录', () => {
-  const dir = tmpRoot();
-  const stateFile = path.join(dir, 'update-state.json');
-  const oldScript = path.join(dir, 'restart-service-old.cjs');
-  fs.writeFileSync(oldScript, '// stale', 'utf8');
-  // 预置过期记录（兜底时刻已过 10 分钟）
-  fs.writeFileSync(stateFile, JSON.stringify({ schema: 1, pendingRestartAt: Date.now() - 10 * 60 * 1000, restartScript: oldScript }), 'utf8');
-  const fakeSpawn = () => ({ status: 0, stderr: '', stdout: '' });
-  const r = indexMod.scheduleServiceRestart('fake-svc', {
-    spawnSyncImpl: fakeSpawn,
-    stateFileOverride: stateFile,
-    lastScheduleAt: 0, // 双闸①放行
-    windowMs: 1,       // 收窄窗口使过期判定即时生效（gate② 对过期记录不阻塞）
-  });
-  assert.equal(r.ok, true);
-  assert.notEqual(r.debounced, true, '过期记录不得阻塞新调度');
-  assert.equal(fs.existsSync(oldScript), false, '旧脚本应在放行写入点被安全清理');
-  const st = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-  assert.ok(fs.existsSync(st.restartScript), '记录指向新脚本');
-  assert.notEqual(st.restartScript, oldScript);
-});
-
-/* ---------------- janitor 清扫（A.1.6-c 注入演练）---------------- */
-
-test('UGATE-25 sweepStaleExecTasks：>24h 孤儿任务 备份→删除→复查闭环；<24h 与异名保留', async () => {
-  const io = { out: (s) => lines.push(String(s)) };
-  const lines = [];
-  const dir = tmpRoot();
-  const staleTs = Date.now() - 25 * 60 * 60 * 1000;
-  const freshTs = Date.now() - 1 * 60 * 60 * 1000;
-  const staleName = 'dsh-prompt-enhancer-exec-123-' + staleTs;
-  const freshName = 'dsh-prompt-enhancer-exec-456-' + freshTs;
-  let deleted = [];
-  const queryImpl = (args) => {
-    const a = Array.isArray(args) ? args : [];
-    if (a[0] === '/Query' && a[1] === '/FO') {
-      const rows = ['"SomeOtherTask"', '"' + staleName + '"', '"' + freshName + '"'];
-      if (deleted.length && !a.includes('/XML')) {
-        return { status: 0, stdout: '\r\n' + rows.filter((r) => !deleted.includes(r.slice(1, -1))).join('\r\n') + '\r\n', stderr: '' };
-      }
-      return { status: 0, stdout: '\r\n' + rows.join('\r\n') + '\r\n', stderr: '' };
-    }
-    if (a[0] === '/Query' && a.includes('/XML')) {
-      const name = a[a.indexOf('/TN') + 1];
-      return { status: 0, stdout: '<?xml version="1.0"?><Task><RegistrationInfo><Description>' + name + '</Description></RegistrationInfo></Task>', stderr: '' };
-    }
-    if (a[0] === '/Delete') {
-      deleted.push(a[a.indexOf('/TN') + 1]);
-      return { status: 0, stdout: 'SUCCESS', stderr: '' };
-    }
-    throw new Error('unexpected ' + JSON.stringify(a));
-  };
-  const r = await updater.sweepStaleExecTasks(io, { queryImpl, backupDir: path.join(dir, 'backup') });
-  assert.equal(r.ok, true);
-  assert.equal(r.scanned, 2);
-  assert.deepEqual(r.cleaned, [staleName], '只清理 >24h 的孤儿');
-  assert.equal(deleted.length, 1);
-  assert.equal(r.remaining, 1, '复查残留 = 保留的 <24h 任务');
-  // 备份核验非空
-  const backupDir = path.join(dir, 'backup');
-  const backups = [];
-  const walk = (d) => fs.readdirSync(d).forEach((f) => {
-    const p = path.join(d, f);
-    fs.statSync(p).isDirectory() ? walk(p) : backups.push(p);
-  });
-  walk(backupDir);
-  assert.equal(backups.length, 1);
-  assert.ok(fs.statSync(backups[0]).size > 20, '备份 XML 必须非空');
-  assert.match(fs.readFileSync(backups[0], 'utf8'), new RegExp(staleName));
-  assert.ok(lines.some((l) => l.includes('复查完成')), '应打印复查清单');
-});
-
-test('UGATE-26 sweepStaleExecTasks：XML 备份不可得时宁留勿删（破坏性操作纪律）', async () => {
-  const lines = [];
-  const io = { out: (s) => lines.push(String(s)) };
-  const staleName = 'dsh-prompt-enhancer-exec-789-' + (Date.now() - 30 * 60 * 60 * 1000);
-  let deleteCalled = false;
-  const queryImpl = (args) => {
-    const a = Array.isArray(args) ? args : [];
-    if (a[0] === '/Query' && a[1] === '/FO') return { status: 0, stdout: '"' + staleName + '"\r\n', stderr: '' };
-    if (a[0] === '/Query' && a.includes('/XML')) return { status: 1, stdout: '', stderr: 'access denied' };
-    if (a[0] === '/Delete') { deleteCalled = true; return { status: 0, stdout: 'SUCCESS', stderr: '' }; }
-    throw new Error('unexpected');
-  };
-  const r = await updater.sweepStaleExecTasks(io, { queryImpl, backupDir: path.join(os.tmpdir(), 'dsh-ugate-nobak-' + Date.now()) });
-  assert.equal(deleteCalled, false, '备份不可得绝不能删除');
-  assert.deepEqual(r.cleaned, []);
-});
-
 /* ---------------- ⑦ 重启失败根因直显（2026-09-08 产品改进·diagLog 链路） ---------------- */
 
 test('UGATE-27 dshErrLogTail/redactDiagLine：脱敏三形态 + 尾部截取 + 降级矩阵', () => {
@@ -451,7 +310,7 @@ test('UGATE-27 dshErrLogTail/redactDiagLine：脱敏三形态 + 尾部截取 + �
   assert.equal(updater.dshErrLogTail('definitely-no-such-svc-xyz'), '', '降级日志缺失应返回空串');
 });
 
-test('UGATE-28 client 接线断言：diagLog 状态/缓存作用域 ref/轮询缓存/failed 分支/终态四点/渲染块 + i18n ZH/EN 成对', () => {
+test('UGATE-28 client 接线断言：diagLog 状态/缓存作用域 ref/轮询缓存/failed 分支/终态两处/渲染块 + i18n ZH/EN 成对', () => {
   const cardRaw = fs.readFileSync(path.join(__dirname, '..', 'src', 'client', 'components', 'updater-card.js'), 'utf8');
   const cm = /module\.exports = ("(?:[^"\\]|\\.)*");?\s*$/.exec(cardRaw);
   const card = JSON.parse(cm[1]);
@@ -466,7 +325,9 @@ test('UGATE-28 client 接线断言：diagLog 状态/缓存作用域 ref/轮询�
   assert.ok(card.includes("typeof s.diagLog === 'string' && s.diagLog.trim()"), '轮询未缓存执行器 diagLog');
   assert.ok(card.includes('setDiagLog(dl || null);'), 'failed 分支未接线 diagLog');
   assert.ok(card.includes(': lastDiagRef.current;'), 'failed 分支未回退读缓存 ref');
-  assert.equal(card.split('setDiagLog(lastDiagRef.current || null);').length - 1, 4, 'updApplyExecutorDown 四处终态都应接线缓存 ref');
+  // 2026-09-13（重启能力移除）：原「重启超时/自愈重发」两处终态随重启 UI 一并删除，
+  // 存活终态 = ① pollExecutorStatus 执行器不可达 ② runPullApply 前置链失败——两处仍须接线缓存 ref。
+  assert.equal(card.split('setDiagLog(lastDiagRef.current || null);').length - 1, 2, 'updApplyExecutorDown 两处存活终态都应接线缓存 ref');
   assert.ok(card.includes("t('updDiagTitle')"), '渲染块未引用 updDiagTitle');
   // i18n：ZH/EN 成对
   const i18nRaw = fs.readFileSync(path.join(__dirname, '..', 'src', 'client', 'i18n.js'), 'utf8');
@@ -478,7 +339,8 @@ test('UGATE-28 client 接线断言：diagLog 状态/缓存作用域 ref/轮询�
   assert.ok(/updDiagTitle: '[^']*root cause/.test(i18n), 'EN 文案缺失');
 });
 
-/* ---------------- ⑧ 2026-09-12 审查修复：D3 尾部降噪+根因优先 / D4 脱敏漏网 / D5 陈旧 diagLog ---------------- */
+/* ---------------- ⑧ 2026-09-12 审查修复：D3 尾部降噪+根因优先 / D4 脱敏漏网 ----------------
+   （原 D5「陈旧 diagLog 清空」随 restartService 移除，已无受测对象） ---------------- */
 
 test('UGATE-29 redactDiagLine 补漏：JWT/Basic/键值凭据/7 字符 sk- 逐条脱敏，且原有三类与不误伤用例不变', () => {
   // 新增漏网形态（D4 实测确认原样输出）
@@ -556,55 +418,4 @@ test('UGATE-30 dshErrLogTail 降噪+根因优先：噪声尾不再挤掉真根�
   const r5 = withFakeErrLog(withError, () => updater.dshErrLogTail('definitely-no-such-svc-d3e', 2));
   assert.ok(r5.split('\n').length <= 2, 'maxLines=2 时不得超过 2 行');
   assert.ok(r5.includes('Error:'), 'maxLines 收窄后仍以根因行起头');
-});
-
-test('UGATE-31 D5 陈旧 diagLog：第二轮 restarting 起点清空上一轮根因（restartService 实测 + 入口接线断言）', async () => {
-  // ① restartService 单元路径：清空发生在同步段（首个 await 之前），故调用后立即断言
-  const svc = 'dsh-ugate-fake-svc'; // 不存在的服务名 → 绝不触碰真实 dsh-web/进程索引
-  updater.state.diagLog = '上一轮失败根因（陈旧）';
-  await updater.restartService(svc, { adminOverride: false });
-  assert.equal(updater.state.diagLog, undefined, '新一轮起点必须清空陈旧 diagLog');
-  assert.equal(updater.state.phase, 'failed', '假服务名走进程级降级 → 终态 failed（无副作用）');
-  // 失败轮重新写入 → 再开新一轮又被清空
-  updater.state.diagLog = 'second-round-stale';
-  await updater.restartService(svc, { adminOverride: false });
-  assert.equal(updater.state.diagLog, undefined, '第二次重启同样清空（不是只清一次）');
-  updater.state.phase = 'idle';
-  updater.state.message = '';
-  updater.state.busy = false;
-  updater.state.applying = false;
-  // ② 入口清理点静态锚定：status handler 序列化的是同一 state 对象——HTTP restart 入口与
-  //    restartService 必须同时清空 diagLog（两处硬编码，缺一即复发陈旧回吐）
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'updater-host.cjs'), 'utf8');
-  const hits = src.match(/state\.diagLog = undefined;/g) || [];
-  assert.equal(hits.length, 2, 'HTTP 入口与 restartService 两处起点都应清空 diagLog，实际 ' + hits.length);
-  // 清空必须发生在「写入点（dshErrLogTail）」之前的第一时间：写入点仍只有失败终态一处
-  assert.equal((src.match(/state\.diagLog = dshErrLogTail\(svc\);/g) || []).length, 1, '失败写入点应保持唯一');
-});
-
-test('UGATE-32 killConflictingHolders 留痕：击杀动作真写 web-port-recovery.log，失败静默不阻断', async () => {
-  const dir = tmpRoot();
-  const savedRoot = sys.EXECUTOR_ROOT;
-  const io = { out: () => {} };
-  const traceFile = path.join(dir, 'web-port-recovery.log');
-  sys.EXECUTOR_ROOT = dir;
-  try {
-    // 非受保护镜像 + 注入 killImpl → 不触真实进程，只验证留痕
-    const r = await updater.killConflictingHolders(io, { holderPidOverride: 424242, imageOverride: 'notepad.exe', killImpl: async () => {} });
-    assert.deepEqual({ killed: r.killed, pid: r.pid, image: r.image }, { killed: true, pid: 424242, image: 'notepad.exe' });
-    assert.ok(fs.existsSync(traceFile), '应留痕 web-port-recovery.log（同区既有留痕落点）');
-    const text = fs.readFileSync(traceFile, 'utf8');
-    assert.match(text, /kill:424242:notepad\.exe/, '留痕需含动作与 pid/image');
-    assert.match(text, /^\[\d{4}-\d{2}-\d{2}T[\d:.]+Z\] /m, '时间戳格式与同区留痕一致');
-    // 受保护镜像 → 不击杀也不留痕（保持原语义）
-    const r2 = await updater.killConflictingHolders(io, { holderPidOverride: 4, imageOverride: 'svchost.exe', killImpl: async () => {} });
-    assert.equal(r2.reason, 'protected');
-    assert.equal(fs.readFileSync(traceFile, 'utf8'), text, '受保护进程不得新增留痕');
-    // 留痕失败静默：EXECUTOR_ROOT 指向不存在的深层路径 → 不抛错、照常返回击杀结论
-    sys.EXECUTOR_ROOT = path.join(dir, 'no-such-dir', 'deeper');
-    const r3 = await updater.killConflictingHolders(io, { holderPidOverride: 424243, imageOverride: 'notepad.exe', killImpl: async () => {} });
-    assert.equal(r3.killed, true, '留痕失败绝不影响击杀主链');
-  } finally {
-    sys.EXECUTOR_ROOT = savedRoot;
-  }
 });

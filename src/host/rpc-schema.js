@@ -32,12 +32,12 @@ const schemas = {
       return true;
     },
   },
-  'update/portRestart': {
-    // v4.12 批次A（P0-1）：auto 为宽松可选布尔——仅 client 自愈链显式传 true 时走
-    // host 自动链闸门（kill-switch/退避）；手动调用不带该字段，行为与现状一致。
+  'update/install': {
+    // 2026-09-13（用户指令·插件内不再有重启能力）：安装已下载到 staging 的新版本。
+    // 安装不重启宿主，返回 restartNeeded，由用户手动重启 DSH 生效。
     required: [],
     validate(args) {
-      return args.auto === undefined || typeof args.auto === 'boolean';
+      return args.profile === undefined || typeof args.profile === 'string';
     },
   },
   'update/diagTail': {
