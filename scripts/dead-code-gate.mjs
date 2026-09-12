@@ -14,7 +14,7 @@ const ALLOW = new Set((args.includes('--allow') ? args[args.indexOf('--allow') +
 let failures = 0;
 const fail = (r, m) => { failures++; console.log('FAIL | ' + r + ' | ' + m); };
 const pass = (r, m) => console.log('PASS | ' + r + ' | ' + m);
-const git = (a) => { const r = spawnSync('git', ['-c', 'safe.directory=*', '-C', ROOT, ...a], { encoding: 'utf8', timeout: 30000 }); return r.status === 0 ? r.stdout : ''; };
+const git = (a) => { const r = spawnSync('git', ['-c', 'safe.directory=*', '-C', ROOT, ...a], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 30000 }); return r.status === 0 ? r.stdout : ''; };
 
 // ---- diff 新增行 ----
 const addedByFile = new Map();
