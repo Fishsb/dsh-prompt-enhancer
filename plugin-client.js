@@ -1998,6 +1998,15 @@ function UpdaterCard(props) {
   // pollRestored 的超时分支都要读它，原 `let lastDiag` 声明在 pollExecutorStatus 内属越作用域
   // 引用（ReferenceError → 失败文案不显示、按钮卡死）。
   const lastDiagRef = React.useRef('');
+  // 2026-09-12（D1 修复）：端口重启超时/执行器不可达时轮询拿不到任何执行器 diagLog——
+  // 主动补取一次 host 侧 DSH err 日志尾部（RPC update/diagTail，只读）；仅当本地无根因时写入，
+  // 不覆盖执行器已给出的根因。旧 host/动态形态无此 RPC → 静默。
+  const pullDiagTail = () => {
+    host.call('update/diagTail', { serviceName }).then((r) => {
+      const dt = r && typeof r.diagLog === 'string' ? r.diagLog.trim() : '';
+      if (dt && !lastDiagRef.current) setDiagLog(dt);
+    }).catch(() => { /* 旧 host/动态形态无此 RPC → 静默 */ });
+  };
   const [applyStatus, setApplyStatus] = React.useState(null);
   // v2.5.5：重启自检倒计时（秒）与重试轮次（首次 1 / 自动重试 2）
   const [restartLeft, setRestartLeft] = React.useState(0);
@@ -2266,11 +2275,13 @@ function UpdaterCard(props) {
               setApplyPhase('idle');
               return;
             }
+pullDiagTail();
             setDiagLog(lastDiagRef.current || null);
             setApplyErr(t('updApplyExecutorDown'));
             setApplyStatus(null);
             setApplyPhase('idle');
           }).catch(() => {
+pullDiagTail();
             setDiagLog(lastDiagRef.current || null);
             setApplyErr(t('updApplyExecutorDown'));
             setApplyStatus(null);
@@ -2375,6 +2386,7 @@ function UpdaterCard(props) {
       setApplyStatus(t('updApplying'));
       pollExecutorStatus(applyPort);
     }).catch(() => {
+pullDiagTail();
       setDiagLog(lastDiagRef.current || null);
             setApplyErr(t('updApplyExecutorDown'));
       setApplyPhase('idle');
@@ -2412,8 +2424,9 @@ function UpdaterCard(props) {
       else stat = t('updRsPreparing');
       setApplyStatus(stat + '（' + elapsed + 's）');
       if (Date.now() - startedAt > 90000) {
+pullDiagTail();
         setDiagLog(lastDiagRef.current || null);
-            setApplyErr(t('updApplyExecutorDown'));
+        setApplyErr(t('updApplyExecutorDown'));
         setApplyStatus(null);
         setApplyPhase('idle');
         setAction(null);

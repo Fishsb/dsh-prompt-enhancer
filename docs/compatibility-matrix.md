@@ -28,6 +28,7 @@
 | `models/current` | client → host | 当前模型 | 只读 |
 | `models/resolve` | client → host | 解析模型 | 只读 |
 | `models/test` | client → host | 连通性测试 | 用户触发 |
+| `models/stats` | client → host | 模型实测统计（扫会话投影聚合 TTFT / tokens-per-second，附 base/lite 预估秒数） | 只读 |
 | `models/autochain` | client → host | 自适应链 | 只读 |
 | `template/default` | client → host | 默认模板 | 只读 |
 | `update/check` | client → host | 版本检测（local 运行时读运行环境 package.json） | 只读 |
@@ -44,6 +45,18 @@
 | `update/restartNeeded` | client → host | 检测未重启 | 只读 |
 | `config/get` | client → host | 读取磁盘配置（$DSH_HOME/dsh-prompt-enhancer.config.json；DSH Desktop 动态端口配置恢复） | 只读 |
 | `config/set` | client → host | 写入磁盘配置（原子写 tmp+rename，≤1MB） | 用户触发 |
+| `voice/modelList` | client → host | 本地模型清单（含已下载状态） | 只读 |
+| `voice/modelDownload` | client → host | 下载本地模型（读配置 `download.proxy` 走显式代理；多源切换 + 断点续传） | 用户触发 |
+| `voice/modelProgress` | client → host | 模型下载进度 | 只读 |
+| `voice/modelApply` | client → host | 切换当前本地模型（重启 worker 加载） | 用户触发 |
+| `voice/modelOpenDir` | client → host | 打开模型目录 | 用户触发 |
+| `voice/modelDelete` | client → host | 删除已下载模型 | 用户触发 |
+| `voice/deployRuntime` | client → host | 本地引擎运行时一键部署（复制 worker + 安装 sherpa-onnx，异步） | 用户触发 |
+| `voice/deployStatus` | client → host | 部署状态轮询 | 只读 |
+| `voice/status` | client → host | 语音引擎 / 规整就绪状态（local 字段实时探测 worker） | 只读 |
+| `voice/transcribe` | client → host | 音频（data URL）→ 云端/本地识别 → 可选规整，返回 `{text,raw,refined}`；apiKey 不进 RPC 请求 | 用户触发 |
+
+> 注：`models/*` / `plugins/*` / `logs/*` / `template/*` / `update/check`·`update/pull`·`update/envcheck` / `enhance*` / `cancel` 共 18 条注册于 `plugin-host.js`（经 `lib/index.cjs` 桥接）；`config/*` / `voice/*` / `update/executorEnsure`·`update/restartNeeded`·`update/makeShortcut`·`update/portRestart` 共 16 条直接注册于 `lib/index.cjs`。两侧同挂 `/dsh-prompt-enhancer/rpc`，合计 **34** 条（2026-09-12 以两文件 `harness.handle(` 实测全集逐条对照）。
 
 > 注：`update/executorEnsure` / `update/restartNeeded` 在 host RPC 清单中保留（部分版本由 client 直连执行器 3081），见 executor RPC。
 
@@ -101,7 +114,8 @@
 |---|---|---|---|
 | ≤ 2.8.3 | 隐式 | 0.1.5 / 0.1.6 | 无显式协议版本 |
 | 3.0.0（重构目标） | `protocolVersion: 1` | `protocolVersion: 1` | 显式协商 |
-| 3.2.x（当前） | `protocolVersion: 1` | 0.1.12+（内容哈希重建） | update/portRestart 独立化（服务模式 schtasks / 默认模式脚本）；执行器专注一键更新/watchdog |
+| 3.2.x | `protocolVersion: 1` | 0.1.12+（内容哈希重建） | update/portRestart 独立化（服务模式 schtasks / 默认模式脚本）；执行器专注一键更新/watchdog |
+| 3.3.x（当前） | `protocolVersion: 1` | 0.1.12+（内容哈希重建） | v3.3.3 起执行器副本同步 `undici` 依赖（缺失时代理能力降级为直连，进程不崩）；`update/serviceInstall` 已移除（不再提供 nssm 服务化安装入口） |
 
 兼容策略：
 
@@ -109,6 +123,17 @@
 - executor 版本由 `EXECUTOR_VERSION` + **内容哈希**（.executor-hash）管理，`executorEnsure` 负责对齐（代码变自动重建，不依赖手动 bump）。
 - 旧 client + 新 host：优先兼容层；无法兼容时提示刷新/升级。
 - 版本检测：本地版本**运行时读运行环境 package.json**（非构建硬编码），发版后产物与版本号天然一致。
+
+### 4.1 客户端依赖边界
+
+| 依赖 | 声明处 | 版本边界 | 不满足时行为 |
+|---|---|---|---|
+| `@deepseek-ai/dsh-client-runtime` | `package.json` `peerDependencies`（与 `dsh.client.inject` 同名列） | `^0.1.0-rc.6` | 宿主缺失 → `dsh.client.inject` 不满足，client 半部不注入（✨/🎤/设置页 UI 均不出现） |
+| `@deepseek-ai/dsh-client-locale` | `package.json` `peerDependencies`（与 `dsh.client.inject` 同名列） | `^0.1.0-rc.6` | 同上（同时是 i18n 取词源） |
+| `@deepseek-ai/dsh-client-ui-renderer` | **不在** `peerDependencies`，由宿主自带 | 会话级槽位条目契约自 `0.1.2-rc.1` 起 | 更早渲染器只提供 `props.session` / `props.input` 形态 → 插件走旧形态回退兼容；两种形态都无 → ✨/🎤 不渲染 |
+| 客户端 `inputActions`（草稿插入能力） | 宿主 client 注入（能力判定，无版本号） | — | 无 `setDraft` → 识别结果追加到草稿末尾；完全不注入 → 🎤 禁用并提示 |
+
+说明：`package.json` `dependencies` 实测仅 `undici`（执行器副本由 `ensureExternalExecutor` 同步 `node_modules/undici`）；host 半部与执行器不声明 peerDependency。上表由 `package.json` `peerDependencies` 与 README「输入框工具行（✨/🎤）客户端契约」段落实读得出，改 peerDependency 或槽位契约时须同步本节。
 
 ---
 

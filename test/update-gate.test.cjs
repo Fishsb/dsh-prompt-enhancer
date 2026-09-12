@@ -477,3 +477,134 @@ test('UGATE-28 client 接线断言：diagLog 状态/缓存作用域 ref/轮询�
   assert.ok(/updDiagTitle: '[^']*疑似根因/.test(i18n), 'ZH 文案缺失');
   assert.ok(/updDiagTitle: '[^']*root cause/.test(i18n), 'EN 文案缺失');
 });
+
+/* ---------------- ⑧ 2026-09-12 审查修复：D3 尾部降噪+根因优先 / D4 脱敏漏网 / D5 陈旧 diagLog ---------------- */
+
+test('UGATE-29 redactDiagLine 补漏：JWT/Basic/键值凭据/7 字符 sk- 逐条脱敏，且原有三类与不误伤用例不变', () => {
+  // 新增漏网形态（D4 实测确认原样输出）
+  assert.equal(updater.redactDiagLine('payload eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0'),
+    'payload ***', '裸 JWT 必须脱敏');
+  assert.equal(updater.redactDiagLine('Authorization: Basic dXNlcjpwYXNzd29yZA=='),
+    'Authorization: Basic ***', 'Basic 凭据必须脱敏');
+  assert.equal(updater.redactDiagLine('apiKey=AIzaSyD-1234567890abcdefghij'), 'apiKey=***', '驼峰 apiKey 必须脱敏');
+  assert.equal(updater.redactDiagLine('password=hunter2secret'), 'password=***', 'password= 必须脱敏');
+  assert.equal(updater.redactDiagLine('api sk-abcdefg'), 'api sk-***', '7 字符 sk- 必须脱敏（门槛 {8,} → {6,}）');
+  assert.equal(updater.redactDiagLine('refresh_token: abcdefghijklmnop'), 'refresh_token: ***');
+  assert.equal(updater.redactDiagLine('Passwd: hunter2secret'), 'Passwd: ***', '大小写不敏感');
+  // 已知正常（不得改坏）
+  assert.equal(updater.redactDiagLine('Authorization: BEARER xxx'), 'Authorization: BEARER ***');
+  assert.equal(updater.redactDiagLine('?TOKEN=SECRET'), '?TOKEN=***');
+  assert.equal(updater.redactDiagLine('authorization: bEaReR zzz'), 'authorization: bEaReR ***');
+  assert.equal(updater.redactDiagLine('X-Api-Key: sk-live-abcdefghijklmnop'), 'X-Api-Key: ***');
+  assert.equal(updater.redactDiagLine('OPENAI key sk-proj-abcdefghijklmnop'), 'OPENAI key sk-***');
+  // UGATE-27 断言的精确输出必须保持
+  assert.equal(updater.redactDiagLine('GET /?token=abc123xyz&x=1 200'), 'GET /?token=***&x=1 200');
+  assert.equal(updater.redactDiagLine('JsonSchemaError: unsupported JSON schema'), 'JsonSchemaError: unsupported JSON schema');
+  // 不误伤：普通文本不得被「secret/at」等词误脱敏
+  assert.equal(updater.redactDiagLine('no secret here at all'), 'no secret here at all');
+});
+
+/* 尾部筛选隔离探针：临时把 sys.EXECUTOR_ROOT 指到临时目录 + 不存在的服务名（跳过注册表路径），
+   绝不触碰真实日志/服务（红线②）。 */
+function withFakeErrLog(content, fn) {
+  const savedRoot = sys.EXECUTOR_ROOT;
+  const dir = tmpRoot();
+  fs.writeFileSync(path.join(dir, 'port-restart.err.log'), content, 'utf8');
+  sys.EXECUTOR_ROOT = dir;
+  try { return fn(dir); } finally { sys.EXECUTOR_ROOT = savedRoot; }
+}
+
+test('UGATE-30 dshErrLogTail 降噪+根因优先：噪声尾不再挤掉真根因；全噪声尾仍回退非空', () => {
+  const L = '\r\n';
+  // ① 噪声 + Error：真机形态——Error 在前，其后是启动警告（旧版 slice(-8) 全是噪声）
+  const noiseBlock = [
+    '(node:22300) ExperimentalWarning: SQLite is an experimental feature and might change at any time',
+    '(Use `node --trace-warnings ...` to show where the warning was created)',
+  ];
+  const withError = [
+    'Node.js v22.22.0',
+    'throw new Error(`${binName}: cannot resolve profile bundle ${JSON.stringify(packageName)}`)',
+    '^',
+    'Error: dsh: cannot resolve profile bundle "dsh-web-search-pro" from the dsh installation',
+    '    at resolveBundleDir (file:///C:/x/dsh-app-boot/lib/index.js:523:8)',
+    '    at loadProfile (file:///C:/x/dsh-app-boot/lib/index.js:546:117)',
+  ].concat(noiseBlock, noiseBlock, noiseBlock).join(L);
+  const r1 = withFakeErrLog(withError, () => updater.dshErrLogTail('definitely-no-such-svc-d3a'));
+  assert.ok(r1.includes('Error: dsh: cannot resolve profile bundle'), '必须看见真根因（旧版被噪声挤出窗口）\n实际：' + r1);
+  assert.ok(!r1.includes('ExperimentalWarning'), '噪声行不得回传');
+  assert.ok(!r1.includes('--trace-warnings'), 'trace-warnings 提示行不得回传');
+  assert.ok(r1.split('\n').length <= 8, '仍受 maxLines 约束，实际 ' + r1.split('\n').length);
+  // 根因优先但不得吃掉更宽窗口内的较早根因（回看池内最后一条根因行）
+  const withOldError = [
+    'Error: OLD-NOISE-BLOCK from a previous boot',
+    '    at oldFrame (file:///C:/old.js:1:1)',
+  ].concat(noiseBlock, noiseBlock, noiseBlock, noiseBlock, noiseBlock, noiseBlock, noiseBlock).join(L);
+  const r2 = withFakeErrLog(withOldError, () => updater.dshErrLogTail('definitely-no-such-svc-d3b'));
+  assert.ok(r2.includes('Error: OLD-NOISE-BLOCK'), '噪声尾后面的较早 Error 仍在 8KB 读区内，应被找回\n实际：' + r2);
+  assert.ok(!r2.includes('ExperimentalWarning'));
+  // ② 全噪声无 Error：必须回退原始尾部（非空，宁多勿漏）
+  const allNoise = [].concat(noiseBlock, noiseBlock, noiseBlock, noiseBlock).join(L);
+  const r3 = withFakeErrLog(allNoise, () => updater.dshErrLogTail('definitely-no-such-svc-d3c'));
+  assert.notEqual(r3, '', '全噪声也必须返回非空尾部（绝不因筛选返回空串）');
+  assert.ok(r3.includes('ExperimentalWarning'), '回退路径就是原始尾部（保留噪声原文）');
+  assert.equal(r3.split('\n').length, 8, '回退时仍按 maxLines 取尾');
+  // ③ 无根因（纯噪声外还有普通行）：保持原始尾部语义，不因猜测改写
+  const plain = ['plain-a', 'plain-b', 'plain-c'].concat(noiseBlock, noiseBlock).join(L);
+  const r4 = withFakeErrLog(plain, () => updater.dshErrLogTail('definitely-no-such-svc-d3d'));
+  assert.ok(r4.includes('plain-a') && r4.includes('plain-b') && r4.includes('plain-c'), '普通行应原样保留');
+  // ④ maxLines 语义不变：显式 2 行
+  const r5 = withFakeErrLog(withError, () => updater.dshErrLogTail('definitely-no-such-svc-d3e', 2));
+  assert.ok(r5.split('\n').length <= 2, 'maxLines=2 时不得超过 2 行');
+  assert.ok(r5.includes('Error:'), 'maxLines 收窄后仍以根因行起头');
+});
+
+test('UGATE-31 D5 陈旧 diagLog：第二轮 restarting 起点清空上一轮根因（restartService 实测 + 入口接线断言）', async () => {
+  // ① restartService 单元路径：清空发生在同步段（首个 await 之前），故调用后立即断言
+  const svc = 'dsh-ugate-fake-svc'; // 不存在的服务名 → 绝不触碰真实 dsh-web/进程索引
+  updater.state.diagLog = '上一轮失败根因（陈旧）';
+  await updater.restartService(svc, { adminOverride: false });
+  assert.equal(updater.state.diagLog, undefined, '新一轮起点必须清空陈旧 diagLog');
+  assert.equal(updater.state.phase, 'failed', '假服务名走进程级降级 → 终态 failed（无副作用）');
+  // 失败轮重新写入 → 再开新一轮又被清空
+  updater.state.diagLog = 'second-round-stale';
+  await updater.restartService(svc, { adminOverride: false });
+  assert.equal(updater.state.diagLog, undefined, '第二次重启同样清空（不是只清一次）');
+  updater.state.phase = 'idle';
+  updater.state.message = '';
+  updater.state.busy = false;
+  updater.state.applying = false;
+  // ② 入口清理点静态锚定：status handler 序列化的是同一 state 对象——HTTP restart 入口与
+  //    restartService 必须同时清空 diagLog（两处硬编码，缺一即复发陈旧回吐）
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'updater-host.cjs'), 'utf8');
+  const hits = src.match(/state\.diagLog = undefined;/g) || [];
+  assert.equal(hits.length, 2, 'HTTP 入口与 restartService 两处起点都应清空 diagLog，实际 ' + hits.length);
+  // 清空必须发生在「写入点（dshErrLogTail）」之前的第一时间：写入点仍只有失败终态一处
+  assert.equal((src.match(/state\.diagLog = dshErrLogTail\(svc\);/g) || []).length, 1, '失败写入点应保持唯一');
+});
+
+test('UGATE-32 killConflictingHolders 留痕：击杀动作真写 web-port-recovery.log，失败静默不阻断', async () => {
+  const dir = tmpRoot();
+  const savedRoot = sys.EXECUTOR_ROOT;
+  const io = { out: () => {} };
+  const traceFile = path.join(dir, 'web-port-recovery.log');
+  sys.EXECUTOR_ROOT = dir;
+  try {
+    // 非受保护镜像 + 注入 killImpl → 不触真实进程，只验证留痕
+    const r = await updater.killConflictingHolders(io, { holderPidOverride: 424242, imageOverride: 'notepad.exe', killImpl: async () => {} });
+    assert.deepEqual({ killed: r.killed, pid: r.pid, image: r.image }, { killed: true, pid: 424242, image: 'notepad.exe' });
+    assert.ok(fs.existsSync(traceFile), '应留痕 web-port-recovery.log（同区既有留痕落点）');
+    const text = fs.readFileSync(traceFile, 'utf8');
+    assert.match(text, /kill:424242:notepad\.exe/, '留痕需含动作与 pid/image');
+    assert.match(text, /^\[\d{4}-\d{2}-\d{2}T[\d:.]+Z\] /m, '时间戳格式与同区留痕一致');
+    // 受保护镜像 → 不击杀也不留痕（保持原语义）
+    const r2 = await updater.killConflictingHolders(io, { holderPidOverride: 4, imageOverride: 'svchost.exe', killImpl: async () => {} });
+    assert.equal(r2.reason, 'protected');
+    assert.equal(fs.readFileSync(traceFile, 'utf8'), text, '受保护进程不得新增留痕');
+    // 留痕失败静默：EXECUTOR_ROOT 指向不存在的深层路径 → 不抛错、照常返回击杀结论
+    sys.EXECUTOR_ROOT = path.join(dir, 'no-such-dir', 'deeper');
+    const r3 = await updater.killConflictingHolders(io, { holderPidOverride: 424243, imageOverride: 'notepad.exe', killImpl: async () => {} });
+    assert.equal(r3.killed, true, '留痕失败绝不影响击杀主链');
+  } finally {
+    sys.EXECUTOR_ROOT = savedRoot;
+  }
+});

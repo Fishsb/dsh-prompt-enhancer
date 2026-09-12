@@ -40,16 +40,18 @@ DeepSeek Harness (DSH) 插件。**两大核心能力**：
 ## 🚀 安装
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.3.3
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#main
 ```
 
 安装后重启 DSH（`dsh web`），输入框工具行出现 ✨ 按钮即安装成功。
 
+> ⚠️ **版本说明**：最新 tag `v3.3.3`（2026-09-01）**早于** ✨ 官方槽位契约修复（Issue #8，commit `0197ae7`，尚未打 tag）——装 `#v3.3.3` 时 ✨ 按钮不会渲染（仅 🎤 可用）。故上面的命令装 `#main`；下一次发布打 tag 后把 `#main` 换成对应 tag 即可。
+>
 > 需本机已装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 且 `pnpm` 在 PATH 中。
 >
-> **客户端兼容性（语音识别）**：🎤 语音输入依赖客户端注入 `inputActions.setDraft`（官方 web client 已满足）；第三方客户端若实现同一契约即可加载，能力集不同时语音输入自动**降级**（无插入能力 → 识别结果追加到草稿末尾；完全不注入 → 🎤 禁用并提示）。**本地离线引擎为「框架 + 可选下载」模式**：插件安装**不携带/不默认下载模型**；设置 → 模型配置 → 💬 语音识别 → 引擎选「本地」→ 「本地模型」区点 **下载模型**（SenseVoice 228MB，带进度显示），下载完成自动生效。详见 [docs/map/flow/voice-input.md](docs/map/flow/voice-input.md)。
+> **客户端兼容性（语音识别）**：🎤 语音输入依赖客户端注入 `inputActions.setDraft`（官方 web client 已满足）；第三方客户端若实现同一契约即可加载，能力集不同时语音输入自动**降级**（无插入能力 → 识别结果追加到草稿末尾；完全不注入 → 🎤 禁用并提示）。**本地离线引擎为「框架 + 可选下载」模式**：插件安装**不携带/不默认下载模型**；设置 → 模型配置 → 💬 语音识别 → 引擎选「本地」→ 「本地模型」区点 **下载模型**（SenseVoice 228MB，带进度显示），下载完成自动生效。详见 [兼容性矩阵](docs/compatibility-matrix.md)（客户端依赖边界与槽位契约）。
 >
-> **输入框工具行（✨/🎤）客户端契约**：输入框右侧按钮与错误提示挂载在会话级槽位 `conversation.input.right` / `conversation.input.dock`。官方渲染器（`@deepseek-ai/dsh-client-ui-renderer` ≥ 0.1.2-rc.1，web 与 DSH Desktop 同源）向槽位条目注入 **`sessionId` prop + `useSession`/`useInput` 选择器 hook + `inputActions` prop**（不提供 `props.session` / `props.input`）；插件 v3.4.x 起按该契约取值，并兼容旧宿主（提供 `props.session` / `props.input` 形态）。第三方客户端渲染器若以其它方式提供会话/输入状态，需实现同一契约（`sessionId` + 上述 hooks 与 actions），✨/🎤 方可显示。
+> **输入框工具行（✨/🎤）客户端契约**：输入框右侧按钮与错误提示挂载在会话级槽位 `conversation.input.right` / `conversation.input.dock`。官方渲染器（`@deepseek-ai/dsh-client-ui-renderer` ≥ 0.1.2-rc.1，web 与 DSH Desktop 同源）向槽位条目注入 **`sessionId` prop + `useSession`/`useInput` 选择器 hook + `inputActions` prop**（不提供 `props.session` / `props.input`）；插件自该修复（Issue #8，commit `0197ae7`，含于 `#main`，尚未打 tag）起按该契约取值，并兼容旧宿主（提供 `props.session` / `props.input` 形态）。第三方客户端渲染器若以其它方式提供会话/输入状态，需实现同一契约（`sessionId` + 上述 hooks 与 actions），✨/🎤 方可显示。
 
 
 更新 / 卸载：
@@ -66,7 +68,7 @@ dsh plugin --profile web remove dsh-prompt-enhancer
 DSH 服务异常、网页打不开时，仍可一键恢复——不依赖浏览器、不依赖 3080 端口。插件设置「端口重启」确认态点击「**桌面**」生成带鲸鱼图标的「重启DSH」快捷方式，双击即重启并显示进度；不生成快捷方式也能用，任意命令窗口直接调用：
 
 ```sh
-node "<DSH_HOME>\AppData\Local\dsh-prompt-enhancer\executor\0.1.11\lib\updater-host.cjs" --cli restart --service dsh-web --profile web
+node "<DSH_HOME>\AppData\Local\dsh-prompt-enhancer\executor\0.1.12\lib\updater-host.cjs" --cli restart --service dsh-web --profile web
 ```
 
 ## 📦 库说明

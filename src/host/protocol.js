@@ -21,8 +21,9 @@ const RPC_METHODS = [
   'template/default',
   // update
   'update/check',
-  'update/pull',
+  'update/pull', // 无 in-repo 调用方（旧更新流程遗留；实际更新走执行器 apply）——保留兼容，勿随意删
   'update/envcheck',
+  'update/diagTail',
   'update/executorEnsure',
   'update/restartNeeded',
   // diagnostics
