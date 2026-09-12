@@ -34,7 +34,6 @@
 | `update/pull` | client → host | 拉取清单文件 | 用户触发 |
 | `update/envcheck` | client → host | 环境检测 | 只读 |
 | `update/portRestart` | client → host | 端口重启（服务模式 schtasks / 默认模式 detached 脚本） | 用户触发 |
-| `update/serviceInstall` | client → host | nssm 服务化安装 | 管理 |
 | `update/makeShortcut` | client → host | 创建桌面快捷方式（RunAs lnk + CLI 脚本） | 用户触发 |
 | `logs/last` | client → host | 诊断日志 | 只读 |
 | `plugins/inventory` | client → host | 插件清单 | 只读 |

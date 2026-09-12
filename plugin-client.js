@@ -702,14 +702,9 @@ const ZH = {
   updApplyRestartFailed: '5 次重启均未恢复——请手动执行 net start dsh-web 后刷新',
   // v3.1.6（用户反馈·文案误导）：bundle 安装但执行器未拉起/中途不可达时，旧文案
   // 「请确认插件为 bundle 安装」会让用户误以为是安装问题——改为准确提示自动重试结果
+  updDiagTitle: 'dsh-web 错误日志尾部（疑似根因，已脱敏）',
   updApplyExecutorDown: '端口重启超时：DSH 服务未在 90 秒内恢复，请刷新页面重试；若仍失败请重启 dsh-web 服务',
 
-  // v3.2.1（用户需求·无服务化引导）：端口重启前检测无 nssm 服务 → 弹窗一键服务化
-  svcInstallBody: '检测到 DSH 未以系统服务运行（无 nssm）。安装 nssm 服务化后，端口重启走系统服务路径，更稳定并支持开机自启。是否现在安装？',
-  svcInstallConfirm: '确认安装',
-  svcInstallBusy: '正在安装服务化（需要一次管理员确认）…',
-  svcInstallDone: '✓ 服务化安装完成 —— 请重启电脑，让 nssm 以系统服务接管端口',
-  svcInstallFail: '✗ 服务化安装失败',
 
   // v3.2.1（独立化·端口重启）：重启中/完成文案
   updPortRestarting: '正在重启端口…',
@@ -1046,14 +1041,9 @@ const EN = {
   updRestartNotListening: 'Port not ready, about to retry',
   updApplyRetry: 'Attempt {n} in progress (service starting, up to 20s)…',
   updApplyRestartFailed: 'Still down after 5 attempts — run `net start dsh-web` manually, then refresh',
+  updDiagTitle: 'dsh-web error log tail (likely root cause, redacted)',
   updApplyExecutorDown: 'Port restart timed out: the DSH service did not recover within 90s. Refresh the page and retry, or restart the dsh-web service',
 
-  // v3.2.1 (no-service onboarding): before port-restart, detect missing nssm service and offer one-click install
-  svcInstallBody: 'DSH is not running as a system service (no nssm). Installing the nssm service routes port-restart through the system-service path — more stable and auto-starts on boot. Install now?',
-  svcInstallConfirm: 'Install',
-  svcInstallBusy: 'Installing service (one admin confirmation required)…',
-  svcInstallDone: '✓ Service installed — please restart the computer and nssm will take over the port as a system service',
-  svcInstallFail: '✗ Install failed',
 
   // v3.2.1 (independent port-restart): in-progress / done texts
   updPortRestarting: 'Restarting port…',
@@ -2003,17 +1993,17 @@ function UpdaterCard(props) {
   const [applyPhase, setApplyPhase] = React.useState('idle');
   const [action, setAction] = React.useState(null);
   const [applyErr, setApplyErr] = React.useState(null);
+  const [diagLog, setDiagLog] = React.useState(null);
+  // 2026-09-12（审查修复·D2）：diagLog 缓存必须放组件作用域——runPullApply 的 .catch 与
+  // pollRestored 的超时分支都要读它，原 `let lastDiag` 声明在 pollExecutorStatus 内属越作用域
+  // 引用（ReferenceError → 失败文案不显示、按钮卡死）。
+  const lastDiagRef = React.useRef('');
   const [applyStatus, setApplyStatus] = React.useState(null);
   // v2.5.5：重启自检倒计时（秒）与重试轮次（首次 1 / 自动重试 2）
   const [restartLeft, setRestartLeft] = React.useState(0);
   const [restartRound, setRestartRound] = React.useState(1);
   // v2.7.0：更新未重启提醒（null=无提醒；命中显示横幅 + 重启命令）
   const [restartNotice, setRestartNotice] = React.useState(null);
-  // v3.2.1（用户需求·无服务化引导）：端口重启完成态检测无 nssm 服务 → 行内引导（非弹窗），
-  // 「✓ 重启成功」下方换一行：引导文案 + 最右「确认安装」按钮（与刷新页面按钮对齐）
-  const [svcNeedInstall, setSvcNeedInstall] = React.useState(false);
-  const [svcInstalling, setSvcInstalling] = React.useState(false);
-  const [svcInstallMsg, setSvcInstallMsg] = React.useState('');
   // 2026-08-16（方案「设置界面样式与交互对齐官方」）：repo/目录输入 label htmlFor 关联（稳定 id）
   const updIds = React.useState(() => ({ repo: dshEnhId('dsh-enh-upd-repo'), dir: dshEnhId('dsh-enh-upd-dir') }))[0];
 
@@ -2028,18 +2018,6 @@ function UpdaterCard(props) {
       if (!disposed && r && r.needed === true) setRestartNotice(r);
     }).catch(() => { /* 旧 host/动态形态无此 RPC → 静默 */ });
     return () => { disposed = true; };
-  }, []);
-
-  // v3.2.1（无服务化引导·审查加固）+ v3.2.1-w（键对齐修复）：挂载时检测 nssm 服务——无服务则显示行内引导
-  // （不依赖端口重启流程的 applyPhase，刷新页面后依然可见；安装成功自动隐藏）
-  React.useEffect(() => {
-    host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
-      const er = envRes && typeof envRes === 'object' ? envRes : {};
-      const its = (er.ok === true && Array.isArray(er.items)) ? er.items : [];
-      const pm = (its.find((i) => i.key === 'port-mode') || {}).detail;
-      setSvcNeedInstall(pm === 'default' || pm === 'no-listener');
-    }).catch(() => { /* host 未就绪/无此 RPC → 静默 */ });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const repo = updaterRepoOf({ updater: { repo: repoInput, targetDir: '' } });
@@ -2174,18 +2152,12 @@ function UpdaterCard(props) {
       executor.call('status', {}, port).then((st) => {
         const s = st && typeof st === 'object' ? st : {};
         failCount = 0;
+        if (s && typeof s.diagLog === 'string' && s.diagLog.trim()) lastDiagRef.current = s.diagLog.trim();
         const elapsed = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
         if (s.phase === 'healthy') {
           setApplyErr(null);
           // v3.1.x（用户需求）：服务已重启完成 → 清除「未重启」提醒横幅
           setRestartNotice(null);
-          // v3.2.1（用户需求·无服务化引导）：重启完成 → 检测 nssm 服务，缺失则行内引导一键服务化
-          host.call('update/envcheck', { serviceName, executorPort }).then((envRes) => {
-            const er = envRes && typeof envRes === 'object' ? envRes : {};
-            const its = (er.ok === true && Array.isArray(er.items)) ? er.items : [];
-            const pm = (its.find((i) => i.key === 'port-mode') || {}).detail;
-            setSvcNeedInstall(pm === 'default' || pm === 'no-listener');
-          }).catch(() => setSvcNeedInstall(false));
           if (/rolled back/i.test(s.message || '')) {
             setApplyStatus(t('updApplyRolledBack'));
             setApplyPhase('rolledback');
@@ -2196,6 +2168,8 @@ function UpdaterCard(props) {
           return;
         }
         if (s.phase === 'failed') {
+          const dl = (s && typeof s.diagLog === 'string' && s.diagLog.trim()) ? s.diagLog.trim() : lastDiagRef.current;
+          setDiagLog(dl || null);
           setApplyErr(s.message || t('updApplyRestartFailed'));
           setApplyStatus(null);
           setApplyPhase('idle');
@@ -2292,10 +2266,12 @@ function UpdaterCard(props) {
               setApplyPhase('idle');
               return;
             }
+            setDiagLog(lastDiagRef.current || null);
             setApplyErr(t('updApplyExecutorDown'));
             setApplyStatus(null);
             setApplyPhase('idle');
           }).catch(() => {
+            setDiagLog(lastDiagRef.current || null);
             setApplyErr(t('updApplyExecutorDown'));
             setApplyStatus(null);
             setApplyPhase('idle');
@@ -2323,19 +2299,6 @@ function UpdaterCard(props) {
     setAction(which);
     setApplyPhase('confirm');
   };
-  // v3.2.1（用户需求·无服务化引导·非弹窗）：重启完成态点「确认安装」→ host 一键服务化（下载/探测 nssm + 提权脚本 + UAC 一次）
-  const doServiceInstall = () => {
-    if (svcInstalling) return;
-    setSvcInstalling(true);
-    setSvcInstallMsg('');
-    host.call('update/serviceInstall', { serviceName, profile }).then((r) => {
-      const rr = r && typeof r === 'object' ? r : {};
-      setSvcInstalling(false);
-      if (rr.ok === true) { setSvcNeedInstall(false); setSvcInstallMsg(t('svcInstallDone')); }
-      else { setSvcInstallMsg(t('svcInstallFail') + '：' + (rr.message || rr.code || '')); }
-    }).catch(() => { setSvcInstalling(false); setSvcInstallMsg(t('svcInstallFail') + '：host unreachable'); });
-  };
-  // v3.2.1（非弹窗）：引导行内联，无需倒计时 effect
   const cancelApply = () => {
     if (applyPhase === 'confirm') { setApplyPhase('idle'); setAction(null); }
   };
@@ -2412,7 +2375,8 @@ function UpdaterCard(props) {
       setApplyStatus(t('updApplying'));
       pollExecutorStatus(applyPort);
     }).catch(() => {
-      setApplyErr(t('updApplyExecutorDown'));
+      setDiagLog(lastDiagRef.current || null);
+            setApplyErr(t('updApplyExecutorDown'));
       setApplyPhase('idle');
       setAction(null);
     });
@@ -2448,7 +2412,8 @@ function UpdaterCard(props) {
       else stat = t('updRsPreparing');
       setApplyStatus(stat + '（' + elapsed + 's）');
       if (Date.now() - startedAt > 90000) {
-        setApplyErr(t('updApplyExecutorDown'));
+        setDiagLog(lastDiagRef.current || null);
+            setApplyErr(t('updApplyExecutorDown'));
         setApplyStatus(null);
         setApplyPhase('idle');
         setAction(null);
@@ -2467,13 +2432,6 @@ function UpdaterCard(props) {
           if ((sawDown || elapsed >= 12) && !doneFlag) { // v3.2.1-t（A）+v3.2.1-u2：曾断开→恢复 或 超任务窗口(12s)后稳定恢复 判完成
             doneFlag = true;
             setApplyErr(null);
-            // v3.2.1（用户需求·无服务化引导）：重启完成 → 检测 nssm 服务，缺失则行内引导一键服务化
-            host.call('update/envcheck', { serviceName, executorPort: executorPort() }).then((envRes) => {
-              const er = envRes && typeof envRes === 'object' ? envRes : {};
-              const its = (er.ok === true && Array.isArray(er.items)) ? er.items : [];
-              const pm = (its.find((i) => i.key === 'port-mode') || {}).detail;
-              setSvcNeedInstall(pm === 'default' || pm === 'no-listener');
-            }).catch(() => setSvcNeedInstall(false));
             setApplyStatus(t('updPortRestartDone') + '（' + elapsed + 's）');
             // v3.3.x（2026-08-24 实测·市场装插件→重启成功但页崩）：完成后嗅探首页是否带「插件加载失败」横幅，
             // 有则显式警告而非纯 ✓——机械成功≠可用
@@ -2692,24 +2650,13 @@ function UpdaterCard(props) {
     applyErr
       ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, applyErr)
       : null,
-    error ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, error) : null,
-    // v3.2.1（用户需求·无服务化引导·非弹窗）：重启完成态换一行引导——文案 + 最右「确认安装」
-    // 按钮（与上方「刷新页面」按钮右对齐）；安装完成/失败显示结果行
-    svcNeedInstall || svcInstallMsg !== ''
-      ? React.createElement('div', { className: 'dsh-plg-row dsh-plg-svc-hint' },
-          React.createElement('span', { className: 'dsh-plg-muted dsh-plg-svc-hint-text' },
-            svcInstallMsg !== '' ? svcInstallMsg : t('svcInstallBody'),
-          ),
-          svcNeedInstall && svcInstallMsg === ''
-            ? React.createElement('button', {
-                type: 'button',
-                className: 'dsh-plg-btn dsh-plg-btn-primary',
-                disabled: svcInstalling,
-                onClick: doServiceInstall,
-              }, svcInstalling ? t('svcInstallBusy') : t('svcInstallConfirm'))
-            : null,
-        )
+    diagLog
+      ? React.createElement('pre', {
+          className: 'dsh-plg-diag-log',
+          style: { margin: '4px 0 0', padding: '8px', maxHeight: '180px', overflow: 'auto', fontSize: '12px', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: 'rgba(127,127,127,0.12)', borderRadius: '6px', textAlign: 'left' },
+        }, t('updDiagTitle') + '\n' + diagLog)
       : null,
+    error ? React.createElement('div', { className: 'dsh-plg-error', role: 'status' }, error) : null,
   );
 }
 function MarqueeOption(props) {
@@ -5133,11 +5080,6 @@ const CSS = [
   '.dsh-plg-modal-title{font-size:15px;line-height:21px;font-weight:600;margin:0 0 10px;color:var(--dsw-alias-label-primary)}',
   '.dsh-plg-modal-body{font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);margin:0 0 14px}',
   '.dsh-plg-modal-actions{display:flex;gap:10px;justify-content:flex-end}',
-  // v3.2.1（用户需求·行内引导）：重启完成态 nssm 服务化引导行——文案撑开、按钮最右（与刷新页面按钮对齐）
-  '.dsh-plg-svc-hint{padding:6px 0;background:var(--dsw-alias-bg-layer-2);border-radius:8px}',
-  '.dsh-plg-svc-hint-text{flex:1;min-width:0}',
-  // v3.2.1（用户反馈·按钮贴最右）：引导行按钮 margin-left:auto 兜底贴右
-  '.dsh-plg-svc-hint .dsh-plg-btn{margin-left:auto;flex:none}',
   // v3.2.5（语音识别模块）：voice UI（dsh-vi-* 前缀）
   // 2026-08-20（用户需求）：🎤 按钮样式对齐优化按钮（dsh-enh-btn）——28px 无边框胶囊、label-secondary、600 字重；
   // 状态色保留（recording/error 红色 + 淡背景，对齐 enh busy/result 风格）

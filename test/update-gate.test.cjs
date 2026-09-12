@@ -411,3 +411,69 @@ test('UGATE-26 sweepStaleExecTasks：XML 备份不可得时宁留勿删（破坏
   assert.equal(deleteCalled, false, '备份不可得绝不能删除');
   assert.deepEqual(r.cleaned, []);
 });
+
+/* ---------------- ⑦ 重启失败根因直显（2026-09-08 产品改进·diagLog 链路） ---------------- */
+
+test('UGATE-27 dshErrLogTail/redactDiagLine：脱敏三形态 + 尾部截取 + 降级矩阵', () => {
+  // redactDiagLine：URL token / Bearer / sk- 三类脱敏，普通行原样
+  assert.equal(updater.redactDiagLine('GET /?token=abc123xyz&x=1 200'), 'GET /?token=***&x=1 200');
+  assert.equal(updater.redactDiagLine('Authorization: Bearer eyJhbGciOi.x.y'), 'Authorization: Bearer ***');
+  assert.equal(updater.redactDiagLine('api key sk-abcdef1234567890qwer'), 'api key sk-***');
+  assert.equal(updater.redactDiagLine('JsonSchemaError: unsupported JSON schema'), 'JsonSchemaError: unsupported JSON schema');
+  // 降级矩阵：注册表查不到的服务名 → 回退 EXECUTOR_ROOT/port-restart.err.log
+  const fallback = path.join(sys.EXECUTOR_ROOT, 'port-restart.err.log');
+  const L = '\r\n';
+  const content = [
+    'line-1-normal',
+    'line-2 leak url http://127.0.0.1:3080/?token=SECRET123 tail',
+    'x'.repeat(400), // 超长行 → 截断到 300 + '…'
+    'line-4\0with-nul',
+    'line-5-final',
+  ].join(L);
+  fs.writeFileSync(fallback, content, 'utf8');
+  try {
+    const tail = updater.dshErrLogTail('definitely-no-such-svc-xyz');
+    assert.ok(tail.includes('line-5-final'), '应读到降级日志尾部');
+    assert.ok(!tail.includes('SECRET123'), 'URL token 必须脱敏');
+    assert.ok(tail.includes('token=***'), '脱敏占位符应存在');
+    assert.ok(!tail.includes('\0'), 'NUL 字节应被清洗');
+    assert.ok(tail.includes('line-4with-nul'), 'NUL 剥离后两侧文本保留（行内拼接）');
+    assert.ok(tail.split('\n').length <= 5);
+    assert.ok(tail.includes('…'), '超长行应截断');
+    // maxLines 语义：只要最后 2 行
+    const tail2 = updater.dshErrLogTail('definitely-no-such-svc-xyz', 2);
+    assert.equal(tail2.split('\n').length, 2);
+    assert.ok(tail2.includes('line-5-final'), '取的是最后 N 行');
+    // 同步 fallback 文件不存在 → 空串（清理后再探一次）
+  } finally {
+    fs.unlinkSync(fallback);
+  }
+  assert.equal(updater.dshErrLogTail('definitely-no-such-svc-xyz'), '', '降级日志缺失应返回空串');
+});
+
+test('UGATE-28 client 接线断言：diagLog 状态/缓存作用域 ref/轮询缓存/failed 分支/终态四点/渲染块 + i18n ZH/EN 成对', () => {
+  const cardRaw = fs.readFileSync(path.join(__dirname, '..', 'src', 'client', 'components', 'updater-card.js'), 'utf8');
+  const cm = /module\.exports = ("(?:[^"\\]|\\.)*");?\s*$/.exec(cardRaw);
+  const card = JSON.parse(cm[1]);
+  assert.ok(card.includes('const [diagLog, setDiagLog] = React.useState(null);'), '缺 diagLog state');
+  // 2026-09-12（审查修复·D2 blocker）：缓存必须放组件作用域——原 `let lastDiag = ''` 声明在
+  // pollExecutorStatus 内，而 runPullApply(.catch) 与 pollRestored(超时分支) 越作用域引用 ⇒
+  // ReferenceError → 其后的 setApplyErr/状态清理整块不执行（失败文案消失、按钮卡死）。
+  assert.ok(card.includes("const lastDiagRef = React.useRef('');"), '缺组件级 diagLog 缓存 ref');
+  const codeOnly = card.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.equal((codeOnly.match(/\blastDiag\b(?!Ref)/g) || []).length, 0, '禁止裸 lastDiag（每次渲染同一 ref，跨函数可见）');
+  assert.ok(card.includes('lastDiagRef.current = s.diagLog.trim();'), '轮询未写缓存 ref');
+  assert.ok(card.includes("typeof s.diagLog === 'string' && s.diagLog.trim()"), '轮询未缓存执行器 diagLog');
+  assert.ok(card.includes('setDiagLog(dl || null);'), 'failed 分支未接线 diagLog');
+  assert.ok(card.includes(': lastDiagRef.current;'), 'failed 分支未回退读缓存 ref');
+  assert.equal(card.split('setDiagLog(lastDiagRef.current || null);').length - 1, 4, 'updApplyExecutorDown 四处终态都应接线缓存 ref');
+  assert.ok(card.includes("t('updDiagTitle')"), '渲染块未引用 updDiagTitle');
+  // i18n：ZH/EN 成对
+  const i18nRaw = fs.readFileSync(path.join(__dirname, '..', 'src', 'client', 'i18n.js'), 'utf8');
+  const im = /module\.exports = ("(?:[^"\\]|\\.)*");?\s*$/.exec(i18nRaw);
+  const i18n = JSON.parse(im[1]);
+  const z = (i18n.match(/updDiagTitle: '([^']*)',/g) || []).length;
+  assert.equal(z, 2, 'updDiagTitle 应 ZH/EN 成对出现');
+  assert.ok(/updDiagTitle: '[^']*疑似根因/.test(i18n), 'ZH 文案缺失');
+  assert.ok(/updDiagTitle: '[^']*root cause/.test(i18n), 'EN 文案缺失');
+});
