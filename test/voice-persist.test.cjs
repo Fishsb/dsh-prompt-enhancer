@@ -2,7 +2,7 @@
 // 覆盖：① voice/* RPC schema 校验行为（lib/rpc-schema.cjs）
 //       ② src/host/rpc-schema.js（源）与 lib/rpc-schema.cjs（运行时副本）双份同步防漂移
 //       ③ lib/index.cjs 注册 voice/status·voice/transcribe（防重构删除无感）
-//       ④ plugin-client.js 产物含 voice 逻辑（构建注入防漂移）+ vendor RecordRTC 注入
+//       ④ lib/client.cjs 产物含 voice 逻辑（构建注入防漂移）+ vendor RecordRTC 注入
 //       ⑤ lib/asr.cjs sanitizeVoiceCfg 行为 + transcribe 空配置/错误路径
 //       ⑥ i18n ZH/EN voice 键平衡（31 键成对防漏）
 const { readFileSync } = require('node:fs');
@@ -66,8 +66,8 @@ test('VOICE-P06 lib/index.cjs 注册 voice/status·voice/transcribe + config/set
 });
 
 // ---- 4. client 产物注入 ----
-test('VOICE-P07 plugin-client.js 产物含 voice 逻辑 + vendor RecordRTC', () => {
-  const client = readFileSync(join(__dirname, '..', 'plugin-client.js'), 'utf8');
+test('VOICE-P07 lib/client.cjs 产物含 voice 逻辑 + vendor RecordRTC', () => {
+  const client = readFileSync(join(__dirname, '..', 'lib', 'client.cjs'), 'utf8'); // P1a：唯一 client 载体
   assert.ok(client.includes('VoiceMicButton'), '产物缺 VoiceMicButton');
   assert.ok(client.includes('VoiceSection'), '产物缺 VoiceSection');
   assert.ok(client.includes("host.call('voice/transcribe'"), '产物缺 voice/transcribe 调用');
@@ -77,7 +77,7 @@ test('VOICE-P07 plugin-client.js 产物含 voice 逻辑 + vendor RecordRTC', () 
 });
 
 test('VOICE-P08 client 产物含 voice 状态机与双暂存逻辑', () => {
-  const client = readFileSync(join(__dirname, '..', 'plugin-client.js'), 'utf8');
+  const client = readFileSync(join(__dirname, '..', 'lib', 'client.cjs'), 'utf8'); // P1a：唯一 client 载体
   assert.ok(client.includes("'voicePendingEnhance'") || client.includes('voicePendingEnhance'), '产物缺 pending 暂存文案引用');
   assert.ok(client.includes('insertVoiceText'), '产物缺 insertVoiceText');
   assert.ok(client.includes('submitting') && client.includes('adjudicating'), '产物缺发送期暂存判定');
@@ -309,7 +309,7 @@ test('VOICE-P19 hotkey 配置白名单 + 产物含快捷键/双触发逻辑', ()
   const bad = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, hotkey: { combo: 123 } });
   assert.equal(bad.hotkey.combo, '', '非法 combo 回退空');
   // 产物含快捷键/双触发逻辑
-  const client = readFileSync(join(__dirname, '..', 'plugin-client.js'), 'utf8');
+  const client = readFileSync(join(__dirname, '..', 'lib', 'client.cjs'), 'utf8'); // P1a：唯一 client 载体
   assert.ok(client.includes('VOICE_LONG_PRESS_MS'), '产物缺长按阈值常量');
   assert.ok(client.includes('parseVoiceHotkey'), '产物缺快捷键解析');
   assert.ok(client.includes('pressStart') && client.includes('pressEnd'), '产物缺按下/松开触发抽象');
@@ -381,7 +381,7 @@ test('VOICE-P23 sanitizeVoiceCfg autoEnhance 白名单（host 透传存储）', 
 });
 
 test('VOICE-P24 产物含 autoEnhance 触发链路 + i18n 键平衡（v3.2.17 +3 键 → 40）', () => {
-  const client = readFileSync(join(__dirname, '..', 'plugin-client.js'), 'utf8');
+  const client = readFileSync(join(__dirname, '..', 'lib', 'client.cjs'), 'utf8'); // P1a：唯一 client 载体
   assert.ok(client.includes('autoEnhance'), '产物缺 autoEnhance 配置字段');
   assert.ok(client.includes('voiceAutoEnhanceOn'), '产物缺自动增强开 i18n 引用');
   assert.ok(client.includes('voiceAutoEnhanceOff'), '产物缺自动增强关 i18n 引用');

@@ -2,7 +2,7 @@
 // 覆盖：① lib/rpc-schema.cjs 的 config/get·config/set 参数校验行为
 //       ② src/host/rpc-schema.js（源）与 lib/rpc-schema.cjs（运行时副本）双份同步防漂移
 //       ③ lib/index.cjs 注册 config/get·config/set（防未来重构删除无感）
-//       ④ plugin-client.js 产物含 syncConfigFromHost/hostSync（client 逻辑构建注入防漂移）
+//       ④ lib/client.cjs 产物含 syncConfigFromHost/hostSync（client 逻辑构建注入防漂移）
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const test = require('node:test');
@@ -48,8 +48,8 @@ test('CFG-P06 lib/index.cjs 注册 config/get·config/set RPC', () => {
   assert.ok(src.includes('renameSync'), '原子写（renameSync）缺失');
 });
 
-test('CFG-P07 plugin-client.js 产物含 syncConfigFromHost/hostSync（构建注入防漂移）', () => {
-  const s = readFileSync(join(__dirname, '..', 'plugin-client.js'), 'utf8');
+test('CFG-P07 lib/client.cjs 产物含 syncConfigFromHost/hostSync（构建注入防漂移）', () => {
+  const s = readFileSync(join(__dirname, '..', 'lib', 'client.cjs'), 'utf8'); // P1a：唯一 client 载体
   assert.ok(s.includes('syncConfigFromHost'), 'client 产物缺 syncConfigFromHost');
   assert.ok(s.includes('hostSync'), 'client 产物缺 hostSync 状态机');
 });

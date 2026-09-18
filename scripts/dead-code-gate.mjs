@@ -147,5 +147,33 @@ for (const line of git(diffArgs).split('\n')) {
   }
   if (!bad) pass('R2', scanned + ' 个 client chunk 无未声明标识符');
 }
+// ---- R3 产物清单 ↔ files 白名单一致（P1a 2026-09-19：幽灵声明是静默面）----
+// 背景：`package.json.files` 里的条目若磁盘不存在，`npm pack` **不报错、静默跳过**；
+// 而入口（main/exports）若不落在白名单内，安装后会缺文件却直到运行才炸。
+// 本门把这三者（白名单 / 磁盘 / 入口声明）钉在一起，任何一处不一致即 FAIL。
+{
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const files = Array.isArray(pkg.files) ? pkg.files : [];
+  const covered = (rel) => files.some((f) => rel === f || rel.startsWith(String(f).replace(/\/$/, '') + '/'));
+  let bad = 0;
+  // A. 白名单每一条必须在磁盘存在（含目录）
+  for (const f of files) {
+    if (!fs.existsSync(path.join(ROOT, f))) { fail('R3', 'files 白名单含幽灵条目（磁盘不存在，npm pack 静默跳过）: ' + f); bad++; }
+  }
+  // B. 入口（main / exports）必须存在且被白名单覆盖；package.json 由 npm 强制包含，豁免
+  const exportsVals = Object.values(pkg.exports || {}).map((v) => (typeof v === 'string' ? v : (v && v.default) || ''));
+  const entries = [pkg.main, ...exportsVals].filter((x) => typeof x === 'string' && x && x.replace(/^\.\//, '') !== 'package.json');
+  for (const e of entries) {
+    const rel = e.replace(/^\.\//, '');
+    if (!fs.existsSync(path.join(ROOT, rel))) { fail('R3', '入口声明指向不存在的文件: ' + e); bad++; continue; }
+    if (!covered(rel)) { fail('R3', '入口未被 files 白名单覆盖（安装后会缺文件）: ' + e); bad++; }
+  }
+  // C. 运行必需产物必须在位（本插件宿主/客户端双半部的真实入口）
+  for (const f of ['plugin-host.js', 'lib/index.cjs', 'lib/client.cjs']) {
+    if (!fs.existsSync(path.join(ROOT, f))) { fail('R3', '运行必需产物缺失: ' + f); bad++; }
+  }
+  if (!bad) pass('R3', files.length + ' 条白名单全部在位，' + entries.length + ' 个入口声明均被覆盖');
+}
+
 console.log(failures ? ('\n✗ 门禁未通过（' + failures + ' 处）') : '\n✅ 死代码门禁通过');
 process.exitCode = failures ? 1 : 0;

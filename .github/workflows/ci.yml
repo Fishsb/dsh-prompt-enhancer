@@ -24,7 +24,6 @@ jobs:
       - name: Syntax check
         run: |
           node --check plugin-host.js
-          node --check plugin-client.js
           node --check lib/index.cjs
           node --check lib/sys.cjs
           node --check lib/updater-host.cjs
@@ -77,4 +76,4 @@ jobs:
 
       - name: Verify generated artifacts are committed
         if: always()
-        run: git diff --exit-code -- lib/client.cjs plugin-client.js plugin-host.js
+        run: git diff --exit-code -- lib/client.cjs plugin-host.js

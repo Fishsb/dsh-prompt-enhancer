@@ -75,7 +75,8 @@ run('build-client.mjs', ['--check']);
 // 无关（sync 不改 bundles/patch），全三层见 scripts/dry-run-lib.mjs（救援流程用）。
 console.log('== 2.5/4 产物语法门（A6）==');
 {
-  const artifacts = ['plugin-host.js', 'plugin-client.js'];
+  // P1a（2026-09-19）：孤儿 plugin-client.js 已退役，不再纳入产物语法门。
+  const artifacts = ['plugin-host.js'];
   const libDir = join(root, 'lib');
   for (const f of readdirSync(libDir)) {
     if (/\.cjs$/.test(f)) artifacts.push(join(libDir, f));
@@ -112,7 +113,8 @@ for (const rt of deployTargets) {
   const snap = sys.rescueSnapshot({ profileName, runtimeDir: rt, reason: 'sync-runtime pre-deploy' });
   console.log((snap.ok ? '✓ 快照 → ' : '⚠ 快照失败（不阻断）: ') + (snap.ok ? snap.dir + '（' + snap.files + ' files）' : snap.message));
 }
-const files = ['plugin-host.js', 'plugin-client.js', 'package.json', 'README.md', 'README.en.md', 'cordis.patch.yml'];
+// P1a（2026-09-19）：孤儿 plugin-client.js 已退役，不再同步到运行环境。
+const files = ['plugin-host.js', 'package.json', 'README.md', 'README.en.md', 'cordis.patch.yml'];
 for (const rt of deployTargets) {
   console.log('--- 目标：' + rt);
   for (const f of files) {

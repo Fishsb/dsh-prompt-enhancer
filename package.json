@@ -7,7 +7,6 @@
   "files": [
     "lib",
     "plugin-host.js",
-    "plugin-client.js",
     "cordis.patch.yml",
     "README.md",
     "README.en.md"
