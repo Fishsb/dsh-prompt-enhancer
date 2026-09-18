@@ -122,13 +122,13 @@ test('UGATE-12 rpc-schema：update/install 宽松可选 profile 校验（重启 
   assert.equal(validateRpcArgs('update/install', { profile: 123 }).ok, false, 'profile 非字符串拒绝');
 });
 
-test('UGATE-13 双侧 schema 同步：src/host/rpc-schema.js 与 lib/rpc-schema.cjs 均含 update/install 规则且无 portRestart', () => {
-  for (const f of ['src/host/rpc-schema.js', 'lib/rpc-schema.cjs']) {
-    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
-    assert.ok(src.includes("'update/install'"), f + ' 缺 update/install 规则');
-    assert.ok(!src.includes('update/portRestart'), f + ' 残留已移除的重启 RPC');
-    assert.ok(src.includes("args.profile === undefined || typeof args.profile === 'string'"), f + ' 缺 profile 宽松可选校验');
-  }
+test('UGATE-13 schema 单一事实源：lib 副本含 update/install 且无 portRestart，死层副本不得复活', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'rpc-schema.cjs'), 'utf8');
+  assert.ok(src.includes("'update/install'"), 'lib/rpc-schema.cjs 缺 update/install 规则');
+  assert.ok(!src.includes('update/portRestart'), 'lib/rpc-schema.cjs 残留已移除的重启 RPC');
+  assert.ok(src.includes("args.profile === undefined || typeof args.profile === 'string'"), '缺 profile 宽松可选校验');
+  assert.ok(!fs.existsSync(path.join(__dirname, '..', 'src', 'host', 'rpc-schema.js')),
+    '死层副本 src/host/rpc-schema.js 复活了——双架构不得回归（P1b）');
 });
 
 test('UGATE-14 接线断言：host 注册 update/install 且 client 安装链调用它（重启 RPC 全链不复存在）', () => {

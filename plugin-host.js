@@ -3524,7 +3524,7 @@ return {
     // 获取执行器地址后直连）。原因：重启/重试必须脱离 dsh-web 进程（服务停 = host 死，
     // 依赖 host 的重试必然无法送达——v2.5.5 out.log 无 update/restart 日志为证）。
 
-    // ================= M2 深化：增强管道（bundle 内 Pipeline，契约同 src/host/pipeline.js）=================
+    // ================= M2 深化：增强管道（bundle 内 Pipeline，契约同已退役的 M2 骨架（P1b 2026-09-19））=================
     // 新增增强模式 / 检索源 = registerEnhanceStage 注册 stage handler，而非修改 enhance 主流程。
     // 2026-08-18（模板体系修订）：每模式 2 个内置模板（default/increment）+ 多自定义模板——
     // system 组装改走 pure.js resolveTemplateSystem（pick/custom 解析 + 旧配置兼容迁移）。

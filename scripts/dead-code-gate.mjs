@@ -175,5 +175,26 @@ for (const line of git(diffArgs).split('\n')) {
   if (!bad) pass('R3', files.length + ' 条白名单全部在位，' + entries.length + ' 个入口声明均被覆盖');
 }
 
+// ---- R4 src/host 不得再长出死层（P1b 2026-09-19：RC-C「双架构无淘汰机制」的结构判据）----
+// 背景：退役前 src/host 有 25 件，其中 18 件（995 物理行）是「从未接线的 M2 目标架构骨架」，
+// 且互相 import 伪装成「有入边」，任何按入边判死的脚本都识别不出整个簇。本门改用**装配清单等值**：
+// src/host 的磁盘文件集必须与 build-host.mjs 引用的清单完全一致——多一件即死层复长。
+{
+  const hostDir = path.join(ROOT, 'src', 'host');
+  if (!fs.existsSync(hostDir)) fail('R4', 'src/host 目录缺失');
+  else {
+    const onDisk = fs.readdirSync(hostDir).filter((f) => f.endsWith('.js'));
+    const builder = fs.readFileSync(path.join(ROOT, 'scripts', 'build-host.mjs'), 'utf8');
+    const referenced = new Set();
+    for (const m of builder.matchAll(/['"](?:\.\.\/)*src\/host\/([A-Za-z0-9_.-]+\.js)['"]/g)) referenced.add(m[1]);
+    referenced.add('app.js'); // bundle 骨架由构建器隐式装配
+    const extra = onDisk.filter((f) => !referenced.has(f));
+    const missing = [...referenced].filter((f) => !onDisk.includes(f));
+    if (extra.length) fail('R4', 'src/host 出现装配清单外的文件（死层复长 / 双架构回归）: ' + extra.join(', '));
+    if (missing.length) fail('R4', '装配清单声明的文件磁盘缺失: ' + missing.join(', '));
+    if (!extra.length && !missing.length) pass('R4', 'src/host ' + onDisk.length + ' 件与 build-host 装配清单一致（无死层）');
+  }
+}
+
 console.log(failures ? ('\n✗ 门禁未通过（' + failures + ' 处）') : '\n✅ 死代码门禁通过');
 process.exitCode = failures ? 1 : 0;

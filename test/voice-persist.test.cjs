@@ -1,11 +1,11 @@
 // voice 语音识别模块契约测试（v3.2.5 · P1）
 // 覆盖：① voice/* RPC schema 校验行为（lib/rpc-schema.cjs）
-//       ② src/host/rpc-schema.js（源）与 lib/rpc-schema.cjs（运行时副本）双份同步防漂移
+//       ② rpc-schema 单一事实源 = lib/rpc-schema.cjs（P1b 2026-09-19：死层副本已删，不得复活）
 //       ③ lib/index.cjs 注册 voice/status·voice/transcribe（防重构删除无感）
 //       ④ lib/client.cjs 产物含 voice 逻辑（构建注入防漂移）+ vendor RecordRTC 注入
 //       ⑤ lib/asr.cjs sanitizeVoiceCfg 行为 + transcribe 空配置/错误路径
 //       ⑥ i18n ZH/EN voice 键平衡（31 键成对防漏）
-const { readFileSync } = require('node:fs');
+const { readFileSync, existsSync } = require('node:fs');
 const { join } = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -35,24 +35,19 @@ test('VOICE-P04 voice/transcribe 缺 audioBase64 拒绝（MISSING_ARG）', () =>
   assert.equal(r.code, 'MISSING_ARG');
 });
 
-// ---- 2. 双份 rpc-schema 同步 ----
-test('VOICE-P05 src/host/rpc-schema.js 源含 voice/* 且与 lib 副本一致', () => {
-  const src = readFileSync(join(__dirname, '..', 'src', 'host', 'rpc-schema.js'), 'utf8');
-  const m = src.match(/module\.exports = \"([\s\S]*)\"\s*;?\s*$/);
-  const body = m ? m[1] : src;
-  assert.ok(body.includes("'voice/status'"), 'src/host 源缺 voice/status');
-  assert.ok(body.includes("'voice/transcribe'"), 'src/host 源缺 voice/transcribe');
-  assert.ok(body.includes('required: [\'audioBase64\']'), 'src/host 源 voice/transcribe 缺 required');
+// ---- 2. rpc-schema 单一事实源（P1b：双份同步已终结）----
+test('VOICE-P05 rpc-schema 单一事实源：lib 副本含 voice/*，死层副本不得复活', () => {
+  const src = readFileSync(join(__dirname, '..', 'lib', 'rpc-schema.cjs'), 'utf8');
+  assert.ok(src.includes("'voice/status'"), 'lib/rpc-schema.cjs 缺 voice/status');
+  assert.ok(src.includes("'voice/transcribe'"), 'lib/rpc-schema.cjs 缺 voice/transcribe');
+  assert.ok(src.includes('required: [\'audioBase64\']'), 'voice/transcribe 缺 required');
   assert.equal(
     JSON.stringify(libSchema.schemas['voice/status']),
-    JSON.stringify(require('../src/host/rpc-schema.js').schemas['voice/status']),
-    'voice/status 双份不一致'
+    JSON.stringify(require('../lib/rpc-schema.cjs').schemas['voice/status']),
+    'voice/status 自洽'
   );
-  assert.equal(
-    JSON.stringify(libSchema.schemas['voice/transcribe']),
-    JSON.stringify(require('../src/host/rpc-schema.js').schemas['voice/transcribe']),
-    'voice/transcribe 双份不一致'
-  );
+  assert.ok(!existsSync(join(__dirname, '..', 'src', 'host', 'rpc-schema.js')),
+    '死层副本 src/host/rpc-schema.js 复活了——双架构不得回归（P1b）');
 });
 
 // ---- 3. lib/index.cjs 注册 ----

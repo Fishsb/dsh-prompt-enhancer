@@ -5,21 +5,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createLogger } = require('../src/host/logger.js');
-const { sha256File, verifySha256 } = require('../src/host/integrity.js');
-
-test('OBS-01 logger writes structured JSON and tails', () => {
-  const lines = [];
-  const logger = createLogger({ writer: (line) => lines.push(line), ringSize: 2 });
-  logger.info('test.event', { a: 1 });
-  logger.error('test.error', { b: 2 });
-  assert.equal(lines.length, 1, 'info goes to writer, error goes to console.error');
-  const parsed = JSON.parse(lines[0]);
-  assert.equal(parsed.level, 'info');
-  assert.equal(parsed.event, 'test.event');
-  assert.equal(parsed.a, 1);
-  assert.equal(logger.tail(1).length, 1);
-});
+// P1b（2026-09-19）：M5 骨架 src/host/logger.js 已退役 → 其守卫 OBS-01 随骨架一并退役
+//（该测试守的是从不接线的骨架，意图已由 ADR-194/197 承载）。
+// integrity 的活副本是 lib/integrity.cjs（原 src/host/integrity.js 为死层，已删）→ 守卫改挂活副本。
+const { sha256File, verifySha256 } = require('../lib/integrity.cjs');
 
 test('OBS-02 sha256File and verifySha256', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-obs-'));

@@ -1,9 +1,9 @@
 // config 磁盘持久化契约测试（v3.2.4 · Issue #1 修复审查补充）
 // 覆盖：① lib/rpc-schema.cjs 的 config/get·config/set 参数校验行为
-//       ② src/host/rpc-schema.js（源）与 lib/rpc-schema.cjs（运行时副本）双份同步防漂移
+//       ② rpc-schema 单一事实源 = lib/rpc-schema.cjs（P1b 2026-09-19：死层副本 src/host/rpc-schema.js 已删，不得复活）
 //       ③ lib/index.cjs 注册 config/get·config/set（防未来重构删除无感）
 //       ④ lib/client.cjs 产物含 syncConfigFromHost/hostSync（client 逻辑构建注入防漂移）
-const { readFileSync } = require('node:fs');
+const { readFileSync, existsSync } = require('node:fs');
 const { join } = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -30,14 +30,13 @@ test('CFG-P04 config/set 缺 config 拒绝（MISSING_ARG）', () => {
   assert.equal(r.code, 'MISSING_ARG');
 });
 
-test('CFG-P05 src/host/rpc-schema.js 源与 lib 副本均含 config/*（双份同步防漂移）', () => {
-  const src = readFileSync(join(__dirname, '..', 'src', 'host', 'rpc-schema.js'), 'utf8');
-  const m = src.match(/module\.exports = \"([\s\S]*)\"\s*;?\s*$/);
-  const body = m ? m[1] : src;
-  assert.ok(body.includes("'config/get'"), 'src/host 源缺 config/get');
-  assert.ok(body.includes("'config/set'"), 'src/host 源缺 config/set');
-  assert.ok(body.includes("required: ['config']"), 'src/host 源 config/set 缺 required 校验');
-  // lib 副本行为由 CFG-P01~P04 覆盖
+test('CFG-P05 rpc-schema 单一事实源：lib 副本含 config/*，死层副本不得复活', () => {
+  const src = readFileSync(join(__dirname, '..', 'lib', 'rpc-schema.cjs'), 'utf8');
+  assert.ok(src.includes("'config/get'"), 'lib/rpc-schema.cjs 缺 config/get');
+  assert.ok(src.includes("'config/set'"), 'lib/rpc-schema.cjs 缺 config/set');
+  assert.ok(src.includes("required: ['config']"), 'config/set 缺 required 校验');
+  assert.ok(!existsSync(join(__dirname, '..', 'src', 'host', 'rpc-schema.js')),
+    '死层副本 src/host/rpc-schema.js 复活了——双架构不得回归（P1b）');
 });
 
 test('CFG-P06 lib/index.cjs 注册 config/get·config/set RPC', () => {
