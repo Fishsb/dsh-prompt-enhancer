@@ -5,6 +5,8 @@
 .internal/
 # WorkBuddy 会话数据（本地记忆/工作日志，项目治理之外的本机沉淀）
 .workbuddy/
+# 圆桌会议工作目录（插件的本地状态/记录，与 .internal 同类，不入仓）
+.roundtable/
 
 # ---- 开发治理文档区（本地管理用，不推 GitHub；对外仅发布 package.json files 白名单内容）----
 # 开发治理/开发过程文档统一放 docs/internal/（架构方案/方案文档/贡献指南等）
