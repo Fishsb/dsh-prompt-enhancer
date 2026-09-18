@@ -37,18 +37,18 @@ The 🎤 record button beside the composer starts listening; the transcript (clo
 ## 🚀 Install
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#main
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.4.0
 ```
 
 Restart DSH (`dsh web`) after installing — the ✨ button appears in the composer toolbar.
 
-> ⚠️ **Version note**: the latest tag `v3.3.3` (2026-09-01) **predates** the ✨ official slot-contract fix (Issue #8, commit `0197ae7`, not yet tagged) — with `#v3.3.3` the ✨ button does not render (only 🎤 works). The command above therefore installs `#main`; once the next release is tagged, replace `#main` with that tag.
+> ℹ️ **Version note**: the latest tag **`v3.4.0` (2026-09-19)** already contains the ✨ official slot-contract fix (Issue #8 / #10) and the cloud ASR fix (Issue #9); the command above installs that tag. If you previously installed `#main` under the old note, re-running it pins you to a released version. **Note**: from v3.4.0 the **in-plugin restart capability is removed** (restart DSH manually after an update) — see [release notes](release-notes/3.4.0.md).
 >
 > Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) installed locally and `pnpm` in PATH.
 >
 > **Client compatibility (voice recognition)**: 🎤 voice input relies on the client injecting `inputActions.setDraft` (the official web client satisfies this); third-party clients implementing the same contract can load it, and when the capability set differs, voice input **degrades gracefully** (no insert capability → transcript appended to the end of the draft; no injection at all → 🎤 disabled with a notice). The **local offline engine uses a "framework + optional download" model**: the plugin ships **without** and does **not** auto-download models; go to Settings → Model configuration → 💬 Voice recognition → set engine to "Local" → in the "Local model" area click **Download model** (SenseVoice 228MB, with progress), and it takes effect automatically when done. See [compatibility notes](docs/compatibility-matrix.md) (client dependency boundary and slot contract).
 >
-> **Composer toolbar (✨/🎤) client contract**: the composer buttons and the error strip mount on the session-scoped slots `conversation.input.right` / `conversation.input.dock`. The official renderer (`@deepseek-ai/dsh-client-ui-renderer` ≥ 0.1.2-rc.1; web and DSH Desktop share the same source) injects **a `sessionId` prop, `useSession`/`useInput` selector hooks, and an `inputActions` prop** into slot entries (it never provides `props.session` / `props.input`); the plugin reads state through that contract since that fix (Issue #8, commit `0197ae7`, included in `#main`, not yet tagged) and keeps a fallback for older hosts that provide the `props.session` / `props.input` shape. Third-party client renderers must implement the same contract (`sessionId` plus the hooks and actions above) for ✨/🎤 to render.
+> **Composer toolbar (✨/🎤) client contract**: the composer buttons and the error strip mount on the session-scoped slots `conversation.input.right` / `conversation.input.dock`. The official renderer (`@deepseek-ai/dsh-client-ui-renderer` ≥ 0.1.2-rc.1; web and DSH Desktop share the same source) injects **a `sessionId` prop, `useSession`/`useInput` selector hooks, and an `inputActions` prop** into slot entries (it never provides `props.session` / `props.input`); the plugin reads state through that contract since that fix (Issue #8 / #10, commit `0197ae7`, released with `v3.4.0`) and keeps a fallback for older hosts that provide the `props.session` / `props.input` shape. Third-party client renderers must implement the same contract (`sessionId` plus the hooks and actions above) for ✨/🎤 to render.
 
 Update / remove:
 
