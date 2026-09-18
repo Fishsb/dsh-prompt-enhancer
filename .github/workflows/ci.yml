@@ -32,13 +32,34 @@ jobs:
       # P0 门禁真话化（圆桌决策 A · 2026-09-19）：历史问题是「测试跑完但进程不退出」——
       # node --test 会等事件循环清空，Linux 上被某个测试文件的长驻句柄吊住 → 作业挂满平台 6h 硬顶
       # 被 cancelled → 其后两步永远 skipped，验证面因此长期拿不到任何信号（近 12 次运行 success = 0）。
-      # 两道治法：--test-force-exit 使测试完成后强制退出（不掩盖任何用例结果，只治进程不退出）；
-      # --test-timeout 给单个用例设上限（挂起即判失败，而不是无限等）。
-      - name: Run tests
+      #
+      # 2026-09-19 第一次修复（--test-force-exit + --test-timeout）实测**不足**：run 35391559294 仍在
+      # 12 分钟步级硬顶处被杀，且结束时残留 4 个 node 孤儿进程 → 挂起发生在测试**进程内**，
+      # 不是「跑完不退出」，force-exit 帮不上；test-timeout 也打断不了阻塞中的用例。
+      # 故改为**按文件隔离跑**：每个测试文件独立进程 + 40s 硬顶，挂死只影响它自己，
+      # 其余文件照常给结论（这同时就是「12 件零上报文件」的逐件裁定手段）。
+      - name: Run tests (per-file isolation · 40s cap each)
         timeout-minutes: 12
         run: |
-          set -o pipefail
-          npm test -- --test-force-exit --test-timeout=120000 2>&1 | tee test-report.txt
+          set -uo pipefail
+          mkdir -p test-reports
+          files=$(node -p "require('./package.json').scripts.test.replace('node --test ','')")
+          rc=0
+          for f in $files; do
+            n=$(basename "$f" .test.cjs)
+            t0=$(date +%s)
+            if timeout -s KILL 40 node --test --test-force-exit "$f" >"test-reports/$n.log" 2>&1; then
+              printf 'PASS  %-24s %3ss  ok=%s\n' "$n" "$(( $(date +%s) - t0 ))" "$(grep -c '^ok ' "test-reports/$n.log" || true)"
+            else
+              c=$?
+              printf 'FAIL  %-24s %3ss  exit=%s\n' "$n" "$(( $(date +%s) - t0 ))" "$c"
+              rc=1
+            fi
+          done
+          echo '==== 汇总：每文件 tests/pass/fail + 失败用例名 ===='
+          grep -h -E '^# (tests|pass|fail)|^not ok [0-9]+ - ' test-reports/*.log || true
+          for l in test-reports/*.log; do echo "===== $l ====="; cat "$l"; done > test-report.txt
+          exit $rc
 
       - name: Upload test report
         if: always()
