@@ -302,9 +302,10 @@ const CLAIMS = [
         const skipGuard = /if \(!exists\(DOC\)\) return null/.test(src);
         return assert(modes.length === 3 && marks && skipGuard, `模式 ${modes.length}/3｜标记 ${marks}｜缺档守卫 ${skipGuard}`);
       }),
-      A('B234-4', '索引', '在册缺陷台账在位（D-1 有处置指向，完整性由 S-4 判）', "DEFECTS 含 D-1", () => {
-        const d = DEFECTS.find((x) => x.id === 'D-1');
-        return assert(!!d && !!d.disposition, d ? `D-1 在册（${d.evidence.length} 条证据）` : 'D-1 丢失（缺陷被静默移除）');
+      A('B234-4', '索引', 'D-1 的处置形态是**判据**而非一次性修复（S-5 在位 + 两副本无已退役件）', '本脚本含 S-5 且两处清单源文件不含 plugin-client.js', () => {
+        const src = read('scripts/arch-claims.mjs');
+        const clean = ['src/host/pure.js', 'src/client/updater.js'].every((f) => !read(f).includes('plugin-client.js'));
+        return assert(src.includes("'S-5'") && clean, `S-5 规则在位 ${src.includes("'S-5'")}｜两副本洁净 ${clean}`);
       }),
     ],
   },
@@ -314,20 +315,11 @@ const CLAIMS = [
 
 const PE_ADR_SET = CLAIMS.map((c) => c.adr).sort();
 
-/** 在册缺陷台账：机检发现的**非 ADR 面**问题——必须写明处置指向，否则 S-4 记冲突（防"发现了但没人管"） */
-const DEFECTS = [
-  {
-    id: 'D-1',
-    at: '2026-09-19',
-    surface: '发布物文件集（同一状态 4 个持有点，仅 1 处有门禁）',
-    finding: '`UPDATE_MANIFEST` 仍含已退役的 `plugin-client.js`，而发布树（`package.json` files 白名单）已无此文件；'
-      + '`update/pull` 的 `validateManifestFiles` 要求入参「恰好覆盖」清单全项 ⇒ 该 RPC 在本仓发布物上不可能成功。'
-      + '同一清单还有第二处副本漂移：L2372 注释称「全部 6 个文件」，数组实为 5 项。',
-    evidence: ['plugin-host.js:2249（常量 5 项，含退役件）', 'plugin-host.js:2372（注释称 6 项）', 'plugin-host.js:2388（缺一即 reject）', 'package.json:7（发布物权威：无 plugin-client.js）', 'test/lib.test.cjs:841（U30 断言把退役件锁进常量）'],
-    disposition: '待拍板：A 从 UPDATE_MANIFEST 删该项（须同步改 `src/host/pure.js` 源 + 重建产物 + 改 U30 断言）/ B 保持现状（本仓已无 `update/pull` 调用者，仅遗留外部调用面）',
-    owner: 'user',
-  },
-];
+/** 在册缺陷台账：机检发现的**非 ADR 面**问题——必须写明处置指向，否则 S-4 记冲突（防"发现了但没人管"）。
+ *  当前为空：唯一一条 D-1（`UPDATE_MANIFEST` 含已退役 `plugin-client.js`，使 `update/pull` 在本仓不可能成功）
+ *  已于 2026-09-19 按用户拍板方案 A 修复（两处副本 + 注释条数 + U30 断言 + 重建产物），并把「这一类」固化为判据 **S-5**
+ *  ——一次性修复会复长，判据才会拦住下一次。 */
+const DEFECTS = [];
 
 const STRUCTURAL = [
   A('S-1', '结构', '分母完整性：判据表覆盖的 ADR 集合 == 声明的 PE 决策集（出处 nav_graph mode=adrs）', '7 条且逐条对应', () => {
@@ -355,6 +347,54 @@ const STRUCTURAL = [
   A('S-4', '结构', '在册缺陷台账：每条缺陷必须写明处置指向与证据（防"发现了但没人管"）', '每条缺陷含 disposition + evidence', () => {
     const bare = DEFECTS.filter((d) => !d.disposition || !(d.evidence || []).length || !d.owner);
     return assert(!bare.length, bare.length ? `条目不全：${bare.map((d) => d.id).join(',')}` : `${DEFECTS.length} 条在册缺陷均有处置指向`);
+  }),
+
+  // ── 状态归属判据（RC-F：同一状态多处持有 ⇒ 让副本可机检） ──────────────────────────
+
+  A('S-5', '结构', '发布物清单一致：两处 `UPDATE_MANIFEST` 副本相等、逐项 ⊆ `package.json` files 白名单、注释条数 == 数组长度', '两副本相等 + 无白名单外条目 + 注释与实际同数', () => {
+    const wl = require(abs('package.json')).files;
+    const legal = (n) => wl.includes(n) || wl.some((w) => n.startsWith(w + '/'));
+    const grabArr = (f, name) => {
+      const m = read(f).match(new RegExp(`const ${name} = \\[([^\\]]*)\\]`));
+      return m ? m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean) : null;
+    };
+    const host = grabArr('src/host/pure.js', 'UPDATE_MANIFEST');
+    const client = grabArr('src/client/updater.js', 'UPDATER_MANIFEST');
+    if (!host || !client) return no(`清单未解析到（host ${!!host} / client ${!!client}）`);
+    const cm = read('src/host/pure.js').match(/全部 (\d+) 个文件/);
+    const outside = host.filter((n) => !legal(n));
+    const same = host.join() === client.join();
+    const cnt = cm ? Number(cm[1]) === host.length : false;
+    return assert(same && !outside.length && cnt,
+      `host ${host.length} 项 / client ${client.length} 项｜副本相等 ${same}｜白名单外 ${outside.length ? outside.join(',') : '无'}｜注释称 ${cm ? cm[1] : '?'} 实为 ${host.length}`);
+  }),
+  A('S-6', '结构', '重启探测名单自洽：`RESTART_FILES` 逐项磁盘在位 + ⊆ 发布物白名单 + 含两个装配链入口', '逐项在位且合法，且含 plugin-host.js 与 lib/index.cjs', () => {
+    const m = read('lib/index.cjs').match(/const RESTART_FILES = \[([^\]]*)\]/);
+    if (!m) return no('未解析到 RESTART_FILES');
+    const arr = m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
+    const wl = require(abs('package.json')).files;
+    const legal = (n) => wl.includes(n) || wl.some((w) => n.startsWith(w + '/'));
+    const missing = arr.filter((f) => !exists(f));
+    const outside = arr.filter((f) => !legal(f));
+    const entries = arr.includes('plugin-host.js') && arr.includes('lib/index.cjs');
+    return assert(!missing.length && !outside.length && entries,
+      `${arr.length} 项｜缺文件 ${missing.length ? missing.join(',') : '无'}｜白名单外 ${outside.length ? outside.join(',') : '无'}｜入口齐 ${entries}`);
+  }),
+  A('S-7', '结构', 'i18n 全局平衡：`ZH` 与 `EN` 顶层键集相等且非空', '两语言键集完全相同（0 差异）', () => {
+    const raw = read('src/client/i18n.js');
+    const lit = raw.match(/^module\.exports\s*=\s*"([\s\S]*)"\s*;?\s*$/m);
+    if (!lit) return no('未解析到 i18n 字符串字面量');
+    const src = lit[1].replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    const iZ = src.indexOf('const ZH');
+    const iE = src.indexOf('const EN');
+    if (iZ < 0 || iE <= iZ) return no('未定位到 ZH/EN 两个表');
+    const keys = (block) => { const o = []; const re = /^\s{2}([A-Za-z0-9_]+)\s*:/gm; let x; while ((x = re.exec(block)) !== null) o.push(x[1]); return o; };
+    const KZ = keys(src.slice(iZ, iE));
+    const KE = keys(src.slice(iE));
+    const onlyZ = KZ.filter((k) => !KE.includes(k));
+    const onlyE = KE.filter((k) => !KZ.includes(k));
+    return assert(KZ.length > 0 && !onlyZ.length && !onlyE.length,
+      `ZH ${KZ.length} 键 / EN ${KE.length} 键｜仅 ZH ${onlyZ.length ? onlyZ.join(',') : '无'}｜仅 EN ${onlyE.length ? onlyE.join(',') : '无'}`);
   }),
 ];
 

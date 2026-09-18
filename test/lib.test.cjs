@@ -838,7 +838,7 @@ test('U13 既有用例回归计数', () => {
 
 test('U30 PLUGIN_VERSION / UPDATE_MANIFEST 常量', () => {
   assert.match(PLUGIN_VERSION, /^\d+\.\d+\.\d+$/, '本地版本须为纯 semver（v 前缀不保留）');
-  assert.deepEqual(UPDATE_MANIFEST, ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'cordis.patch.yml']);
+  assert.deepEqual(UPDATE_MANIFEST, ['plugin-host.js', 'README.md', 'README.en.md', 'cordis.patch.yml']);
 });
 
 test('U31 parseVersion 归一化', () => {
@@ -914,12 +914,13 @@ test('U37 parseTagsPayload / validateManifestFiles（v2.4.1 新契约）', () =>
   assert.equal(parseTagsPayload('not json'), null);
   assert.equal(parseTagsPayload(''), null);
   assert.equal(parseTagsPayload(null), null);
-  // validateManifestFiles：恰好 5 个清单文件、无重复/多余、内容 ≤1MB
+  // validateManifestFiles：恰好覆盖全部清单文件、无重复/多余、内容 ≤1MB
+  // （2026-09-19 D-1 修复：不再写死条数——用 UPDATE_MANIFEST.length 表达，条数漂移由门禁 arch-claims S-5 管）
   const okFiles = UPDATE_MANIFEST.map((name) => ({ name, content: 'x' }));
   const r1 = validateManifestFiles(okFiles);
   assert.equal(r1.ok, true);
-  assert.equal(r1.files.length, 5);
-  assert.equal(validateManifestFiles(okFiles.slice(0, 4)).ok, false, '缺文件');
+  assert.equal(r1.files.length, UPDATE_MANIFEST.length);
+  assert.equal(validateManifestFiles(okFiles.slice(0, -1)).ok, false, '缺文件');
   assert.equal(validateManifestFiles(okFiles.concat([{ name: 'extra.js', content: 'x' }])).ok, false, '多余文件');
   assert.equal(validateManifestFiles([...okFiles, { name: 'README.md', content: 'dup' }]).ok, false, '重复文件');
   assert.equal(validateManifestFiles([{ name: 'plugin-host.js', content: 'x'.repeat(1000001) }]).ok, false, '超 1MB');

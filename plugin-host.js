@@ -2246,7 +2246,7 @@ function estimateLiteModeSeconds(ttftMs, tokensPerSecond, inputChars) {
 // 测试/动态形态下占位符未替换 → typeof 未定义 → 回退 0.0.0（仅格式占位，构建产物始终为真实版本）。
 const PLUGIN_VERSION = typeof '3.3.3' !== 'undefined' ? '3.3.3' : '0.0.0';
 // 一键拉取的文件清单（发布仓库根目录，raw.githubusercontent.com 按 tag 拉取）
-const UPDATE_MANIFEST = ['plugin-host.js', 'plugin-client.js', 'README.md', 'README.en.md', 'cordis.patch.yml'];
+const UPDATE_MANIFEST = ['plugin-host.js', 'README.md', 'README.en.md', 'cordis.patch.yml'];
 // update/check 结果缓存 TTL（未鉴权 GitHub API 限流 60 次/时）
 const UPDATE_CACHE_TTL_MS = 300000;
 
@@ -2369,7 +2369,7 @@ function parseTagsPayload(payload) {
   }
 }
 
-// 拉取文件清单校验（update/pull 入参）：必须恰好覆盖 UPDATE_MANIFEST 全部 6 个文件，
+// 拉取文件清单校验（update/pull 入参）：必须恰好覆盖 UPDATE_MANIFEST 全部 4 个文件，
 // 无重复/无多余；content 为已解码文本且 ≤1MB。返回 { ok, files } | { ok:false, message }
 function validateManifestFiles(files) {
   if (!Array.isArray(files)) return { ok: false, message: 'files array required' };
