@@ -31,7 +31,10 @@ jobs:
       # P2（2026-09-19）：RPC 契约事实源一致性——由注册面派生，锁「文档面 / schema 覆盖 / 具名申报 / 孤儿」四不变量
       # P4（2026-09-19）贯穿判据：门禁**存在 ≠ 被执行**——四个结构门禁收敛为 `npm run gate` 一条命令，并首次进入 CI。
       #   串行链：死代码/装配 R1–R4 → RPC 契约 → 提示词生成区漂移 → ADR 承诺 ↔ 代码现状（arch-claims）
+      #   `if: always()` 必加：run 35397066749 实证——本步失败会把其后的「Run tests」整步 skipped，
+      #   等于用一条门禁吃掉另一条判据的读数（正是 P0 修掉的静默面）。判据之间不得互相遮蔽。
       - name: Structure gates (dead-code · RPC · prompts · arch-claims)
+        if: always()
         run: npm run gate
 
       # P0 门禁真话化（圆桌决策 A · 2026-09-19）：历史问题是「测试跑完但进程不退出」——
@@ -44,6 +47,7 @@ jobs:
       # 故改为**按文件隔离跑**：每个测试文件独立进程 + 40s 硬顶，挂死只影响它自己，
       # 其余文件照常给结论（这同时就是「12 件零上报文件」的逐件裁定手段）。
       - name: Run tests (per-file isolation · 40s cap each)
+        if: always()
         timeout-minutes: 12
         run: |
           set -uo pipefail

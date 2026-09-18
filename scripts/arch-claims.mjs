@@ -7,10 +7,11 @@
 // 架构决策**（= 分不分母，见下）的承诺翻成一条可执行断言，命令/期望/实测/判定一并输出。
 //
 // 分母出处（**不得自拟条数**）：`nav_graph mode=adrs` 全量 37 条中、锚点匹配
-//   /pe-f\d|prompt-enhancer/ 的 **6 条** —— ADR-146(feature:pe-f06) ·
-//   ADR-194/197/201(module:prompt-enhancer) · ADR-224/230(feature:pe-f01)。
+//   /pe-f\d|prompt-enhancer/ 的 **7 条** —— ADR-146(feature:pe-f06) ·
+//   ADR-194/197/201/234(module:prompt-enhancer) · ADR-224/230(feature:pe-f01)。
 //   采集命令与录制时间见 docs/internal/P4-状态归属-2026-09-19.md §一。
 //   治理事件日志可读时脚本**自行交叉核对**这个多重集（S-2），不可读则记 SKIP（不记 PASS）。
+//   ⚠ 新增一条 PE 决策（nav_decide）后**必须同步加一行判据**，否则 S-2 立即红——判据面随决策面走。
 //
 // 判据三档（**不可混算**——混算就是又一次代理指标当判据）：
 //   REQUIRED 仓库内可机检、必须成立 —— 失败即**冲突**，exit 1
@@ -263,13 +264,48 @@ const CLAIMS = [
         return assert(n === 0, `${n}`);
       }),
       A('A230-3', '索引', 'P3 决策档在位且三项拍板已回写', '档存在且含三项拍板行', () => {
+        // ⚠ CI 首跑实证（run 35397066749）：`docs/internal` 整目录在干净 clone 里不存在，
+        //   先 list() 再判空会 ENOENT 抛错 → 记为冲突（假冲突）。必须先判目录存在。
+        if (!exists('docs/internal')) return { skip: true, actual: 'docs/internal 整目录缺位（本地治理档，CI/干净 clone 预期无）' };
         const f = list('docs/internal').find((x) => x.startsWith('P3-装配契约'));
-        if (!f) return { skip: true, actual: 'docs/internal 为本地治理档（CI/干净 clone 预期无）' };
+        if (!f) return { skip: true, actual: 'P3 决策档缺位（本地治理档）' };
         const src = read(`docs/internal/${f}`);
         const hit = ['拍板结果', 'D8 诊断面', '不立项'].filter((k) => src.includes(k));
         return assert(hit.length === 3, `${f} 命中 ${hit.length}/3`);
       }),
       gate('A230-4', ['scripts/rpc-manifest.mjs', '--check'], 'RPC 契约面不受本轮影响（派生事实源一致）'),
+    ],
+  },
+  {
+    adr: 'ADR-234', anchor: 'module:prompt-enhancer', at: '2026-09-18', level: '已兑现',
+    promise: 'P4：结构判据机检化（分母由模型派生、判据表为投影、四档语义含 SKIP/在册未达/在册缺陷）+ 四条结构门禁收敛为 `npm run gate` 并首次进 CI + RC-F 收敛基线（10 个状态面 / 在册缺陷 D-1）',
+    assertions: [
+      A('B234-1', '结构', '四条结构门禁收敛为一条命令（顺序即依赖序）', 'gate 串行链 = dead-code → rpc-manifest → sync-prompts → arch-claims，后两者带 --check', () => {
+        const g = require(abs('package.json')).scripts.gate;
+        const order = ['dead-code-gate.mjs', 'rpc-manifest.mjs', 'sync-prompts.mjs', 'arch-claims.mjs'];
+        const idx = order.map((s) => g.indexOf(s));
+        const asc = idx.every((v, i) => v > -1 && (i === 0 || v > idx[i - 1]));
+        const flags = /rpc-manifest\.mjs --check/.test(g) && /sync-prompts\.mjs --check/.test(g) && /arch-claims\.mjs --check/.test(g);
+        return assert(asc && flags, `四门禁在位 ${idx.filter((v) => v > -1).length}/4｜顺序 ${asc}｜--check ${flags}`);
+      }),
+      A('B234-2', '结构', '门禁进 CI 且判据之间不得互相遮蔽（失败仍出读数）', 'Structure gates 跑 npm run gate 且与 Run tests 两步均 if: always()', () => {
+        const ci = read('.github/workflows/ci.yml');
+        const step = /- name: Structure gates[\s\S]{0,400}?run: npm run gate/.test(ci);
+        const gateAlways = /- name: Structure gates[\s\S]{0,300}?if: always\(\)/.test(ci);
+        const testsAlways = /- name: Run tests[\s\S]{0,160}?if: always\(\)/.test(ci);
+        return assert(step && gateAlways && testsAlways, `步骤 ${step}｜gate always ${gateAlways}｜tests always ${testsAlways}`);
+      }),
+      A('B234-3', '结构', '判据表是投影（三种模式 + 治理档标记区），治理档缺位不判漂移', '脚本含 --check/--md/--write 与标记对', () => {
+        const src = read('scripts/arch-claims.mjs');
+        const modes = ['--check', '--md', '--write'].filter((m) => src.includes(`'${m}'`));
+        const marks = src.includes('ARCH-CLAIMS:BEGIN') && src.includes('ARCH-CLAIMS:END');
+        const skipGuard = /if \(!exists\(DOC\)\) return null/.test(src);
+        return assert(modes.length === 3 && marks && skipGuard, `模式 ${modes.length}/3｜标记 ${marks}｜缺档守卫 ${skipGuard}`);
+      }),
+      A('B234-4', '索引', '在册缺陷台账在位（D-1 有处置指向，完整性由 S-4 判）', "DEFECTS 含 D-1", () => {
+        const d = DEFECTS.find((x) => x.id === 'D-1');
+        return assert(!!d && !!d.disposition, d ? `D-1 在册（${d.evidence.length} 条证据）` : 'D-1 丢失（缺陷被静默移除）');
+      }),
     ],
   },
 ];
@@ -294,8 +330,10 @@ const DEFECTS = [
 ];
 
 const STRUCTURAL = [
-  A('S-1', '结构', '分母完整性：判据表覆盖的 ADR 集合 == 声明的 PE 决策集（出处 nav_graph mode=adrs）', '6 条且逐条对应', () => {
-    const declared = ['ADR-146', 'ADR-194', 'ADR-197', 'ADR-201', 'ADR-224', 'ADR-230'].sort();
+  A('S-1', '结构', '分母完整性：判据表覆盖的 ADR 集合 == 声明的 PE 决策集（出处 nav_graph mode=adrs）', '7 条且逐条对应', () => {
+    // 声明面（出处：`nav_graph mode=adrs`，锚点匹配 /pe-f\d|prompt-enhancer/，采集 2026-09-19）。
+    // 新增 PE 决策必须同步加行，否则 S-1（本处）与 S-2（治理日志交叉核对）都会红。
+    const declared = ['ADR-146', 'ADR-194', 'ADR-197', 'ADR-201', 'ADR-224', 'ADR-230', 'ADR-234'].sort();
     const same = declared.length === PE_ADR_SET.length && declared.every((x, i) => x === PE_ADR_SET[i]);
     return assert(same, `${PE_ADR_SET.length} 条：${PE_ADR_SET.join(',')}`);
   }),
