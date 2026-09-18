@@ -8,6 +8,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # P0 门禁真话化（圆桌决策 A · 2026-09-19）：作业级硬顶兜底——真挂死也快速失败，不再挂满平台 6h 上限被 cancelled
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -27,11 +29,31 @@ jobs:
           node --check lib/sys.cjs
           node --check lib/updater-host.cjs
 
+      # P0 门禁真话化（圆桌决策 A · 2026-09-19）：历史问题是「测试跑完但进程不退出」——
+      # node --test 会等事件循环清空，Linux 上被某个测试文件的长驻句柄吊住 → 作业挂满平台 6h 硬顶
+      # 被 cancelled → 其后两步永远 skipped，验证面因此长期拿不到任何信号（近 12 次运行 success = 0）。
+      # 两道治法：--test-force-exit 使测试完成后强制退出（不掩盖任何用例结果，只治进程不退出）；
+      # --test-timeout 给单个用例设上限（挂起即判失败，而不是无限等）。
       - name: Run tests
-        run: npm test
+        timeout-minutes: 12
+        run: |
+          set -o pipefail
+          npm test -- --test-force-exit --test-timeout=120000 2>&1 | tee test-report.txt
 
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: test-report.txt
+          if-no-files-found: warn
+
+      # 后置两步改 if: always()：测试失败也要把「产物是否与源码一致」这条独立判据取回来。
+      # 原实现的 skipped 是静默面——一次挂起会把两条判据一起吞掉。
       - name: Build client bundle
+        if: always()
         run: npm run build
 
       - name: Verify generated artifacts are committed
+        if: always()
         run: git diff --exit-code -- lib/client.cjs plugin-client.js plugin-host.js
