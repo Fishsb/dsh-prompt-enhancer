@@ -28,6 +28,10 @@ jobs:
           node --check lib/sys.cjs
           node --check lib/updater-host.cjs
 
+      # P2（2026-09-19）：RPC 契约事实源一致性——由注册面派生，锁「文档面 / schema 覆盖 / 具名申报 / 孤儿」四不变量
+      - name: RPC contract check
+        run: node scripts/rpc-manifest.mjs --check
+
       # P0 门禁真话化（圆桌决策 A · 2026-09-19）：历史问题是「测试跑完但进程不退出」——
       # node --test 会等事件循环清空，Linux 上被某个测试文件的长驻句柄吊住 → 作业挂满平台 6h 硬顶
       # 被 cancelled → 其后两步永远 skipped，验证面因此长期拿不到任何信号（近 12 次运行 success = 0）。

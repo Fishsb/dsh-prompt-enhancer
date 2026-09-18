@@ -60,6 +60,29 @@
 
 > 注：`update/executorEnsure` / `update/install` / `update/restartNeeded` 在 host RPC 清单中保留（部分版本由 client 直连执行器 3081），见 executor RPC；执行器自插件内重启能力退役后只负责**下载 / 校验 / 安装 / 回滚**，不再重启。
 
+> 注（**P2 · 2026-09-19 · 参数校验申报**）：上述 34 条中 **17 条有参数校验**（`lib/rpc-schema.cjs` 的 `schemas`），另 **17 条无校验且在此具名申报**——**禁止按类别笼统豁免**；新增线上方法却不申报、或申报过期，都会被 `node scripts/rpc-manifest.mjs --check` 拒绝（事实源由注册面派生，不靠人工清点）。
+>
+> | 方法 | 桶 | 理由 |
+> |---|---|---|
+> | `cancel` | **A** 无参/只读 | 只读：取消信号（无匹配时静默成功） |
+> | `enhance/progress` | **A** 无参/只读 | 只读：查询优化进度（不存在的 seq 返回空） |
+> | `logs/last` | **A** 无参/只读 | 无参只读：返回日志环 |
+> | `models/autochain` | **A** 无参/只读 | 入参仅 noCache 布尔，宽松语义即契约 |
+> | `models/current` | **A** 无参/只读 | 无参只读：读当前选择的模型 |
+> | `models/list` | **A** 无参/只读 | 无参只读：列举 provider 与模型 |
+> | `models/stats` | **A** 无参/只读 | 入参仅 provider/model/inputChars 展示用，非法值退化为空统计（无副作用） |
+> | `plugins/inventory` | **A** 无参/只读 | 只读：列举插件清单 |
+> | `template/default` | **A** 无参/只读 | 无参只读：返回内置模板目录 |
+> | `update/restartNeeded` | **A** 无参/只读 | 只读：文件 mtime 比对，无副作用 |
+> | `voice/deployRuntime` | **A** 无参/只读 | 无参动作：部署本地 ASR worker（固定流程，无用户入参） |
+> | `voice/deployStatus` | **A** 无参/只读 | 无参只读：本地 worker 部署态 |
+> | `models/resolve` | **B** 有参·保持宽松 | 有参（provider/model）保持宽松：非法值由下游 resolveModelInfo 兜底，收紧急属 BREAKING |
+> | `plugins/stop` | **B** 有参·保持宽松 | 有参（pluginId）保持宽松：非法 id 由插件面自行返回 not-found |
+> | `plugins/undefine` | **B** 有参·保持宽松 | 有参（pluginId）保持宽松：同上 |
+> | `update/executorEnsure` | **B** 有参·保持宽松 | 有参（port）保持宽松：非法端口由执行器侧拒绝 |
+> | `update/pull` | **B** 有参·保持宽松 | 有参（repo/sessionId）保持宽松：本仓无调用点（handler 按决策保留），收紧收益为零 |
+>
+> **A 桶** = 无参 / 只读 / 无副作用入参，无可校验之物。**B 桶 = 有入参但保持宽松**——补校验会把既有「静默容忍」的调用变成 **400**，属**已发布对外行为变更**，须单列并标 BREAKING 由用户拍板，故本轮**只申报不收紧**（圆桌决策 A 的边界）。
 ### executor RPC（`127.0.0.1:3081/rpc`）
 
 | 方法 | 说明 |
