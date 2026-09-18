@@ -23,8 +23,12 @@ function makeTgz(name, version, hostBody) {
   fs.writeFileSync(path.join(pkg, 'plugin-host.js'), hostBody);
   fs.writeFileSync(path.join(pkg, 'lib', 'index.cjs'), "module.exports=1;\n");
   const out = path.join(tmp, name);
-  // Windows 自带 bsdtar（与 installStagedTarball 同款调用面）
-  execFileSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'),
+  // win: Windows 自带 bsdtar（与 installStagedTarball 同款调用面；必须绝对路径——PATH 里的 Git GNU tar
+  //      会把 `-C C:\...` 当远程主机）；posix: PATH 寻址的 tar。2026-09-19 平台解耦（A18 同批）。
+  const tarBin = process.platform === 'win32'
+    ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe')
+    : 'tar';
+  execFileSync(tarBin,
     ['-czf', out.replace(/\\/g, '/'), '-C', path.dirname(pkg), 'package'], { stdio: 'ignore' });
   return out;
 }

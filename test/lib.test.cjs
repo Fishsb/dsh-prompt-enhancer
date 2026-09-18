@@ -5,14 +5,6 @@ const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-// [LIBREG-DIAG 2026-09-19·临时] 注册截断定位探针：随诊断批次进出，发布前必撤。
-try {
-  const __self = require('node:fs').readFileSync(__filename, 'utf8');
-  console.error('[LIBREG] load-start pid=' + process.pid + ' node=' + process.version
-    + ' plat=' + process.platform + ' execArgv=' + JSON.stringify(process.execArgv)
-    + ' lines=' + __self.split('\n').length
-    + ' topLevelTestCalls=' + ((__self.match(/^test\(/gm) || []).length));
-} catch (e) { console.error('[LIBREG] load-start probe failed: ' + e.message); }
 
 const src = readFileSync(join(__dirname, '..', 'plugin-host.js'), 'utf8');
 const begin = src.indexOf('// ==PURE-BEGIN==');
@@ -1672,6 +1664,3 @@ test('LIBWIRE-06 updater-host.cjs EADDRINUSE 动态口 fallback 在位（写 exe
   assert.match(src, /server\.listen\(0, '127\.0\.0\.1', onListen\)/, '动态口必须 listen(0) 交由 OS 分配');
   assert.match(src, /JSON\.stringify\(\{ port: actual, pid: process\.pid, ts: Date\.now\(\) \}\)/, 'onListen 必须写 executor.port {port,pid,ts} 供 executorEnsure 发现（动态口链路收口）');
 });
-
-// [LIBREG-DIAG 2026-09-19·临时] 若此行未出现在 CI 日志，说明文件加载被切断，而非 runner 少报。
-console.error('[LIBREG] load-end reached (EOF)' + ' activeTests=' + (process.__libregN || 'n/a'));
