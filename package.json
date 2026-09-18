@@ -19,7 +19,7 @@
   },
   "scripts": {
     "build:host": "node scripts/build-host.mjs",
-    "gate": "node scripts/dead-code-gate.mjs",
+    "gate": "node scripts/dead-code-gate.mjs && node scripts/rpc-manifest.mjs --check && node scripts/sync-prompts.mjs --check && node scripts/arch-claims.mjs --check",
     "verify:enhance": "node scripts/enhance-verify.mjs",
     "build:client": "node scripts/build-client.mjs",
     "build": "node scripts/build-host.mjs && node scripts/build-client.mjs",
