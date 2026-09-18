@@ -3,6 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
 const sys = require('../lib/sys.cjs');
 const psvc = require('../lib/platform-service.cjs');
 
@@ -88,6 +90,14 @@ function makeExecMock(handlers) {
 }
 
 const WHERE_OK = { stdout: 'C:\\WINDOWS\\System32\\sc.exe\r\n' };
+/** 平台工具解析命令（与 lib/sys.cjs probeEnv 预检同源）：win `where sc.exe`；darwin `which launchctl`；
+ *  linux `which systemctl`。mock 键 =「命令 参数」——POSIX 侧工具预检与 tools 项是同一命令，共用一个 handler。
+ *  注：不把「发行版一定装了 which」当前提——POSIX 真机若缺 which，runProbeAsync 映射 ENOENT，
+ *  probeEnv 照既有语义落「工具不可达」早退；本组用例注入 mock 执行器，故与真实 PATH 无关。 */
+const TOOL_PROBE_TARGET = process.platform === 'win32' ? 'sc.exe'
+  : process.platform === 'darwin' ? 'launchctl' : 'systemctl';
+const TOOL_PROBE_KEY = (process.platform === 'win32' ? 'where' : 'which') + ' ' + TOOL_PROBE_TARGET;
+const TOOL_PROBE_OK = process.platform === 'win32' ? WHERE_OK : { stdout: '/usr/bin/' + TOOL_PROBE_TARGET + '\n' };
 const NETSTAT_3080_4242 = '\r\nTCP    0.0.0.0:3080           0.0.0.0:0              LISTENING       4242\r\n';
 const NETSTAT_NONE = '\r\nTCP    0.0.0.0:9999           0.0.0.0:0              LISTENING       99\r\n';
 const TASKLIST_SVC0 = '"node.exe","4242","Services","0","8,888 K"\r\n';
@@ -96,7 +106,7 @@ const CURL_EXIT7 = Object.assign(new Error('curl exit 7'), { code: 7 });
 /** win 全链标准 mock（工具预检过 + 3080 有监听者 + curl 可控）。 */
 function winChainMock(curlResult) {
   return makeExecMock({
-    'where sc.exe': WHERE_OK,
+    [TOOL_PROBE_KEY]: TOOL_PROBE_OK,
     'netstat -ano': { stdout: NETSTAT_3080_4242 },
     'tasklist /FO CSV /NH': { stdout: TASKLIST_SVC0 },
     curl: curlResult,
@@ -105,7 +115,7 @@ function winChainMock(curlResult) {
 /** win 无监听链 mock。 */
 function winNoListenerMock(curlResult) {
   return makeExecMock({
-    'where sc.exe': WHERE_OK,
+    [TOOL_PROBE_KEY]: TOOL_PROBE_OK,
     'netstat -ano': { stdout: NETSTAT_NONE },
     curl: curlResult,
   });
@@ -116,6 +126,42 @@ function scRunningAsync() {
     if (cmd === 'sc' && args[0] === 'query') return { ok: true, status: 0, stdout: 'STATE : 4 RUNNING', stderr: '', error: null };
     if (cmd === 'sc' && args[0] === 'qc') return { ok: true, status: 0, stdout: 'START_TYPE : 2 AUTO_START', stderr: '', error: null };
     throw Object.assign(new Error('unexpected ' + cmd), { code: 'UNMOCKED_PSVC' });
+  };
+}
+
+/** POSIX 服务检测孪生 mock（与 platform-service 平台分发同源）：linux `systemctl is-active/is-enabled`；
+ *  darwin `launchctl list`。state='running'|'stopped'——win 侧仍走 scRunningAsync（原样，不动）。
+ *  输出对齐解析契约：parseSystemdActive 认 status 0 + 'active'/'inactive'（'inactive' = 已装未运行）。 */
+function posixServiceMock(state) {
+  return async (cmd, args) => {
+    if (cmd === 'launchctl' && args[0] === 'list') {
+      return { ok: true, status: 0, stdout: state === 'running' ? '4242 0 dsh-web' : '- 0 dsh-web', stderr: '', error: null };
+    }
+    if (cmd === 'systemctl' && args[0] === 'is-active') {
+      return { ok: true, status: 0, stdout: (state === 'running' ? 'active' : 'inactive') + '\n', stderr: '', error: null };
+    }
+    if (cmd === 'systemctl' && args[0] === 'is-enabled') {
+      return { ok: true, status: 0, stdout: 'enabled\n', stderr: '', error: null };
+    }
+    throw Object.assign(new Error('unexpected ' + cmd), { code: 'UNMOCKED_PSVC' });
+  };
+}
+/** 服务「存在且在跑」的平台分发选择器：win 原样返回 scRunningAsync()；POSIX 走对应后端命令形态。 */
+function runningServiceMock() {
+  return process.platform === 'win32' ? scRunningAsync() : posixServiceMock('running');
+}
+
+/** POSIX 真实探测夹具：临时目录自建可执行文件 + PATH 前置（经 runProbe/runProbeAsync 的 env 参数注入），
+ *  用于验证真实 spawn 通道的成功/非 0 退出映射，而**不依赖发行版装了哪些工具**（which/curl 的有无不作前提）。
+ *  仅 POSIX 分支调用（shell 脚本 + ':' 分隔符语义），win32 分支保持原样。 */
+function makeProbeStub(name, body) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-sys-probe-'));
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, '#!/bin/sh\n' + body, { mode: 0o755 });
+  fs.chmodSync(file, 0o755);
+  return {
+    env: Object.assign({}, process.env, { PATH: dir + path.delimiter + process.env.PATH }),
+    cleanup() { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 清理失败不掩盖断言结果 */ } },
   };
 }
 
@@ -135,8 +181,23 @@ test('SYS-06 runProbe 同步契约回归：白名单拒绝/真实快速探测，
   const r2 = sys.runProbe('sc', ['query\x01bad'], undefined);
   assert.equal(r2.code, 'BAD_PROBE_ARG');
 
-  const r3 = sys.runProbe('where', ['sc.exe'], undefined);
-  assert.equal(r3.ok, true, 'where sc.exe 应成功');
+  if (process.platform === 'win32') {
+    const r3 = sys.runProbe('where', ['sc.exe'], undefined);
+    assert.equal(r3.ok, true, 'where sc.exe 应成功');
+  } else {
+    // POSIX：where 是 Windows 专有解析器——真实探测的期望语义就是「不可达」（ENOENT，而非抛异常）；
+    // 正向成功路径改用自建工具（PATH 前置）走同一条真实 spawnSync 通道，不依赖发行版自带工具。
+    const rw = sys.runProbe('where', ['sc.exe'], undefined);
+    assert.equal(rw.ok, false, 'Linux/macOS 上 where 不可达（Windows 专有解析器）');
+    assert.equal(rw.code, 'ENOENT', '不可达须映射为 ENOENT 而不是抛异常');
+    const stub = makeProbeStub('where', 'echo /stub/sc.exe\n');
+    try {
+      const r3 = sys.runProbe('where', ['sc.exe'], stub.env);
+      assert.equal(r3.ok, true, 'POSIX 真实 spawnSync 成功路径（自建工具经 PATH 解析）');
+      assert.equal(r3.code, 0, '成功须映射为退出码 0');
+      assert.equal(String(r3.stdout).trim(), '/stub/sc.exe', '真实 stdout 须原样回传');
+    } finally { stub.cleanup(); }
+  }
 });
 
 test('SYS-07 runProbeAsync：Promise 形状/白名单/非 0 退出映射对齐 spawnSync status 语义', async () => {
@@ -145,10 +206,25 @@ test('SYS-07 runProbeAsync：Promise 形状/白名单/非 0 退出映射对齐 s
   const r1 = await p;
   assert.deepEqual(r1, { ok: false, code: 'BAD_PROBE_CMD' });
 
-  // 真实执行器：where 不存在的名字 → 非 0 退出 → {ok:false,code:<exit>}（spawnSync status 等价）
-  const r2 = await sys.runProbeAsync('where', ['dsh-definitely-not-exist-xyz-9x7'], undefined);
-  assert.equal(r2.ok, false);
-  assert.equal(r2.code, 1, '非 0 退出码必须映射为 number');
+  // 真实执行器：非 0 退出 → {ok:false,code:<exit>}（spawnSync status 等价）
+  if (process.platform === 'win32') {
+    // win：where 存在但名字查不到 → 退出码 1
+    const r2 = await sys.runProbeAsync('where', ['dsh-definitely-not-exist-xyz-9x7'], undefined);
+    assert.equal(r2.ok, false);
+    assert.equal(r2.code, 1, '非 0 退出码必须映射为 number');
+  } else {
+    // POSIX：where 本身不可达 → ENOENT（string，非退出码）；「非 0 退出 → number」改由自建工具真实验证
+    const rw = await sys.runProbeAsync('where', ['dsh-definitely-not-exist-xyz-9x7'], undefined);
+    assert.equal(rw.ok, false);
+    assert.equal(rw.code, 'ENOENT', 'POSIX 无 where：不可达语义（string code，与退出码区分）');
+    const stub = makeProbeStub('where', 'exit 3\n');
+    try {
+      const r2 = await sys.runProbeAsync('where', [], stub.env);
+      assert.equal(r2.ok, false);
+      assert.equal(r2.code, 3, '非 0 退出码必须映射为 number');
+      assert.equal(typeof r2.code, 'number', '退出码不得退化为字符串');
+    } finally { stub.cleanup(); }
+  }
 
   // ENOENT 映射（mock 注入，避免依赖白名单外命令）
   sys.__setProbeExecutor(makeExecMock({
@@ -173,7 +249,7 @@ test('SYS-08 C-3 超时硬杀：挂起子进程被击杀 → ETIMEDOUT 且远短
 
 test('SYS-09 probeEnv golden 契约：mock 全链下 items 序/key 集/字段与同步版逐字段一致', async () => {
   sys.__setProbeExecutor(winChainMock({ stdout: '200' }));
-  psvc.__setProbeAsync(scRunningAsync());
+  psvc.__setProbeAsync(runningServiceMock());
   try {
     const items = await sys.probeEnv('dsh-web', {}, {});
     assert.deepEqual(items.map((i) => i.key), ['tools', 'net', 'port-mode', 'port-pid'], '数组序契约');
@@ -185,16 +261,27 @@ test('SYS-09 probeEnv golden 契约：mock 全链下 items 序/key 集/字段与
     assert.deepEqual(Object.keys(net).sort(), ['detail', 'key', 'ok', 'warn']);
     assert.deepEqual({ ok: net.ok, warn: net.warn, detail: net.detail }, { ok: true, warn: false, detail: 'ok' });
     // port 两项：带 level:'warn'
-    assert.deepEqual(Object.keys(portMode).sort(), ['detail', 'key', 'level', 'ok']);
-    assert.deepEqual({ ok: portMode.ok, level: portMode.level, detail: portMode.detail }, { ok: true, level: 'warn', detail: 'service' });
-    assert.deepEqual({ ok: portPid.ok, level: portPid.level, detail: portPid.detail }, { ok: true, level: 'warn', detail: '4242' });
+    if (process.platform === 'win32') {
+      assert.deepEqual(Object.keys(portMode).sort(), ['detail', 'key', 'level', 'ok']);
+      assert.deepEqual({ ok: portMode.ok, level: portMode.level, detail: portMode.detail }, { ok: true, level: 'warn', detail: 'service' });
+      assert.deepEqual({ ok: portPid.ok, level: portPid.level, detail: portPid.detail }, { ok: true, level: 'warn', detail: '4242' });
+    } else {
+      // POSIX：3080 监听者由同步原语真实探测（dshPrimPortHolder，无可注入的 mock 缝）——用例前提是
+      // 本机 3080 空闲（CI runner 无 DSH 服务）→ 平台映射「服务存在但无监听」：port-mode=service-stopped、
+      // port-pid=no-listener，且失败态合同按定义带 warn:true（win 侧有监听者故为 ok 形态，形状契约仍逐字段断言）。
+      assert.deepEqual(Object.keys(portMode).sort(), ['detail', 'key', 'level', 'ok', 'warn']);
+      assert.deepEqual({ ok: portMode.ok, warn: portMode.warn, level: portMode.level, detail: portMode.detail }, { ok: false, warn: true, level: 'warn', detail: 'service-stopped' });
+      assert.deepEqual({ ok: portPid.ok, warn: portPid.warn, level: portPid.level, detail: portPid.detail }, { ok: false, warn: true, level: 'warn', detail: 'no-listener' });
+    }
   } finally { teardownProbeMocks(); }
 });
 
 test('SYS-10 probeEnv 无监听→service-stopped；工具不可达早退形状逐字一致；单项异常不拖垮整表', async () => {
   // 分支①：3080 无监听 + 服务存在（STOPPED）
   sys.__setProbeExecutor(winNoListenerMock({ stdout: '200' }));
-  psvc.__setProbeAsync(async () => ({ ok: true, status: 0, stdout: 'STATE : 1 STOPPED', stderr: '', error: null }));
+  psvc.__setProbeAsync(process.platform === 'win32'
+    ? async () => ({ ok: true, status: 0, stdout: 'STATE : 1 STOPPED', stderr: '', error: null })
+    : posixServiceMock('stopped'));
   try {
     const items = await sys.probeEnv('dsh-web', {}, {});
     const pm = items.find((i) => i.key === 'port-mode');
@@ -203,9 +290,9 @@ test('SYS-10 probeEnv 无监听→service-stopped；工具不可达早退形状�
     assert.deepEqual(pp, { key: 'port-pid', ok: false, warn: true, detail: 'no-listener', level: 'warn' });
   } finally { teardownProbeMocks(); }
 
-  // 分支②：where 非 0 退出 → 早退四项 tool-unreachable（含 level 字段）
+  // 分支②：工具解析命令非 0 退出 → 早退四项 tool-unreachable（含 level 字段）
   sys.__setProbeExecutor(makeExecMock({
-    where: () => { throw Object.assign(new Error('exit 1'), { code: 1 }); },
+    [TOOL_PROBE_KEY]: () => { throw Object.assign(new Error('exit 1'), { code: 1 }); },
   }));
   psvc.__setProbeAsync(async () => { throw new Error('must not be called'); });
   try {
@@ -218,7 +305,7 @@ test('SYS-10 probeEnv 无监听→service-stopped；工具不可达早退形状�
 
   // 分支③：单项执行器抛异常 → 该项降级 warn，其余项照常
   sys.__setProbeExecutor(makeExecMock({
-    'where sc.exe': () => { throw new Error('boom'); },
+    [TOOL_PROBE_KEY]: () => { throw new Error('boom'); },
   }));
   try {
     const items = await sys.probeEnv('dsh-web', {}, {});
@@ -230,7 +317,7 @@ test('SYS-11 net 熔断状态机：3 连败入冷却→窗内零实测回缓存+
   // 阶段①：3 次连败全部实测，第 4 次起进冷却窗
   const execFail = winChainMock(CURL_EXIT7);
   sys.__setProbeExecutor(execFail);
-  psvc.__setProbeAsync(scRunningAsync());
+  psvc.__setProbeAsync(runningServiceMock());
   try {
     for (let i = 1; i <= 3; i++) {
       const items = await sys.probeEnv('dsh-web', {}, {});
@@ -255,7 +342,7 @@ test('SYS-11 net 熔断状态机：3 连败入冷却→窗内零实测回缓存+
   let succeedNext = false;
   const execMix = winChainMock(() => (succeedNext ? { stdout: '200' } : CURL_EXIT7));
   sys.__setProbeExecutor(execMix);
-  psvc.__setProbeAsync(scRunningAsync());
+  psvc.__setProbeAsync(runningServiceMock());
   try {
     await sys.probeEnv('dsh-web', {}, {}); // fail=1（实测）
     succeedNext = true;
@@ -276,7 +363,7 @@ test('SYS-11 net 熔断状态机：3 连败入冷却→窗内零实测回缓存+
   process.env.DSH_PE_NET_BREAKER = '0';
   const execKnob = winChainMock(CURL_EXIT7);
   sys.__setProbeExecutor(execKnob);
-  psvc.__setProbeAsync(scRunningAsync());
+  psvc.__setProbeAsync(runningServiceMock());
   try {
     for (let i = 0; i < 5; i++) {
       const items = await sys.probeEnv('dsh-web', {}, {});

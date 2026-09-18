@@ -22,7 +22,9 @@ const updater = require('../lib/updater-host.cjs');
 
 const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-dguard-'));
 
-/** 用 System32 tar 造一个真实可解的 tgz（package/package.json 含 name/version）。 */
+/** 用平台自带 tar 造一个真实可解的 tgz（package/package.json 含 name/version）。
+ *  win32 = System32\tar.exe 绝对路径（PATH 里 Git Bash GNU tar 会把 `-C C:\...` 解析成远程主机）；
+ *  POSIX = PATH 里的 tar（linux/macOS 均自带）。Windows 分支逐字节不变，仅新增 POSIX 分支。 */
 function makeRealTgz(dest, version, opts) {
   const o = opts || {};
   const stage = tmpRoot();
@@ -31,7 +33,9 @@ function makeRealTgz(dest, version, opts) {
   fs.writeFileSync(path.join(pkgDir, 'package.json'),
     JSON.stringify({ name: 'dsh-prompt-enhancer', version }), 'utf8');
   if (o.extraFile) fs.writeFileSync(path.join(pkgDir, o.extraFile), 'x', 'utf8');
-  const tarBin = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+  const tarBin = process.platform === 'win32'
+    ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe')
+    : 'tar';
   execFileSync(tarBin, ['-czf', dest.replace(/\\/g, '/'), '-C', stage, 'package'], { timeout: 30000 });
   return dest;
 }
