@@ -47,6 +47,28 @@
 //        口径收窄：present 且**行数 > 0** 而 closed/superseded = 0 是**合法分母 0**，不算接线缺口（不红）。
 //        A-1c / A-2c / A-3c 为**真数据对账腿**：判据裁决必须与扫描面读数独立重推的期望一致，
 //        用于堵「只改调用点 add(id, true, …)」这类掏空；A-3c 的期望由读数独立重推，不复用 A-3 的中间量。
+//   T7（2026-09-26 技术债七卡口径）：册壳豁免由「形态四条件」改为「**显式声明行** SHELL-DECL（逐字点名自身）」。
+//        ⚠ 准确口径：T7 的**净增量只有一条 —— 多要求一行自陈**。真正拦住仿冒件的是「有卡」「措辞位」
+//          两道**形态闸**（旧口径本来也有）；两版唯一的行为差别是「无自陈但形态全中」这一形状
+//          （实测 旧版=被豁免 / 新版=落回未引用集判红）。
+//        ⚠ 该声明行在本仓**不进版本控制**（docs/devref/ 被 .gitignore:19 忽略、且不在 package.json.files
+//          白名单里），故"可审"只落在本地治理面 —— 这条**未达成**，不许当已解决读。
+//          本分支实证补充（2026-09-27，全新 checkout）：**无 docs/devref 的机器上本环整体不可判** ——
+//          INDEX.md 不存在 ⇒ A-5 报 SKIP、豁免集恒空、声明行的到位无从判起。声明可审的**前置条件**
+//          因此有两条：① docs/devref 进版本控制；② 索引与卡正文随包可达。缺任一条，"可审"都不成立。
+//          ⇒ 在本仓现状下，**声明集台账**（.gate-shell-decls.json + 探针）是"可见性"能落地的**唯一**形态：
+//            它把「哪些文件带声明」这一事实钉进版本控制，而声明行本身留在本地治理面。
+//        ⚠ 残余①（**本判据的结构上界，不冒充已堵**）：「谁可以声明」在仓内**无唯一性约束** ——
+//          声明行只要求逐字点名**本文件自己**，故任何文件都能自陈。实测：把真册壳那一行复制进
+//          另一份同形文件（只需把文件名改成自己）即同样被豁免，无需碰真册壳那个文件。判据内不可解：
+//          "拥有声明的集合"是外部意图，判据里没有任何可读通道能证明某一行声明**是由谁写的**；
+//          再加条件（要求改真册壳 / 加签名 / 记时间戳）都只是把上界往后推一格，且签名本身也在同一可写面内。
+//          判据内能给的**唯一**增量是**可观测性**：豁免集进机读面（--json 的 summary.exempt/unreferenced），
+//          注册与注销都留下逐条痕迹；"改真册壳才拿得到"这一条**不成立、已在本分支订正**。
+//          ⚠ 声明行的**有效性**另有一道仓内护栏（非判据）：test/gate-shell-decl-consistency.cjs 探针——
+//          统计本仓所有带声明的文件，其集合与行数须逐字等于 .gate-shell-decls.json 台账，
+//          声明集有任何变化即判红并要求**显式更新台账**（可见、可 diff、进版本控制）。
+//          探针只做可见性，**不**阻止任何人加声明（那需要外部裁决面，仓内无此面）。
 //
 // ⚠ --json 兼容性：本版**结构可能与旧版不同** —— summary 增 judged/unjudged/readHealth 三键，
 //   新增顶层 tail（尾行文本），且尾行不再以纯文本追加在 JSON 之后（旧版 stdout 因此不是合法 JSON）。
@@ -80,6 +102,9 @@ let CLOSED_MARK = /后续|已全部|已订正|已闭环|已作废|已并入|已�
 let ARCH_TRIG = /索引待修正|应改锚|待改锚|索引待补/;
 let ARCH_EVID = /实测|nav_graph|已作废|二次复核|已闭环/;
 const ARCH_GLOB = /^prompt-enhancer-.*\.md$/;
+// T7：册壳**显式声明行**——豁免的唯一入口（形态条件不再构成豁免，理由见 isShellBody 注释）。
+// 路径字符集受限（无空白/引号/换行）⇒ 声明行天然单行、无注入面；比较用**逐字相等**，不做模糊/后缀匹配。
+const SHELL_DECL_RE = /^SHELL-DECL ([A-Za-z0-9._\/-]+)$/;
 
 const clean = (s) => s.replace(/\*\*/g, '').replace(/`/g, '').trim();
 
@@ -488,11 +513,15 @@ function wiringGaps(rows, presentOf, denomOf) {
 //   [磁盘有未引用卡]  = 行数 > 0、零 closed 行、存在未被卡表引用的卡正文 -> A-5 红
 //   [合法零 closed]   = 行数 > 0、零 closed 行、无未引用卡正文        -> 绿（合法分母 0）
 //   [状态词不被识别]  = 状态列用词不在 closed/superseded 词表内、正文却有措辞 -> A-1c 红
-//   [仿冒册壳]        = 首行写成册壳样式但正文段里有未闭环措辞         -> A-5 红（第四轮补）
+//   [仿冒册壳]        = 首行写成册壳样式但**无自身声明行**（第四/五轮）   -> A-5 红
+//                       第四轮形状 = 首行仿冒 + 措辞落普通正文段；第五轮（T7）起**声明行**才是豁免入口，
+//                       故「措辞进块引用」已不再是绕过面（旧措辞与本行自相矛盾，2026-09-27 订正）。
 // 判据口径：磁盘卡正文 ⊆ 卡表已解析集合 ⟺ 「未被引用」与「有 case 差异」同时为空。
-//   注：按字面「差集非空」，真实 INDEX.md 里的 `cards/reference.md` 同时也是**册壳**（首行 # 且含「知识卡册」），
-//   在大小写敏感的 WSL 上会被误报——故对**真册壳**豁免；豁免是唯一让文件整体脱离全部判据的出口，
-//   故**必须具名可见**：A-5 的「实测」串里打印被豁免的件数与文件名清单（:494 这条承诺与实现对账）。
+//   注：真实 `cards/reference.md` 按**旧四条件**曾是册壳豁免件，但自 T7 起**不再需要豁免** ——
+//   它被 INDEX.md 卡表两行引用（declared），故不进未引用集；旧注释说它"同时也是册壳"属**误判**
+//   （真正的册壳是 how-to.md / decision.md，各 0 张卡），2026-09-27 订正。
+//   豁免是**唯一**让文件整体脱离全部判据的出口，故**必须具名可见**：A-5 的「实测」串打印被豁免的
+//   件数与文件名清单；T7 起另经 --json 的 summary.exempt / summary.unreferenced 进机读面。
 function cardBodyFiles(devrefDir) {
   const out = [];
   for (const sub of ['cards', 'shoucang']) {
@@ -502,33 +531,77 @@ function cardBodyFiles(devrefDir) {
   }
   return out;
 }
-// 册壳判定（第四轮·仿冒册壳夹具）：**不可只靠首行仿冒** —— 首行正则形如「# 知识卡册 · reference」
-// 再补一句未闭环措辞即可免检（实测 /tmp/ghost → EXIT=0 静默豁免）。
-// 改为**结构化**判定，四条件全中才算册壳（任一条不满足即非册壳，落回未引用卡判定）：
-//   ① 首行是 H1 且含「知识卡册」——既有格式面，仅作必要条件，不单独构成豁免；
-//   ② 整份文件**没有任何卡条目小节**（无 `## ` 开头行）——有卡条目就不可能是空册；
-//   ③ 整份文件**没有任何卡字段行**（无 `- 状态：`/`- 溯源：`/`- 指向架构档：`）——有字段就有卡；
-//   ④ 未闭环措辞**只出现在 markdown 块引用里**（行首 `>` 或引用块内续行）——见下方 ④ 的实现注释；
-//      措辞落在普通正文段 => 那是断言不是告誡 => 不是册壳。
-// 取证：真实册壳 how-to.md / decision.md 的「待修正」都落在第 5 行的块引用告诫句（行首 `>`，grep -n 实测）；
-//       仿冒夹具的措辞落在普通正文段，条件 ④ 即判非册壳。
-function isShellBody(abs) {
+// 册壳判定（第五轮·T7 2026-09-26）：**豁免只认显式声明行**，形态不再构成豁免。
+//
+// 为什么换掉上一版「结构性四条件」（第四轮）——那被独立复核核定为**判据上界**，不是判据：
+//   四条件（① 首行含「知识卡册」② 无二级小节 ③ 无卡字段行 ④ 措辞仅在块引用）**全部是形态条件**。
+//   仿冒者只要看见这四条，就能在自己的文件里逐条复刻：首行写「# 项目知识卡册 · 任意」、不写小节、
+//   不写卡字段、把措辞塞进一行 `> …待修正…` —— 逐字同形 ⇒ 整体豁免 ⇒ 该文件脱离**全部**判据
+//   （实测：/tmp 仿冒件在旧版下 EXIT=0）。形态可被观察即可被复制，再往四条件里加条件只是把上界往后
+//   推一格（第四轮已连改两次）—— 这是该口径的结构性上界：**空册外壳不携带任何只有真册壳才有的东西**。
+//
+// 新口径：豁免 = **该文件自己声明**「我是空册」，且声明里**点名自己**：
+//   声明形态：单独一行的  `SHELL-DECL <册内相对路径>`（例：`SHELL-DECL cards/how-to.md`）
+//   · 必须**逐字等于本文件相对 devref 的路径**（cards/xxx.md 或 shoucang/xxx.md）——写别的文件名不算数
+//   · 只认「行首锚定 + 整行匹配」的独立声明行：夹在正文句中的同串不构成声明（不靠关键词搜索）
+//   · 至多一条；出现两条及以上视为**声明有歧义** -> 不算豁免（fail-closed，不猜哪条为准）
+// 由此得到的性质（**精确版**，勿再读成"绕过路径只剩改真册壳"）：
+//   ① 免掉的是**形态可复刻性**：不再有「逐条模仿形状即拿到豁免」—— 拿到豁免必须先写下一条专门语句，
+//      它是**可 grep 的独立事实**。⚠ 但**这条语句本身不进版本控制**（docs/devref 被 .gitignore:19 忽略，
+//      见下方「不进版本控制」条）；进版本控制的是**声明集台账** .gate-shell-decls.json（配套探针
+//      test/gate-shell-decl-consistency.cjs：声明集一变即红，逼出一次显式 diff）。
+//   ② 残余①（未堵）：**任何文件都能写下指向自己的那条声明**，故豁免集**无唯一性上界**（实测：把真册壳
+//      那一行复制进另一份同形文件、只把文件名改成自己，即同样豁免，无需碰真册壳）。判据内不可解 ——
+//      "谁有权声明"是外部意图，仓内无可读通道；本判据能给的只有**可观测性**（豁免集进 --json）。
+//   ③ 声明**点自己的名**：册壳是「文件级全有全无」的出口，声明与对象一一对应，不存在「声明一个、豁免一批」。
+//   ④ 对**卡正文**不豁免：册内有卡（卡条目小节或卡字段行，见下方 ② 判别）一律不许被声明豁免——豁免面
+//      只覆盖「一册写明了它是空册」这一类；删掉这一条，声明行就会退化成「谁想免检就在自己文件里加一行」。
+// 取证件（本仓 docs/devref，2026-09-26 实读）：
+//   `grep -n '^SHELL-DECL' docs/devref/cards/how-to.md docs/devref/cards/decision.md` → 各 1 行、点名自身；
+//   `docs/devref/cards/reference.md` 载 2 张卡、**无**声明行 -> 本就不在豁免面（被卡表引用）。
+
+/** 册内卡条目小节：`## ` 开头行（H2–H6 亦计——卡标题在本仓是 H2）。非空册的判据见 isShellBody ②。 */
+function hasCardSection(lines) {
+  return lines.some((l) => /^\s{0,3}#{2,6}\s/.test(l));
+}
+/** 卡字段行：`- 状态：`/`- 溯源：`/`- 指向架构档：`（本仓卡正文的固定字段面）。 */
+function hasCardField(lines) {
+  return lines.some((l) => /^\s*-\s*(状态|溯源|指向架构档)\s*[:：]/.test(l));
+}
+/** 读出册壳**显式声明**：恰好一条 `SHELL-DECL <rel>` 且 `<rel>` 等于 relOfThisFile；否则 declared=false。
+ *  三种不成立的情形被显式区分（无声明 / 多条歧义 / 点名他人），便于把「为什么没豁免」打出来。 */
+function readShellDecl(raw, relOfThisFile) {
+  const lines = raw.split(/\r?\n/).filter((l) => l !== '');
+  const decls = [];
+  for (const l of lines) {
+    const m = SHELL_DECL_RE.exec(l.trim());
+    if (m) decls.push({ line: l.trim(), target: m[1] });
+  }
+  if (!decls.length) return { declared: false, why: '无 SHELL-DECL 声明行' };
+  if (decls.length > 1) return { declared: false, why: 'SHELL-DECL 声明行 ' + decls.length + ' 条（有歧义，不猜）' };
+  if (decls[0].target !== relOfThisFile) {
+    return { declared: false, why: 'SHELL-DECL 点名 `' + decls[0].target + '`，与本文件路径 `' + relOfThisFile + '` 不符' };
+  }
+  return { declared: true, why: '声明行 `' + decls[0].line + '`（逐字等于本文件路径）' };
+}
+function isShellBody(abs, rel) {
   const raw = readIf(abs);
   if (raw === null) return false;
+  const relOfThisFile = rel || path.relative(DEVREF, abs).split(path.sep).join('/');
+  // ① 声明闸（**豁免的唯一入口**）：本文件自己、逐字点名自己、且只有一条声明行。
+  //    形态条件全部退居**必要性**——没有声明，形状再像也不豁免（这就是本卡要堵的那条绕过路径）。
+  const decl = readShellDecl(raw, relOfThisFile);
+  if (!decl.declared) return false;
   const lines = raw.split(/\r?\n/);
-  const first = lines[0] || '';
-  if (!first.startsWith('#') || first.indexOf('知识卡册') < 0) return false;                 // ①
-  if (lines.some((l) => /^\s{0,3}#{2,6}\s/.test(l))) return false;                          // ②
-  if (lines.some((l) => /^\s*-\s*(状态|溯源|指向架构档)\s*[:：]/.test(l))) return false;      // ③
-  // ④ 未闭环措辞只允许出现在**块引用**（markdown 引用 = 引述/告诫）里。
-  //    ⚠ 这里**不能**用关键词白名单：第一版我写了「本册|须知|必须|注意|⚠」等词，而仿冒夹具正文正是
-  //    「本册待修正，尚未核对。」——关键词本身就是可仿冒面，等于没堵（实测 ghost 仍 EXIT=0）。
-  //    结构判据是**块引用**（行首 `>` 或引用块内续行），不是关键词、也不是「同一块里另有闭环词」：
-  //    ——「同块须含 CLOSED_MARK 词」这条我试过又撤了：真实两个册壳的告诫句里**不含**任何闭环词
-  //      （实测 grep 后续|已全部|已订正|已闭环|已作废|… 均 0 命中），加上它会把真实册壳判成非册壳、
-  //      在真实面把它们当「未引用卡」报红——直接违反「真实面必须绿」的硬条件。
-  //    ⚠ 已登记残余：仿冒者若把措辞**写进块引用**、且文件里没有其它正文段，形状与真册壳**无法区分**
-  //      （这不只是本判据的弱点，是「空册声明」这一形态本身的弱断言性）。此残余见交付说明，不冒充已堵。
+  // ② 非空册闸：册内**有卡**（有卡条目小节或卡字段行）一律不许被声明豁免
+  //    —— 防「声明行变成谁都能加的免检票」：有卡的册子有卡表在管，不该走豁免面。
+  if (hasCardSection(lines) || hasCardField(lines)) return false;
+  // ③ 措辞位闸（**必要性**，不是豁免条件）：申报豁免的空册里，未闭环措辞只允许出现在**块引用**中
+  //    （「引述/告誡」与「断言」的区分）；落在普通正文段 ⇒ 就同一份文件自己写了未闭合断言 ⇒ 不豁免。
+  //    ⚠ 这里**不能**用关键词白名单：第四轮试过「本册|须知|必须|注意|⚠」等词，而仿冒夹具正文正是
+  //      「本册待修正，尚未核对。」——关键词本身就是可仿冒面，等于没堵（实测 ghost 仍 EXIT=0）。
+  //    ⚠「同块须含 CLOSED_MARK 词」这条第四轮试过又撤了：真实两个册壳的告誡句里**不含**任何闭环词
+  //      （实测 grep 后续|已全部|已订正|已闭环|已作废|… 均 0 命中），加上它会误红真实册壳。
   const inQuote = new Array(lines.length).fill(false);
   let inQ = false;
   for (let i = 0; i < lines.length; i++) {
@@ -537,7 +610,7 @@ function isShellBody(abs) {
     inQuote[i] = inQ;
   }
   const hitIdx = lines.map((l, i) => ({ l, i })).filter((x) => UNCLOSED.some((w) => x.l.indexOf(w) >= 0));
-  if (hitIdx.some((x) => !inQuote[x.i])) return false;                                       // ④
+  if (hitIdx.some((x) => !inQuote[x.i])) return false;                                       // ③
   return true;
 }
 function unreferencedCards(devrefDir, rows, resolveFn) {
@@ -548,12 +621,21 @@ function unreferencedCards(devrefDir, rows, resolveFn) {
     const b = resolveFn(devrefDir, row);
     if (b) declared.add(path.resolve(b.file));
   }
-  const exempt = onDisk.filter((f) => isShellBody(f.abs));
+  // rel 显式传入（devref 相对路径）——声明行按**本目录**点名，故不能用模块级 DEVREF 兜底推算
+  const exempt = onDisk.filter((f) => isShellBody(f.abs, f.rel));
   const files = onDisk
-    .filter((f) => !isShellBody(f.abs))
+    .filter((f) => !isShellBody(f.abs, f.rel))
     .map((f) => ({ ...f, declared: declared.has(path.resolve(f.abs)) }))
     .filter((f) => !f.declared);
-  return { present: true, files, diskTotal: onDisk.length, declaredTotal: declared.size, exempt };
+  // why：豁免**依据**（本文件里那条逐字点名自身的声明行）——豁免是唯一让文件整体脱离全部判据的出口，
+  // 具名可见之外还要给出**依据**，否则人读串只能看到「谁被豁免」，看不到「凭什么被豁免」。
+  return {
+    present: true,
+    files,
+    diskTotal: onDisk.length,
+    declaredTotal: declared.size,
+    exempt: exempt.map((f) => ({ ...f, why: readShellDecl(readIf(f.abs) || '', f.rel) })),
+  };
 }
 const unreferenced = unreferencedCards(DEVREF, cards.rows || [], resolveCardBody);
 {
@@ -563,12 +645,15 @@ const unreferenced = unreferencedCards(DEVREF, cards.rows || [], resolveCardBody
     const refs = unreferenced.files;
     add('A-5', refs.length === 0,
       '卡表以外未被引用的卡正文（未纳入卡表者）',
-      '磁盘卡正文 ⊆ 卡表已解析集合（cards/**、shoucang/**，册壳样式除外）；未被引用的卡正文 > 0 即 FAIL',
+      '磁盘卡正文 ⊆ 卡表已解析集合（cards/**、shoucang/**，**显式声明豁免的空册除外**）；未被引用的卡正文 > 0 即 FAIL',
       '磁盘卡正文 ' + (unreferenced.diskTotal || 0) + ' 件｜卡表已解析 ' + (unreferenced.declaredTotal || 0) + ' 件｜未被引用 ' + refs.length + ' 件'
       + (refs.length ? '：' + refs.map((f) => f.rel).join(' / ') + '（这些文件的未闭环措辞不在任何判据的扫描面内，不得判绿）' : '')
       // 豁免是**唯一**让文件整体脱离全部判据的出口，必须具名可见（头注口径：分母/豁免/命中全部打印）
+      // T7：具名之外还要给**依据**（那条逐字点名自身的声明行）——只给名单等于让人自己去找凭什么。
       + '｜册壳豁免 ' + (unreferenced.exempt || []).length + ' 件'
-      + ((unreferenced.exempt || []).length ? '：' + unreferenced.exempt.map((f) => f.rel).join(' / ') + '（命中首行+无小节+无卡字段+措辞仅在块引用 四条件，故不判）' : ''));
+      + ((unreferenced.exempt || []).length
+        ? '：' + unreferenced.exempt.map((f) => f.rel + '（' + (f.why && f.why.why || '依据缺失') + '）').join(' / ')
+        : ''));
   }
 }
 
@@ -594,15 +679,42 @@ const unreferenced = unreferencedCards(DEVREF, cards.rows || [], resolveCardBody
   const u2 = unreferencedCards(t2, uCards2.rows, resolveCardBody);
   fs.rmSync(t2, { recursive: true, force: true });
   const a5bOk = u.files.length === 1 && u2.files.length === 0;
-  add('A-4b', allPresent === 1 && nonePresent === 0 && legalZero === 0 && honest === 0 && a5bOk,
-    'A-4/A-5 判别力自证（内存变异 + 指向临时目录构造：present/分母/未引用集三面）',
-    'present 且分母 0 -> 缺口 1；present 缺位 -> 0；present 且分母 >0 -> 0；无 SKIP -> 0；未引用卡 1 件 -> 检出 1，登记后 -> 0',
+  // A-5c（T7）：豁免闸的**真数据对账**（不是纯函数自证）——同形文件只差一行声明，豁免结论必须翻转。
+  // 三个方向都测：① 无声明（旧四条件下会被豁免的形状）-> 落回未引用集；② 带自身声明 -> 进豁免集；
+  // ③ 声明**点名别人** -> 不算豁免（防「声明一个、豁免一批」）。夹具全在临时目录，真实面零写入。
+  const t3 = fs.mkdtempSync(path.join(os.tmpdir(), 'card-arch-decl-'));
+  fs.mkdirSync(path.join(t3, 'cards'), { recursive: true });
+  fs.mkdirSync(path.join(t3, 'shoucang'), { recursive: true });
+  const idxT3 = ['# INDEX', '', '| 卡 | 册 | 创建 | 状态 | 溯源 |', '|---|---|---|---|---|',
+    '| 甲卡 | reference | 2026-01-01 | accepted | `cards/reference.md` |', ''].join('\n');
+  fs.writeFileSync(path.join(t3, 'INDEX.md'), idxT3, 'utf8');
+  fs.writeFileSync(path.join(t3, 'cards', 'reference.md'), ['# 甲卡', '', '正文正常。', ''].join('\n'), 'utf8');
+  const shellNoDecl = ['# 项目知识卡册 · 空册', '', '> 本册待修正，尚未核对。', ''].join('\n');
+  const shellSelf = ['# 项目知识卡册 · 空册', 'SHELL-DECL cards/how-to.md', '', '> 本册待修正，尚未核对。', ''].join('\n');
+  const shellOther = ['# 项目知识卡册 · 空册', 'SHELL-DECL cards/decision.md', '', '> 本册待修正，尚未核对。', ''].join('\n');
+  fs.writeFileSync(path.join(t3, 'cards', 'how-to.md'), shellNoDecl, 'utf8');
+  const uNoDecl = unreferencedCards(t3, scanCards(t3).rows, resolveCardBody);
+  fs.writeFileSync(path.join(t3, 'cards', 'how-to.md'), shellSelf, 'utf8');
+  const uDecl = unreferencedCards(t3, scanCards(t3).rows, resolveCardBody);
+  fs.writeFileSync(path.join(t3, 'cards', 'how-to.md'), shellOther, 'utf8');
+  const uOther = unreferencedCards(t3, scanCards(t3).rows, resolveCardBody);
+  fs.rmSync(t3, { recursive: true, force: true });
+  const declGateOk = uNoDecl.files.length === 1 && uNoDecl.exempt.length === 0
+    && uDecl.files.length === 0 && uDecl.exempt.length === 1
+    && uOther.files.length === 1 && uOther.exempt.length === 0;
+  add('A-4b', allPresent === 1 && nonePresent === 0 && legalZero === 0 && honest === 0 && a5bOk && declGateOk,
+    'A-4/A-5 判别力自证（内存变异 + 指向临时目录构造：present/分母/未引用集/**T7 豁免闸**四面）',
+    'present 且分母 0 -> 缺口 1；present 缺位 -> 0；present 且分母 >0 -> 0；无 SKIP -> 0；未引用卡 1 件 -> 检出 1，登记后 -> 0；'
+    + '同形文件无声明 -> 未引用 1/豁免 0，带自身声明 -> 未引用 0/豁免 1，声明点名他人 -> 未引用 1/豁免 0',
     'present+分母0 检出 ' + allPresent + ' 处' + (allPresent === 1 ? ' ✓' : ' ✗')
     + '｜present 缺位 检出 ' + nonePresent + ' 处' + (nonePresent === 0 ? ' ✓' : ' ✗')
     + '｜present+分母>0 检出 ' + legalZero + ' 处' + (legalZero === 0 ? ' ✓' : ' ✗')
     + '｜无 SKIP 检出 ' + honest + ' 处' + (honest === 0 ? ' ✓' : ' ✗')
     + '｜未引用卡 检出 ' + u.files.length + ' 件' + (u.files.length === 1 ? ' ✓' : ' ✗')
-    + '｜登记后 检出 ' + u2.files.length + ' 件' + (u2.files.length === 0 ? ' ✓' : ' ✗'));
+    + '｜登记后 检出 ' + u2.files.length + ' 件' + (u2.files.length === 0 ? ' ✓' : ' ✗')
+    + '｜T7 豁免闸：无声明 未引用 ' + uNoDecl.files.length + '/豁免 ' + uNoDecl.exempt.length
+    + '，带自身声明 未引用 ' + uDecl.files.length + '/豁免 ' + uDecl.exempt.length
+    + '，声明点名他人 未引用 ' + uOther.files.length + '/豁免 ' + uOther.exempt.length + (declGateOk ? ' ✓' : ' ✗'));
 }
 
 // ── 机读面三态自证 A-6 ────────────────────────────────────────────────
@@ -653,9 +765,16 @@ const jsonRows = toTriState(ROWS);
 if (has('--json')) {
   // 机读面：stdout 只有**一行** JSON（stdout 必须可 parse）
   // rows[].pass 三态：true / false / null（null = 停在 SKIP，没判上）
+  // T7（残余①的可观测性落点）：豁免集**进机读面**。豁免是唯一让文件整体脱离全部判据的出口，
+  //   且本判据**无法**约束"谁有权声明"（见头注残余①）⇒ 那么至少要保证：谁被豁免、依据是哪一行、
+  //   谁落在未引用集里，全部可由机器读取。豁免集的任何变化 = 这份 JSON 的一次 diff。
   console.log(JSON.stringify({
     devref: DEVREF, arch: ARCH, rows: jsonRows,
-    summary: { pass: passed.length, conflict: conflicts.length, skip: skips.length, judged: judged.length, unjudged, readHealth: health },
+    summary: {
+      pass: passed.length, conflict: conflicts.length, skip: skips.length, judged: judged.length, unjudged, readHealth: health,
+      exempt: (unreferenced.exempt || []).map((f) => ({ rel: f.rel, decl: f.why && f.why.declared ? f.why.why : null })),
+      unreferenced: (unreferenced.files || []).map((f) => f.rel),
+    },
     tail: tailLine,
   }, null, 1));
 } else {

@@ -1,0 +1,16 @@
+{
+  "_doc": [
+    "T7 册壳声明集台账（**进版本控制**）。",
+    "用途：把「仓内哪些文件带 SHELL-DECL 声明行」这一事实钉进版本控制 —— docs/devref/ 被 .gitignore:19 忽略，",
+    "      声明行本身进不了 git，故本文件是它唯一的可见落点。",
+    "维护：声明集**任何变化**（新增 / 删除 / 改名 / 改指向）都必须显式更新本文件 —— 探针",
+    "      test/gate-shell-decl-consistency.cjs 会在不一致时报红；更新即一次可 diff 的提交，这就是「可见」。",
+    "口径：只登记判据器扫描面（docs/devref 的 cards/ 与 shoucang/）内的 .md；每条的 decl 必须逐字等于该文件里那一行。",
+    "残余：本台账**不**限制谁能加声明（那需要外部裁决面，仓内无此面，见判据器头注残余①）；",
+    "      它只保证——加了就得留痕。"
+  ],
+  "entries": [
+    { "file": "docs/devref/cards/decision.md", "decl": "SHELL-DECL cards/decision.md" },
+    { "file": "docs/devref/cards/how-to.md", "decl": "SHELL-DECL cards/how-to.md" }
+  ]
+}
