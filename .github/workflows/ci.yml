@@ -33,8 +33,21 @@ jobs:
       #   串行链：死代码/装配 R1–R4 → RPC 契约 → 提示词生成区漂移 → ADR 承诺 ↔ 代码现状（arch-claims）
       #   `if: always()` 必加：run 35397066749 实证——本步失败会把其后的「Run tests」整步 skipped，
       #   等于用一条门禁吃掉另一条判据的读数（正是 P0 修掉的静默面）。判据之间不得互相遮蔽。
+      #
+      # 步级硬顶（2026-09-26）：本步此前**无自身 timeout**。环上限当时为 180s（scripts/gate.mjs），
+      #   五环串行最坏 5×180 = 900s **正好等于下方作业级硬顶 15min** —— 三者取等 ⇒ 没有余量：
+      #   任一环挂死到上限，作业级 cancelled 先吃掉本步后续行与其后所有步骤（Run tests / 产物一致性）
+      #   及唯一 artifact（test-report.txt）⇒ 门禁与测试一起失去读数。
+      #   故补本步 timeout 并收紧环上限，三档取**严格递增**：
+      #     · 环级 5×120s = 600s —— 出处 scripts/gate.mjs 的 RING_TIMEOUT_MS（实测各环 0.05–0.30s，头寸 ~400×）
+      #     · 步级 12min  = 720s —— 只做**兜底**：环之和已留 120s 余量，正常路径下 gate.mjs 自己会先
+      #       打印完 5 行 RING + 汇总退出码再退出，**不被步上限拦腰杀掉**（若被杀，未打印的 RING 行即丢读数）
+      #     · 作业级 15min = 900s（下方 job 级硬顶，本次未改）
+      #   ⚠ timeout 与 if: always() 是**两个正交面**，不得为压时限删 any 一者：
+      #     timeout 只决定本步何时停；if: always() 决定其后步骤在本步失败/超时时照常执行（不短路）。
       - name: Structure gates (dead-code · RPC · prompts · arch-claims)
         if: always()
+        timeout-minutes: 12
         run: npm run gate
 
       # P0 门禁真话化（圆桌决策 A · 2026-09-19）：历史问题是「测试跑完但进程不退出」——

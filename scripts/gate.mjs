@@ -35,7 +35,18 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ARGS = process.argv.slice(2);
 const has = (f) => ARGS.includes(f);
-const RING_TIMEOUT_MS = Number(process.env.GATE_RING_TIMEOUT_MS || 180000);
+// ── 环上限与三档硬顶（2026-09-26）────────────────────────────────────────────
+// 环上限 120s ⇒ 五环串行最坏 5×120 = **600s**，须**严格小于** CI 的两侧硬顶：
+//   环之和 600s  <  步上限 720s（.github/workflows/ci.yml gate 步 timeout-minutes: 12）  <  作业上限 900s（job timeout-minutes: 15）
+// ⚠ 旧值 180000 的病灶：5×180 = 900s **正好等于作业硬顶**（三档取等 ⇒ 零余量）——任一环挂死到上限，
+//   作业级 cancelled 先吃掉其后所有步骤（Run tests / 产物一致性）与唯一 artifact（test-report.txt）
+//   ⇒ 门禁与测试一起失去读数（本仓核心纪律：判据之间不得互相遮蔽）。
+// 取 120s 的依据（**本机实测，非估计**）：2026-09-26 五环全跑合计 580ms
+//   （dead-code 104ms · rpc 58ms · prompts 65ms · arch-claims 300ms · cards 52ms）⇒ 单环 120s 仍有 ~400× 头寸。
+// 步上限 720s 只做**兜底**：环之和留 120s 余量，正常路径下本编排器会先打印完 5 行 RING + 汇总退出码
+//   再退出，不被作业拦腰杀掉（被杀时未打印的 RING 行即丢失读数）。
+// 环境变量 GATE_RING_TIMEOUT_MS 仍可覆盖（排障用）；改它或改 CI 两侧时，须复核上面三档仍严格递增。
+const RING_TIMEOUT_MS = Number(process.env.GATE_RING_TIMEOUT_MS || 120000);
 
 // ⚠ 各环**必须以 `scripts/<名>.mjs` 字面量**写在这里：arch-claims 的 B234-1 会下探入口脚本，
 //    取不到零环即判红（fail-closed）。改链时同步在这里增删，并与 arch-claims 的 GATE_RINGS 点名面对齐。
