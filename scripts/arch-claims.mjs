@@ -19,13 +19,25 @@
 //   TARGET   终局目标、尚未达成 —— 必须写明**在册依据**（后续 ADR / 决策档），无依据即冲突
 //
 // 用法：node scripts/arch-claims.mjs [--check] [--json] [--md] [--write]
-//   --check  REQUIRED 失败或文档投影漂移 → exit 1
+//   --check  REQUIRED 失败 / 判据面漂移 → exit 1
 //   --md     输出 Markdown 判据表（**投影，勿手抄**）
 //   --write  把判据表写入治理档标记区（本地档；文件不存在则跳过）
+//
+// 投影漂移的判定口径（T2 · 2026-09-27，**三态**——本会要的"读数可解释"就落在这里）：
+//   投影里「期望/实测/判定」列**是环境的函数**（治理日志可不可读决定 A194-4/S-2 走实判还是 SKIP）。
+//   故判据面与环境派生列**分开判**：
+//     · 判据面一致 + 档内读数取自**另一种**环境 ⇒ `stale-readings`：陈旧读数，**不判漂移**、打印提示；
+//     · 判据面变了（加/删/改断言、表体缺行、指纹被替换） ⇒ `drift`：**exit 1**；
+//     · 判据面一致 + **同一种**环境读数却变了 ⇒ `drift`：环境解释不了，仍 exit 1（不放宽）。
+//   ⚠ 反面教训（本仓实测 2026-09-27）：只按"档区与本次实算逐字相等"判，则投影必然只对**生成它的
+//     那个环境**成立——同一份治理根态投影，带 PE_GOV_ROOT 跑 exit 0、不带则 exit 1（gate 整链跟着红）。
+//     那是**假红**（判据表一个字未变），与假绿同属"读数不可解释"。
+//   ⚠ `--write` 请**在本形态**跑；跨形态写出的投影会被判 stale-readings（提示刷新，不是失败）。
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -39,6 +51,10 @@ const MARK_BEGIN = '<!-- ARCH-CLAIMS:BEGIN -->';
 const MARK_END = '<!-- ARCH-CLAIMS:END -->';
 const GOV_EVENTS = process.env.PE_NAV_EVENTS
   || path.join(process.env.PE_GOV_ROOT || 'D:\\FF', '.internal', 'events.jsonl');
+// 读数快照环境标签（T2）：投影里「期望/实测/判定」列**是环境的函数**（治理日志可不可读决定
+//   A194-4/S-2 走实判还是 SKIP）。故投影必须自述「这份读数是在哪种环境下取的」——否则读者
+//   无法分辨「判据变了」与「只是换了个环境跑」，而那正是本会要的可解释性。
+const SNAP_ENV = fs.existsSync(GOV_EVENTS) ? 'gov-readable' : 'gov-unreadable';
 
 const abs = (p) => path.join(ROOT, p);
 const exists = (p) => fs.existsSync(abs(p));
@@ -507,12 +523,96 @@ const CLAIMS = [
         const testsAlways = /- name: Run tests[\s\S]{0,160}?if: always\(\)/.test(ci);
         return assert(step && gateAlways && testsAlways, `步骤 ${step}｜gate always ${gateAlways}｜tests always ${testsAlways}`);
       }),
-      A('B234-3', '结构', '判据表是投影（三种模式 + 治理档标记区），治理档缺位不判漂移', '脚本含 --check/--md/--write 与标记对', () => {
+      A('B234-3', '结构', '判据表是投影（三种模式 + 治理档标记区），治理档缺位不判漂移', '脚本含 --check/--md/--write 与标记对；**语义**守卫：档缺位 ⇒ 判定不是 drift（不锁返回字面量）', () => {
         const src = read('scripts/arch-claims.mjs');
         const modes = ['--check', '--md', '--write'].filter((m) => src.includes(`'${m}'`));
         const marks = src.includes('ARCH-CLAIMS:BEGIN') && src.includes('ARCH-CLAIMS:END');
-        const skipGuard = /if \(!exists\(DOC\)\) return null/.test(src);
-        return assert(modes.length === 3 && marks && skipGuard, `模式 ${modes.length}/3｜标记 ${marks}｜缺档守卫 ${skipGuard}`);
+        // 守卫的**语义**是"缺档 ⇒ 不判漂移"，不是某个具体返回字面量：锁死字面量会把
+        //   T2 的归因改造（return {kind:'missing-doc'}）误判成"守卫被删"（2026-09-27 实测踩到）。
+        //   改用**行为**判定：拿分类器在缺档/缺标记两个变异体上实跑，看它是否落在"不判漂移"。
+        const g1 = classifyDrift(null, 'x', 'sha256:0', 0);
+        const g2 = classifyDrift(undefined, 'x', 'sha256:0', 0);
+        const skipGuard = g1.kind === 'missing-doc' && g2.kind === 'missing-marker';
+        return assert(modes.length === 3 && marks && skipGuard, `模式 ${modes.length}/3｜标记 ${marks}｜缺档守卫（语义）${skipGuard}：缺档→${g1.kind}｜缺标记→${g2.kind}`);
+      }),
+      A('B234-5', '结构', '投影漂移判定的**归因两分**与**防手抄守卫**在位（T2 · 2026-09-27）', '投影带跨环境同值的判据面指纹；漂移时能分辨"换环境"与"判据过期"；指纹行参与判定且自底向上重算', () => {
+        const src = read('scripts/arch-claims.mjs');
+        const hasFp = /function claimsFingerprint/.test(src);
+        // 指纹的**判据面**必须不含环境派生列：detail 在（判据文本），pass/skip/actual 必须不在。
+        const facesLine = (src.match(/const faces = rows\.map\(\(r\) => \[([^\]]*)\]/) || [])[1] || '';
+        const facesClean = !/\br\.(pass|skip|actual|expect)\b|\bpassed\b|\bskips\b/.test(facesLine);
+        // 跨环境同值的计数腿：计数里只许有 RUN.length / DEFECTS.length（passed/skips 会随环境抖）
+        const countsLine = (src.match(/const c = counts \|\| \[([^\]]*)\]/) || [])[1] || '';
+        const countsClean = /RUN\.length/.test(countsLine) && !/passed|skips|conflicts/.test(countsLine);
+        // 判定例程不得引用投影里的指纹（须自底向上重算），且必须**先剥指纹行**再比对（否则递归）
+        const stampStrip = /stampedMd/.test(src) && /stripFp/.test(src);
+        const judgeByRecalc = /const localFp = claimsFingerprint\(\)/.test(src);
+        // 归因两分：判据面没变 ⇒ 陈旧读数（stale-readings，不判漂移）；变了 ⇒ 真漂移（drift）
+        const twoWay = /kind === 'stale-readings'/.test(src) && /判据面\*\*已过期\*\*/.test(src);
+        // 指纹行参与判定（否则改档里的指纹无人抓）
+        const fpInVerdict = /fpConsistent/.test(src) && /process\.exit\(1\)/.test(src);
+        const pass = hasFp && facesClean && countsClean && stampStrip && judgeByRecalc && twoWay && fpInVerdict;
+        return assert(pass, `指纹函数 ${hasFp}｜判据面不含环境列 ${facesClean}｜计数跨环境同值 ${countsClean}｜剥指纹行 ${stampStrip}｜自底向上重算 ${judgeByRecalc}｜归因两分 ${twoWay}｜指纹参与判定 ${fpInVerdict}`);
+      }),
+      A('B234-6', '结构', '投影漂移判定**判别力自证**（内存变异：陈旧读数 与 判据面演化 必须被分成两类，防手抄腿在两种环境下都有效）', '换环境->stale-readings（不判漂移）；同环境读数漂移/指纹变/条数过期/表体缺行->drift 真红；指纹被替换->fpConsistent=false；缺档/缺标记->各 1 且不判漂移', () => {
+        // 判别力自证（变异体，仿 S-8/A-4b 的形态）：只"声明"归因两分是不够的——
+        //   必须证明这条判定**真能把两类分开放**，否则它可被静默掏空（比如两分腿恒真）。
+        //   ⚠ 这是本会 2026-09-27 的**假红**复盘落点：修复前单形态判漂移 ⇒ 另一种形态必假红。
+        const FP = 'sha256:' + 'a'.repeat(16);
+        const OTHER = 'sha256:' + 'b'.repeat(16);
+        // 真实判据面目（用本进程实跑出来的行，不编造文本）
+        const ROWS = RUN.slice(0, 3);
+        const body = (rows) => rows.map((r) => `| ${r.id} ${r.kind}：${r.detail} |`);
+        const mk = (fp, n, rows, env) => ['表头', '|---|---|', ...body(rows),
+          '', `> fingerprint（判据面指纹·跨环境同值）：\`${fp}\`（${n} 条断言｜读数快照 env=${env}｜判据面 = id/kind/detail）`,
+          '', '> 生成：--md｜通过 1'].join('\n');
+        // 另一种环境算出来的同一份表体（剥掉指纹行、读数列不同）
+        const computedEnvDiff = mk('', 0, [], 'x').replace(/\n> fingerprint[^\n]*/, '').replace('通过 1', '通过 9');
+        const c = [
+          ['换环境->陈旧读数', classifyDrift(mk(FP, 3, ROWS, 'gov-readable'), computedEnvDiff, FP, 3, ROWS, 'gov-unreadable').kind === 'stale-readings'],
+          ['同环境读数漂移仍判红', classifyDrift(mk(FP, 3, ROWS, 'gov-unreadable'), computedEnvDiff, FP, 3, ROWS, 'gov-unreadable').kind === 'drift'],
+          ['指纹变->真漂移', classifyDrift(mk(OTHER, 3, ROWS, 'x'), computedEnvDiff, FP, 3, ROWS, 'x').kind === 'drift'],
+          ['条数过期->真漂移', classifyDrift(mk(FP, 2, ROWS, 'x'), computedEnvDiff, FP, 3, ROWS, 'x').kind === 'drift'],
+          ['表体缺行->真漂移', classifyDrift(mk(FP, 3, ROWS.slice(0, 2), 'x'), computedEnvDiff, FP, 3, ROWS, 'x').kind === 'drift'],
+          ['指纹被替换', (() => { const d = classifyDrift(computedEnvDiff, computedEnvDiff, FP, 3, []); return d.kind === 'none' && d.fpConsistent === false; })()],
+          ['逐字相等+行齐', (() => { const x = mk(FP, 3, ROWS, 'x'); const d = classifyDrift(x, x, FP, 3, ROWS, 'x'); return d.kind === 'none' && d.fpConsistent === true && !d.missingRows.length; })()],
+          ['缺档', classifyDrift(null, computedEnvDiff, FP, 3, ROWS).kind === 'missing-doc'],
+          ['缺标记', classifyDrift(undefined, computedEnvDiff, FP, 3, ROWS).kind === 'missing-marker'],
+        ];
+        const bad = c.filter((x) => !x[1]).map((x) => x[0]);
+        return assert(!bad.length, c.map(([k, v]) => k + ' ' + (v ? '✓' : '✗')).join('｜') + (bad.length ? '｜未命中 ' + bad.join(',') : ''));
+      }),
+      A('B234-7', '结构', '漂移**归因文本**与事实同向：判据面未变时不得叙述成「已过期」（措辞面假红）', '面变→（已过期+判据面变了）；面未变（同环境读数漂移）→（未变+不是判据演化）且两分类措辞不互借', () => {
+        // 依据（2026-09-27 独立复核实测）：同环境读数漂移时，档内指纹 == 本形态指纹、表体齐，
+        //   归因却打印「判据面**已过期**」+ 收尾「已归因：判据面变了」——判据面一个字未改。
+        //   这是 b2/I3 同族的**措辞与事实相反**：人读会被引向错误的修复方向。只声明两分类不够，
+        //   必须证明**文本真的跟着分类走**（纯函数变异体，仿 B234-6 形态）。
+        const FP = 'sha256:' + 'a'.repeat(16);
+        const OTHER = 'sha256:' + 'b'.repeat(16);
+        const ROWS = RUN.slice(0, 3);
+        const mk = (fp, n, rows, env) => ['表头', '|---|---|', ...rows.map((r) => `| ${r.id} ${r.kind}：${r.detail} |`),
+          '', `> fingerprint（判据面指纹·跨环境同值）：\`${fp}\`（${n} 条断言｜读数快照 env=${env}｜判据面 = id/kind/detail）`,
+          '', '> 生成：--md｜通过 1'].join('\n');
+        const envDiff = mk('', 0, [], 'x').replace(/\n> fingerprint[^\n]*/, '').replace('通过 1', '通过 9');
+        // ① 面未变 + 同环境读数漂移 ⇒ 措辞必须是「未变」，且不得含「已过期」
+        const sameEnv = classifyDrift(mk(FP, 3, ROWS, 'gov-readable'), envDiff, FP, 3, ROWS, 'gov-readable');
+        const a1 = driftAttribution(sameEnv, FP, 3, 'gov-readable');
+        const ok1 = sameEnv.kind === 'drift' && a1.faceChanged === false
+          && /判据面\*\*未变\*\*/.test(a1.why) && !/已过期/.test(a1.why)
+          && !/判据面变了/.test(a1.tail) && /不是判据演化/.test(a1.tail);
+        // ② 面变（指纹变）⇒ 措辞必须是「已过期」，且不得反过来写「未变」
+        const faceChg = classifyDrift(mk(OTHER, 3, ROWS, 'x'), envDiff, FP, 3, ROWS, 'x');
+        const a2 = driftAttribution(faceChg, FP, 3, 'x');
+        const ok2 = faceChg.kind === 'drift' && a2.faceChanged === true
+          && /判据面\*\*已过期\*\*/.test(a2.why) && /判据面变了/.test(a2.tail) && !/未变/.test(a2.why);
+        // ③ 面变（表体缺行）也必须走「已过期」支
+        const rowChg = classifyDrift(mk(FP, 3, ROWS.slice(0, 2), 'x'), envDiff, FP, 3, ROWS, 'x');
+        const ok3 = driftAttribution(rowChg, FP, 3, 'x').faceChanged === true;
+        // ④ 印刷面：正文两支都真的被调用到（防函数存在却没人调）
+        const src = read('scripts/arch-claims.mjs');
+        const wired = (src.match(/driftAttribution\(/g) || []).length >= 3;
+        const bad = [['面未变→未变措辞', ok1], ['面变→已过期措辞', ok2], ['表体缺行→已过期支', ok3], ['函数已接线(≥3处)', wired]].filter((x) => !x[1]).map((x) => x[0]);
+        return assert(!bad.length, `面未变措辞 ${ok1 ? '✓' : '✗'}｜面变措辞 ${ok2 ? '✓' : '✗'}｜缺行支 ${ok3 ? '✓' : '✗'}｜接线 ${wired ? '✓' : '✗'}` + (bad.length ? `｜未命中 ${bad.join(',')}` : ''));
       }),
       A('B234-4', '索引', 'D-1 的处置形态是**判据**而非一次性修复（S-5 在位 + 两副本无已退役件）', '本脚本含 S-5 且两处清单源文件不含 plugin-client.js', () => {
         const src = read('scripts/arch-claims.mjs');
@@ -708,7 +808,7 @@ function textReport() {
   return out.join('\n');
 }
 
-function mdReport() {
+function mdTable() {
   const out = [];
   out.push('| ADR | 锚点 | 承诺 | 判据 | 档 | 期望 | 实测 | 判定 |');
   out.push('|---|---|---|---|---|---|---|---|');
@@ -716,8 +816,36 @@ function mdReport() {
     const c = CLAIMS.find((x) => x.adr === r.claim);
     out.push(`| ${r.claim || '—'} | \`${c ? c.anchor : '—'}\` | ${c ? c.promise.slice(0, 46) + (c.promise.length > 46 ? '…' : '') : '（结构性）'} | ${r.id} ${r.kind}：${r.detail} | ${r.skip ? 'SKIP' : r.pass ? (r.target ? '在册未达' : 'PASS') : r.target ? '在册未达' : '冲突'} | ${r.expect} | ${r.actual} | ${ICON(r)} |`);
   }
+  return out.join('\n');
+}
+
+/** 判据面指纹（T2 · 2026-09-27）：**跨环境同值**的判据面摘要。
+ *  只吃「非环境派生」列，不吃 期望/实测/判定（那三列随治理日志可不可读而变）。
+ *  用法：投影里展示 + `--check` 可归因（漂移时先比指纹）。 */
+function claimsFingerprint(rows = RUN, counts = null) {
+  // ⚠ 计数里**只许放跨环境同值的量**（本仓实测的坑）：passed/conflicts/skips 随治理日志可不可读
+  //   而变（治理根态 33/0/1 vs 工件形态 31/0/3），放进去指纹就会跨形态抖 ⇒ 归因会说反。
+  const c = counts || [RUN.length, DEFECTS.length];
+  const faces = rows.map((r) => [r.claim || '—', r.id, r.kind, r.detail, r.tier, r.target ? 'T' : '-'].join('\u0001'));
+  return 'sha256:' + createHash('sha256').update(faces.join('\u0002') + '\u0003' + c.join(','), 'utf8').digest('hex').slice(0, 16);
+}
+
+function mdTail() {
+  const out = [];
+  // ── 判据面指纹（T2 · 2026-09-27）────────────────────────────────────────────
+  // 为什么要有它（本仓实测的假红）：本档**同时**是投影与判定基准，而投影里的「实测/判定」列
+  //   **天然随环境变**——实测（--json 逐列比对，同脚本同树）：id/kind/detail/claim/tier/target
+  //   两形态全同；actual×2、pass/skip×2、expect×1 仅因「治理日志可不可读」而不同（A194-4/S-2）。
+  //   ⇒ 单形态判漂移，另一种形态必然**假红**（实测：治理根态投影留在档里，不带 PE_GOV_ROOT 的
+  //     默认形态就报「文档漂移」，而判据表其实一个字都没变）。
+  //   故判据面 = 「非环境派生」列（id/kind/detail/claim/tier/target + 计数），跨形态同值。
+  //   它点名的是**判据演化**（加/删/改一条断言），不点名读数——正是「投影过期」与「只是换了个
+  //   环境跑」的分界。计数进指纹是为了「加一条判据而投影没重生成」可见。
+  //   副作用（声明的边界）：断言文案（detail）改动也会让 fingerprint 变，即使判据等价——
+  //   工程上是刻意的（本表 detail 即判据文本）；必要时应重生成投影，**不要**判这条为假红。
+  out.push(`> fingerprint（判据面指纹·跨环境同值）：\`${claimsFingerprint()}\`（${RUN.length} 条断言｜读数快照 env=${SNAP_ENV}｜判据面 = id/kind/detail/claim/tier/target + 计数，**不含**环境派生的期望/实测/判定列）`);
   out.push('');
-  out.push(`> 生成：\`node scripts/arch-claims.mjs --md\`（**投影，勿手抄**）｜通过 ${passed.length} · 冲突 ${conflicts.length} · SKIP ${skips.length} · 在册未达 ${pendingTargets.length} · 在册缺陷 ${DEFECTS.length}`);
+  out.push(`> 生成：\`node scripts/arch-claims.mjs --md\`（**投影，勿手抄；判定例程不手抄，见 --check**）｜通过 ${passed.length} · 冲突 ${conflicts.length} · SKIP ${skips.length} · 在册未达 ${pendingTargets.length} · 在册缺陷 ${DEFECTS.length}`);
   out.push('');
   out.push('**在册缺陷（非 ADR 面；有处置指向但尚未处置）**');
   out.push('');
@@ -726,6 +854,8 @@ function mdReport() {
   for (const d of DEFECTS) out.push(`| ${d.id} | ${d.surface} | ${d.finding} | ${d.evidence.join('<br>')} | ${d.disposition} |`);
   return out.join('\n');
 }
+
+function mdReport() { return mdTable() + '\n' + mdTail(); }
 
 if (has('--write')) {
   if (exists(DOC)) {
@@ -750,21 +880,137 @@ if (has('--write')) {
   console.log(textReport());
 }
 
+/** 投影漂移**分类器**（纯函数·可内存变异自证，见 B234-6）。
+ *  region: string（标记区文本）| null（档不存在）| undefined（档在但缺标记）
+ *  envOnly / stale-readings ⇒ 判据面没变，差异只来自环境派生列（期望/实测/判定）。
+ *  drift ⇒ 判据面变了（判据演化 / 表体缺行 / 指纹被替换 / 同环境读数漂移）⇒ 投影确实过期。 */
+function classifyDrift(region, computedMd, fp, n, rows = [], snapEnv = null, stripFp = null) {
+  if (region === null) return { kind: 'missing-doc' };
+  if (region === undefined) return { kind: 'missing-marker' };
+  // ⚠ 两件事必须分开：①指纹/条数/env 从**原始档区**读（它们是数据）；
+  //   ②比对拿**已剥指纹行**的档区（与 compute 侧对称）。曾把两者合成一步 ⇒ 指纹读成（无）、
+  //   "环境一致"被误报成指纹不一致（2026-09-27 实测踩到，两种环境都红）。
+  const meta = String(region).trim();
+  const r = stripFp ? stripFp(meta) : meta;
+  const docFp = (meta.match(/fingerprint（[^）]*）：`(sha256:[0-9a-f]+)`/) || [])[1] || null;
+  // 指纹行把「读数快照 env=…」插在条数与判据面之间 ⇒ 条数定式只能取到「N 条断言」，
+  //   不能沿用上游那版「（N 条断言｜判据面 = 」——旧定式会取不到条数，
+  //   把「判据面未过期」误判成过期（2026-09-27 实测踩到）。
+  const boundN = (meta.match(/（(\d+) 条断言/) || [])[1] || null;
+  const docEnv = (meta.match(/读数快照 env=([a-z-]+)/) || [])[1] || null;
+  // 三腿：①档内指纹有值 ②等于本形态实算值 ③条数与本形态一致
+  const fpConsistent = docFp === fp && boundN === String(n);
+  const verbatim = r === String(computedMd).trim();   // r 已剥指纹行，与 compute 侧对称
+  // 表体**行绑定**：每行的 `| id kind：detail |` 必须逐字在位。防"留着指纹行、把表体删空/删几行"，
+  //   也防"投影是旧判据面拼出来的新指纹"。（不切单元格：实测 S-8 的期望/实测列内含 ASCII `|`，
+  //   切列会误判——这也是读数列不得参与判定的又一条理由。）
+  const rowPrefix = (x) => `| ${x.id} ${x.kind}：${x.detail} |`;
+  const missingRows = rows.filter((x) => !r.includes(rowPrefix(x)));
+  if (verbatim) return { kind: 'none', docFp, boundN, fpConsistent, missingRows };
+  // 判据面（指纹 + 表体逐行）一致 ⇒ 差异只能在**读数尾巴**上。还要再分一层，
+  //   因为「换环境」与「同环境读数变了」是两件事：
+  //   · 档内读数取自**另一种**环境（env 标签不同）⇒ 陈旧读数，刷新即可，**不判漂移**；
+  //   · **同一种**环境、读数却变了 ⇒ 环境解释不了（例如代码改了、实测值跟着动）⇒ 仍判红。
+  //     ⚠ 少了这一层就是把闸门放宽：同环境也先放过，等于把「读数漂移」整类静默掉——
+  //       那正是本仓最忌的「失败不可观测」。
+  const thesisOk = fpConsistent && !missingRows.length;
+  const envExplains = !!docEnv && docEnv !== snapEnv;
+  if (thesisOk && envExplains) return { kind: 'stale-readings', docFp, boundN, docEnv, fpConsistent, missingRows, envOnly: true };
+  return { kind: 'drift', docFp, boundN, docEnv, fpConsistent, missingRows, envOnly: false, sameEnvReadings: thesisOk };
+}
+
+/** 漂移**归因文本**（纯函数·可内存变异自证，见 B234-7）。
+ *  判据面「变没变」决定措辞，**两分类不得互相借用**：
+ *   · 面变（指纹/条数/表体任一失效）⇒ 判据面**已过期**，是判据演化；
+ *   · 面未变、只剩同环境读数漂移 ⇒ 判据面**未变**，不得写「已过期」（一个字未改却叙述成过期，
+ *     即 b2/I3「措辞与事实相反」同族缺陷——2026-09-27 独立复核实测踩到）。
+ *  tail 供收尾行复用，避免收尾与上文两处说反。 */
+function driftAttribution(drift, localFp, localN, snapEnv) {
+  const missing = drift.missingRows || [];
+  const legs = [];
+  if (drift.docFp !== localFp) legs.push(`指纹不一致（档内 ${drift.docFp || '（无）'} vs 本形态 ${localFp}）`);
+  if (drift.boundN !== String(localN)) legs.push(`条数不一致（档内 ${drift.boundN || '（无）'} 条 vs 本形态 ${localN} 条）`);
+  if (missing.length) legs.push(`表体缺行 ${missing.length}/${localN}（如 ${missing.slice(0, 3).map((x) => x.id).join(',')}）`);
+  if (drift.sameEnvReadings) legs.push(`读数漂移（同为 env=${snapEnv}，实测/判定列却与投影不符）`);
+  const faceChanged = drift.docFp !== localFp || drift.boundN !== String(localN) || missing.length > 0;
+  const why = faceChanged
+    ? `判据面**已过期**（${legs.join('｜') || '表体与指纹之外的内容不一致'}）——投影随判据演化而过期，请在**本形态**跑 --write 重生成`
+    : `判据面**未变**，同环境（env=${snapEnv}）读数漂移：${legs.join('｜')}——档内指纹与表体均与本形态一致，不符的是**读数列**（判据面一个字未改），请跑 --write 重生成`;
+  const tail = faceChanged
+    ? '上面已归因：判据面变了，不是换环境'
+    : '上面已归因：判据面未变，是同环境读数漂移（不是判据演化）';
+  return { faceChanged, why, tail };
+}
+
 if (has('--check')) {
-  const drift = (() => {
-    if (!exists(DOC)) return null;                       // 本地治理档缺位 → 不判漂移（SKIP）
-    const src = read(DOC);
-    const i = src.indexOf(MARK_BEGIN);
-    const j = src.indexOf(MARK_END);
-    if (i < 0 || j < 0) return '缺标记区';
-    return src.slice(i + MARK_BEGIN.length, j).trim() === mdReport().trim() ? null : '判据表与投影不一致（跑 --write 重新生成）';
+  // 判定例程（**不手抄**）：把指纹行从**两侧**都剥掉，只比其余部分。
+  //   ⚠ 两侧必须用**同一个**剥行函数（对称）——--write 写进档里的投影是**含**指纹行的，
+  //     只剥实算侧就永远比不齐、还会把"环境一致"误报成"读数快照陈旧"（2026-09-27 实测踩到）。
+  //   ⚠ 必须自底向上重算，不得引用投影里那行 fingerprint——否则"改档里的指纹"能绕过门禁。
+  const stripFp = (t) => String(t).split('\n').filter((l, i, a) => !/^> fingerprint（/.test(l)
+    // 剥行后空行塌缩，按同样规则归一：丢弃"生成："行**之后**的第一个空行
+    && !(i > 0 && /^> 生成：/.test(a[i - 1]) && l === '')).join('\n').trim();
+  const stampedMd = () => stripFp(mdReport());
+  const docText = exists(DOC) ? read(DOC) : null;
+  const docRegion = (() => {
+    if (docText === null) return null;                    // 本地治理档缺位 → 不判漂移（SKIP）
+    const i = docText.indexOf(MARK_BEGIN);
+    const j = docText.indexOf(MARK_END);
+    return (i < 0 || j < 0) ? undefined : docText.slice(i + MARK_BEGIN.length, j);
   })();
-  if (drift === '缺标记区') console.log(`⚠ ${DOC} 缺标记区，文档漂移未判（本地档可重建）`);
-  else if (drift) console.log(`✗ 文档漂移：${drift}`);
+
+  const localFp = claimsFingerprint();
+  const localN = RUN.length;
+  // 档区原样传入；classifyDrift 内部分离「读元数据（原始）」与「比对（已剥指纹行）」两侧
+  const drift = classifyDrift(docRegion, stampedMd(), localFp, localN, RUN, SNAP_ENV, stripFp);
+  // 判据面指纹一致性：档里那行必须**同时**满足 ①有值 ②与本形态实算值相等 ③条数与本形态一致。
+  //   三腿缺一即记一票冲突（原来这条只会打印，不参与判定——改档里的指纹或留下旧指纹都无人抓）。
+  const fpConsistent = !!drift.fpConsistent;
+  // 收尾措辞的**诚实腿**（b2/I3 同源教训）：本环存在 SKIP ⇒ 措辞不得说「一致」而不加限定，
+  //   否则"有环未判"会被读成"判过了"。这条在**加指纹前就已存在**（实测：治理根态输出
+  //   「✓ 结构判据一致：… SKIP 0」而工件形态输出同样以「✓ 结构判据一致」开头、SKIP 3——
+  //   门禁编排器靠**尾行计数**兜住了，但人读会被误导）。声明它，不改任何环的判定语义。
+  const partial = skips.length > 0;
+  const fpLine = `判据面指纹 ${localFp}（${localN} 条断言）${drift.docFp && drift.docFp !== localFp ? `｜⚠ 投影内指纹不一致：${drift.docFp}` : ''}`;
+
+  if (drift.kind === 'missing-marker') {
+    console.log(`⚠ ${DOC} 缺标记区，文档漂移未判（本地档可重建，可跑 --write 重生成）`);
+  } else if (drift.kind === 'missing-doc') {
+    console.log(`⤫ 文档投影未判：${DOC} 不存在（本地治理档 gitignore，CI/干净 clone 无此件）——不记 PASS｜${fpLine}`);
+  } else if (drift.kind === 'stale-readings') {
+    // ── 归因两分（其一）：判据面**没变**，只是读数取自另一种环境 ──────────────
+    // 这是本会要的「读数可解释」：**不判漂移、不 exit 1**（否则换个环境跑就假红，
+    //   而判据表其实一个字都没变）。
+    console.log(`⤫ 读数快照陈旧（非判据面漂移）：投影表体与判据面一致，仅环境派生列（期望/实测/判定）取自`
+      + ` env=${drift.docEnv || '?'} 而本次是 env=${SNAP_ENV}——跑 --write 可刷新，本条不记 PASS 也不记冲突｜${fpLine}`);
+  } else if (drift.kind === 'drift') {
+    // 归因另一支：**点名具体是哪条腿失效**——笼统写「指纹 A vs B」会把'指纹相同但表体缺行'
+    //   也叙述成指纹不同（实测踩到）。⚠ 措辞由 driftAttribution 统一出，面未变时**不得**说「已过期」。
+    const attr = driftAttribution(drift, localFp, localN, SNAP_ENV);
+    console.log(`✗ 文档漂移：判据表与投影不一致｜${attr.why}｜${fpLine}`);
+  }
+
   if (conflicts.length) {
     console.log(`✗ 结构判据冲突 ${conflicts.length} 条：${conflicts.map((c) => c.id).join(', ')}`);
     process.exit(1);
   }
-  if (drift && drift !== '缺标记区') process.exit(1);
-  console.log(`✓ 结构判据一致：断言 ${passed.length} 通过 · 冲突 0 · SKIP ${skips.length}（本地档/日志缺位）· 在册未达 ${pendingTargets.length} · 在册缺陷 ${DEFECTS.length}（${DEFECTS.map((d) => d.id).join(',')}——有处置指向、尚未处置）`);
+  if (drift.kind === 'drift') {
+    const attr = driftAttribution(drift, localFp, localN, SNAP_ENV);
+    console.log(`✗ ${attr.faceChanged ? '投影已过期' : '投影读数漂移'}：请跑 --write 重生成（${attr.tail}）`);
+    process.exit(1);
+  }
+  // 防手抄腿：档在、标记在、**档区与实算逐字相等**却仍不一致 ⇒ 只能是档内那行指纹被
+  //   替换/缺失/条数过期（逐字相等时该腿不会误伤）。⚠ 不受 partial 影响——有 SKIP 也得抓。
+  const docPresent = drift.kind !== 'missing-doc' && drift.kind !== 'missing-marker';
+  if (docPresent && fpConsistent === false) {
+    console.log(`✗ 投影内指纹行与会话实算不符（防手抄失效）：档内 ${drift.docFp || '（无）'} / ${drift.boundN || '（无）'} 条 vs 本形态 ${localFp} / ${localN} 条——请跑 --write 重生成`);
+    process.exit(1);
+  }
+  const tail = partial
+    ? `（${passed.length} 条判定通过；另有 SKIP ${skips.length} 条**未判**：${skips.map((s) => s.id).join(', ')}——本条不是"全过"）`
+    : '（——有处置指向、尚未处置）';
+  console.log(`✓ 结构判据一致${partial ? '（未判全）' : ''}：断言 ${passed.length} 通过 · 冲突 0 · SKIP ${skips.length}（本地档/日志缺位）· 在册未达 ${pendingTargets.length} · 在册缺陷 ${DEFECTS.length}${tail}｜${fpLine}`
+    + (drift.kind === 'stale-readings' ? `｜读数快照 env=${drift.docEnv || '?'} ≠ 本次 env=${SNAP_ENV}（表体与判据面一致，仅读数列陈旧；跑 --write 可刷新，不记冲突）` : ''));
+  // 收尾措辞的诚实腿：有 SKIP 时不得只留一个 ✓ 让编排器/人读成"全过"。
+  if (partial) console.log(`⤫ 未判全：SKIP ${skips.length} 条（${skips.map((s) => s.id).join(', ')}）——不记 PASS`);
 }
