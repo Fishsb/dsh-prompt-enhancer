@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+const net = require('node:net');
 const sys = require('../lib/sys.cjs');
 const psvc = require('../lib/platform-service.cjs');
 
@@ -237,14 +238,55 @@ test('SYS-07 runProbeAsync：Promise 形状/白名单/非 0 退出映射对齐 s
 });
 
 test('SYS-08 C-3 超时硬杀：挂起子进程被击杀 → ETIMEDOUT 且远短于命令自然时长', { timeout: 20000 }, async () => {
-  // 黑洞地址 connect 挂起（curl -m 20 自然时长 ≥15s）；探针 700ms 硬超时应 SIGTERM 击杀
-  // （execFile timeout 语义：超时杀子进程并 reject——对齐 spawnSync error.code='ETIMEDOUT'）。
-  const t0 = Date.now();
-  const r = await sys.runProbeAsync('curl', ['-s', '-m', '20', 'http://10.255.255.1/'], undefined, { timeoutMs: 700 });
-  const elapsed = Date.now() - t0;
-  assert.equal(r.ok, false);
-  assert.equal(r.code, 'ETIMEDOUT', '超时必须归一化为 ETIMEDOUT');
-  assert.ok(elapsed < 5000, '子进程必须在超时窗内被杀死（实际 ' + elapsed + 'ms；未击杀将 ≥15s）');
+  // 【挂起来源已换：黑洞地址 → 环回停滞服务】旧写法连 http://10.255.255.1/（黑洞地址）指望 connect 挂起，
+  // 实测**同一台机上就能翻脸**：直连该地址 3 次 = exit 28(5020ms) / exit 7(31ms) / exit 7(29ms)——
+  // 首连挂起、随后被邻居/路由缓存的下一条不可达秒回 EHOSTUNREACH ⇒ curl 秒退 7，探针根本等不到超时，
+  // 断言 code==='ETIMEDOUT' 随机变红（flaky；同文件连跑 3 次 = OK/FAIL/FAIL 即此因）。
+  // 换成本机停滞服务：端口由内核分配、必然处于 LISTEN、连接必被 accept，服务端只读不写 ⇒ curl 阻塞等响应
+  // 直到 -m 到点。不触网、不吃路由/代理/ICMP 的影响，挂起是**服务端行为**而非网络运气。
+  // 腿①走真实 curl 二进制 + 真实 spawn/杀进程链路（POSIX）；腿②③用执行器注入缝钉住归一化契约，
+  // 跨平台恒跑（形状取自本机实测：execFile 超时拒绝 = code:null / killed:true / signal:'SIGTERM'，
+  // 不带 'ETIMEDOUT' 字样——归一化读的是 killed/signal，不是某个平台特有的 code）。
+  const conns = [];
+  const srv = net.createServer((conn) => { conns.push(conn); /* 持有连接、永不写响应：就是挂起 */ });
+  await new Promise((res, rej) => { srv.once('error', rej); srv.listen(0, '127.0.0.1', res); });
+  const url = 'http://127.0.0.1:' + srv.address().port + '/';
+  // 探针环境剥掉代理变量 + --noproxy '*'：确保「连本机」不受宿主代理配置影响（本机代理命中与否不再是不确定项）
+  const probeEnv = Object.assign({}, process.env);
+  for (const k of ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'all_proxy']) delete probeEnv[k];
+  probeEnv.no_proxy = '*'; probeEnv.NO_PROXY = '*';
+  // 注：--noproxy 的值必须是白名单参数字符集（validateProbe 正则无 `*`）——写 '*' 会先被判 BAD_PROBE_ARG，
+  // 探针根本不执行 curl。这里用本机回环字面量，语义等价（只需豁免回环一条）。
+  const args = ['-s', '-m', '8', '--noproxy', '127.0.0.1', url]; // -m 8 = 自然时长 8s，远长于探针 700ms 硬超时
+  try {
+    if (process.platform !== 'win32') {
+      // 腿①（真实链路·证伪腿）：真实 curl 连本机停滞服务 → 挂起 → 探针 700ms 硬超时应击杀它
+      // 负控实证：抽掉 execOpts.timeout 后本腿在 ~8s 处红（elapsed<5000 断言），非永真。
+      const t0 = Date.now();
+      const r = await sys.runProbeAsync('curl', args, probeEnv, { timeoutMs: 700 });
+      const elapsed = Date.now() - t0;
+      assert.equal(r.ok, false);
+      assert.equal(r.code, 'ETIMEDOUT', '超时必须归一化为 ETIMEDOUT');
+      assert.ok(elapsed < 5000, '子进程必须在超时窗内被杀死（实际 ' + elapsed + 'ms；未击杀将 ≥8s）');
+    }
+    // 腿②（执行器契约）：真实超时拒绝形状 → 归一化 ETIMEDOUT，且硬超时确被透传给执行器
+    let seen = null;
+    sys.__setProbeExecutor(async (cmd, a, opts) => {
+      seen = { cmd, a, opts };
+      throw Object.assign(new Error('Command failed: timeout'), { code: null, killed: true, signal: 'SIGTERM', stdout: '', stderr: '' });
+    });
+    const r2 = await sys.runProbeAsync('curl', args, probeEnv, { timeoutMs: 700 });
+    assert.deepEqual({ ok: r2.ok, code: r2.code }, { ok: false, code: 'ETIMEDOUT' }, 'code=null + killed/signal 的超时拒绝必须归一化为 ETIMEDOUT');
+    assert.equal(seen.opts.timeout, 700, '探针硬超时必须透传到执行器（去掉超时处理本断言即红）');
+    // 腿③（反向对照·防永真）：非超时失败不得被误判为 ETIMEDOUT——exit 7 正是本缺陷的现场症状
+    sys.__setProbeExecutor(makeExecMock({ curl: CURL_EXIT7 }));
+    const r3 = await sys.runProbeAsync('curl', args, probeEnv, { timeoutMs: 700 });
+    assert.equal(r3.code, 7, 'curl 连不上（exit 7）必须原样透传为退出码，不得被当作 ETIMEDOUT');
+  } finally {
+    for (const c of conns) { try { c.destroy(); } catch { /* 连接已由对端销毁：无妨 */ } }
+    await new Promise((res) => srv.close(res));
+    teardownProbeMocks();
+  }
 });
 
 test('SYS-09 probeEnv golden 契约：mock 全链下 items 序/key 集/字段与同步版逐字段一致', async () => {
