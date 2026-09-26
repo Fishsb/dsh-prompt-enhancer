@@ -126,20 +126,25 @@ export function deriveState({ id, exitCode, text, note } = {}) {
   const raw = stripAnsi(text);
   const lines = parseRingState(raw);
   if (lines.length > 1) {
-    return { state: 'FAIL', source: 'derived', reason: '契约违背：本环输出 ' + lines.length + ' 条状态行（应恰 1 条）：' + lines.map((l) => l.id + '=' + l.state).join(' / ') };
+    // 返回值同样冻结（复核席 c3）：堵住「在 results.push 之前改写 v」这一整类。
+    return Object.freeze({ state: 'FAIL', source: 'derived', reason: '契约违背：本环输出 ' + lines.length + ' 条状态行（应恰 1 条）：' + lines.map((l) => l.id + '=' + l.state).join(' / ')  });
   }
   if (lines.length === 1) {
     const l = lines[0];
     if (id && l.id !== id) {
-      return { state: 'FAIL', source: 'structure', reason: '契约违背：状态行 id「' + l.id + '」≠ 本环声明 id「' + id + '」' };
+      // 返回值同样冻结（复核席 c3）：堵住「在 results.push 之前改写 v」这一整类。
+      return Object.freeze({ state: 'FAIL', source: 'structure', reason: '契约违背：状态行 id「' + l.id + '」≠ 本环声明 id「' + id + '」'  });
     }
     if (l.state === 'FAIL' && exitCode === 0) {
-      return { state: 'FAIL', source: 'structure', reason: l.reason + '（状态面 FAIL，退出码面 0——两面对不上，取严）' };
+      // 返回值同样冻结（复核席 c3）：堵住「在 results.push 之前改写 v」这一整类。
+      return Object.freeze({ state: 'FAIL', source: 'structure', reason: l.reason + '（状态面 FAIL，退出码面 0——两面对不上，取严）'  });
     }
     if (l.state !== 'FAIL' && exitCode !== 0) {
-      return { state: 'FAIL', source: 'structure', reason: '契约违背：自报 ' + l.state + ' 但退出码 ' + exitCode + '——' + l.reason };
+      // 返回值同样冻结（复核席 c3）：堵住「在 results.push 之前改写 v」这一整类。
+      return Object.freeze({ state: 'FAIL', source: 'structure', reason: '契约违背：自报 ' + l.state + ' 但退出码 ' + exitCode + '——' + l.reason  });
     }
-    return { state: l.state, source: 'structure', reason: l.reason || '（环未给理由）' };
+    // 返回值同样冻结（复核席 c3）：堵住「在 results.push 之前改写 v」这一整类。
+    return Object.freeze({ state: l.state, source: 'structure', reason: l.reason || '（环未给理由）'  });
   }
   const hasOutput = raw.split('\n').some((l) => l.trim() && !NOISE_RE.test(l.trim()));
   if (!hasOutput) {
