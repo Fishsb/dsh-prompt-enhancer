@@ -60,7 +60,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// 状态出口契约（P5）：本环原有尾行三态保留为**给人看的面**；下面在**同一批裁决量**上再产出机读契约行。
+import { emitRingState, installCrashGuard, installStdoutHygiene } from './lib/ring-state.mjs';
 
+installCrashGuard('cards');
+// 本环 --json 的 stdout 是机读数据面（必须可 JSON.parse）⇒ 装 stdout 纯净性守卫（无开关）。
+installStdoutHygiene();
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ARGS = process.argv.slice(2);
 const has = (f) => ARGS.includes(f);
@@ -670,6 +675,17 @@ if (has('--json')) {
   if (health.length) console.log('读侧健康：✗ ' + health.length + ' 处不可判 —— ' + health.join(' / '));
   console.log(tailLine);
 }
+
+// 状态出口（P5）：三态与尾行 tailLine、退出码**同源**（读 conflicts/skips/passed/health 同一批量）。
+//   FAIL = 有冲突；SKIP = 未判全（有 SKIP 或读侧不可判）/ 未带 --check（退出码不反映判定）；PASS = 冲突 0 且判全。
+const ringState = conflicts.length
+  ? ['FAIL', `卡<->档冲突 ${conflicts.length} 条：${conflicts.map((c) => c.id).join(', ')}`]
+  : !has('--check')
+    ? ['SKIP', '未带 --check（退出码不反映判定）——' + tailLine.replace(/\s+/g, ' ')]
+    : partial
+      ? ['SKIP', `未判全：断言 ${passed.length} · SKIP ${skips.length}${skips.length ? '（未判：' + unjudged.join(',') + '）' : ''}${health.length ? '（读侧不可判 ' + health.length + ' 处）' : ''}——不记 PASS`]
+      : ['PASS', `判据全过（无 SKIP、读侧干净）：断言 ${passed.length} 通过 · 冲突 0 · 真判 ${judged.length}/${judged.length}`];
+emitRingState('cards', ringState[0], ringState[1]);
 
 // 退出码：**按原契约不动**（本项只改措辞与信号）——只有显式 --check 才按冲突数与源。
 // 无参调用仍 exit 0：这一处是既有行为，改动它属越界；「无参也按门禁退出」另立工作项处理。

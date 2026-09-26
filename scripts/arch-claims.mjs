@@ -28,7 +28,10 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+// 状态出口契约（P5）：本环的 SKIP/冲突/漂移 → 三态映射只在**下面 --check 出口一处**作出。
+import { emitRingState, installCrashGuard } from './lib/ring-state.mjs';
 
+installCrashGuard('arch-claims');
 const require = createRequire(import.meta.url);
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ARGS = process.argv.slice(2);
@@ -693,10 +696,23 @@ if (has('--check')) {
   })();
   if (drift === '缺标记区') console.log(`⚠ ${DOC} 缺标记区，文档漂移未判（本地档可重建）`);
   else if (drift) console.log(`✗ 文档漂移：${drift}`);
+  // 三态裁决（**唯一出口**，与下面两条 exit **同源**——不另算一遍）：
+  //   FAIL = 有冲突 或 文档漂移（标记区缺位是**可重建的本地档缺位**，沿用原判：不判漂移，故不红）
+  //   SKIP = 无冲突无漂移但**判据面没判全**（有 skip 行）——「没判上」不记 PASS
+  //   PASS = 冲突 0 且无 skip 行
+  const ringState = (conflicts.length || (drift && drift !== '缺标记区'))
+    ? ['FAIL', conflicts.length
+      ? `结构判据冲突 ${conflicts.length} 条：${conflicts.map((c) => c.id).join(', ')}`
+      : '文档漂移：' + drift]
+    : skips.length
+      ? ['SKIP', `断言 ${passed.length} 通过 · 冲突 0 · SKIP ${skips.length}（未判：${skips.map((s) => s.id).join(',')}——本地治理档/日志缺位，不记 PASS）· 在册未达 ${pendingTargets.length}`]
+      : ['PASS', `断言 ${passed.length} 通过 · 冲突 0 · SKIP 0 · 在册未达 ${pendingTargets.length} · 在册缺陷 ${DEFECTS.length}`];
   if (conflicts.length) {
     console.log(`✗ 结构判据冲突 ${conflicts.length} 条：${conflicts.map((c) => c.id).join(', ')}`);
+    emitRingState('arch-claims', ringState[0], ringState[1]);
     process.exit(1);
   }
-  if (drift && drift !== '缺标记区') process.exit(1);
+  if (drift && drift !== '缺标记区') { emitRingState('arch-claims', ringState[0], ringState[1]); process.exit(1); }
   console.log(`✓ 结构判据一致：断言 ${passed.length} 通过 · 冲突 0 · SKIP ${skips.length}（本地档/日志缺位）· 在册未达 ${pendingTargets.length} · 在册缺陷 ${DEFECTS.length}（${DEFECTS.map((d) => d.id).join(',')}——有处置指向、尚未处置）`);
+  emitRingState('arch-claims', ringState[0], ringState[1]);
 }
