@@ -994,7 +994,12 @@ if (has('--check')) {
   }
 
   // 状态出口（T1/P5）：三态与尾行、退出码**同源**——基于上面 M-1 的 drift.kind 分类（不再用字符串比较）。
-  const driftIsReal = drift.kind === 'drift' || drift.kind === 'missing-doc';
+  // ⚠ 只有**真漂移**（drift）与**真冲突**（conflicts）才 FAIL。
+  //   missing-doc = 治理档不在（CI/干净 clone 必然缺位，gitignore 覆盖）⇒ 结构性缺位 ⇒ SKIP；
+  //   missing-marker / stale-readings = 不判漂移（既有口径）⇒ 连同无冲突时落 SKIP 或 PASS。
+  //   ⚠ 不得把 missing-doc 记 FAIL：退出码路径只给 drift 退 1，记 FAIL 会产出「FAIL 而 exit 0」的自相矛盾
+  //     （CI 实测踩到：RING arch-claims FAIL exit 0）。
+  const driftIsReal = drift.kind === 'drift';
   const ringState = (conflicts.length || driftIsReal)
     ? ['FAIL', conflicts.length
       ? `结构判据冲突 ${conflicts.length} 条：${conflicts.map((c) => c.id).join(', ')}`
