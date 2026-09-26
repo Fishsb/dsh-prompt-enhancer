@@ -103,6 +103,72 @@ test('GATEEXIT-06 端到端(真跑)：显式基线恰好覆盖 ⇒ 0 且留痕�
   assert.deepEqual(partial.json.summary.unexpected, u, '未覆盖的环须逐个报出');
 });
 
+test('GATEEXIT-11 穷举不变量：accepted ⇔（verdict=NOT_FULLY_JUDGED ∧ 未判非空 ∧ 基线非空 ∧ 未判⊆基线）', async () => {
+  const m = await import(path.join(ROOT, 'scripts', 'lib', 'gate-exit.mjs'));
+  // ⚠ 集合里**必须含重复元素**（独立复核席 D1 实测：全不重复时 Array.from(new Set()) 无事可做，
+  //   去重行为零覆盖 ⇒ 删掉实现里的 Set 仍 11/11 绿）。故下列集合刻意混入重复项。
+  const unjudgedSets = [[], ['a'], ['b'], ['a', 'b'], ['a', 'x'], ['a', 'a', 'b'], ['a', 'b', 'a', 'b']];
+  const baselines = [null, [], ['a'], ['b'], ['a', 'b'], ['a', 'x'], ['a', 'a'], ['b', 'b', 'a']];
+  const verdicts = ['ALL_PASS', 'FAIL', 'NOT_FULLY_JUDGED', 'SOME_FUTURE_STATE'];
+  let bad = 0; let acceptedShapes = 0; let total = 0;
+  for (const v of verdicts) for (const u of unjudgedSets) for (const b of baselines) {
+    total += 1;
+    const r = m.applyBaseline(v, u, b ?? [], []);   // 显式传 blocking='[]'（缺省 undefined 会污染形状断言）
+    const base = b === null ? [] : b;
+    const shouldAccept = v === 'NOT_FULLY_JUDGED' && u.length > 0 && base.length > 0 && u.every((x) => base.includes(x));
+    const expectCode = shouldAccept ? 0 : (v === 'FAIL' ? 1 : v === 'ALL_PASS' ? 0 : 2);
+    if (r.accepted !== shouldAccept) { bad += 1; console.log('  accepted 不符:', v, JSON.stringify(u), JSON.stringify(b), r.accepted); }
+    if (r.code !== expectCode) { bad += 1; console.log('  code 不符:', v, JSON.stringify(u), JSON.stringify(b), r.code, expectCode); }
+    // unexpected 必须只含**基线外**的 id（否则"基线外"这份信号就掺假了）
+    if (!r.unexpected.every((id) => !base.includes(id))) { bad += 1; console.log('  unexpected 含基线内 id:', JSON.stringify(r)); }
+    // ⚠ 去重面（独立复核席 D1）：上面这些集合刻意含重复元素——**报出的机读数组不得带重复**。
+    //   为什么单独盯形状而不是结果：删掉实现里的 Set 时"判定结果"确实不变（多余元素被 includes 吸收），
+    //   但**报给消费者的数组会带重复** ⇒ 下游按 id 计数/比对（如 CI 脚本、后续按 id 派工）会读错。
+    //   故此处显式断言三个数组各自无重复，把去重从"实现细节"升为**契约形状**。
+    for (const [k, arr] of [['unjudged', r.unjudged], ['baseline', r.baseline], ['blocking', r.blocking], ['unexpected', r.unexpected]]) {
+      if (arr.length !== new Set(arr).size) { bad += 1; console.log('  ' + k + ' 带重复项:', JSON.stringify(arr)); }
+    }
+    // 未判集合的**集合语义**必须保持：输入 ['a','a','b'] 与 ['a','b'] 判定结果逐项相同
+    const twin = m.applyBaseline(v, Array.from(new Set(u)), b === null ? null : Array.from(new Set(b)), []);
+    if (twin.code !== r.code || twin.accepted !== r.accepted) {
+      bad += 1; console.log('  重复元素改变了判定（集合语义被破坏）:', v, JSON.stringify(u), JSON.stringify(b));
+    }
+    if (r.accepted) acceptedShapes += 1;
+  }
+  assert.equal(bad, 0, '穷举 ' + total + ' 组合出现 ' + bad + ' 处不符');
+  assert.ok(acceptedShapes > 0, '穷举中必须存在可接纳形状（否则断言退化成恒真）');
+  assert.ok(acceptedShapes < total, '接纳必须是少数形状，不得恒真');
+  // 形状锁：**所有**返回分支的键集合必须逐一相同（漏键比错值更隐蔽：下游读到 undefined 才崩）
+  const shapes = new Map();
+  for (const v of verdicts) for (const u of unjudgedSets) for (const b of baselines) for (const blk of [[], ['z']]) {
+    const keys = Object.keys(m.applyBaseline(v, u, b ?? [], blk)).sort().join(',');
+    shapes.set(keys, (shapes.get(keys) || 0) + 1);
+  }
+  assert.equal(shapes.size, 1, '返回形状不唯一（有分支漏键）：' + Array.from(shapes.keys()).join(' | '));
+});
+
+test('GATEEXIT-12 不可接纳面（D2）：非 PASS 且非 SKIP 的环即便 id 在基线内也不得被接纳', async () => {
+  const m = await import(path.join(ROOT, 'scripts', 'lib', 'gate-exit.mjs'));
+  // 复现独立复核席实测的形态：零输出的静默死环（UNKNOWN）恰好 id 就是基线内的那一环
+  const r = m.applyBaseline('NOT_FULLY_JUDGED', ['arch-claims'], ['arch-claims'], ['arch-claims']);
+  assert.equal(r.accepted, false, 'UNKNOWN 环不得被基线吸收（否则"换空脚本"即可让链级报 0）');
+  assert.equal(r.code, 2, '含不可接纳面时链级必须是 2');
+  assert.deepEqual(r.blocking, ['arch-claims'], 'blocking 面须原样报出（机读可见）');
+  assert.ok(r.unexpected.includes('arch-claims'), '被拒的环须出现在 unexpected 里（不被静默吞掉）');
+  // FAIL 优先仍成立
+  assert.equal(m.applyBaseline('FAIL', ['x'], ['x'], ['y']).code, 1, '有 FAIL 时仍是 1（失败优先于未判全）');
+  // 端到端：真把环换成 0 字节 no-op，确认加了基线也**不**报 0
+  const fs = require('node:fs'); const os = require('node:os');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-d2-'));
+  fs.cpSync(ROOT, tmp, { recursive: true, filter: (s) => !/\.git|node_modules/.test(s) });
+  fs.writeFileSync(path.join(tmp, 'scripts', 'arch-claims.mjs'), '', 'utf8');   // 0 字节：静默死环
+  const p = spawnSync(process.execPath, [path.join(tmp, 'scripts', 'gate.mjs'), '--quiet', '--accept-unjudged=arch-claims,cards'],
+    { cwd: tmp, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  const out = String(p.stdout || '') + String(p.stderr || '');
+  assert.equal(p.status, 2, '静默死环 + 基线 ⇒ 必须仍为 2（实测修复前为 0）：\n' + out.slice(-800));
+  assert.ok(/UNKNOWN/.test(out), '摘要须点名 UNKNOWN 环（可定位）：\n' + out.slice(-800));
+});
+
 test('GATEEXIT-07 端到端(真跑·故障注入)：环全超时 ⇒ FAIL 腿为 1（不被未判全/接纳混淆）', () => {
   const r = runGate(['--json'], { GATE_RING_TIMEOUT_MS: '1' });
   assert.ok(r.json, 'gate --json 必须可 parse：\n' + r.out);

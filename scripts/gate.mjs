@@ -126,8 +126,11 @@ function resolveStatus(text, code, ring) {
   const lines = scanLines(t);
   const last = lines[lines.length - 1] || '';
   const empty = lines.length === 0;         // 只有 node 警告不算"有读数"
+  // ⚠ UNKNOWN ≠ SKIP（独立复核席 D2）：SKIP = 判据自己声明"本地扫描面缺位"（可基线化的构造性缺位）；
+  //   UNKNOWN = 环**根本没给读数**（脚本被换空 / 静默坏死）——那是**缺陷**。两者若同码，把门环换成
+  //   空脚本就能被基线吸收成 0，与本次要堵的假绿同形。故零输出单列 UNKNOWN，且**永不接纳**。
   if (empty) return code === 0
-    ? ['SKIP', '本环零输出且 exit 0——**无读数**（不是 PASS）']
+    ? ['UNKNOWN', '本环零输出且 exit 0——**无读数**（不是 PASS，也不等于"扫描面缺位"）']
     : ['FAIL', '本环零输出且退出码 ' + code + '（异常/kill）'];
   if (code !== 0) return ['FAIL', 'exit ' + code + ' · ' + digest(t)];
   // ① 结构性定位环自报结论行（全输出扫描，不依赖位置）
@@ -188,7 +191,11 @@ for (const r of RINGS) {
 // 未判全（SKIP / 空环表）→ 2，除非消费者**显式**声明接纳基线且未判集合 ⊆ 基线（降 0 并留痕）。
 const unjudged = results.filter((r) => r.status !== 'PASS').map((r) => r.id);
 const verdict = verdictOf(results.map((r) => r.status));
-const applied = applyBaseline(verdict, results.filter((r) => r.status === 'SKIP').map((r) => r.id), ACCEPT_BASELINE);
+// 可接纳面 = SKIP（构造性缺位，可枚举可基线化）；不可接纳面 = 其余一切非 PASS（FAIL 已由 verdict 压住，
+// UNKNOWN / 未来新增态一律进 blocking ⇒ 不得被基线吸收，见 gate-exit.mjs 的 D2 说明）。
+const acceptable = results.filter((r) => r.status === 'SKIP').map((r) => r.id);
+const blocking = results.filter((r) => r.status !== 'PASS' && r.status !== 'SKIP').map((r) => r.id);
+const applied = applyBaseline(verdict, [...acceptable, ...blocking], ACCEPT_BASELINE, blocking);
 const EXIT = applied.code;
 // ⚠ 措辞纪律（b2·I3 / b3·N4）：**有环未判就不得说「全过」**——即便已按基线接纳（那时退出码是 0，
 //   但"哪些环没判上"是事实，不得被 0 洗掉）。SELF_REPORT 式反义子串同理：接纳态文案不得含「全过」。

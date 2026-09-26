@@ -57,16 +57,33 @@ export function parseAcceptBaseline(argv) {
   return Array.from(new Set(raw.split(',').map((s) => s.trim()).filter(Boolean)));
 }
 
-/** 应用接纳基线。返回 {code, verdict, unjudged, baseline, accepted, unexpected}。
- *  accepted=true ⇔ verdict 恰为 NOT_FULLY_JUDGED 且 未判集合**非空**且 ⊆ 基线（且基线非空）。 */
-export function applyBaseline(verdict, unjudged, baseline) {
+/** 应用接纳基线。返回 {code, verdict, unjudged, baseline, blocking, accepted, unexpected}。
+ *  accepted=true ⇔ verdict 恰为 NOT_FULLY_JUDGED ∧ 未判集合**非空** ∧ ⊆ 基线（且基线非空）∧ **无可接纳面之外的阻塞**。
+ *
+ *  @param blocking 不可接纳面：**非 PASS 且非 SKIP** 的环 id（如零输出的 UNKNOWN）。
+ *    为什么必须单列（独立复核席实测的真缺口 D2）：SKIP = 判据**自己声明**"本地扫描面缺位"——
+ *    可枚举、可基线化；UNKNOWN = 环**根本没给出读数**（脚本被换空/静默坏死）——那是**缺陷**不是缺位。
+ *    若允许它被基线吸收，则"把门环换成空脚本"就能让链级报 0，与本裁定要堵的假绿**同形**
+ *    （实测旧行为：把 arch-claims 换成 0 字节 exit 0 的 no-op ⇒ 加基线后仍 exit 0）。
+ *    故此面**优先于一切接纳判断**：只要非空，无论 id 是否在基线内，一律拒绝并要求仍是 NOT_FULLY_JUDGED。 */
+export function applyBaseline(verdict, unjudged, baseline, blocking) {
   const u = Array.from(new Set((unjudged || []).map(String)));
   const base = baseline === null || baseline === undefined ? [] : Array.from(new Set(baseline.map(String)));
-  const code = exitCodeOf(verdict);
-  const refused = { code, verdict, unjudged: u, baseline: base, accepted: false, unexpected: verdict === 'NOT_FULLY_JUDGED' ? u : [] };
+  const blk = Array.from(new Set((blocking || []).map(String)));
+  const refused = { code: exitCodeOf(verdict), verdict, unjudged: u, baseline: base, blocking: blk, accepted: false, unexpected: verdict === 'NOT_FULLY_JUDGED' ? u : [] };
+  if (blk.length) {
+    // 失败优先仍优先：有 FAIL 时保持 1；否则一律落未判全（不得因 id 恰在基线内而放过）
+    return { ...refused, code: verdict === 'FAIL' ? GATE_EXIT.FAIL : GATE_EXIT.NOT_FULLY_JUDGED, unexpected: Array.from(new Set([...refused.unexpected, ...blk])) };
+  }
   if (verdict !== 'NOT_FULLY_JUDGED') return refused;   // FAIL 永不接纳（失败优先）
-  if (!base.length || !u.length) return refused;        // 空基线 / 无未判对象 ⇒ 不接纳（fail-closed）
+  // 空基线 / 无未判对象 ⇒ 不接纳（fail-closed）。⚠ `!base.length` 这一支**当前被下一行的 unexpected
+  //   分支完全覆盖**（基线为空 ⇒ 任何非空未判集合都落在基线外）——变异测试实测：删掉它行为逐项不变。
+  //   保留它作为**前置守卫**：把"空基线不得接纳"写在判定入口，而非依赖下游推导；日后若改动 unexpected
+  //   的算法，它仍是承重条件（GATEEXIT-11 穷举锁最终行为，不锁实现写法）。
+  if (!base.length || !u.length) return refused;
   const unexpected = u.filter((id) => !base.includes(id));
   if (unexpected.length) return { ...refused, unexpected };
-  return { code: GATE_EXIT.ALL_PASS, verdict, unjudged: u, baseline: base, accepted: true, unexpected: [] };
+  // ⚠ 返回形状必须与其它分支**逐键一致**（独立复核席 D1 的连带发现：本条最初漏了 blocking，
+  //   于是"可接纳"路径的 r.blocking === undefined，下游若遍历该字段就崩）。接线实测见 GATEEXIT-11 的形状断言。
+  return { code: GATE_EXIT.ALL_PASS, verdict, unjudged: u, baseline: base, blocking: blk, accepted: true, unexpected: [] };
 }
