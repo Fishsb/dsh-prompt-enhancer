@@ -1,0 +1,73 @@
+# 行尾归一（2026-09-26 立 · WSL 迁移时补）
+#
+# ## 为什么需要这个文件
+#
+# 本机 Windows 侧 git 系统级配置 core.autocrlf = true，而本仓此前**没有** .gitattributes
+# ⇒ git 自行决定哪些文件在工作区写成 CRLF。实测（prompt-enhancer，131 个受控文件）：
+# 工作区 8 个文件呈 CRLF，而**索引里存的却一律是 LF**（实测 0 个 CRLF）。
+#
+# 直接后果：同一棵工作树被 Windows git（autocrlf=true）与 WSL git（未设=false）
+# 以**不同规则**解读 ⇒ 在 WSL 侧 git status 显示大量"改动"，
+# 实为**视角差异而非内容漂移**。本仓同族实测：diff 增删行数完全相等
+# （如 shoucang 74 文件 +25746/-25746，prompt-enhancer 16 文件 +5881/-5881），
+# 且 --ignore-cr-at-eol 后差异归零 —— 可作为"零内容改动"的判据。
+#
+# ## 本文件做什么
+#
+# 把"源文件一律 LF"从**偶然**变成**契约**：不论 core.autocrlf 如何设置、
+# 不论在 Windows/WSL/Linux 哪台机器上检出，工作区与索引都是 LF。
+#
+# ## 为什么它不改动既有内容（实测）
+#
+# eol=lf 只规定"检出时写成什么"，索引侧本就已是 LF
+# ⇒ 加本文件**不产生索引变更**。校验：加之前后 git status 只应显示本文件自身。
+#
+# ## 边界
+#
+# 二进制作显式 binary 声明（否则 git 可能改写字节 ⇒ 产物损坏）。
+# 本仓实测二进制受控文件：8 个（7 .png + 1 .ico）
+#
+# 默认：文本自动识别 + 检出为 LF
+* text=auto eol=lf
+
+# 显式固化源文件与文档类型（与上一条冗余，但让"这些必须是 LF"可被 grep 到，
+# 且不受未来 * 规则调整影响）
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.mjs   text eol=lf
+*.js    text eol=lf
+*.cjs   text eol=lf
+*.json  text eol=lf
+*.jsonl text eol=lf
+*.md    text eol=lf
+*.css   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.py    text eol=lf
+*.sh    text eol=lf
+
+# PowerShell 脚本：本仓当前为 LF 且实测可用，固定之
+*.ps1   text eol=lf
+
+# 二进制件：禁止任何行尾转换
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.tgz   binary
+*.woff  binary
+*.woff2 binary
+*.m4a   binary
+*.mp3   binary
+*.mp4   binary
+*.wav   binary
+*.map   binary
+
+# 例外：*.txt 按文本处理会弄坏含 NUL 的抓取日志；
+# git 的 text=auto 本会把含 NUL 者判为二进制，这里显式收窄。
+*.txt   text=auto
