@@ -90,7 +90,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// 状态出口契约（P5）：本环原有尾行三态保留为**给人看的面**；下面在**同一批裁决量**上再产出机读契约行。
+import { emitRingState, installCrashGuard, installStdoutHygiene } from './lib/ring-state.mjs';
 
+installCrashGuard('cards');
+// 本环 --json 的 stdout 是机读数据面（必须可 JSON.parse）⇒ 装 stdout 纯净性守卫（无开关）。
+installStdoutHygiene();
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ARGS = process.argv.slice(2);
 const has = (f) => ARGS.includes(f);
@@ -824,3 +829,14 @@ if (has('--json')) {
 //     保留该旗的原因：gate 链显式传它（scripts/gate.mjs RINGS），且 arch-claims **B234-1** 有硬门
 //     「实装 --check 的环在链上必须带 --check」——删掉此旗会让第 4 环判红。
 if (conflicts.length) process.exit(1);   // 未判全不退非零：见上 ②（链上硬约束，保 SKIP/FAIL 可分）
+
+// 状态出口（T1/P5）：三态与尾行 tailLine、退出码**同源**（读 conflicts/skips/passed/health 同一批量）。
+//   FAIL = 有冲突；SKIP = 未判全（有 SKIP 或读侧不可判）/ 未带 --check；PASS = 冲突 0 且判全。
+const rangeState = conflicts.length
+  ? ['FAIL', `卡<->档冲突 ${conflicts.length} 条：${conflicts.map((c) => c.id).join(', ')}`]
+  : !has('--check')
+    ? ['SKIP', '未带 --check（非门禁口径，人工直跑）——' + tailLine.replace(/\s+/g, ' ')]
+    : partial
+      ? ['SKIP', `未判全：断言 ${passed.length} · SKIP ${skips.length}${skips.length ? '（未判：' + unjudged.join(',') + '）' : ''}`]
+      : ['PASS', `判据全过（无 SKIP、读侧干净）：断言 ${passed.length} 通过 · 冲突 0 · 真判 ${judged.length}/${judged.length}`];
+emitRingState('cards', rangeState[0], rangeState[1]);

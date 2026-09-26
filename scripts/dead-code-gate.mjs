@@ -6,7 +6,10 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// 状态出口契约（P5）：本环的机读三态由**本环自己声明**，gate.mjs 只读结构不解释措辞。
+import { emitRingState, installCrashGuard } from './lib/ring-state.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+installCrashGuard('dead-code');
 const ROOT = path.join(__dirname, '..');
 const args = process.argv.slice(2);
 const RANGE = args.includes('--range') ? args[args.indexOf('--range') + 1] : 'HEAD~1..HEAD';
@@ -197,4 +200,7 @@ for (const line of git(diffArgs).split('\n')) {
 }
 
 console.log(failures ? ('\n✗ 门禁未通过（' + failures + ' 处）') : '\n✅ 死代码门禁通过');
+// 状态行与下面的退出码**同源同处**产出：不另算一遍，免出第二个裁决点。
+emitRingState('dead-code', failures ? 'FAIL' : 'PASS',
+  failures ? failures + ' 处 FAIL（R1–R4）' : 'R1–R4 全过');
 process.exitCode = failures ? 1 : 0;

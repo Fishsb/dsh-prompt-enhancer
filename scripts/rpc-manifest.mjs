@@ -17,7 +17,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { emitRingState, installCrashGuard, installStdoutHygiene } from './lib/ring-state.mjs';
 
+installCrashGuard('rpc');
+installStdoutHygiene();   // 本环 --json 的 stdout 是机读数据面 ⇒ 契约行不得污染它
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const args = process.argv.slice(2);
@@ -99,7 +102,14 @@ if (args.includes('--check')) {
   if (fails.length) {
     console.error('\n✗ RPC 事实源一致性未通过：');
     for (const f of fails) console.error('  · ' + f);
+    // 状态行在 exit 之前打：退出码与状态**同源**（fails 为同一份裁决），且不得因 exit 丢读数。
+    emitRingState('rpc', 'FAIL', fails.length + ' 条不变量失败：' + fails.map((f) => f.split('：')[0].split(':')[0]).join(' / '));
     process.exit(1);
   }
   console.log('\n✓ RPC 事实源一致：' + live.length + ' 条线上方法 / ' + schemas.length + ' 条有校验 / ' + gap.length + ' 条已具名申报不校验 / 0 孤儿 / 文档 100% 覆盖');
+  emitRingState('rpc', 'PASS',
+    live.length + ' 条线上方法一致 / schema ' + schemas.length + ' / 具名申报 ' + gap.length + ' / 0 孤儿 / 文档 100% 覆盖');
+} else {
+  // 本环只在 --check 下做判定：无该旗时退出码不反映判定，**不得记 PASS**（如实报 SKIP）。
+  emitRingState('rpc', 'SKIP', '未带 --check（清单/--json 为报表形态，未判一致性）');
 }

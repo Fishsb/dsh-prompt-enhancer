@@ -17,7 +17,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// 状态出口契约（P5）：本环「一致 / 漂移」两态由本环自己声明，gate.mjs 不再从措辞里反推。
+import { emitRingState, installCrashGuard } from './lib/ring-state.mjs';
 
+installCrashGuard('prompts');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const ROOT = path.resolve(__dirname, '..');
@@ -182,6 +185,7 @@ const endMarker = '// ==PROMPTS-END==';
 const segStart = hostSrc.indexOf(genBegin);
 const segEndIdx = hostSrc.indexOf(endMarker, segStart === -1 ? 0 : segStart);
 if (segStart === -1 || segEndIdx === -1) {
+  emitRingState('prompts', 'FAIL', 'src/host/app.js 缺少生成标记区（' + BEGIN + ' / ' + END + '）——无法判定漂移');
   console.error('✗ src/host/app.js 缺少生成标记区（' + BEGIN + ' / ' + END + '），请先手工建立');
   process.exit(2);
 }
@@ -191,11 +195,15 @@ const updated = hostSrc.slice(0, segStart) + escapeForJsonString(generated) + ho
 
 if (updated === hostSrc) {
   console.log('✓ prompts 与 plugin-host.js 生成区一致');
+  emitRingState('prompts', 'PASS', '生成区与 ' + SKILL_ROOT + ' 下的 md 源逐字一致（' + SOURCES.length + ' 个常量，零漂移）');
   process.exit(0);
 }
 if (process.argv.includes('--check')) {
+  emitRingState('prompts', 'FAIL', '生成区漂移：' + SKILL_ROOT + ' 下的 md 源与 src/host/app.js 生成区不一致');
   console.error('✗ 生成区漂移：prompts/*.md 与 plugin-host.js 不一致，请运行 node scripts/sync-prompts.mjs');
   process.exit(1);
 }
 fs.writeFileSync(HOST, updated, 'utf8');
 console.log('✓ plugin-host.js 生成区已同步（' + SOURCES.map((s) => s.name).join('/') + '）');
+// 本次是**同步（写）**调用：漂移被修掉了，但「修之前是否一致」这一判定并未作出——不记 PASS。
+emitRingState('prompts', 'SKIP', '本次为同步（写）调用：已写入生成区 ' + SOURCES.length + ' 个常量，未判漂移');

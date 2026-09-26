@@ -40,7 +40,10 @@ import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+// 状态出口契约（P5）：本环的 SKIP/冲突/漂移 → 三态映射只在**下面 --check 出口一处**作出。
+import { emitRingState, installCrashGuard } from './lib/ring-state.mjs';
 
+installCrashGuard('arch-claims');
 const require = createRequire(import.meta.url);
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ARGS = process.argv.slice(2);
@@ -990,13 +993,24 @@ if (has('--check')) {
     console.log(`✗ 文档漂移：判据表与投影不一致｜${attr.why}｜${fpLine}`);
   }
 
+  // 状态出口（T1/P5）：三态与尾行、退出码**同源**——基于上面 M-1 的 drift.kind 分类（不再用字符串比较）。
+  const driftIsReal = drift.kind === 'drift' || drift.kind === 'missing-doc';
+  const ringState = (conflicts.length || driftIsReal)
+    ? ['FAIL', conflicts.length
+      ? `结构判据冲突 ${conflicts.length} 条：${conflicts.map((c) => c.id).join(', ')}`
+      : '文档漂移：判据表与投影不一致']
+    : skips.length
+      ? ['SKIP', `断言 ${passed.length} 通过 · 冲突 0 · SKIP ${skips.length}（未判：${skips.map((s) => s.id).join(',')}——本地治理档/日志缺位，不记 PASS）`]
+      : ['PASS', `断言 ${passed.length} 通过 · 冲突 0 · SKIP 0 · 在册未达 ${pendingTargets.length} · 在册缺陷 ${DEFECTS.length}`];
   if (conflicts.length) {
     console.log(`✗ 结构判据冲突 ${conflicts.length} 条：${conflicts.map((c) => c.id).join(', ')}`);
+    emitRingState('arch-claims', ringState[0], ringState[1]);
     process.exit(1);
   }
   if (drift.kind === 'drift') {
     const attr = driftAttribution(drift, localFp, localN, SNAP_ENV);
     console.log(`✗ ${attr.faceChanged ? '投影已过期' : '投影读数漂移'}：请跑 --write 重生成（${attr.tail}）`);
+    emitRingState('arch-claims', ringState[0], ringState[1]);
     process.exit(1);
   }
   // 防手抄腿：档在、标记在、**档区与实算逐字相等**却仍不一致 ⇒ 只能是档内那行指纹被
@@ -1004,6 +1018,7 @@ if (has('--check')) {
   const docPresent = drift.kind !== 'missing-doc' && drift.kind !== 'missing-marker';
   if (docPresent && fpConsistent === false) {
     console.log(`✗ 投影内指纹行与会话实算不符（防手抄失效）：档内 ${drift.docFp || '（无）'} / ${drift.boundN || '（无）'} 条 vs 本形态 ${localFp} / ${localN} 条——请跑 --write 重生成`);
+    emitRingState('arch-claims', ringState[0], ringState[1]);
     process.exit(1);
   }
   const tail = partial
@@ -1013,4 +1028,6 @@ if (has('--check')) {
     + (drift.kind === 'stale-readings' ? `｜读数快照 env=${drift.docEnv || '?'} ≠ 本次 env=${SNAP_ENV}（表体与判据面一致，仅读数列陈旧；跑 --write 可刷新，不记冲突）` : ''));
   // 收尾措辞的诚实腿：有 SKIP 时不得只留一个 ✓ 让编排器/人读成"全过"。
   if (partial) console.log(`⤫ 未判全：SKIP ${skips.length} 条（${skips.map((s) => s.id).join(', ')}）——不记 PASS`);
+  // 正常出口：与环级状态同源打契约行（恰一行，走 stderr）
+  emitRingState('arch-claims', ringState[0], ringState[1]);
 }

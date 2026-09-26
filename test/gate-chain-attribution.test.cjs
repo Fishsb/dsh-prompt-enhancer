@@ -23,7 +23,11 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
-const EXCLUDE = new Set(['.git', 'node_modules', '.dsh-worktrees', 'test-reports']);
+// ⚠ 排除 docs/internal（本地治理档，gitignore 覆盖）：本文件测的是**下探归因面**（B234-1 取到几环），
+//   与投影漂移判定无关；带上它会让 arch-claims 因「同环境读数漂移」判红（M-1 的合法行为），
+//   使 GCAT-1「正常态 exit 0」在任何含治理档的机器上必红——那是夹具面污染，不是归因失灵。
+//   排除后夹具 = CI/干净 clone 形态，与 GCAT 的判据面一致。
+const EXCLUDE = new Set(['.git', 'node_modules', '.dsh-worktrees', 'test-reports', 'internal']);
 const hasGit = spawnSync('git', ['--version'], { encoding: 'utf8' }).status === 0;
 
 /** 整仓副本（排除 .git/node_modules/工作树/报告），并 \`git init\`+提交一次——S-8 的行尾判据需要 git 元数据 */
