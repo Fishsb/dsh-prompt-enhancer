@@ -113,28 +113,52 @@ function parseRings(cmd) {
   return out;
 }
 
+/** 摘 `scripts/<名>.mjs` 字面量（首次出现序、去重） */
+function ringLiterals(text) {
+  const seen = [];
+  const re = /scripts\/([\w.\-]+\.mjs)/g;
+  let m;
+  while ((m = re.exec(text)) !== null) { const s = 'scripts/' + m[1]; if (!seen.includes(s)) seen.push(s); }
+  return seen;
+}
+
+/** 剥块注释与行注释：入口脚本的头注里普遍写了自身用法（`用法：node scripts/gate.mjs`），
+ *  不剥会把入口脚本自己当成一环（未点名 → 假红）。同理，被注释掉的环不算环。 */
+function stripCommentLines(text) {
+  return text
+    .split('\n')
+    .map((l) => l.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/, ''))
+    .join('\n');
+}
+
 /** 派生门禁链：① 直接解析 package.json.scripts.gate；② 若该命令只调一个**入口脚本**
  *  （编排器形态，如 `node scripts/gate.mjs`），下探一层读入口脚本，按首次出现序取其内 `scripts/*.mjs`。
  *  ⚠ 波 2（F1 gate.mjs）接口：各环须以 `scripts/<名>.mjs` 字面量出现在入口脚本内，
- *    否则此处置零环 → 判红（fail-closed，不静默取空集）。 */
+ *    否则此处置零环 → 判红（fail-closed，不静默取空集）。
+ *  ⚠ 归因（2026-09-27 · I4）：零环时**必须说得出零环是怎么来的**。只报「链 0 环」会把读者
+ *    引到点名面 / package.json 上找并不存在的问题（真凶在下探面），故一并返回 diag，
+ *    归因文案见 chainZeroReason；判定语义不变（零环照样判红）。 */
 function gateChain() {
   const cmd = String(require(abs('package.json')).scripts.gate || '');
   let rings = parseRings(cmd);
   let source = 'package.json';
   let nested = false;
+  // 归因三态（state）：not-applicable 本条腿不适用（命令里 ≥2 环，无需下探）· nested 下探成功
+  //   · zero-literal 入口在但取不到环 · missing 入口不在位 · unparsed 命令里认不出入口
+  let diag = { state: 'not-applicable', entryScript: null, entryExists: false, suspicious: false };
   if (rings.length < 2) {
-    const entry = (cmd.match(/node\s+(scripts\/[\w.\-]+\.mjs)/) || [])[1];
+    // ⚠ 入口只从命令里的 `scripts/<名>.mjs` **字面量**取；一条都没有（如 `node "$ENTRY"`、变量拼接）时
+    //   **不做「模糊匹配最近路径」的猜测**——猜出来的入口会把读者指到另一个错文件上，等于用第二个
+    //   错误回答 I4（这条腿的意义正是不再瞎指）。此时如实说「认不出」，并如实标可疑形态。
+    //   本仓 gate 若改用变量拼接调用入口，此腿**照样判红**（零环），正如实报告为「认不出入口」。
+    //   ⚠ 形态与 parseRings 同一（必须带 `node ` 前缀）：放宽成「忽略前缀」会让「别名/包装器直接调入口」
+    //     这一类命令从判红变成下探成功——那是**语义变更**，不属于本次归因修复的范围。
+    const literals = [...cmd.matchAll(/node\s+(scripts\/[\w.\-]+\.mjs)/g)].map((m) => m[1]);
+    const entry = literals.find((s) => exists(s)) || literals[0] || null;
     if (entry && exists(entry)) {
       // ⚠ 剥注释再扫：入口脚本的头注里普遍写了自身用法（\`用法：node scripts/gate.mjs\`），
       //   不剥会把入口脚本自己当成一环（未点名 → 假红）。同理，被注释掉的环不算环。
-      const body = read(entry)
-        .split('\n')
-        .map((l) => l.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/, ''))
-        .join('\n');
-      const seen = [];
-      const re = /scripts\/([\w.\-]+\.mjs)/g;
-      let m;
-      while ((m = re.exec(body)) !== null) { const s = 'scripts/' + m[1]; if (!seen.includes(s)) seen.push(s); }
+      const seen = ringLiterals(stripCommentLines(read(entry)));
       const self = entry.replace(/^\.\//, '');
       for (let i = seen.length - 1; i >= 0; i -= 1) if (seen[i] === self) seen.splice(i, 1);
       // 编排器形态下旗标由入口脚本自己传（不在 package.json 字面量里），故 args 留空并置 nested。
@@ -142,13 +166,46 @@ function gateChain() {
       //   （复核席实测的净回归）。现改为：nested 时旗标改从**入口脚本自身文本**取证（见 chainFlags），
       //   只把"字面量里读不到旗"降级为"改看入口脚本"，不放弃这一腿。
       rings = seen.map((s, i) => ({ script: s, args: [], pos: i }));
+      // ⚠ 零环也置 source/nested：下探**确实发生过**（读的确实是这份入口脚本），只是它没有字面量。
+      //   若此处不置，读数里的「源」会写成 package.json —— 那又是一次错误归因（I4 要关的正是这个）。
       source = entry + '（编排器入口，下探一层）';
       nested = true;
+      diag = { state: seen.length ? 'nested' : 'zero-literal', entryScript: entry, entryExists: true, suspicious: false };
+    } else if (entry) {
+      diag = { state: 'missing', entryScript: entry, entryExists: false, suspicious: false };
+    } else {
+      // 命令面认不出入口：如实说「认不出」。suspicious = 命令里出现了变量拼接 / 插值 / 字符串拼接形态
+      //   （只是提示可能的原因，**不作为入口指认**——没有可指认的入口就写成 null）。
+      const suspicious = /\$\{|\$[A-Za-z_][\w]*|%[A-Za-z_][\w]*%|\+\s*["']/.test(cmd);
+      diag = { state: 'unparsed', entryScript: null, entryExists: false, suspicious };
     }
   }
   // ⚠ 不再用 `/npm run/.test(cmd)` 判 nested：那会让「命令里带 npm run」把旗标腿整体带偏
   //   （且在编排器下探已成功时属于误判）。nested 只认"下探确实发生"。
-  return { cmd, rings, source, nested, entryScript: nested ? (cmd.match(/node\s+(scripts\/[\w.\-]+\.mjs)/) || [])[1] : null };
+  return { cmd, rings, source, nested, entryScript: diag.entryScript, diag };
+}
+
+/** 零环归因文案（I4）：把「链上取不到环」回答到**真正的面**上，并给出可执行的检查动作。
+ *  两条禁令（都是这条腿存在的理由）：① 认不出入口时**不得猜一个路径**——宁说「认不出」，不给假指向；
+ *  ② 措辞不得读起来像「点名面 / package.json 有问题」——零环时点名面根本没被比对过，那是最初的错误归因。
+ *  ⚠ 本节只改**归因与措辞**：任何 state 都仍然判红（fail-closed，见 B234-1）。 */
+function chainZeroReason(diag) {
+  const e = diag.entryScript;
+  switch (diag.state) {
+    case 'missing':
+      return `⚠ 编排器入口不在位：${e}（判据知道它，是因为 package.json.scripts.gate 指向它）`
+        + '——链上取不到环来自**入口缺位**（读数里只会剩入口脚本自己，那不是一环），'
+        + '不是点名面/package.json 的问题；检查该入口脚本是否已建并已提交（F1 gate.mjs 波次是否落地）';
+    case 'zero-literal':
+      return `⚠ 编排器入口解析到 0 环：请检查 ${e} 是否以**字面量** \`scripts/<名>.mjs\` 调用各环`
+        + '（本判据按下探字面量取环，不解释变量拼接 / shell 展开；零环会一路被误报成点名面问题，真因就在这里）';
+    case 'unparsed':
+      return '⚠ 认不出编排器入口：package.json.scripts.gate 的命令面里没有 \`node scripts/<名>.mjs\` 字面量'
+        + (diag.suspicious ? '（命令含变量拼接/插值形态，疑似入口由变量给出）' : '')
+        + '，故无从下探、也无从指认入口；本仓 gate 须以字面量调用入口脚本（编排器形态见 gate 链约定）';
+    default:
+      return '';
+  }
 }
 
 /** 环脚本是否**实装** --check：识别 argv 检索的多种真实写法（各环不统一，实测 2026-09-26）：
@@ -391,7 +448,7 @@ const CLAIMS = [
     promise: 'P4：结构判据机检化（分母由模型派生、判据表为投影、四档语义含 SKIP/在册未达/在册缺陷）+ 四条结构门禁收敛为 `npm run gate` 并首次进 CI + RC-F 收敛基线（10 个状态面 / 在册缺陷 D-1）',
     assertions: [
       A('B234-1', '结构', '门禁链收敛为一条命令（顺序即依赖序）', '点名集合 ≡ gate 链实际集合（双向）；链序 == 本表声明序；实装 --check 的环在链上必须带 --check（含编排器入口自传旗的形态）', () => {
-        const { rings, source, nested, entryScript } = gateChain();
+        const { rings, source, nested, entryScript, diag } = gateChain();
         const named = GATE_RINGS.map((r) => r.script);
         const actual = rings.map((r) => r.script);
         const extra = actual.filter((s) => !named.includes(s));      // 链上新增环未点名 → 红（R4 要堵的那一面）
@@ -424,10 +481,21 @@ const CLAIMS = [
         }
         const flags = flagMiss;
         const okAll = !extra.length && !lost.length && !dup.length && asc && !flags.length;
+        // ⚠ 归因先行（I4 · 2026-09-27）：零环时**不得**用「点名却缺席 N 件」当结论——读者会去点名面/
+        //   package.json 找问题，而真凶在下探面（入口里没有字面量 / 入口不在位 / 入口认不出）。
+        //   此行改成只报「零环怎么来的」+ 该查哪个文件；判定不变（照样 okAll=false → 仍判红）。
+        //   ⚠ 不只是 actual.length===0：下探失败时 rings 常残留「入口脚本自己」（parseRings 会命中
+        //     `node scripts/gate.mjs`），报成「链 1 环｜未点名 gate.mjs」同样是错误归因。故判据是
+        //     「下探是否失败」，不是「数出来几个」。
+        const diveFailed = diag.state === 'missing' || diag.state === 'zero-literal' || diag.state === 'unparsed';
+        if (diveFailed || !actual.length) return no(chainZeroReason(diag));
         return assert(okAll,
-          `链 ${actual.length} 环（源 ${source}${nested ? '｜旗标取证面 = 入口脚本文本；下探失败则取零环' : ''}）`
+          `链 ${actual.length} 环（源 ${source}${nested ? '｜旗标取证面 = 入口脚本文本' : ''}）`
           + `｜未点名 ${extra.length ? extra.join(',') : '无'}`
           + `｜点名却缺席 ${lost.length ? lost.join(',') : '无'}`
+          // 部分缺席（有环、但少了某几环）同样要能指向**下探面**：若入口脚本文本里没有该环字面量，
+          //   该环很可能是被变量拼接调用（而非被删）——归因必须落在入口脚本上，别让读者去点名面找。
+          + (nested && lost.length ? `（下探面：入口脚本 ${entryScript} 字面量里没有它们——请检查该入口是否以变量拼接调用此环）` : '')
           + `｜重复 ${dup.length ? dup.join(',') : '无'}`
           + `｜链序单调 ${asc}`
           + `｜实装 --check 却未带旗 ${flags.length ? flags.join(',') : '无'}`);
