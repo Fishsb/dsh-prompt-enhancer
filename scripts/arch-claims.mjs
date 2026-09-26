@@ -514,6 +514,38 @@ const CLAIMS = [
         const bad = c.filter((x) => !x[1]).map((x) => x[0]);
         return assert(!bad.length, c.map(([k, v]) => k + ' ' + (v ? '✓' : '✗')).join('｜') + (bad.length ? '｜未命中 ' + bad.join(',') : ''));
       }),
+      A('B234-7', '结构', '漂移**归因文本**与事实同向：判据面未变时不得叙述成「已过期」（措辞面假红）', '面变→（已过期+判据面变了）；面未变（同环境读数漂移）→（未变+不是判据演化）且两分类措辞不互借', () => {
+        // 依据（2026-09-27 独立复核实测）：同环境读数漂移时，档内指纹 == 本形态指纹、表体齐，
+        //   归因却打印「判据面**已过期**」+ 收尾「已归因：判据面变了」——判据面一个字未改。
+        //   这是 b2/I3 同族的**措辞与事实相反**：人读会被引向错误的修复方向。只声明两分类不够，
+        //   必须证明**文本真的跟着分类走**（纯函数变异体，仿 B234-6 形态）。
+        const FP = 'sha256:' + 'a'.repeat(16);
+        const OTHER = 'sha256:' + 'b'.repeat(16);
+        const ROWS = RUN.slice(0, 3);
+        const mk = (fp, n, rows, env) => ['表头', '|---|---|', ...rows.map((r) => `| ${r.id} ${r.kind}：${r.detail} |`),
+          '', `> fingerprint（判据面指纹·跨环境同值）：\`${fp}\`（${n} 条断言｜读数快照 env=${env}｜判据面 = id/kind/detail）`,
+          '', '> 生成：--md｜通过 1'].join('\n');
+        const envDiff = mk('', 0, [], 'x').replace(/\n> fingerprint[^\n]*/, '').replace('通过 1', '通过 9');
+        // ① 面未变 + 同环境读数漂移 ⇒ 措辞必须是「未变」，且不得含「已过期」
+        const sameEnv = classifyDrift(mk(FP, 3, ROWS, 'gov-readable'), envDiff, FP, 3, ROWS, 'gov-readable');
+        const a1 = driftAttribution(sameEnv, FP, 3, 'gov-readable');
+        const ok1 = sameEnv.kind === 'drift' && a1.faceChanged === false
+          && /判据面\*\*未变\*\*/.test(a1.why) && !/已过期/.test(a1.why)
+          && !/判据面变了/.test(a1.tail) && /不是判据演化/.test(a1.tail);
+        // ② 面变（指纹变）⇒ 措辞必须是「已过期」，且不得反过来写「未变」
+        const faceChg = classifyDrift(mk(OTHER, 3, ROWS, 'x'), envDiff, FP, 3, ROWS, 'x');
+        const a2 = driftAttribution(faceChg, FP, 3, 'x');
+        const ok2 = faceChg.kind === 'drift' && a2.faceChanged === true
+          && /判据面\*\*已过期\*\*/.test(a2.why) && /判据面变了/.test(a2.tail) && !/未变/.test(a2.why);
+        // ③ 面变（表体缺行）也必须走「已过期」支
+        const rowChg = classifyDrift(mk(FP, 3, ROWS.slice(0, 2), 'x'), envDiff, FP, 3, ROWS, 'x');
+        const ok3 = driftAttribution(rowChg, FP, 3, 'x').faceChanged === true;
+        // ④ 印刷面：正文两支都真的被调用到（防函数存在却没人调）
+        const src = read('scripts/arch-claims.mjs');
+        const wired = (src.match(/driftAttribution\(/g) || []).length >= 3;
+        const bad = [['面未变→未变措辞', ok1], ['面变→已过期措辞', ok2], ['表体缺行→已过期支', ok3], ['函数已接线(≥3处)', wired]].filter((x) => !x[1]).map((x) => x[0]);
+        return assert(!bad.length, `面未变措辞 ${ok1 ? '✓' : '✗'}｜面变措辞 ${ok2 ? '✓' : '✗'}｜缺行支 ${ok3 ? '✓' : '✗'}｜接线 ${wired ? '✓' : '✗'}` + (bad.length ? `｜未命中 ${bad.join(',')}` : ''));
+      }),
       A('B234-4', '索引', 'D-1 的处置形态是**判据**而非一次性修复（S-5 在位 + 两副本无已退役件）', '本脚本含 S-5 且两处清单源文件不含 plugin-client.js', () => {
         const src = read('scripts/arch-claims.mjs');
         const clean = ['src/host/pure.js', 'src/client/updater.js'].every((f) => !read(f).includes('plugin-client.js'));
@@ -819,6 +851,29 @@ function classifyDrift(region, computedMd, fp, n, rows = [], snapEnv = null, str
   return { kind: 'drift', docFp, boundN, docEnv, fpConsistent, missingRows, envOnly: false, sameEnvReadings: thesisOk };
 }
 
+/** 漂移**归因文本**（纯函数·可内存变异自证，见 B234-7）。
+ *  判据面「变没变」决定措辞，**两分类不得互相借用**：
+ *   · 面变（指纹/条数/表体任一失效）⇒ 判据面**已过期**，是判据演化；
+ *   · 面未变、只剩同环境读数漂移 ⇒ 判据面**未变**，不得写「已过期」（一个字未改却叙述成过期，
+ *     即 b2/I3「措辞与事实相反」同族缺陷——2026-09-27 独立复核实测踩到）。
+ *  tail 供收尾行复用，避免收尾与上文两处说反。 */
+function driftAttribution(drift, localFp, localN, snapEnv) {
+  const missing = drift.missingRows || [];
+  const legs = [];
+  if (drift.docFp !== localFp) legs.push(`指纹不一致（档内 ${drift.docFp || '（无）'} vs 本形态 ${localFp}）`);
+  if (drift.boundN !== String(localN)) legs.push(`条数不一致（档内 ${drift.boundN || '（无）'} 条 vs 本形态 ${localN} 条）`);
+  if (missing.length) legs.push(`表体缺行 ${missing.length}/${localN}（如 ${missing.slice(0, 3).map((x) => x.id).join(',')}）`);
+  if (drift.sameEnvReadings) legs.push(`读数漂移（同为 env=${snapEnv}，实测/判定列却与投影不符）`);
+  const faceChanged = drift.docFp !== localFp || drift.boundN !== String(localN) || missing.length > 0;
+  const why = faceChanged
+    ? `判据面**已过期**（${legs.join('｜') || '表体与指纹之外的内容不一致'}）——投影随判据演化而过期，请在**本形态**跑 --write 重生成`
+    : `判据面**未变**，同环境（env=${snapEnv}）读数漂移：${legs.join('｜')}——档内指纹与表体均与本形态一致，不符的是**读数列**（判据面一个字未改），请跑 --write 重生成`;
+  const tail = faceChanged
+    ? '上面已归因：判据面变了，不是换环境'
+    : '上面已归因：判据面未变，是同环境读数漂移（不是判据演化）';
+  return { faceChanged, why, tail };
+}
+
 if (has('--check')) {
   // 判定例程（**不手抄**）：把指纹行从**两侧**都剥掉，只比其余部分。
   //   ⚠ 两侧必须用**同一个**剥行函数（对称）——--write 写进档里的投影是**含**指纹行的，
@@ -861,16 +916,10 @@ if (has('--check')) {
     console.log(`⤫ 读数快照陈旧（非判据面漂移）：投影表体与判据面一致，仅环境派生列（期望/实测/判定）取自`
       + ` env=${drift.docEnv || '?'} 而本次是 env=${SNAP_ENV}——跑 --write 可刷新，本条不记 PASS 也不记冲突｜${fpLine}`);
   } else if (drift.kind === 'drift') {
-    // 归因另一支：判据面**变了** ⇒ 真漂移，必须红。**点名具体是哪条腿失效**——
-    //   笼统写「指纹 A vs B」会把'指纹相同但表体缺行'也叙述成指纹不同（实测踩到）。
-    const legs = [];
-    if (drift.docFp !== localFp) legs.push(`指纹不一致（档内 ${drift.docFp || '（无）'} vs 本形态 ${localFp}）`);
-    if (drift.boundN !== String(localN)) legs.push(`条数不一致（档内 ${drift.boundN || '（无）'} 条 vs 本形态 ${localN} 条）`);
-    if (drift.missingRows.length) legs.push(`表体缺行 ${drift.missingRows.length}/${localN}（如 ${drift.missingRows.slice(0, 3).map((x) => x.id).join(',')}）`);
-    if (drift.sameEnvReadings) legs.push(`读数漂移（同为 env=${SNAP_ENV}，实测/判定列却与投影不符）`);
-    const why = `判据面**已过期**（${legs.join('｜') || '表体与指纹之外的内容不一致'}）`
-      + '——投影随判据演化而过期，请在**本形态**跑 --write 重生成';
-    console.log(`✗ 文档漂移：判据表与投影不一致｜${why}｜${fpLine}`);
+    // 归因另一支：**点名具体是哪条腿失效**——笼统写「指纹 A vs B」会把'指纹相同但表体缺行'
+    //   也叙述成指纹不同（实测踩到）。⚠ 措辞由 driftAttribution 统一出，面未变时**不得**说「已过期」。
+    const attr = driftAttribution(drift, localFp, localN, SNAP_ENV);
+    console.log(`✗ 文档漂移：判据表与投影不一致｜${attr.why}｜${fpLine}`);
   }
 
   if (conflicts.length) {
@@ -878,7 +927,8 @@ if (has('--check')) {
     process.exit(1);
   }
   if (drift.kind === 'drift') {
-    console.log('✗ 投影已过期：请跑 --write 重生成（上面已归因：判据面变了，不是换环境）');
+    const attr = driftAttribution(drift, localFp, localN, SNAP_ENV);
+    console.log(`✗ ${attr.faceChanged ? '投影已过期' : '投影读数漂移'}：请跑 --write 重生成（${attr.tail}）`);
     process.exit(1);
   }
   // 防手抄腿：档在、标记在、**档区与实算逐字相等**却仍不一致 ⇒ 只能是档内那行指纹被
