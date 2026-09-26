@@ -38,10 +38,16 @@
 //   F7 读侧健康（2026-09-26 红队修复）：编码不可判（非法 UTF-8 / U+FFFD）、表行被静默丢弃、
 //        读期间被改写（size+mtimeMs 变化）——命中即 FAIL，真判据**不得判绿**。
 //
-// 退出码（**保持原契约**：仅 --check 才按冲突数决定；无参调用仍 exit 0——该处越界不改，另立工作项）：
-//   有冲突 -> exit 1。
-//   F2（2026-09-26 红队修复）：未判全（有 SKIP）或读侧不可判 -> exit 0，但尾行**不得出现「一致」**字样，
-//        改打「⏭ …未判全：断言 N · SKIP M（未判：…）」；--json 的 summary 另有 judged（真判条数）。
+// 退出码（F3·2026-09-26 修复：**默认即门禁语义；--check 不再改变任何退出码**）：
+//   有冲突 -> exit 1 —— **带旗与否一致**。
+//     修复前是 `if (has('--check') && conflicts.length)`：无参调用带真冲突仍 exit 0，而当时头注自称
+//     「--check（= 默认行为，gate 第 5 环显式写它）」⇒ 同一份冲突数据红字照打、进程报成功，以退出码为准的
+//     调用方（含「先跑跑看」的人）把红读成通过（红队 F3 实测）。现默认即门禁语义，头注两处同步。
+//   未判全（有 SKIP）或读侧不可判 -> exit 0（**带旗与否一致**），但**不得静默**：尾行不得出现「一致」字样，
+//     另打一行三态读数（带旗 = 门禁口径「gate 按其三态记 SKIP」；无旗 = 人工直跑「勿据退出码 0 判绿」）。
+//     ⚠ 该行曾误写成「--check 下 exit 1」——那正是本卡要修的同一类病（头注与实现相反）：以代码为准，勿照抄。
+//   F2（2026-09-26 红队修复）：未判全时尾行改打「⏭ …未判全：断言 N · SKIP M（未判：…）」；
+//        --json 的 summary 另有 judged（真判条数）。
 //   F3（2026-09-26 红队修复 + 裁定收窄）：扫描面**存在却解析不出可判对象（分母 0）** -> A-4 FAIL，
 //        堵「表头失配 ⇒ 分母 0 ⇒ 同句 SKIP」那一类静默掏空。
 //        口径收窄：present 且**行数 > 0** 而 closed/superseded = 0 是**合法分母 0**，不算接线缺口（不红）。
@@ -75,6 +81,8 @@
 //   消费方请按键取值，勿按行号/行数解析。
 //
 // 用法：node scripts/card-arch-consistency.mjs [--check] [--json] [--devref <dir>] [--arch <dir>]
+//   --check  **不改变任何退出码**：有冲突一律 exit 1（不带旗亦然 = 默认即门禁语义）；未判全一律 exit 0。
+//           它只改「未判全」那行读数措辞（门禁口径 / 人工直跑）；--json 时该行走 stderr，stdout 仍是单行 JSON。
 //   --devref / --arch  覆盖扫描面（默认 docs/devref 与 <治理根>/.internal/arch），
 //                      用于**可复现的反例自证**：指向临时目录即可看它变红。
 
@@ -746,8 +754,18 @@ const judgedTotal = judged.length + unjudged.length;
 const health = HEALTH.issues.map((h) => (path.relative(ROOT, h.file).startsWith('..') ? h.file : path.relative(ROOT, h.file)) + '（' + h.issues.join('；') + '）');
 
 // F2 + F3：尾行只有在「冲突 0 · 无 SKIP · 读侧干净」时才允许报「判据一致」这类全判通过结论。
-// 冲突 -> exit 1；未判全 / 读侧不可判 -> exit 0 但**不得**报全判通过（换了输入就换结论 ⇒ 不可当全判通过读）。
+// 冲突 -> exit 1（**带旗与否一致**，F3 修复）；未判全 / 读侧不可判 -> exit 0 但**不得**报全判通过
+// （换了输入就换结论 ⇒ 不可当全判通过读），且下方另打一行三态读数，避免「退出码 0」被静默读成绿。
 const partial = skips.length > 0 || health.length > 0;
+// F3：未判全的读数必须区分「门禁口径」与「人工直跑」——两者退出码同为 0，差别只在谁能把它当通过用。
+// ⚠ 打印位置：**必须排在尾行之前**。gate.mjs 的归因 digest 取「最后一条非噪声行」（gate.mjs:104/160），
+//   本行若排在尾行之后，带真冲突时会把「✗ 卡<->档冲突 N 条：A-1」挤掉、让 FAIL 的归因串变成这句读数。
+const strict = has('--check');
+const partialRead = partial
+  ? (strict
+    ? '⚠ 门禁口径：未判全 ' + (skips.length + health.length) + ' 处（SKIP ' + skips.length + ' · 读侧不可判 ' + health.length + '）——gate 按其三态记 SKIP（非 PASS）；环退出码 0 属链上硬约束（见头注）'
+    : '⚠ 人工直跑：未判全 ' + (skips.length + health.length) + ' 处（SKIP ' + skips.length + ' · 读侧不可判 ' + health.length + '）——本条**不是全判通过**，勿据退出码 0 判绿')
+  : null;
 const tailLine = conflicts.length
   ? '✗ 卡<->档冲突 ' + conflicts.length + ' 条：' + conflicts.map((c) => c.id).join(', ')
   : (partial
@@ -777,6 +795,8 @@ if (has('--json')) {
     },
     tail: tailLine,
   }, null, 1));
+  // ⚠ stdout 已是单行 JSON（头注的兼容性承诺）⇒ 状态读数只能走 stderr，不得污染 stdout。
+  if (partialRead) process.stderr.write(partialRead + '\n');
 } else {
   console.log('知识卡-架构档（卡<->档）机检（册 A · 判据 A-1 / A-2 / A-3 + 判别力自证 A-1b/A-2b/A-3b + 接线 A-4）');
   console.log('扫描面：卡表 ' + path.relative(ROOT, path.join(DEVREF, 'INDEX.md')) + '｜架构档 ' + ARCH);
@@ -787,9 +807,20 @@ if (has('--json')) {
   }
   console.log('汇总：通过 ' + passed.length + ' · 冲突 ' + conflicts.length + ' · SKIP ' + skips.length + ' · 真判 ' + judged.length + '/' + judgedTotal);
   if (health.length) console.log('读侧健康：✗ ' + health.length + ' 处不可判 —— ' + health.join(' / '));
+  if (partialRead) console.log(partialRead);   // 排在尾行前：尾行须始终是本环的结论行
   console.log(tailLine);
 }
 
-// 退出码：**按原契约不动**（本项只改措辞与信号）——只有显式 --check 才按冲突数与源。
-// 无参调用仍 exit 0：这一处是既有行为，改动它属越界；「无参也按门禁退出」另立工作项处理。
-if (has('--check') && conflicts.length) process.exit(1);
+// ── 退出码（F3·2026-09-26 修复：默认即门禁语义）────────────────────────
+//   ① 冲突 -> **exit 1，带旗与否一致**。修复前是 `has('--check') && conflicts.length`：无参调用带真冲突仍
+//      exit 0 —— 同一份冲突数据红字照打、进程报成功，以退出码为准的调用方（含「先跑跑看」的人）把红读成
+//      通过（红队 F3 实测：无参 exit 0 / --check exit 1，输出正文逐字相同）。
+//   ② 未判全（有 SKIP / 读侧不可判）-> **exit 0（带 --check 亦然）**。这不是遗漏，是链上硬约束：
+//      gate.mjs 以「code !== 0 -> FAIL」归因（scripts/gate.mjs:104），环若在未判全时退非零，「没判上」
+//      就会被折进「判失败」，SKIP 与 FAIL 不再可分 —— 正是 gate 的三态读法要保住的区别。
+//      链级 SKIP/PASS 退出码语义归 T3（task t-muii4b04）：其裁定（0=全过 / 1=有 FAIL / 2=未判全）**要求**
+//      「环自身的退出码不承载 SKIP（两环 SKIP 时各环仍 exit 0）」——与本条 ② 同向，故本卡不扩张链级语义。
+//   ⇒ `--check` 因此**不再改变退出码**（冲突本就退 1；未判全两态都退 0），只区分未判全时的读数措辞。
+//     保留该旗的原因：gate 链显式传它（scripts/gate.mjs RINGS），且 arch-claims **B234-1** 有硬门
+//     「实装 --check 的环在链上必须带 --check」——删掉此旗会让第 4 环判红。
+if (conflicts.length) process.exit(1);   // 未判全不退非零：见上 ②（链上硬约束，保 SKIP/FAIL 可分）
