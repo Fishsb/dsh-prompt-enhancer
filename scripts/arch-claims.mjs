@@ -89,6 +89,116 @@ const witness = (id, file, cases, detail) => A(
   },
 );
 
+// ─────────────── 门禁链 / 行尾：派生读取（F4 · F5 · 2026-09-26 红队修复波 1）───────────────
+
+/** 门禁链**点名面**：本判据表认可的环（每条须写明"本表为何需要它"）。
+ *  判据形态 = 点名集合 ≡ package.json 链上实际集合（**双向相等**）。
+ *  ⚠ 为何保留点名面而不做"纯派生"：两条负控互斥——"加一环不更新期望→红"要派生侧多出来，
+ *    "删掉一环→红"要点名侧仍点名。只从 package.json 取集合的话，删环会把两侧一起缩小，
+ *    判据恒绿。故：本表 = 点名面，package.json = 事实面，任一侧单独变动都红。 */
+const GATE_RINGS = [
+  { id: 'dead-code', script: 'scripts/dead-code-gate.mjs', why: 'R1–R4 死代码 / 装配契约（ADR-224）' },
+  { id: 'rpc', script: 'scripts/rpc-manifest.mjs', why: 'RPC 注册面派生一致（ADR-201 / ADR-230）' },
+  { id: 'prompts', script: 'scripts/sync-prompts.mjs', why: '提示词生成区不漂移' },
+  { id: 'arch-claims', script: 'scripts/arch-claims.mjs', why: '本判据表自身（ADR-234）' },
+  { id: 'cards', script: 'scripts/card-arch-consistency.mjs', why: '知识卡 ↔ 架构档一致性（册 A · 2026-09-25 接入）' },
+];
+
+/** 从命令串摘出 `node scripts/xxx.mjs [args]`，顺序即链序 */
+function parseRings(cmd) {
+  const out = [];
+  const re = /node\s+(scripts\/[\w.\-]+\.mjs)([^&|]*)/g;
+  let m;
+  while ((m = re.exec(cmd)) !== null) out.push({ script: m[1], args: (m[2].match(/--[\w-]+/g) || []), pos: m.index });
+  return out;
+}
+
+/** 派生门禁链：① 直接解析 package.json.scripts.gate；② 若该命令只调一个**入口脚本**
+ *  （编排器形态，如 `node scripts/gate.mjs`），下探一层读入口脚本，按首次出现序取其内 `scripts/*.mjs`。
+ *  ⚠ 波 2（F1 gate.mjs）接口：各环须以 `scripts/<名>.mjs` 字面量出现在入口脚本内，
+ *    否则此处置零环 → 判红（fail-closed，不静默取空集）。 */
+function gateChain() {
+  const cmd = String(require(abs('package.json')).scripts.gate || '');
+  let rings = parseRings(cmd);
+  let source = 'package.json';
+  let nested = false;
+  if (rings.length < 2) {
+    const entry = (cmd.match(/node\s+(scripts\/[\w.\-]+\.mjs)/) || [])[1];
+    if (entry && exists(entry)) {
+      // ⚠ 剥注释再扫：入口脚本的头注里普遍写了自身用法（\`用法：node scripts/gate.mjs\`），
+      //   不剥会把入口脚本自己当成一环（未点名 → 假红）。同理，被注释掉的环不算环。
+      const body = read(entry)
+        .split('\n')
+        .map((l) => l.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/, ''))
+        .join('\n');
+      const seen = [];
+      const re = /scripts\/([\w.\-]+\.mjs)/g;
+      let m;
+      while ((m = re.exec(body)) !== null) { const s = 'scripts/' + m[1]; if (!seen.includes(s)) seen.push(s); }
+      const self = entry.replace(/^\.\//, '');
+      for (let i = seen.length - 1; i >= 0; i -= 1) if (seen[i] === self) seen.splice(i, 1);
+      // 编排器形态下旗标由入口脚本自己传（不在 package.json 字面量里），故 args 留空并置 nested。
+      // ⚠ 旧实现由此**整体关闭**旗标腿（nested ? [] : …）——那会让 card-arch 的旗丢失一并漏检
+      //   （复核席实测的净回归）。现改为：nested 时旗标改从**入口脚本自身文本**取证（见 chainFlags），
+      //   只把"字面量里读不到旗"降级为"改看入口脚本"，不放弃这一腿。
+      rings = seen.map((s, i) => ({ script: s, args: [], pos: i }));
+      source = entry + '（编排器入口，下探一层）';
+      nested = true;
+    }
+  }
+  // ⚠ 不再用 `/npm run/.test(cmd)` 判 nested：那会让「命令里带 npm run」把旗标腿整体带偏
+  //   （且在编排器下探已成功时属于误判）。nested 只认"下探确实发生"。
+  return { cmd, rings, source, nested, entryScript: nested ? (cmd.match(/node\s+(scripts\/[\w.\-]+\.mjs)/) || [])[1] : null };
+}
+
+/** 环脚本是否**实装** --check：识别 argv 检索的多种真实写法（各环不统一，实测 2026-09-26）：
+ *    \`has('--check')\`（arch-claims / card-arch-consistency）· \`args.includes('--check')\`（rpc-manifest）
+ *    · \`process.argv.includes('--check')\`（sync-prompts）——变量名任意、接收者须是 args/argv/ARGV 之类。
+ *  ⚠ 不得退化成"文中出现 --check 就算实装"：头注/注释里普遍写了用法（本文件即如此），
+ *    那样会把**没实装**的脚本判成实装。故先剥注释行，再要求"接收者 + includes/has"形态。 */
+function implementsCheck(p) {
+  if (!exists(p)) return false;
+  const code = read(p)
+    .split('\n')
+    .map((l) => l.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/, ''))   // 剥块注释与行注释
+    .join('\n');
+  return /(?:process\.)?(?:argv|args|ARGV|ARGS|[A-Za-z_$][\w$]*Args)\s*\.\s*includes\s*\(\s*['"]--check['"]\s*\)/.test(code)
+    || /has\s*\(\s*['"]--check['"]\s*\)/.test(code);
+}
+
+/** 行尾三列读数（F5）：`git ls-files -z --eol`。
+ *  列序 = <i/> <w/> <attr/> [<eol=>] \t <path>；用 -z 防文件名含空白/换行被拆错列。 */
+function eolRows() {
+  if (!exists('.git')) return null;                     // 非 git 检出（发行包解包）→ 不可判
+  let raw = '';
+  try {
+    raw = execFileSync('git', ['ls-files', '-z', '--eol'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 60000 });
+  } catch (e) { return { error: String(e.message).slice(0, 80) }; }
+  const rows = [];
+  for (const rec of raw.split('\0')) {
+    if (!rec) continue;
+    const tab = rec.indexOf('\t');
+    if (tab < 0) { rows.push({ file: rec, raw: true }); continue; }
+    const f = rec.slice(0, tab).trim().split(/\s+/);
+    const strip = (s, p) => (s && s.startsWith(p) ? s.slice(p.length) : s);   // --eol 三列带 i/ w/ attr/ 前缀
+    rows.push({
+      index: strip(f[0], 'i/') || '?',
+      worktree: strip(f[1], 'w/') || '?',
+      attr: strip(f[2], 'attr/') || '?',
+      eol: f[3] || '',
+      file: rec.slice(tab + 1),
+    });
+  }
+  return { rows };
+}
+
+/** 字节级往返：字节 --utf8 解码--> 串 --utf8 编码--> 字节 必须相等。
+ *  不等 ⇒ 判据读到的"文本"与磁盘不是同一份（编码被换过），行尾断言会静默失效。 */
+function roundTripOk(f) {
+  const buf = fs.readFileSync(path.join(ROOT, f));
+  return Buffer.from(buf.toString('utf8'), 'utf8').equals(buf);
+}
+
 process.env.DSH_ENHANCER_NO_INDEX = '1';          // 与仓库其它 lib 测试同口径：不写进程索引
 const indexMod = require(abs('lib/index.cjs'));
 
@@ -280,13 +390,47 @@ const CLAIMS = [
     adr: 'ADR-234', anchor: 'module:prompt-enhancer', at: '2026-09-18', level: '已兑现',
     promise: 'P4：结构判据机检化（分母由模型派生、判据表为投影、四档语义含 SKIP/在册未达/在册缺陷）+ 四条结构门禁收敛为 `npm run gate` 并首次进 CI + RC-F 收敛基线（10 个状态面 / 在册缺陷 D-1）',
     assertions: [
-      A('B234-1', '结构', '四条结构门禁收敛为一条命令（顺序即依赖序）', 'gate 串行链 = dead-code → rpc-manifest → sync-prompts → arch-claims，后两者带 --check', () => {
-        const g = require(abs('package.json')).scripts.gate;
-        const order = ['dead-code-gate.mjs', 'rpc-manifest.mjs', 'sync-prompts.mjs', 'arch-claims.mjs'];
-        const idx = order.map((s) => g.indexOf(s));
-        const asc = idx.every((v, i) => v > -1 && (i === 0 || v > idx[i - 1]));
-        const flags = /rpc-manifest\.mjs --check/.test(g) && /sync-prompts\.mjs --check/.test(g) && /arch-claims\.mjs --check/.test(g);
-        return assert(asc && flags, `四门禁在位 ${idx.filter((v) => v > -1).length}/4｜顺序 ${asc}｜--check ${flags}`);
+      A('B234-1', '结构', '门禁链收敛为一条命令（顺序即依赖序）', '点名集合 ≡ gate 链实际集合（双向）；链序 == 本表声明序；实装 --check 的环在链上必须带 --check（含编排器入口自传旗的形态）', () => {
+        const { rings, source, nested, entryScript } = gateChain();
+        const named = GATE_RINGS.map((r) => r.script);
+        const actual = rings.map((r) => r.script);
+        const extra = actual.filter((s) => !named.includes(s));      // 链上新增环未点名 → 红（R4 要堵的那一面）
+        const lost = named.filter((s) => !actual.includes(s));       // 点名环从链上消失 → 红（F4 负控）
+        const dup = actual.filter((s, i) => actual.indexOf(s) !== i);
+        const order = rings
+          .map((r) => named.indexOf(r.script))
+          .filter((i) => i >= 0);
+        const asc = order.every((v, i) => i === 0 || v > order[i - 1]);
+        // 旗标腿：直连形态从命令行字面量取证；编排器形态旗由入口脚本自传，改从**入口脚本文本**取证
+        //   （条目内需出现 `scripts/<名>.mjs` 与 `--check`，二者相隔不超过 160 字符）。
+        //   ⚠ 旧实现 nested 时整条腿短路 —— 复核席实测那是相对基线的判别力净回归（丢 rpc/prompts 的
+        //     --check 后判绿）。入口脚本不可读/取不到条目 → 记 fail（fail-closed，不静默放过）。
+        const entryText = nested && entryScript && exists(entryScript) ? read(entryScript) : null;
+        const flagMiss = [];
+        for (const r of rings) {
+          if (!implementsCheck(r.script)) continue;
+          if (!nested) {
+            if (!r.args.includes('--check')) flagMiss.push(r.script);
+            continue;
+          }
+          if (entryText === null) { flagMiss.push(r.script + '(入口脚本不可读，无法取证旗标)'); continue; }
+          const k = entryText.indexOf(r.script);
+          if (k < 0) { flagMiss.push(r.script); continue; }
+          // 取证窗 = 该环自己的条目行，**遇到下一环的 .mjs 字面量即截断**（定宽窗口会串到下一环的旗标上 → 假绿）
+          const rest = entryText.slice(k).split('\n');
+          let seg = rest[0];
+          for (let i = 1; i < Math.min(rest.length, 4) && !/\.mjs['"]/.test(rest[i]); i += 1) seg += '\n' + rest[i];
+          if (!/--check/.test(seg)) flagMiss.push(r.script);
+        }
+        const flags = flagMiss;
+        const okAll = !extra.length && !lost.length && !dup.length && asc && !flags.length;
+        return assert(okAll,
+          `链 ${actual.length} 环（源 ${source}${nested ? '｜旗标取证面 = 入口脚本文本；下探失败则取零环' : ''}）`
+          + `｜未点名 ${extra.length ? extra.join(',') : '无'}`
+          + `｜点名却缺席 ${lost.length ? lost.join(',') : '无'}`
+          + `｜重复 ${dup.length ? dup.join(',') : '无'}`
+          + `｜链序单调 ${asc}`
+          + `｜实装 --check 却未带旗 ${flags.length ? flags.join(',') : '无'}`);
       }),
       A('B234-2', '结构', '门禁进 CI 且判据之间不得互相遮蔽（失败仍出读数）', 'Structure gates 跑 npm run gate 且与 Run tests 两步均 if: always()', () => {
         const ci = read('.github/workflows/ci.yml');
@@ -395,6 +539,54 @@ const STRUCTURAL = [
     const onlyE = KE.filter((k) => !KZ.includes(k));
     return assert(KZ.length > 0 && !onlyZ.length && !onlyE.length,
       `ZH ${KZ.length} 键 / EN ${KE.length} 键｜仅 ZH ${onlyZ.length ? onlyZ.join(',') : '无'}｜仅 EN ${onlyE.length ? onlyE.join(',') : '无'}`);
+  }),
+  A('S-8', '结构', '行尾契约执行：受控文本跨机 LF + 二进制不被转换 + 契约在位且被匹配', 'i/ 与 w/ 仅 lf|none；二进制扩展名有显式 binary 声明；.gitattributes 含 * text=auto eol=lf', () => {
+    // 依据：.gitattributes「源文件一律 LF」是**契约**，契约无用例即声明（红队 R5）。
+    // 只断言跨机稳定的量：索引/工作树行尾、二进制声明面、契约行本身。判定语义（什么算 LF）不可重定义。
+    const attrs = exists('.gitattributes') ? read('.gitattributes') : null;
+    if (attrs === null) return no('.gitattributes 不在位（行尾契约无载体）—— i/ w/ attr/ 无从断言');
+    const contract = /^\s*\*\s+text=auto\s+eol=lf\s*$/m.test(attrs);
+    const r = eolRows();
+    if (!r || r.error) return no('git ls-files --eol 不可执行：' + (r && r.error ? r.error : '.git 缺位（非 git 检出 / 解包发行物）'));
+    const rows = r.rows.filter((x) => !x.raw);
+    const malformed = r.rows.filter((x) => x.raw);
+    const scan = (rs) => {
+      const text = rs.filter((x) => x.attr === 'text' || x.attr === 'text=auto');
+      const bins = rs.filter((x) => x.index === '-text');
+      return {
+        text, bins,
+        badText: text.filter((x) => !['lf', 'none'].includes(x.index) || !['lf', 'none'].includes(x.worktree)),
+        // 注：不再有 badBin 腿——「i/-text ⇒ attr 含 binary/-text」与 --eol 的列来源同源，恒真（空转）。
+        //     二进制面的真判据是下面的 undeclared（**声明面**：扩展名必须在 .gitattributes 有显式规则）。
+        badBin: [],
+      };
+    };
+    const j = scan(rows);
+    // 判别力自证（变异体）：把第 1 件 w/lf 改成 w/crlf，同一判定路径必须变红；否则本判据可被静默掏空。
+    const at = rows.findIndex((y) => y.worktree === 'lf');
+    const neg = scan(rows.map((x, i) => (i === at ? { ...x, worktree: 'crlf' } : x)));
+    // 二进制**声明面**：真实存在的二进制扩展名必须在 .gitattributes 有显式规则。
+    //   ⚠ 不采用「i/-text ⇒ attr 含 -text」的字面写法——--eol 的 attr/ 列本就是 i/-text 的来源，该式恒真（空转）。
+    const body = attrs.split(/\r?\n/).filter((l) => l.trim() && !/^\s*#/.test(l)).join('\n');
+    const binExts = [...new Set(j.bins.map((x) => (path.extname(x.file) || '(无扩展名)').toLowerCase()))].filter((e) => e !== '(无扩展名)');
+    const undeclared = binExts.filter((e) => !new RegExp('\\*\\' + e + '\\s+(binary|-text)\\s*$', 'm').test(body));
+    const zero = rows.length === 0 || j.text.length === 0 || j.bins.length === 0 || binExts.length === 0;
+    const dist = (k) => { const m = {}; for (const x of rows) m[x[k]] = (m[x[k]] || 0) + 1; return Object.entries(m).map(([a, b]) => a + '×' + b).join(' '); };
+    const show = (xs) => xs.slice(0, 8).map((x) => x.file + '(' + x.index + ' ' + x.worktree + ' ' + x.attr + ')').join(' ');
+    // --deep（可选，不进 gate 链）：逐件字节往返核对，防"判据读到的不是磁盘那份"。默认关，避免每跑一次读全仓。
+    if (has('--deep') && !zero) {
+      const enc = j.text.filter((x) => !roundTripOk(x.file)).map((x) => x.file);
+      if (enc.length) return no('字节往返不等（判据读到的与磁盘非同源）' + enc.length + ' 件：' + enc.slice(0, 5).join(',') + '｜i/ ' + dist('index') + '｜w/ ' + dist('worktree'));
+    }
+    const pass = contract && !zero && !j.badText.length && !j.badBin.length && !undeclared.length && !malformed.length && neg.badText.length === 1;
+    return assert(pass,
+      '契约行 ' + contract
+      + '｜i/ ' + dist('index') + '｜w/ ' + dist('worktree') + '｜attr/ ' + dist('attr')
+      + '｜受控 ' + rows.length + ' 件：文本判 ' + j.text.length + ' 恰越界 ' + j.badText.length + (j.badText.length ? '：' + show(j.badText) : '')
+      + '｜二进制 ' + j.bins.length + ' 件（扩展名 ' + binExts.join(',') + '）声明缺 ' + undeclared.length + (undeclared.length ? '：' + undeclared.join(',') : '')
+      + '｜畸形 --eol 行 ' + malformed.length
+      + '｜负控 命中 ' + neg.badText.length + '/1'
+      + (zero ? '｜⚠ 空扫：分母含 0（' + rows.length + '/' + j.text.length + '/' + j.bins.length + '），不判绿' : ''));
   }),
 ];
 
