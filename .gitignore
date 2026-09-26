@@ -38,3 +38,9 @@ node_modules/
 dist/
 build/
 *.tgz
+# ---- 执行隔离与门禁运行产物（本地临时件，不入库）----
+# .dsh-worktrees/ = 任务看板的 worktree 执行隔离目录（含嵌套 git 仓库）
+#   不忽略的后果：git add -A 会把 8 个 worktree 当 gitlink 暂存（实测 8 条 embedded repo 警告）
+.dsh-worktrees/
+# gate.mjs 每次运行写的机读摘要（verdict / unjudged / 各环状态），临时件
+gate-summary.json
