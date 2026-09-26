@@ -26,9 +26,12 @@ import fs from 'node:fs';
 export const RING_PREFIX = 'RING-STATE';
 export const RING_STATES = ['PASS', 'FAIL', 'SKIP'];
 
-/** 契约行形状：行首锚定 + 三态闭集 + 可空 reason。**只解析本契约，不解释任何自然语言。**
+/** 契约行形状：**行首（列 0）锚定** + 三态闭集 + 可空 reason。**只解析本契约，不解释任何自然语言。**
  *  ⚠ 三态词必须在**字段位置**（tag 之后的第二个字段）；正文里出现的「PASS/SKIP/全过」等字样
- *    不构成状态——这正是 N4（措辞面假绿）在本层的根治形态。 */
+ *    不构成状态——这正是 N4（措辞面假绿）在本层的根治形态。
+ *  ⚠ **前导空白不被剥除**（独立复核席反例 R1 实测）：若先 trim 再匹配，`^` 锚就形同虚设，
+ *    `'    RING-STATE rpc PASS 引用来的'` 这类**缩进仿冒行**会被读成真状态。
+ *    故只做**尾部** CR 归一，`^` 必须落在列 0。缩进行一律不是契约行（进退化位）。 */
 export const RING_LINE_RE = new RegExp('^' + RING_PREFIX + '\\s+(\\S+)\\s+(PASS|FAIL|SKIP)(?:\\s+(.*))?$');
 
 const ANSI_RE = /\u001b\[[0-9;]*m/g;
@@ -90,7 +93,8 @@ export function installStdoutHygiene() {
 export function parseRingState(text) {
   const out = [];
   for (const raw of stripAnsi(text).split('\n')) {
-    const m = raw.trim().match(RING_LINE_RE);
+    // 只归一**尾部** CR；前导空白必须保留，^ 才是真锚（见上方 R1 注释）。
+    const m = raw.replace(/\r$/, '').match(RING_LINE_RE);
     if (m) out.push({ id: m[1], state: m[2], reason: (m[3] || '').trim() });
   }
   return out;

@@ -74,6 +74,14 @@ test('P5-03 gate.mjs 内不存在任何对环输出的文本匹配（零正则 /
   assert.ok(!/RegExp/.test(code), 'gate.mjs 不得构造正则');
   assert.ok(!/u001b/.test(src), 'gate.mjs 不得自带 ANSI 剥离（应复用 lib）');
   assert.ok(/deriveState/.test(code), 'gate.mjs 应通过 deriveState 裁决');
+  // ⚠ 独立复核席反例 R2：只查 .test(/.match(/RegExp 是**代理判据**，绕行成本低
+  //   （加一行 text.indexOf(...) / text.includes('PASS') / split+find 即可重新引入文本匹配）。
+  //   故这里再堵三类非正则通道：对**环输出变量**的 indexOf/includes/find/startsWith/split 判定。
+  //   说明：gate 对自身数组/字符串（r.text、r.script、l 等）的常规用法不在禁止面内——
+  //   本断言只针对把「环输出」当文本解释的调用形态。
+  for (const bad of [/r\.text\.indexOf\s*\(/, /r\.text\.includes\s*\(/, /text\.indexOf\s*\(/, /text\.includes\s*\(/]) {
+    assert.ok(!bad.test(code), 'gate.mjs 不得对环输出做文本匹配（' + bad + '）——P5-03 的非正则腿');
+  }
   for (const gone of ['resolveStatus', 'locateConclusion', 'scanLines', 'SELF_REPORTS', 'GENERIC_CONCLUSIONS']) {
     assert.ok(!new RegExp('\\b' + gone + '\\b').test(code), '旧启发式 ' + gone + ' 不得回流');
   }
@@ -109,6 +117,26 @@ test('P5-05 契约行缺失 => fail-closed（不接线不猜、不默认 PASS）
   assert.equal(deriveState({ id: 'rpc', exitCode: 1, text: 'RING-STATE rpc PASS a\n' }).state, 'FAIL', 'PASS 却非零退出 = 矛盾，取严');
   assert.equal(deriveState({ id: 'rpc', exitCode: 0, text: 'RING-STATE rpc FAIL a\n' }).state, 'FAIL', 'FAIL 却零退出 = 矛盾，取严');
   assert.equal(deriveState({ id: 'rpc', exitCode: 0, text: '' }).state, 'SKIP', '零输出不得记 PASS');
+});
+
+test('P5-05b 行首锚定是**真锚**：缩进/前缀仿冒行必须被拒（独立复核席反例 R1）', async () => {
+  const { deriveState } = await lib();
+  // 病根：若 parseRingState 先 raw.trim() 再匹配，^ 就形同虚设——缩进仿冒行会被读成真状态。
+  // 本用例是那处漏洞的**变异杀手**：把 trim 加回去 / 删掉 ^ 锚，本用例必须报红。
+  const mustReject = [
+    ['4 空格缩进', '    RING-STATE rpc PASS 引用来的'],
+    ['Tab 缩进', '\tRING-STATE rpc PASS x'],
+    ['正文内出现', '他说 RING-STATE rpc PASS x'],
+    ['方括号前缀', '[log] RING-STATE rpc PASS x'],
+    ['近似 tag', 'RING-STATE-ISH rpc PASS x'],
+    ['小写状态词', 'RING-STATE rpc pass x'],
+  ];
+  for (const [label, text] of mustReject) {
+    const v = deriveState({ id: 'rpc', exitCode: 0, text: text + '\n' });
+    assert.equal(v.state, 'FAIL', label + ' 的仿冒契约行不得被读成状态（应 fail-closed）；实得 ' + v.state);
+  }
+  // 正例：列 0 的真契约行仍被读出（尾部 CR 归一不影响）
+  assert.equal(deriveState({ id: 'rpc', exitCode: 0, text: 'RING-STATE rpc PASS ok\r\n' }).state, 'PASS', '列 0 契约行应被读出');
 });
 
 test('P5-06 位置无关（N2 复发防线）：契约行后跟 50 行噪声仍被读出', async () => {

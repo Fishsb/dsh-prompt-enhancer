@@ -74,7 +74,9 @@ for (const r of RINGS) {
       cwd: ROOT, encoding: 'utf8', timeout: RING_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024,
     });
     code = p.status;
-    text = (p.stdout || '') + (p.stderr || '');
+    // ⚠ 两流之间**显式补一个换行**：否则若某环 stdout 不以 \n 结尾，契约行会与末行黏成一行而不可解析
+    //   （独立复核席反例 R3：实测五环当前均以 \n 结尾，故原实现侥幸可用——这里消除该隐式依赖）。
+    text = (p.stdout || '') + '\n' + (p.stderr || '');
     if (p.error) note = String(p.error.message).slice(0, 80);
     if (p.signal) note = '被信号 ' + p.signal + ' 终止';
   }
