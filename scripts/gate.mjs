@@ -82,12 +82,22 @@ for (const r of RINGS) {
   }
   // 只读结构：环自报的契约行 → 三态（退化位亦在 ring-state.mjs 内穷举，本文件不猜措辞）。
   const v = deriveState({ id: r.id, exitCode: note ? null : code, text, note });
-  results.push({
+  // ⚠ **结构性判据**（独立复核席 V2/V3 反例的根治）：条目一构造即冻结。
+  //   复核席证明「按变量名/引用数做代理判据」可被绕开——例如在 results 构造完成后回改
+  //   `e.status='PASS'`（全文不含标识符 text、零配额操纵），即可把 SKIP 翻成 PASS 而 12 条用例零失败。
+  //   冻结把「事后改写」从**静默假绿**变成**硬失败**（ESM 严格模式 ⇒ 赋值抛 TypeError ⇒ 进程非零退出），
+  //   且该保护与任何变量名无关：改名、别名、换容器都绕不过「对象已冻结」这一事实。
+  results.push(Object.freeze({
     id: r.id, script: r.script, args: r.args,
     status: v.state, source: v.source, exit: code,
     ms: Date.now() - started, summary: summarize(v), text,
-  });
+  }));
 }
+
+// ⚠ 结果集构造完成后**整体冻结**：条目冻结挡住「回改字段」（V3 反例），数组冻结挡住
+//   「替换元素」（results[i] = {...}）。两者都是与变量名无关的结构性约束——
+//   任何事后改写在此处都是硬失败，而不是静默假绿。
+Object.freeze(results);
 
 if (!has('--json')) {
   console.log('门禁链（全跑 · 不短路）· scripts/gate.mjs');
