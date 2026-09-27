@@ -84,7 +84,8 @@ push('rpc', 'SKIP', '契约行在场 + 20 行噪声（N2 形态）', REAL.rpc.ou
 // ②-类 契约行缺失 ⇒ 新语义 fail-closed = FAIL（正确，不是回归）；旧语义不得读成 PASS
 const failClosed = [];
 // 期望：**新语义必须拒绝判 PASS**——有输出但无契约行 ⇒ FAIL（fail-closed）；
-//   零输出 ⇒ SKIP「无读数」（同为「不判过」，但语义不同，不可混算）。
+//   零输出 ⇒ UNKNOWN「无读数」（T3/N3 裁定：UNKNOWN = 环根本没给读数 = **缺陷**；只有可枚举的
+//   「扫描面缺位」才是 SKIP。两者同码会让「把环换成空脚本」被接纳基线吸收成 0 —— 与要堵的假绿同形）。
 // 旧语义若读成 PASS，那是**误判证据**（列出来给读者看），不是新版的问题。
 const pushFC = (id, label, text, code, want) => {
   const o = oldAPI.resolveStatus(text, code, { id })[0];
@@ -95,7 +96,7 @@ pushFC('rpc', '契约缺失·改写措辞', 'RPC 事实源：注册面 0 + bundl
 pushFC('arch-claims', '契约缺失·改写措辞', '结构判据：31 条成立 · 3 条无从判定\n', 0, 'FAIL');
 pushFC('prompts', '契约缺失·末行像通过', '提示词生成区：与技能包源逐字相同\n', 0, 'FAIL');
 pushFC('rpc', '契约缺失·末行含 PASS 字样', '全部检查通过\nRPC 检查 PASS\n', 0, 'FAIL');
-pushFC('cards', '契约缺失·零输出（无读数）', '', 0, 'SKIP');
+pushFC('cards', '契约缺失·零输出（无读数）', '', 0, 'UNKNOWN');
 
 console.log('【A 单元级】');
 console.log(W('环', 13) + W('场景', 34) + W('真值', 6) + W('旧', 6) + W('新', 6) + '对照');
