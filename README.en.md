@@ -37,12 +37,14 @@ The 🎤 record button beside the composer starts listening; the transcript (clo
 ## 🚀 Install
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.4.0
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.4.1
 ```
 
 Restart DSH (`dsh web`) after installing — the ✨ button appears in the composer toolbar.
 
-> ℹ️ **Version note**: the latest tag **`v3.4.0` (2026-09-19)** already contains the ✨ official slot-contract fix (Issue #8 / #10) and the cloud ASR fix (Issue #9); the command above installs that tag. If you previously installed `#main` under the old note, re-running it pins you to a released version. **Note**: from v3.4.0 the **in-plugin restart capability is removed** (restart DSH manually after an update) — see [release notes](release-notes/3.4.0.md).
+> ℹ️ **Version note**: the latest tag **`v3.4.1` (2026-10-06)** contains the **DSH 0.2.x compatibility fix** — it fixes the plugin being rejected at load time by the host's compatibility gate on DSH `0.2.0` and later, which made ✨/🎤 and the settings card disappear entirely (Issue #11 / #12). The command above installs that tag. If you previously installed `#main` under the old note, re-running it pins you to a released version.
+>
+> Earlier releases: **v3.4.0** (2026-09-19) added the ✨ official slot-contract fix (Issue #8 / #10) and the cloud ASR fix (Issue #9), and **removed the in-plugin restart capability** (restart DSH manually after an update) — see [release notes](release-notes/3.4.0.md).
 >
 > Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) installed locally and `pnpm` in PATH.
 >

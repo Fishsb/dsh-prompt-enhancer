@@ -1,7 +1,8 @@
 # Changelog
 
 [3.3.3]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.2...v3.3.3
-[Unreleased]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.4.0...HEAD
+[Unreleased]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.4.1...HEAD
+[3.4.1]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.4.0...v3.4.1
 [3.4.0]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.3...v3.4.0
 [3.3.2]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.1...v3.3.2
 [3.3.1]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.0...v3.3.1
@@ -14,6 +15,8 @@
 > 🗺️ 条目内的 `flow:` 标注为功能链路标签（原 pmg 项目地图 `docs/map/` 已随 pmg 于 2026-09-10 移除，该路径不再存在）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
 ## [Unreleased]
+
+## [3.4.1] - 2026-10-06
 
 - **修复「插件在新版 DSH 上被拒绝装载」——移除已被官方删除的 `@deepseek-ai/dsh-client-runtime` 声明 + 放宽 locale 区间（2026-10-06）**：现象是远端 **issue #11 / #12**（用户在 DSH `0.2.0-rc.2` 上装/启 `dsh-prompt-enhancer@3.4.0` 被提示「不兼容」，✨/🎤 与设置页卡片消失）与本机宿主日志 `skipping profile bundle "dsh-prompt-enhancer"` 的同根因。**根因（两条叠加，非单一）**：① 该包**自 DSH `0.2.0` 起已从发行物中消失**（0.2.0-rc.2 的 62 个 `dsh-client-*` 包名中无它；npm 末版 `0.1.1-rc.2` @2026-08-21 后停发），而它同时被列在 `peerDependencies` 与 `dsh.client.inject`；② `dsh-client-locale` 的区间写作 `^0.1.0-rc.6`——**caret 在 0.x 上只允许 0.1.x**，故对 `0.2.0-rc.2` 判 false。宿主的 compatibility 门（`dsh-app-boot/lib/index.js` `evaluatePluginCompatibility`，只审 `peerDependencies` 里 `@deepseek-ai/dsh*` 命名空间）因此 deny 整个 bundle。**改前取证（先证后改，逐处列出）**：`src/`、`lib/`、`scripts/`、`test/`、`cordis.patch.yml`、`plugin-host.js`、`README*` 对 `dsh-client-runtime` **全部零命中**；`lib/client.cjs` 唯一 `require` 是 `'react'`（`@deepseek-ai/dsh-client-ui-renderer` 的 3 次出现**全在注释文本内**，非 require）；全仓仅 `package.json`（peer + inject 各 1 处）与 `package-lock.json`（root 条目镜像 + 传递依赖，非我方声明）出现该名 ⇒ 判定为**「仅声明、无真实引用」⇒ 直接移除**，未做任何版本放宽或兼容层（放宽只对「仍被使用但版本不匹配」成立）。**改动**：`package.json` 的 `peerDependencies` 与 `dsh.client.inject` **同时**删去该名，locale 改为 `>=0.1.0-rc.6`（保持两处包名集合逐项相等）；`package-lock.json` root 条目同步（以 `npm install --package-lock-only` 实算结果逐字节比对一致）。**反向自证（防判据没牙）**：同一判据函数两侧对照——改前 manifest vs `0.2.0-rc.2` ⇒ `REJECT`（列出 locale + runtime 两名不满足，exit 1）；改后同输入 ⇒ `PASS`（exit 0）。同法在**真实装载门** `loadProfileDirectory` 上对照：改前 `skippedBundles = 1`（`✗ dsh-prompt-enhancer :: incompatible`）/ 改后 `skippedBundles = []`（21 个 bundle 全部装载，插件在册）。**semver 双向实算**：`>=0.1.0-rc.6` 对 `0.1.0-rc.6` / `0.1.0-rc.8` / `0.1.7-rc.2`（旧版）与 `0.2.0-rc.1` / `0.2.0-rc.2`（新版）**六值全 true**；对照原 `^0.1.0-rc.6` 对 0.2.x 三值全 false。**部署与生效复验（§6.3）**：`npm run build`（幂等，三产物 md5 与构建前一致）→ `build-host/build-client --check` **零漂移** → `sync-runtime` 部署到 system + web 两个 profile（19 项 md5 全过，运行环境副本与仓库 HEAD **逐字节一致**，部署账本更新为 `system@3.4.0 / web@3.4.0 (source=sync-runtime)`）→ **重启后复验**：① 宿主启动日志 `skipping profile bundle` 由 **1 处 → 0 处**；② 界面复验（独立实例 + CDP）`.dsh-enh-btn` 与 `.dsh-vi-btn` **各渲染 1 个**，插件样式已注入，设置页出现「✨ Prompt Enhancer」导航项且卡片本体渲染（`.dsh-plg-root`×1 / tab×3 / `.dsh-plg-mselect`×8）；③ RPC 复验：`config/get`、`models/list` 返回真实数据，**增强链一次真实调用**成功（返回 `{ok:true, text:"请编写一个排序函数…", model:"deepseek-v4.1-flash"}`）；同机对照——重启后 `POST /dsh-prompt-enhancer/rpc` **HTTP 200**，而改前该端点与任意不存在路径同为 **405**（不可区分）。**已实测**：上述全部读数（命令与原始输出见 `docs/internal/适配勘察-2026-10-06.md` 与本次执行记录）；`build-host --check` / `build-client --check` 零漂移。**未实测/如实登记**：`npm test` 本次 **302/304**——两处失败（`GATEEXIT-06`、`P5-10`）经**临时回退到改前基线复跑同样失败**，判定为**既有状态、与本改动无关**；`npm run gate` 第 4 环 `arch-claims` 报「投影读数漂移」（判据面指纹 `sha256:a664b8bd8ad77f94` 未变）同样在改前基线**逐字复现**，亦属既有状态，**本轮未处置**（跑 `--write` 重生成投影或修该环不在本任务边界内）。**边界**：未 bump `version`（仍 `3.4.0`）、未打 tag / 建 Release / 推送发布、未向本地 profile 执行安装动作（仅经 `sync-runtime` 落运行环境）、未改槽位契约与设置卡片体系、未加 npm 通道、未用 `allow-version` 例外冒充修复、未手改生成物、未动 `.gitignore`。— [PE-F01]（flow: 装配与加载链）
 
