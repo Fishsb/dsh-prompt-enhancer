@@ -150,12 +150,15 @@
 
 | 依赖 | 声明处 | 版本边界 | 不满足时行为 |
 |---|---|---|---|
-| `@deepseek-ai/dsh-client-runtime` | `package.json` `peerDependencies`（与 `dsh.client.inject` 同名列） | `^0.1.0-rc.6` | 宿主缺失 → `dsh.client.inject` 不满足，client 半部不注入（✨/🎤/设置页 UI 均不出现） |
-| `@deepseek-ai/dsh-client-locale` | `package.json` `peerDependencies`（与 `dsh.client.inject` 同名列） | `^0.1.0-rc.6` | 同上（同时是 i18n 取词源） |
+| `@deepseek-ai/dsh-client-locale` | `package.json` `peerDependencies`（与 `dsh.client.inject` 同名列） | `>=0.1.0-rc.6`（覆盖 0.1.x 与 0.2.x 两线） | 宿主不满足 → 插件被 compatibility 门拒绝装载，**整个 bundle 在 profile 启动阶段被 skip**（✨/🎤/设置页 UI 均不出现，且客户端零提示） |
 | `@deepseek-ai/dsh-client-ui-renderer` | **不在** `peerDependencies`，由宿主自带 | 会话级槽位条目契约自 `0.1.2-rc.1` 起 | 更早渲染器只提供 `props.session` / `props.input` 形态 → 插件走旧形态回退兼容；两种形态都无 → ✨/🎤 不渲染 |
 | 客户端 `inputActions`（草稿插入能力） | 宿主 client 注入（能力判定，无版本号） | — | 无 `setDraft` → 识别结果追加到草稿末尾；完全不注入 → 🎤 禁用并提示 |
 
+> **已移除（2026-10-06）**：`@deepseek-ai/dsh-client-runtime` 原列于上表首位（peer + `dsh.client.inject` 同名，边界 `^0.1.0-rc.6`）。该包自 DSH `0.2.0` 起**已从发行物中消失**（0.2.0-rc.2 的 62 个 `dsh-client-*` 中无它；npm 末版 `0.1.1-rc.2` @2026-08-21 后停发），而 `^0.1.0-rc.6` 在 semver 上**不含 0.2.x** ⇒ 二者叠加使插件在 0.2.0-rc.2 上被 `evaluatePluginCompatibility` 判为不兼容并 deny（远端 issue #11 / #12 与本机 `skipping profile bundle` 同根因）。实测本仓**对该包零真实引用**（`src/`、`lib/`、`scripts/`、`test/`、`cordis.patch.yml`、`plugin-host.js`、`README*` 全零命中；产物 `lib/client.cjs` 唯一 `require` 是 `'react'`），故**直接移除声明**而非放宽版本。依据与逐条证据见 `docs/internal/适配勘察-2026-10-06.md`（§3.1/§3.4）与 CHANGELOG `[Unreleased]` 2026-10-06 条目。
+
 说明：`package.json` `dependencies` 实测仅 `undici`（执行器副本由 `ensureExternalExecutor` 同步 `node_modules/undici`）；**undici 亦服务语音模型下载**（`asr-models.cjs` → `net-proxy`）；host 半部与执行器不声明 peerDependency。上表由 `package.json` `peerDependencies` 与 README「输入框工具行（✨/🎤）客户端契约」段落实读得出，改 peerDependency 或槽位契约时须同步本节。
+
+> ⚠️ **声明面一致性契约**：`peerDependencies` 的包名集合与 `dsh.client.inject` 必须**逐项相等**（本节即该事实的记录处）；改一侧必须同步另一侧，否则形成自相矛盾的声明面。可复跑校验：`node -e "const p=require('./package.json');console.log(JSON.stringify(Object.keys(p.peerDependencies).sort())===JSON.stringify([...p.dsh.client.inject].sort()))"` 应为 `true`。
 
 ---
 
