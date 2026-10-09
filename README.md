@@ -37,14 +37,16 @@ DeepSeek Harness (DSH) 插件。**两大核心能力**：
 ## 🚀 安装
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.4.1
+dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.4.2
 ```
 
 安装后重启 DSH（`dsh web`），输入框工具行出现 ✨ 按钮即安装成功。
 
-> ℹ️ **版本说明**：最新 tag **`v3.4.1`（2026-10-06）**已包含 **DSH 0.2.x 兼容性修复**——修复插件在 DSH `0.2.0` 及以后被宿主兼容性门拒绝装载、✨/🎤 与设置页卡片全部消失的问题（Issue #11 / #12），上面的命令直接装该 tag。若你此前按旧说明装的是 `#main`，按上面命令重装即可锁到已发布版本。
+> ℹ️ **版本说明**：最新 tag **`v3.4.2`（2026-10-09）**已包含 **Windows 平台修复**——修复 Windows 上宿主启动约 5 秒后**静默退出**（worker 进程扫描在 Windows 上把本机全部 node 进程（含宿主自身）当 worker 回收，导致宿主杀掉自己；表现为界面永久停在「自动重连中」），上面的命令直接装该 tag。
 >
-> 历史版本要点：**v3.4.0**（2026-09-19）起包含 ✨ 官方槽位契约修复（Issue #8 / #10）与云端语音修复（Issue #9），并**移除了插件内重启能力**（更新后请手动重启 DSH）。详见 [release notes](release-notes/3.4.0.md)。
+> 历史版本要点：**v3.4.1**（2026-10-06）已包含 **DSH 0.2.x 兼容性修复**——修复插件在 DSH `0.2.0` 及以后被宿主兼容性门拒绝装载、✨/🎤 与设置页卡片全部消失的问题（Issue #11 / #12）。若你此前按旧说明装的是 `#main`，按上面命令重装即可锁到已发布版本。
+>
+> 更早：**v3.4.0**（2026-09-19）起包含 ✨ 官方槽位契约修复（Issue #8 / #10）与云端语音修复（Issue #9），并**移除了插件内重启能力**（更新后请手动重启 DSH）。详见 [release notes](release-notes/3.4.0.md)。
 >
 > 需本机已装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 且 `pnpm` 在 PATH 中。
 >
