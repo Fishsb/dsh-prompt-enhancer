@@ -74,9 +74,15 @@ function liveMethods() {
 }
 
 /** PE-F01 域边界表（ADR-230 的声明面；行范围 [起, 止]，均含端点，物理行口径） */
+// P1-a（2026-10-13 缩批）：域边界随 `lib/index.cjs` 缩短而**重算**（839 → 786 行）。
+//   重算口径与原表**逐字一致**：域起点 = 该节分隔线（`// ===`）所在行，末域止于文件末行；
+//   D4（语音面）由 88 行缩为 35 行 —— 因为 8 条 `voice/model*`·`voice/deploy*` 已退役，
+//   本域只剩 `voice/status`·`voice/transcribe` 两条（且改委托官方 speechToText）。
+//   ⚠ 这不是「改浅」：A230-1 判的是「域表覆盖 100% 且连续无缝」，**判据强度不变**
+//     （仍是 `sum === n && contig && tail === n`），只是事实数字随代码变化而同步。
 const PE_F01_DOMAINS = [
-  ['D0', 1, 65], ['D1', 66, 386], ['D2', 387, 523], ['D3', 524, 580], ['D4', 581, 668],
-  ['D5', 669, 702], ['D6', 703, 752], ['D7', 753, 782], ['D8', 783, 839],
+  ['D0', 1, 63], ['D1', 64, 384], ['D2', 385, 521], ['D3', 522, 578], ['D4', 579, 613],
+  ['D5', 614, 647], ['D6', 648, 697], ['D7', 698, 727], ['D8', 728, 786],
 ];
 
 /** 一条断言：kind ∈ 行为|结构|门禁|见证|索引|目标；fn 返回 {pass, actual} */
@@ -394,10 +400,16 @@ const CLAIMS = [
     adr: 'ADR-201', anchor: 'module:prompt-enhancer', at: '2026-09-12', level: '已兑现',
     promise: '收缩为「提示词增强 + 语音识别」双核心并移除插件内重启：删 update/portRestart、update/makeShortcut，新增 update/install（BREAKING）',
     assertions: [
-      A('A201-1', '结构', '线上注册面条数（与 test/rpc-contract.test.cjs 的数字锁交叉核）', '34 条', () => {
+      // P1-a（2026-10-13 缩批）：数字 34 → **26**。⚠ 这不是「改浅断言」——
+      //   本条判的是「**注册面条数这个事实**」，34 是 P1-a 前的实测值；P1-a 删掉 8 条
+      //   `voice/*`（model*/deploy*：引擎/云端/模型下载/运行时部署退役，识别交官方
+      //   `speechToText`）⇒ 事实变为 26（原生 8 + bundle 18）。**判据强度不变**：
+      //   仍是「注册面必须等于实测条数」（`assert(all.size === 26)` 与旧式的严格等号同形，
+      //   未改成区间/大于等于，也未跳过任何一条注册面）。
+      A('A201-1', '结构', '线上注册面条数（与 test/rpc-contract.test.cjs 的数字锁交叉核）', '26 条', () => {
         const { native, bundled } = liveMethods();
         const all = new Set([...native, ...bundled]);
-        return assert(all.size === 34, `${all.size} 条（原生 ${native.length} + bundle ${bundled.length}）`);
+        return assert(all.size === 26, `${all.size} 条（原生 ${native.length} + bundle ${bundled.length}）`);
       }),
       A('A201-2', '结构', '删两个 RPC / 新增 update/install', 'portRestart、makeShortcut 缺席；install 在位', () => {
         const { native, bundled } = liveMethods();
@@ -415,7 +427,9 @@ const CLAIMS = [
         const hits = walk('src/client').filter((f) => /portRestart|makeShortcut/.test(read(f)));
         return assert(!hits.length, hits.length ? `命中 ${hits.join(',')}` : '零引用');
       }),
-      witness('A201-5', 'test/rpc-contract.test.cjs', ['34', 'update/portRestart'], '数字契约锁与「已删方法永不返回」证据在册'),
+      // P1-a（2026-10-13 缩批）：witness 的**字面量**随数字锁同步 34 → 26（仅指向「数字锁仍在册」这一事实，
+      //   不改变 witness 的判据强度：仍要求 test/rpc-contract.test.cjs 内含该数字与 update/portRestart）。
+      witness('A201-5', 'test/rpc-contract.test.cjs', ['26', 'update/portRestart'], '数字契约锁与「已删方法永不返回」证据在册'),
     ],
   },
   {

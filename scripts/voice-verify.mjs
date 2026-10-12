@@ -222,12 +222,21 @@ async function main() {
   console.log('平台: ' + process.platform + (IS_WIN ? '（R4 SYSTEM 环可跑）' : '（R4 SYSTEM 环 Windows-only ⇒ 将 SKIP）'));
 
   // 1. 语法（跨平台必跑）
-  //    lib/asr.cjs + asr-worker.cjs 是判据本体，缺件即 FAIL。
-  //    lib/asr-models.cjs 是 **P1 待删件** ⇒ 存在则照跑，不存在则 SKIP（原因写明），不得报绿。
+  //    lib/asr.cjs 是判据本体（P1-a 缩批后仍在：规整 + 委托官方 speechToText），缺件即 FAIL。
+  //    lib/asr-worker.cjs / lib/asr-models.cjs 是 **P1-a 退役件** ⇒ 存在则照跑，不存在则
+  //    SKIP（原因写明），**不得报绿**（与下方 asr-models 分支同形）。
   const syn = run(process.execPath, ['--check', path.join(repoRoot, 'lib', 'asr.cjs')]);
-  const synW = run(process.execPath, ['--check', path.join(repoRoot, 'lib', 'asr-worker.cjs')]);
-  check('语法 lib/asr.cjs + lib/asr-worker.cjs', syn.status === 0 && synW.status === 0,
-    syn.stderr ? String(syn.stderr).slice(0, 120) : (synW.stderr ? String(synW.stderr).slice(0, 120) : ''));
+  check('语法 lib/asr.cjs', syn.status === 0, syn.stderr ? String(syn.stderr).slice(0, 120) : '');
+  const asrWorkerPath = path.join(repoRoot, 'lib', 'asr-worker.cjs');
+  const workerRetired = !fs.existsSync(asrWorkerPath);
+  if (!workerRetired) {
+    const synW = run(process.execPath, ['--check', asrWorkerPath]);
+    check('语法 lib/asr-worker.cjs（P1-a 退役件，存在则判）', synW.status === 0,
+      synW.stderr ? String(synW.stderr).slice(0, 120) : '');
+  } else {
+    skip('语法 lib/asr-worker.cjs（P1-a 退役件，存在则判）',
+      'lib/asr-worker.cjs 不存在 —— P1-a 缩批已退役本地 ASR 引擎宿主（识别交官方 speechToText）⇒ 此环无被判对象，SKIP 而非报绿');
+  }
   const asrModelsPath = path.join(repoRoot, 'lib', 'asr-models.cjs');
   if (fs.existsSync(asrModelsPath)) {
     const synM = run(process.execPath, ['--check', asrModelsPath]);
@@ -239,8 +248,15 @@ async function main() {
   }
 
   // 2. worker 端口发现（--port > worker.port > 扫描；不再硬编码 3082）
+  //    ⚠ P1-a：本地 worker 引擎已退役 ⇒ 引擎件不在册时，以下四条（端口/health/modelReady/冒烟）
+  //    均**无被判对象** ⇒ 逐条 SKIP 并写明原因（**不得报绿**，也不判 FAIL —— 不是失败，是已退役）。
   const disc = await discoverWorkerPort();
-  if (!disc.port) {
+  if (workerRetired) {
+    skip('worker 端口发现', 'lib/asr-worker.cjs 不存在 —— P1-a 已退役本地 ASR worker 引擎（识别交官方 speechToText）⇒ 无被判对象');
+    skip('worker health', '同上：本地 worker 引擎已退役 ⇒ 无被判对象');
+    skip('worker 模型就绪 modelReady', '同上：本地 worker 引擎已退役 ⇒ 无被判对象');
+    skip('正弦波识别冒烟', '同上：本地 worker 引擎已退役 ⇒ 无被判对象（识别链改由官方 speechToText 承担，其验证不在本脚本判据面）');
+  } else if (!disc.port) {
     check('worker 端口发现', false, '未找到 worker（来源: ' + disc.tried.join(' ; ') + '）');
     check('worker health', false, '无端口可探 —— worker 未运行或未写 worker.port');
     check('worker 模型就绪 modelReady', false, '无端口可探');

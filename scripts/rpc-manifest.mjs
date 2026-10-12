@@ -56,8 +56,6 @@ const DECLARED_NO_SCHEMA = {
   'enhance/progress': 'A 只读：查询优化进度（不存在的 seq 返回空）',
   cancel: 'A 只读：取消信号（无匹配时静默成功）',
   'update/restartNeeded': 'A 只读：文件 mtime 比对，无副作用',
-  'voice/deployRuntime': 'A 无参动作：部署本地 ASR worker（固定流程，无用户入参）',
-  'voice/deployStatus': 'A 无参只读：本地 worker 部署态',
   // B 桶：有入参但**保持宽松**——补校验会改变已发布对外行为，须单列 BREAKING 后由用户拍板
   'models/resolve': 'B 有参（provider/model）保持宽松：非法值由下游 resolveModelInfo 兜底，收紧急属 BREAKING',
   'plugins/stop': 'B 有参（pluginId）保持宽松：非法 id 由插件面自行返回 not-found',

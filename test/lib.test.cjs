@@ -1621,13 +1621,12 @@ test('U66 parseSearchPlan JSON 容错解析（v3.0p）', () => {
  * （不 require 目标模块，零副作用；调用点数量下限防「绑定在位但被孤立」漂移）。 */
 const libSrc = (rel) => readFileSync(join(__dirname, '..', rel), 'utf8');
 
-test('LIBWIRE-01 index.cjs 的 asrDeploy require 绑定在位且调用点 ≥2', () => {
-  const src = libSrc('lib/index.cjs');
-  assert.match(src, /const asrDeploy = require\('\.\/asr-deploy\.cjs'\);/, 'asrDeploy require 绑定必须在位（voice/deployRuntime、voice/deployStatus 消费）');
-  const calls = (src.match(/asrDeploy\./g) || []).length;
-  assert.ok(calls >= 2, 'asrDeploy 调用点应 ≥2，实测 ' + calls);
-});
-
+// LIBWIRE-01（asrDeploy require 绑定 + 调用点 ≥2）**随 P1-a 退役**：
+//   其判据对象 = `lib/asr-deploy.cjs` 与该模块的 require 绑定；P1-a 已删除该模块
+//   （voice/deployRuntime·voice/deployStatus 两条 RPC 一并退役）⇒ 本用例**无被判对象**。
+//   ⚠ 依「测试随被删代码一并退役」定论：**整条删除**，不留空壳/不改成恒真。
+//   ⚠ 本组（LIBWIRE）的**其余 5 条**（02–06：stage-install·executor·net-proxy·updater-host）
+//     仍在册并继续覆盖各自模块的 require 接线不变量 —— 组级意图未被削弱。
 test('LIBWIRE-02 stage-install.cjs 的 sys require 绑定在位且调用点 ≥3', () => {
   const src = libSrc('lib/stage-install.cjs');
   assert.match(src, /const sys = require\('\.\/sys\.cjs'\);/, 'sys require 绑定必须在位（rescueSnapshot/writeDeployLedgerEntry/EXECUTOR_ROOT 等消费）');

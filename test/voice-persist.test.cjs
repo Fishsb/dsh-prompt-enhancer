@@ -61,14 +61,16 @@ test('VOICE-P06 lib/index.cjs 注册 voice/status·voice/transcribe + config/set
 });
 
 // ---- 4. client 产物注入 ----
-test('VOICE-P07 lib/client.cjs 产物含 voice 逻辑 + vendor RecordRTC', () => {
-  const client = readFileSync(join(__dirname, '..', 'lib', 'client.cjs'), 'utf8'); // P1a：唯一 client 载体
-  assert.ok(client.includes('VoiceMicButton'), '产物缺 VoiceMicButton');
+// P1-a（2026-10-13 缩批）：断言面随退役更新 —— VoiceMicButton/RecordRTC 已退役（按钮交官方、
+// 采集改原生 MediaRecorder）；**判据强度不变**（仍逐项断言「产物含该能力」，只是换成现行实现）。
+test('VOICE-P07 lib/client.cjs 产物含语音逻辑（P1-a：原生采集 + 热键通道）', () => {
+  const client = readFileSync(join(__dirname, '..', 'lib', 'client.cjs'), 'utf8'); // 唯一 client 载体
+  assert.ok(client.includes('VoiceHotkeyHost'), '产物缺热键通道组件');
   assert.ok(client.includes('VoiceSection'), '产物缺 VoiceSection');
   assert.ok(client.includes("host.call('voice/transcribe'"), '产物缺 voice/transcribe 调用');
   assert.ok(client.includes('isEnhancing'), '产物缺 isEnhancing');
-  assert.ok(client.includes('function RecordRTC'), '产物缺 vendor RecordRTC 注入');
-  assert.ok(client.includes('desiredSampRate'), '产物缺 16k 采样参数');
+  assert.ok(client.includes('new window.MediaRecorder'), '产物缺原生 MediaRecorder 采集');
+  assert.ok(!client.includes('function RecordRTC'), 'RecordRTC vendor 应已退役（P1-a）');
 });
 
 test('VOICE-P08 client 产物含 voice 状态机与双暂存逻辑', () => {
@@ -79,54 +81,46 @@ test('VOICE-P08 client 产物含 voice 状态机与双暂存逻辑', () => {
 });
 
 // ---- 5. lib/asr.cjs sanitize ----
-test('VOICE-P09 sanitizeVoiceCfg 白名单净化', () => {
+// P1-a（2026-10-13 缩批）：asr.cloud / asr.local 面随「识别交官方」退役 ⇒ 本判据改判
+// **仍存的四项增值配置面**（refine/vad/hotkey/autoEnhance）的白名单净化，判据强度不变（仍逐项严格等号）。
+test('VOICE-P09 sanitizeVoiceCfg 白名单净化（四项增值配置面）', () => {
   const clean = asr.sanitizeVoiceCfg({
-    asr: { engine: 'bad', cloud: { protocol: 'x', baseUrl: 'https://a.com/', apiKey: 'k', model: 'm' } },
-    refine: { enabled: 'yes', maxTokens: 99999 },
+    refine: { enabled: 'yes', maxTokens: 99999, mode: 'bogus', baseUrl: 'https://a.com/' },
+    vad: { enabled: 'x' },
+    hotkey: { enabled: 'x', combo: 123 },
+    autoEnhance: 'x',
   });
-  assert.equal(clean.asr.engine, 'cloud'); // 非法回退 cloud
-  assert.equal(clean.asr.cloud.protocol, 'chat'); // 非法回退 chat
-  assert.equal(clean.asr.cloud.baseUrl, 'https://a.com'); // 去尾斜杠
-  assert.equal(clean.refine.enabled, false); // 非 boolean 回退
-  assert.equal(clean.refine.maxTokens, 300); // 越界回退默认
+  assert.equal(clean.refine.enabled, false);   // 非 boolean 回退
+  assert.equal(clean.refine.maxTokens, 300);   // 越界回退默认
+  assert.equal(clean.refine.mode, 'chain');    // 非法 mode 回退 chain
+  assert.equal(clean.refine.baseUrl, 'https://a.com'); // 去尾斜杠
+  assert.equal(clean.vad.enabled, true);       // 非 false 即 true
+  assert.equal(clean.hotkey.enabled, false);   // 非 true 即 false
+  assert.equal(clean.hotkey.combo, '');        // 非字符串回退空串
+  assert.equal(clean.autoEnhance, false);      // 非 true 即 false
+  // P1-a：asr.cloud / asr.local 已退役 —— 净化结果不得再出现这两段
+  assert.equal(clean.asr, undefined, 'asr.cloud/local 面应已退役');
 });
 
-test('VOICE-P10 status 组装：cloud/refine configured 判定（P2 local 实时探测）', async () => {
+// P1-a（2026-10-13 缩批）：status 改**委托官方 `ctx.speechToText.snapshot()`** ⇒ 本判据改判
+// 「委托面 + refine 就绪态」；判据强度不变（仍逐项严格等号 + 结构断言）。
+// ⚠ 测试环境未注入 speechToText ⇒ speech.available=false 且带 SPEECH_SERVICE_UNAVAILABLE
+//   （这正是「取不到服务时不 park、而是显式降级」的判据）。
+test('VOICE-P10 status 组装：委托官方 speechToText + refine configured 判定', async () => {
   // refine 默认 chain 模式：已选基座模型（provider/model）→ configured=true（v3.2.8）
-  const s = await asr.status({
-    asr: { engine: 'cloud', cloud: { baseUrl: 'b', apiKey: 'k', model: 'm' } },
-    refine: { enabled: true, provider: 'ollama', model: 'qwen2.5:1.5b' },
-  });
+  const s = await asr.status({ refine: { enabled: true, provider: 'ollama', model: 'qwen2.5:1.5b' } });
   assert.equal(s.ok, true);
-  assert.equal(s.asr.cloud.configured, true);
   assert.equal(s.refine.configured, true, 'chain 模式 + 已选模型 → 就绪');
   // custom 模式：独立三项完整 → configured
-  const s2 = await asr.status({
-    asr: { engine: 'cloud' },
-    refine: { enabled: true, mode: 'custom', baseUrl: 'r', apiKey: 'k', model: 'm' },
-  });
+  const s2 = await asr.status({ refine: { enabled: true, mode: 'custom', baseUrl: 'r', apiKey: 'k', model: 'm' } });
   assert.equal(s2.refine.configured, true, 'custom 模式独立三项 → 就绪');
-  // local 字段结构（worker 探测，测试环境通常未运行 → installed=false 但结构完整）
-  assert.equal(typeof s.asr.local.installed, 'boolean');
-  assert.equal(typeof s.asr.local.modelReady, 'boolean');
-  assert.equal(typeof s.asr.local.workerUp, 'boolean');
+  // 委托面结构（未注入服务 ⇒ available=false + 明确 error；注入后 providers/selection 来自官方 snapshot）
+  assert.equal(typeof s.speech.available, 'boolean');
+  assert.ok(Array.isArray(s.speech.providers), 'providers 须为数组');
+  assert.equal(s.speech.available, false, '测试环境未注入 speechToText ⇒ available=false');
+  assert.equal(s.speech.error, 'SPEECH_SERVICE_UNAVAILABLE', '须显式降级而非静默');
 });
 
-test('VOICE-P11 transcribe 错误路径：空配置 ASR_NO_KEY / local 分派 / BAD_AUDIO', async () => {
-  const noKey = await asr.transcribe({ asr: { engine: 'cloud' } }, 'data:audio/wav;base64,AAAA');
-  assert.equal(noKey.ok, false);
-  assert.equal(noKey.code, 'ASR_NO_KEY');
-  // P2：local 引擎已实现——分派到 worker（本机可能运行中或未部署）；无论 worker 状态如何，
-  // 都应返回 ok:false 且错误码为 ASR_LOCAL_* 系列（不再有 NOT_READY 占位）
-  const local = await asr.transcribe({ asr: { engine: 'local' } }, 'data:audio/wav;base64,AAAA');
-  assert.equal(local.ok, false);
-  assert.ok(String(local.code).startsWith('ASR_LOCAL_'), 'local 错误码应为 ASR_LOCAL_*，实际 ' + local.code);
-  const badAudio = await asr.transcribe({ asr: { engine: 'cloud' } }, 'not-a-data-url');
-  assert.equal(badAudio.ok, false);
-  assert.equal(badAudio.code, 'BAD_AUDIO');
-});
-
-// ---- 6. i18n 平衡 ----
 test('VOICE-P12 i18n voice 键 ZH/EN 平衡（37 键成对，v3.2.9 快捷键 +6）', () => {
   const i18n = readFileSync(join(__dirname, '..', 'src', 'client', 'i18n.js'), 'utf8');
   const m = i18n.match(/module\.exports = \"([\s\S]*)\"\s*;?\s*$/);
@@ -140,32 +134,6 @@ test('VOICE-P12 i18n voice 键 ZH/EN 平衡（37 键成对，v3.2.9 快捷键 +6
 });
 
 // ---- 7. 整配置结构回归（2026-08-20 实测修复：handler 传整配置致 engine 恒回退 cloud）----
-test('VOICE-P13 整配置结构调用（handler 真实形态）engine=local 生效', async () => {
-  // host handler 传入的是整个 dsh-prompt-enhancer.config.json（顶层键含 voice），非 voice 段
-  const whole = {
-    version: '3.2.4',
-    fallback: [],
-    params: {},
-    voice: {
-      asr: { engine: 'local', cloud: { protocol: 'chat', baseUrl: 'b', apiKey: 'k', model: 'm' } },
-      refine: { enabled: true, baseUrl: 'r', apiKey: 'k', model: 'm' },
-    },
-  };
-  const s = await asr.status(whole);
-  assert.equal(s.asr.engine, 'local', '整配置输入应读出 engine=local（此前恒 cloud）');
-  assert.ok(s.asr.local && typeof s.asr.local.workerUp === 'boolean', 'local 探测结构完整');
-  // 关键回归：engine=local 时 transcribe 必须走 local 分支（ASR_LOCAL_*），绝不能 ASR_NO_KEY
-  const t = await asr.transcribe(whole, 'data:audio/wav;base64,AAAA');
-  assert.equal(t.ok, false);
-  assert.ok(String(t.code).startsWith('ASR_LOCAL_'), '整配置 + local 应走本地分支，实际 ' + t.code);
-  // cloud 整配置：三元组完整（configured）→ 真实请求 baseUrl='b' 无效 → 云端分支网络错误（而非 local 分支）
-  const wholeCloud = JSON.parse(JSON.stringify(whole));
-  wholeCloud.voice.asr.engine = 'cloud';
-  const tc = await asr.transcribe(wholeCloud, 'data:audio/wav;base64,AAAA');
-  assert.equal(tc.code, 'ASR_NETWORK', 'cloud 整配置应走云端分支（bad url → NETWORK），实际 ' + tc.code);
-});
-
-// ---- 8. VAD 配置（2026-08-20 P3）：sanitize vad 白名单 ----
 test('VOICE-P14 sanitizeVoiceCfg vad 字段：默认开启，显式 false 关闭', () => {
   const d = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' } });
   assert.equal(d.vad.enabled, true, 'vad 默认开启');
@@ -174,88 +142,6 @@ test('VOICE-P14 sanitizeVoiceCfg vad 字段：默认开启，显式 false 关闭
 });
 
 // ---- 9. 多语言（2026-08-20 P3）：sanitize local.language 白名单 ----
-test('VOICE-P15 sanitizeVoiceCfg local.language：默认 auto，非法回退 auto', () => {
-  const d = asr.sanitizeVoiceCfg({ asr: { engine: 'local' } });
-  assert.equal(d.asr.local.language, 'auto', '默认 auto');
-  const ja = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { language: 'ja' } } });
-  assert.equal(ja.asr.local.language, 'ja', '合法枚举保留');
-  const bad = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { language: 'xx' } } });
-  assert.equal(bad.asr.local.language, 'auto', '非法回退 auto');
-});
-
-// ---- 10. 模型管理框架（2026-08-20：插件精简·框架接口 + 可选下载）----
-test('VOICE-P16 模型清单结构 + installed 判定 + sanitize model id', () => {
-  const am = require('../lib/asr-models.cjs');
-  const list = am.modelList();
-  assert.equal(list.ok, true);
-  assert.ok(Array.isArray(list.models) && list.models.length >= 1, '至少一个模型');
-  const m = list.models[0];
-  assert.equal(typeof m.id, 'string');
-  assert.equal(typeof m.name, 'string');
-  assert.ok(m.sizeMB > 0, 'sizeMB 为正');
-  assert.equal(typeof m.installed, 'boolean');
-  // 未知模型下载拒绝
-  const bad = am.modelDownload('no-such-model');
-  assert.equal(bad.ok, false);
-  assert.equal(bad.code, 'MODEL_UNKNOWN');
-  // sanitize model id（单模型 sense-voice，旧值 sensevoice-q8 兼容映射）
-  const d = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { model: 'sensevoice-q8' } } });
-  assert.equal(d.asr.local.model, 'sense-voice', '旧值兼容映射');
-});
-
-// ---- 11. 模型管理 v2（多模型市场/自定义扫描/切换，2026-08-20）----
-test('VOICE-P20 多模型切换白名单：paraformer/自定义/空 保留，非法回退（v3.2.16 修复）', () => {
-  // 修复前：sanitizeVoiceCfg 模型白名单硬编码 sense-voice，任何非 sense-voice 选择被静默重置
-  // → 设置页「切换模型」保存无效、UI 永不反映当前模型。修复后按 [A-Za-z0-9._-] 动态校验保留。
-  const para = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { model: 'paraformer-zh' } } });
-  assert.equal(para.asr.local.model, 'paraformer-zh', '内置多模型 id 保留');
-  const custom = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { model: 'my-custom.model_v2' } } });
-  assert.equal(custom.asr.local.model, 'my-custom.model_v2', '自定义模型目录名保留');
-  const empty = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { model: '' } } });
-  assert.equal(empty.asr.local.model, '', '删除最后模型：空串保留（无当前模型）');
-  const legacy = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { model: 'sensevoice-q8' } } });
-  assert.equal(legacy.asr.local.model, 'sense-voice', '旧值兼容映射');
-  const bad = asr.sanitizeVoiceCfg({ asr: { engine: 'local', local: { model: '../evil' } } });
-  assert.equal(bad.asr.local.model, 'sense-voice', '非法 id 回退默认');
-});
-
-test('VOICE-P17 模型市场多条目 + 自定义扫描 + modelApply 校验', () => {
-  const am = require('../lib/asr-models.cjs');
-  const list = am.modelList();
-  assert.ok(list.models.length >= 2, '内置至少 2 个下载配置');
-  const ids = list.models.map((m) => m.id);
-  assert.ok(ids.includes('sense-voice') && ids.includes('paraformer-zh'), '内置含 SenseVoice + Paraformer');
-  const sense = list.models.find((m) => m.id === 'sense-voice');
-  assert.equal(sense.type, 'sense-voice');
-  const para = list.models.find((m) => m.id === 'paraformer-zh');
-  assert.equal(para.type, 'paraformer', 'paraformer 带类型（worker 按类型加载）');
-  // 自定义扫描：非内置目录 + onnx + tokens → custom 列出（本机 models/ 可能无自定义目录，但结构须正确）
-  for (const m of list.models) {
-    assert.equal(typeof m.installed, 'boolean');
-    assert.equal(typeof m.custom, 'boolean');
-  }
-  // modelApply：未安装拒绝 / 已安装 ok（环境自适应：模型是否已装因机器而异，两个方向都要能验）
-  const paraInstalled = para.installed;
-  if (!paraInstalled) {
-    const bad = am.modelApply('paraformer-zh');
-    assert.equal(bad.code, 'MODEL_NOT_INSTALLED', '未安装模型切换应拒绝');
-  } else {
-    const okp = am.modelApply('paraformer-zh');
-    assert.equal(okp.ok, true, JSON.stringify(okp));
-    assert.equal(okp.model, 'paraformer-zh');
-  }
-  if (sense.installed) {
-    const ok = am.modelApply('sense-voice');
-    assert.equal(ok.ok, true, JSON.stringify(ok));
-    assert.equal(ok.model, 'sense-voice');
-    assert.equal(ok.type, 'sense-voice');
-  } else {
-    const bad2 = am.modelApply('sense-voice');
-    assert.equal(bad2.code, 'MODEL_NOT_INSTALLED', '默认模型未安装时同样应拒绝');
-  }
-});
-
-// ---- 12. 规整复用模型配置（2026-08-20 用户需求）：chain 模式走基座 llm ----
 test('VOICE-P18 refine chain 模式：基座模型选择（provider/model）+ llm 调用 + 降级', async () => {
   // sanitize：默认 chain；provider/model 保留；custom 保留
   const d = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, refine: { enabled: true, provider: 'ollama', model: 'qwen2.5:1.5b' } });
@@ -375,16 +261,19 @@ test('VOICE-P23 sanitizeVoiceCfg autoEnhance 白名单（host 透传存储）', 
   assert.equal(bad.autoEnhance, false, '非法回退 false');
 });
 
+// P1-a（2026-10-13 缩批）：自动增强触发链路自 mic-button.js **搬入 hotkey.js 的 VoiceHotkeyHost**；
+// 判据强度不变（仍逐项断言「产物含该链路」），只把断言点换成现行实现位置。
 test('VOICE-P24 产物含 autoEnhance 触发链路 + i18n 键平衡（v3.2.17 +3 键 → 40）', () => {
-  const client = readFileSync(join(__dirname, '..', 'lib', 'client.cjs'), 'utf8'); // P1a：唯一 client 载体
+  const client = readFileSync(join(__dirname, '..', 'lib', 'client.cjs'), 'utf8'); // 唯一 client 载体
   assert.ok(client.includes('autoEnhance'), '产物缺 autoEnhance 配置字段');
   assert.ok(client.includes('voiceAutoEnhanceOn'), '产物缺自动增强开 i18n 引用');
   assert.ok(client.includes('voiceAutoEnhanceOff'), '产物缺自动增强关 i18n 引用');
   assert.ok(client.includes('voiceAutoEnhanceTip'), '产物缺自动增强提示 i18n 引用');
-  // 触发链路：insertVoiceText 返回后按 filled/pending/autoEnhance 判定调用 enhance
-  assert.ok(client.includes('fill.filled === true'), '产物缺 filled 判定');
-  assert.ok(client.includes('fill.pending'), '产物缺 pending 判定');
-  assert.ok(client.includes("enhance(sessionId, filledText, inputActions, draftRef)"), '产物缺 enhance 自动触发调用');
+  // 触发链路（P1-a：现位于 VoiceHotkeyHost）：识别填入后按 autoEnhance 判定调用 enhance
+  assert.ok(client.includes('insertVoiceText'), '产物缺 insertVoiceText（已搬入 hotkey.js）');
+  assert.ok(client.includes('VoiceHotkeyHost'), '产物缺热键通道组件（承载自动增强触发）');
+  assert.ok(client.includes('autoEnhance === true'), '产物缺 autoEnhance 触发判定');
+  assert.ok(client.includes('typeof enhance === \'function\''), '产物缺 enhance 自动触发调用');
   // i18n 键平衡（v3.2.17 +3 键 → 40）
   const i18n = readFileSync(join(__dirname, '..', 'src', 'client', 'i18n.js'), 'utf8');
   const m = i18n.match(/module\.exports = \"([\s\S]*)\"\s*;?\s*$/);
