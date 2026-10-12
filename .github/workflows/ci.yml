@@ -26,7 +26,11 @@ jobs:
           node --check plugin-host.js
           node --check lib/index.cjs
           node --check lib/sys.cjs
-          node --check lib/updater-host.cjs
+          # P1 收口清账（2026-10-13）：移除 `node --check lib/updater-host.cjs` ——
+          #   该文件随 P1-c「更新执行器退役」整体删除（更新交回官方 plugin manager）
+          #   ⇒ 本行自 5d2f21f 起每次 push 必红（Syntax check=failure），
+          #   而其后各步因 `if: always()` 仍正常产出读数 —— 即「假警报式红」，
+          #   会让将来真正的红被忽略。已删该行。
 
       # P2（2026-09-19）：RPC 契约事实源一致性——由注册面派生，锁「文档面 / schema 覆盖 / 具名申报 / 孤儿」四不变量
       # P4（2026-09-19）贯穿判据：门禁**存在 ≠ 被执行**——四个结构门禁收敛为 `npm run gate` 一条命令，并首次进入 CI。
