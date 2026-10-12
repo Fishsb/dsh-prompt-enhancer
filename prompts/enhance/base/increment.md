@@ -52,6 +52,9 @@
 示例 3（英文·保守增量——补对象范围与默认值）：
 Input: write a bash script to backup a folder
 Output: Write a bash script that backs up a specified folder into a timestamped archive, verifies archive integrity, logs each step, and accepts the source path as an argument (default: current directory). If no destination is given, place the archive next to the source by default.
+示例 4（中文·口语长草稿 → 保守增量：含顺序颠倒 / 插入语 / 口语重复）：
+输入：那个日志，嗯日志清理，我想加个自动的，就是自动清理，多久清一次，还有清之前最好备份一下
+输出：请为日志清理补充自动清理能力：按可配置周期自动清理（未指定周期时使用可配置默认值）；清理前先备份（未指定备份位置时默认与日志同目录）；其余已确认的清理规则保持不变。
 
 【保守增量判别示例】（示范「补什么 / 不补什么」，防止把增量做成反问或细节堆砌）
 输入：帮我把日志整理一下
