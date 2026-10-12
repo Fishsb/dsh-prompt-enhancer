@@ -42,6 +42,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 // 状态出口契约（P5）：本环的 SKIP/冲突/漂移 → 三态映射只在**下面 --check 出口一处**作出。
 import { emitRingState, installCrashGuard } from './lib/ring-state.mjs';
+import { resolveGovRoot } from './lib/gov-root.mjs';
 
 installCrashGuard('arch-claims');
 const require = createRequire(import.meta.url);
@@ -53,7 +54,7 @@ const DOC = 'docs/internal/P4-状态归属-2026-09-19.md';
 const MARK_BEGIN = '<!-- ARCH-CLAIMS:BEGIN -->';
 const MARK_END = '<!-- ARCH-CLAIMS:END -->';
 const GOV_EVENTS = process.env.PE_NAV_EVENTS
-  || path.join(process.env.PE_GOV_ROOT || 'D:\\FF', '.internal', 'events.jsonl');
+  || path.join(resolveGovRoot(), '.internal', 'events.jsonl');
 // 读数快照环境标签（T2）：投影里「期望/实测/判定」列**是环境的函数**（治理日志可不可读决定
 //   A194-4/S-2 走实判还是 SKIP）。故投影必须自述「这份读数是在哪种环境下取的」——否则读者
 //   无法分辨「判据变了」与「只是换了个环境跑」，而那正是本会要的可解释性。

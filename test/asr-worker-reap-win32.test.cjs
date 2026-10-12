@@ -101,36 +101,82 @@ test('ASR-WIN2 反向行为腿：扫描不得把非 worker 进程（含宿主自
     `进程扫描不得返回非 worker 进程：实测 ${JSON.stringify(bogus)}（扫描共 ${JSON.stringify(scanned)}）`);
 });
 
-test('ASR-WIN3 正向行为腿：命令行携带 worker 脚本路径的进程必须被发现（防 return [] 假修复）', () => {
+test('ASR-WIN3 正向行为腿：命令行携带 worker 脚本路径的进程必须被发现（防 return [] 假修复）', (t) => {
   // 用一个"命令行签名与 worker 相同"的替身进程取材：两条腿（/proc 与 CIM）都以
   // 「命令行里出现 worker 脚本路径」为判据，替身因此对被测量是等价的，且不必加载模型。
   // 替身寿命给足（180s）：win32 每次扫描都要起一次 PowerShell，机器繁忙时单次可达数秒，
   // 寿命短会让"还没扫到"冒充"扫不到"（实测：20s 寿命在全量套件里被本用例自己耗光）。
-  const decoy = cp.spawn(process.execPath, ['-e', 'setTimeout(function () {}, 180000)', WORKER], {
+  //
+  // ⚠ 与兄弟文件的相互干扰（2026-10-12 实测·本批修）：`node --test` **按文件并行**跑，
+  //   而 `test/asr-worker-reap.test.cjs` 会真调 `sweepStaleWorkers()` / `ensureWorker()`
+  //   （ASR-R2b/R4）——它们按设计"只留一个"并**杀掉其余同签名进程**，替身正是候选。
+  //   实测证据：单独跑本文件 3/3 绿；与 asr-worker-reap.test.cjs 同批则 WIN3 必红
+  //   （进程探针复现：`sweep killed [decoy]`）。那是**兄弟用例改了机器状态**造成的假红，
+  //   不是发现面退化。故此处：替身若被外部杀掉就换一个新的重试——但**断言强度不变**
+  //   （仍要求"活着的替身必须被扫到"），真正的 `return []` 假修复照样红。
+  const spawnDecoy = () => cp.spawn(process.execPath, ['-e', 'setTimeout(function () {}, 180000)', WORKER], {
     stdio: 'ignore',
     windowsHide: true,
   });
+  /** 替身是否仍存活（**可被当前扫描面看见**的意义上）。
+   *  ⚠ 不能用裸 `process.kill(pid,0)` 判活：兄弟用例的 SIGKILL 打出的**僵尸**（Z 态、尚未被
+   *     本进程 wait 回收）也会令它返回 true —— 实测读数 pid=… kill(pid,0)=true 而
+   *     workerPidsByProcessScan() 已看不见它。僵尸对发现面已不可见，重采前必须把它识别出来。
+   *  POSIX 读 /proc/<pid>/stat 第 3 列；win32 退回进程 shell 的 exitCode/signalCode。 */
+  const alive = (p) => {
+    if (p.exitCode !== null || p.signalCode !== null) return false;
+    if (process.platform !== 'win32') {
+      try {
+        const stat = fs.readFileSync('/proc/' + p.pid + '/stat', 'utf8');
+        if (/\)\s+Z\s/.test(stat)) return false;   // 僵尸：已死、等待回收，扫描面不再可见
+      } catch (e) { return false; }                // /proc 条目消失 = 已退出
+    }
+    try { process.kill(p.pid, 0); return true; } catch (e) { return false; }
+  };
+  let decoy = spawnDecoy();
   try {
     let found = [];
     let slow = false;
-    // 至多扫 3 次。区分两种"没扫到"：枚举本身超时（win32 走 PowerShell，模块内头寸 5s，
-    // 繁忙时会 ETIMEDOUT ⇒ stdout 为空 ⇒ 返回 []，这是环境而非判据的读数）与
-    // 枚举正常但漏掉替身（真失败）。据此决定是重试还是立即判红。
-    for (let i = 0; i < 3; i++) {
+    let attempts = 0;
+    let reaped = 0;
+    // 至多采 6 次。每次睡眠后重扫；命中即过。三类"没扫到"分别处置：
+    //   · 替身在扫描窗内被并行的兄弟用例清扫（alive=false） ⇒ 换替身重采（外部状态，非判据失败）；
+    //   · 枚举本身超时（win32 走 PowerShell，模块内头寸 5s，繁忙时 ETIMEDOUT ⇒ stdout 空 ⇒ []）
+    //     ⇒ 重采（环境读数，不能区分"漏发现"与"超时"）；
+    //   · 枚举正常 + 替身活着 + 仍漏 ⇒ **立即判红**（真失败，如被改成 `return []`）。
+    while (attempts < 6) {
+      attempts += 1;
+      if (!alive(decoy)) {
+        if (reaped >= 3) break;
+        reaped += 1;
+        decoy = spawnDecoy();
+      }
       sleepSync(800);
       const t0 = Date.now();
       found = m.workerPidsByProcessScan();
       slow = Date.now() - t0 >= 4800;
       if (found.includes(decoy.pid)) break;
-      if (!slow) break;
+      if (!alive(decoy)) continue;   // 扫描窗内被外部杀掉 ⇒ 换替身重采
+      if (slow) continue;            // 枚举超时 ⇒ 重采
+      break;                          // 真失败：替身活着、枚举正常、却漏掉它
     }
-    if (slow && !found.includes(decoy.pid)) {
-      console.log('  [未取材] 本机进程枚举单次耗时 >=4.8s（win32 PowerShell 头寸 5s 被占满），'
-        + '本次读数 [] 不能区分"漏发现"与"枚举超时"，不计 PASS');
+    if (found.includes(decoy.pid)) {
+      // 通过
+    } else if (reaped >= 3) {
+      // ⚠ 「取材失败」必须**显式现形**，不得静默变绿（2026-10-12 回修·独立复验 §8.2.4 点名）。
+      //   用 node:test 的 `t.skip()` 而非裸 `console.log + return`：前者在 TAP 面留下
+      //   `# SKIP` 标记（`# pass 2 / # skipped 1`），后者只留一行日志、用例仍记 ok——
+      //   那正是「失败不可观测」。
+      t.skip('未取材：替身连续被并行用例清扫（reaped=' + reaped + '），本次读数不能区分"漏发现"与"取材失败"');
       return;
+    } else if (slow) {
+      // 同族：枚举超时也是「取材失败」，同样显式 SKIP（不记 PASS）
+      t.skip('未取材：本机进程枚举单次耗时 >=4.8s（win32 PowerShell 头寸 5s 被占满），本次读数不能区分"漏发现"与"枚举超时"');
+      return;
+    } else {
+      assert.ok(false,
+        `命令行携带 ${WORKER} 的进程必须被发现（pid ${decoy.pid}）；实测 ${JSON.stringify(found)}`);
     }
-    assert.ok(found.includes(decoy.pid),
-      `命令行携带 ${WORKER} 的进程必须被发现（pid ${decoy.pid}）；实测 ${JSON.stringify(found)}`);
   } finally {
     try { decoy.kill(); } catch (e) { /* 已退出 */ }
     sleepSync(200);

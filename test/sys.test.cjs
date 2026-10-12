@@ -173,6 +173,34 @@ function teardownProbeMocks() {
   delete process.env.DSH_PE_NET_BREAKER;
 }
 
+/** 3080 监听者探测桩（平台无关判据用）。
+ *
+ *  为什么需要它：`probePortHolder` 在**非 win32** 走 `dshPrimPortHolder` —— 一个真实子进程原语
+ *  （`ss -ltnp` → `netstat -tlnp` 退路），**没有执行器 mock 缝**。于是 SYS-09/10 的 POSIX 分支只能
+ *  把期望绑在「本机 3080 恰好空闲」上：插件自己的部署机（3080 上就住着 DSH）反而必红 ——
+ *  这是**环境凑不齐型**假红（判据本身一个字没错），正是本批要拿掉的「必须某个环境才能判」。
+ *
+ *  做法：把 `ss`/`netstat` 换成 PATH **前置**的桩可执行文件，两种形态都能在任何机器上钉住：
+ *    · body 为空        ⇒ 无监听者（→ service-stopped / no-listener 分支）
+ *    · body 给一行 ss 输出 ⇒ 有监听者（→ pid-only / service 分支）
+ *  这与本文件既有的 `makeProbeStub` 是同一手法；win32 走 mock（`netstat -ano`），本桩为空操作。
+ *  @returns {() => void} 还原函数（务必 finally 调用） */
+function withPortHolderStub(body) {
+  if (process.platform === 'win32') return () => {};
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-holder-stub-'));
+  for (const f of ['ss', 'netstat']) {
+    const p = path.join(dir, f);
+    fs.writeFileSync(p, '#!/bin/sh\n' + (body || ''), { mode: 0o755 });
+    fs.chmodSync(p, 0o755);
+  }
+  const old = process.env.PATH;
+  process.env.PATH = dir + path.delimiter + old;
+  return () => {
+    process.env.PATH = old;
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 清理失败不掩盖断言结果 */ }
+  };
+}
+
 test('SYS-06 runProbe 同步契约回归：白名单拒绝/真实快速探测，且不返回 Promise', () => {
   const r1 = sys.runProbe('not-allowed-cmd', [], undefined);
   assert.equal(r1.ok, false);
@@ -292,6 +320,9 @@ test('SYS-08 C-3 超时硬杀：挂起子进程被击杀 → ETIMEDOUT 且远短
 test('SYS-09 probeEnv golden 契约：mock 全链下 items 序/key 集/字段与同步版逐字段一致', async () => {
   sys.__setProbeExecutor(winChainMock({ stdout: '200' }));
   psvc.__setProbeAsync(runningServiceMock());
+  // POSIX 的 3080 监听者走不可 mock 的真实原语 ⇒ 用 PATH 前置桩把它钉成「本机 3080 空闲」，
+  // 使本用例的前提**由用例自己保证**，不再依赖「插件恰好没跑在这台机上」（见 withPortHolderStub 注释）。
+  const undoHolder = withPortHolderStub('');
   try {
     const items = await sys.probeEnv('dsh-web', {}, {});
     assert.deepEqual(items.map((i) => i.key), ['tools', 'net', 'port-mode', 'port-pid'], '数组序契约');
@@ -315,10 +346,12 @@ test('SYS-09 probeEnv golden 契约：mock 全链下 items 序/key 集/字段与
       assert.deepEqual({ ok: portMode.ok, warn: portMode.warn, level: portMode.level, detail: portMode.detail }, { ok: false, warn: true, level: 'warn', detail: 'service-stopped' });
       assert.deepEqual({ ok: portPid.ok, warn: portPid.warn, level: portPid.level, detail: portPid.detail }, { ok: false, warn: true, level: 'warn', detail: 'no-listener' });
     }
-  } finally { teardownProbeMocks(); }
+  } finally { undoHolder(); teardownProbeMocks(); }
 });
 
 test('SYS-10 probeEnv 无监听→service-stopped；工具不可达早退形状逐字一致；单项异常不拖垮整表', async () => {
+  // POSIX 的 3080 探测不可 mock ⇒ 同 SYS-09，用 PATH 前置桩把「无监听」由用例自己钉住。
+  const undoHolder = withPortHolderStub('');
   // 分支①：3080 无监听 + 服务存在（STOPPED）
   sys.__setProbeExecutor(winNoListenerMock({ stdout: '200' }));
   psvc.__setProbeAsync(process.platform === 'win32'
@@ -330,7 +363,7 @@ test('SYS-10 probeEnv 无监听→service-stopped；工具不可达早退形状�
     const pp = items.find((i) => i.key === 'port-pid');
     assert.deepEqual(pm, { key: 'port-mode', ok: false, warn: true, detail: 'service-stopped', level: 'warn' });
     assert.deepEqual(pp, { key: 'port-pid', ok: false, warn: true, detail: 'no-listener', level: 'warn' });
-  } finally { teardownProbeMocks(); }
+  } finally { undoHolder(); teardownProbeMocks(); }
 
   // 分支②：工具解析命令非 0 退出 → 早退四项 tool-unreachable（含 level 字段）
   sys.__setProbeExecutor(makeExecMock({

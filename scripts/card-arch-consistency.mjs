@@ -92,6 +92,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // 状态出口契约（P5）：本环原有尾行三态保留为**给人看的面**；下面在**同一批裁决量**上再产出机读契约行。
 import { emitRingState, installCrashGuard, installStdoutHygiene } from './lib/ring-state.mjs';
+import { resolveGovRoot } from './lib/gov-root.mjs';
 
 installCrashGuard('cards');
 // 本环 --json 的 stdout 是机读数据面（必须可 JSON.parse）⇒ 装 stdout 纯净性守卫（无开关）。
@@ -104,7 +105,7 @@ const opt = (name, dflt) => {
   if (i >= 0 && ARGS[i + 1] && ARGS[i + 1].indexOf('--') !== 0) return ARGS[i + 1];
   return dflt;
 };
-const GOV_ROOT = process.env.PE_GOV_ROOT || 'D:\\FF';
+const GOV_ROOT = resolveGovRoot();
 const DEVREF = path.resolve(opt('--devref', path.join(ROOT, 'docs', 'devref')));
 const ARCH = path.resolve(opt('--arch', path.join(GOV_ROOT, '.internal', 'arch')));
 

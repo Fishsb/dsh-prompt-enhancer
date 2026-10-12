@@ -159,12 +159,27 @@ test('P5-08 五环可见：默认形态下 5 条 RING 行，逐环 id 齐全', (
   const ringLines = r.out.split(NL).filter((l) => /^RING /.test(l));
   assert.equal(ringLines.length, 5, 'RING 行应恰 5 条');
   for (const [id] of RINGS) assert.ok(ringLines.some((l) => l.startsWith('RING ' + id + ' ')), id + ' 应有自己的 RING 行');
-  // ⚠ 对齐 T3/N3 三态裁定（2026-09-27 用户裁定 A）：无 FAIL 但有 SKIP ⇒ 退出码 2（未判全），
-  //   不再断言 0 —— 本仓两环在无治理档环境下必 SKIP，断 0 会把「没判上」读成「判过了」（正是 P5 要治的病）。
-  const skipN = ringLines.filter((l) => / SKIP /.test(l)).length;
-  const failN = ringLines.filter((l) => / FAIL /.test(l)).length;
-  assert.equal(r.code, failN > 0 ? 1 : (skipN > 0 ? 2 : 0),
-    '三态退出码（T3 裁定）：有 FAIL ⇒ 1，否则有 SKIP ⇒ 2（未判全），否则 0');
+  // ⚠ 对齐 T3/N3 三态裁定（2026-09-27 用户裁定 A）：无 FAIL 但有 SKIP ⇒ 退出码 2（未判全）。
+  //   但**「有没有 SKIP」本身是环境的函数**，不是判据（2026-10-12 本批发现并修正）：
+  //   arch-claims/cards 两环的扫描面（治理档 + 治理根）在仓外，只有**治理根可被解析**时才走实判；
+  //   不可读时它们按契约报 SKIP。修 `scripts/lib/gov-root.mjs` 之前，本机（WSL）治理根解析不到
+  //   ⇒ 恒有 2 个 SKIP ⇒ 退出码恒 2；修好之后解析得到 ⇒ 全判 ⇒ 退出码 0。**两种都是合法读数。**
+  //   故此处**不得**在 0 / 2 之间取一个假定的「环境正确值」（那正是把环境当判据）——改为断言
+  //   三态**自洽**：退出码必须由 RING 行面实算推出，且 SKIP 与退出码同向。
+  // ⚠ 计状态必须取**字段位**（第 3 列），不得全文 grep「SKIP」字样：环自报的理由里本来就会出现
+  //   「SKIP 0」「全过」这类词（如 arch-claims 的「冲突 0 · SKIP 0」）——按字样计会把 PASS 行
+  //   误数成 SKIP（2026-10-12 实测：真 SKIP 0 却数出 1，退出码期望被算成 2）。这与 ring-state
+  //   契约「状态只在字段位置」是同一纪律，旧写法在此处恰好被真 SKIP 掩盖。
+  const statusOf = (l) => l.split(/\s+/)[2];
+  const skipN = ringLines.filter((l) => statusOf(l) === 'SKIP').length;
+  const failN = ringLines.filter((l) => statusOf(l) === 'FAIL').length;
+  // 反向：**无 FAIL 时**只要有 SKIP 就必须取 2（防「有未判却说 0」——P5 要治的原始病不得在这个口径下溜过）。
+  //   ⚠ 必须加 failN === 0 这个前提：三态裁定里「失败优先于未判全」，有 FAIL 时是 1 而非 2。
+  const expected = failN > 0 ? 1 : (skipN > 0 ? 2 : 0);
+  assert.equal(r.code, expected,
+    '三态退出码（T3 裁定）：有 FAIL ⇒ 1，否则有 SKIP ⇒ 2（未判全），否则 0；'
+    + `实测 FAIL ${failN} / SKIP ${skipN} / exit ${r.code}`);
+  if (skipN > 0 && failN === 0) assert.equal(r.code, 2, '无 FAIL 且有 SKIP 时退出码必须为 2（不得读成 0）');
 });
 
 test('P5-09 gate --json 的 summary 与 RING 行同源（计数不得与行面不一致）', () => {
@@ -179,13 +194,64 @@ test('P5-09 gate --json 的 summary 与 RING 行同源（计数不得与行面�
   assert.ok(j.rings.every((x) => x.source === 'structure'), '真仓各环都应走结构面（不留退化位）');
 });
 
-test('P5-10 三态语义：SKIP 不得被读成 PASS（本契约要治的原始病）', () => {
+/** 环**自报文本**里声明「没判上」的措辞（内容派生）。
+ *
+ *  ⚠ 为什么必须靠它、不能只靠 `rings[].status`（2026-10-12 回修·独立复验 §4.4 实测）：
+ *    `scripts/lib/ring-state.mjs` 的 `emitRingState` 出口若把 SKIP 印成 PASS（= 本契约要治的
+ *    原始病最直接形态），`status` 列被污染 ⇒ `status/verdict/summary.skip` 全部同谋变绿，
+ *    旧 P5-10 的 `if (skips.length)` 整块被跳过 ⇒ **13/13 全绿而病在**。
+ *    但**出口翻转只改状态字段、不改环自报的 reason 文本**（reason 由环内容派生）——
+ *    于是「状态列」与「自报文本」会互相矛盾，这就是不依赖被污染通道的那条腿。
+ *  `SKIP\s*[1-9]` 刻意只认 **非零** 计数：真仓 PASS 环的自报里就带「SKIP 0」（arch-claims）
+ *  与「无 SKIP」（cards），按字样全局 grep 会把 PASS 误判为未判全（P5-08 已栽过一次）。 */
+const SELF_DECLARES_NOT_PASS = /未判全|退化位|SKIP\s*[1-9]/;
+
+test('P5-10 三态语义【交叉判据】：环自报文本与状态列必须互相印证（SKIP 不得被印成 PASS）', () => {
   const r = run(GATE, ['--json']);
   const j = JSON.parse(r.stdout);
-  const skips = j.rings.filter((x) => x.status === 'SKIP');
-  if (skips.length) {
-    assert.equal(j.summary.verdict, 'NOT_FULLY_JUDGED', '有 SKIP 时 verdict 不得为 ALL_PASS');
-    assert.ok(!/环 PASS/.test(r.stdout) || !/无 SKIP/.test(r.stdout), '有 SKIP 时不得出现「全过」措辞');
+  const selfReport = (x) => String(x.summary || '');
+  const declared = j.rings.filter((x) => SELF_DECLARES_NOT_PASS.test(selfReport(x)));
+  const statusSkips = j.rings.filter((x) => x.status === 'SKIP');
+
+  // ── ① 交叉断言（核心·抓原始病最直接形态）────────────────────────────────
+  //   环自报里声明了「未判全 / 退化位 / SKIP n>0」（内容派生），其状态列**不得**为 PASS。
+  //   出口把 SKIP 翻成 PASS 时，这条必红（自报不动、状态列被动）。
+  const lied = j.rings.filter((x) => x.status === 'PASS' && SELF_DECLARES_NOT_PASS.test(selfReport(x)));
+  assert.deepEqual(lied.map((x) => x.id), [],
+    '环自报里声明了「未判全/SKIP」，状态列却印成 PASS ⇒ 契约出口把 SKIP 翻成了 PASS（原始病）：'
+    + JSON.stringify(lied.map((x) => x.id + ' → ' + selfReport(x))));
+
+  // ── ② 空集必须由**文本面**证明，不得由已被污染的 status 字段自证 ──────────
+  //   「没有 SKIP」不能只说「status 里数不到 SKIP」（那正是被污染的通道），而必须由
+  //   各环**自报文本**佐证：状态列声称零 SKIP 时，自报里也不得出现任何「没判上」声明。
+  //   该断言在**两种形态下都真执行**（形态 A：两侧皆空 ⇒ 2 个空集必须相等；形态 B：两侧皆有）。
+  if (statusSkips.length === 0) {
+    assert.deepEqual(declared.map((x) => x.id), [],
+      '状态列声称无 SKIP，但环自报文本里却有「未判全/SKIP」⇒ 空集不是由文本证明的（状态列可疑）：'
+      + JSON.stringify(declared.map((x) => x.id + ' → ' + selfReport(x))));
+  } else {
+    // 形态 B：状态列的 SKIP 集合必须恰是自报里声明未判全的那些（互相印证，不多不少）
+    assert.deepEqual(statusSkips.map((x) => x.id).sort(), declared.map((x) => x.id).sort(),
+      '状态列的 SKIP 集合与自报文本声明的未判全集合必须逐项一致');
+  }
+
+  // ── ③ 判别力自证：本判据的谓词必须真能咬住真 SKIP 自报、且不误伤 PASS 自报 ──
+  //   （没有这一条，② 的「空集」可能是谓词恒假的产物 —— 那与本契约要治的假绿同族。）
+  assert.ok(SELF_DECLARES_NOT_PASS.test('环自报：未判全：断言 11 · SKIP 2（未判：A-2）'),
+    '谓词必须能识别真 SKIP 自报（取自真仓 cards 环形态 B 的真实 summary）');
+  assert.ok(!SELF_DECLARES_NOT_PASS.test('环自报：断言 37 通过 · 冲突 0 · SKIP 0 · 在册未达 3 · 在册缺陷 0'),
+    '「SKIP 0」是真 PASS 自报（arch-claims），谓词不得误判其为未判全');
+  assert.ok(!SELF_DECLARES_NOT_PASS.test('环自报：判据全过（无 SKIP、读侧干净）：断言 13 通过 · 冲突 0 · 真判 3/3'),
+    '「无 SKIP」是真 PASS 自报（cards 形态 A），谓词不得误判');
+
+  // ── ④ 保留原覆盖：verdict 与状态列自洽（不是核心，但不得丢）──────────────
+  const blocking = j.rings.filter((x) => x.status === 'FAIL' || x.status === 'UNKNOWN');
+  if (blocking.length) {
+    assert.equal(j.summary.verdict, 'FAIL', '有 FAIL/UNKNOWN 时失败优先，verdict 必须是 FAIL');
+  } else if (statusSkips.length) {
+    assert.equal(j.summary.verdict, 'NOT_FULLY_JUDGED', '有 SKIP 且无 FAIL 时 verdict 必须是 NOT_FULLY_JUDGED');
+  } else {
+    assert.equal(j.summary.verdict, 'ALL_PASS', '无 FAIL 无 SKIP 时 verdict 必须是 ALL_PASS');
   }
 });
 
