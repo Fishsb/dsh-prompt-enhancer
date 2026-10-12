@@ -52,16 +52,10 @@ const DECLARED_NO_SCHEMA = {
   'models/stats': 'A 入参仅 provider/model/inputChars 展示用，非法值退化为空统计（无副作用）',
   'logs/last': 'A 无参只读：返回日志环',
   'template/default': 'A 无参只读：返回内置模板目录',
-  'plugins/inventory': 'A 只读：列举插件清单',
   'enhance/progress': 'A 只读：查询优化进度（不存在的 seq 返回空）',
   cancel: 'A 只读：取消信号（无匹配时静默成功）',
-  'update/restartNeeded': 'A 只读：文件 mtime 比对，无副作用',
   // B 桶：有入参但**保持宽松**——补校验会改变已发布对外行为，须单列 BREAKING 后由用户拍板
   'models/resolve': 'B 有参（provider/model）保持宽松：非法值由下游 resolveModelInfo 兜底，收紧急属 BREAKING',
-  'plugins/stop': 'B 有参（pluginId）保持宽松：非法 id 由插件面自行返回 not-found',
-  'plugins/undefine': 'B 有参（pluginId）保持宽松：同上',
-  'update/executorEnsure': 'B 有参（port）保持宽松：非法端口由执行器侧拒绝',
-  'update/pull': 'B 有参（repo/sessionId）保持宽松：本仓无调用点（handler 按决策保留），收紧收益为零',
 };
 
 const { native, bundled, live, intersection } = deriveLiveMethods();

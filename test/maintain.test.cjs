@@ -32,8 +32,6 @@ const net = require('node:net');
 
 const sys = require('../lib/sys.cjs');
 const M = require('../lib/maintain-lib.cjs');
-const stageInstall = require('../lib/stage-install.cjs');
-const updater = require('../lib/updater-host.cjs');
 const indexMod = require('../lib/index.cjs');
 
 const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-maint-'));
@@ -308,23 +306,6 @@ test('MAINT-16 rescueSnapshot → 破坏 → rescueRestore 忠实回写（含 ex
 
 /* ---------------- stage-install 抽取面与 G5 探针 ---------------- */
 
-test('MAINT-17 update/install 与 stage-install 同一实现（杜绝逻辑分叉）', () => {
-  assert.equal(indexMod.installStagedTarball, stageInstall.installStagedTarball);
-  assert.equal(indexMod.findStagedTarball, stageInstall.findStagedTarball);
-  // 2026-09-13：原 update/portRestart（安装+重启）已拆成非重启的 update/install——
-  // 新 RPC 必须复用 lib/stage-install.cjs 同一实现，且重启 RPC 不得残留。
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'index.cjs'), 'utf8');
-  assert.match(src, /harness\.handle\('update\/install'/, '新安装 RPC 必须注册');
-  // 只锚「注册」形态：注释里的说明性提及不算残留接线
-  assert.ok(!/harness\.handle\('update\/portRestart'/.test(src), '已移除的重启 RPC 不得残留注册');
-  assert.match(src, /installStagedTarball\(staged, profile\)/, 'update/install 必须调用 stage-install 的同一实现');
-  assert.match(src, /findStagedTarball\(\)/, 'update/install 必须复用同一 staging 发现实现');
-});
-
-test('MAINT-18 peekTarballVersion 缺失文件返回空串不抛', () => {
-  assert.equal(stageInstall.peekTarballVersion('C:\\definitely\\missing.tgz'), '');
-});
-
 test('MAINT-20 buildCliRestartScript 已随 G4 退役', () => {
   assert.equal(indexMod.buildCliRestartScript, undefined);
 });
@@ -364,46 +345,3 @@ test('PKG-BOM package.json 禁止 UTF-8 BOM（启动崩溃根因回归守卫）'
 
 const silentIo = () => ({ out() {}, ask: async () => '' });
 
-test('MAINT-25q 过程计时：timed io 每行带 [+Xs] 戳 + runWithTiming 开始/总耗时收尾', async () => {
-  const outs = []; const ticks = [];
-  const base = { out: (s) => outs.push(String(s)), tick: (l) => ticks.push(String(l)), clearTick: () => {} };
-  const tio = updater.createTimedIo(base);
-  tio.out('步骤A');
-  assert.ok(/^\[\d+s\] 步骤A$/.test(outs[outs.length - 1]), '输出应自动带耗时戳');
-  tio.tick('等待中');
-  assert.ok(/^\[\d+s\] 等待中$/.test(ticks[ticks.length - 1]), 'tick 应透传并带戳');
-  const r = await updater.runWithTiming(base, '测试动作', async (io2) => { io2.out('内部行'); return { ok: true }; });
-  assert.equal(r.ok, true);
-  assert.ok(outs.some((x) => x.includes('▶ 开始：测试动作')), '应打印开始行');
-  assert.ok(outs.some((x) => x === '[0s] 内部行' || /^\[\d+s\] 内部行$/.test(x)), '内部行应经包装输出');
-  assert.ok(outs.some((x) => x.includes('■ 结束：测试动作（总耗时 ') && x.endsWith('s）')), '应打印总耗时行');
-});
-
-test('MAINT-26c 一键更新（安装侧）：安装→干跑闸门，装完须手动重启；闸门失败自动回滚', async () => {
-  const seq = [];
-  const okRun = await updater.runOneClickUpdate(silentIo(), 'web', {
-    findTgzImpl: () => 'C:\\staged\\pkg.tgz',
-    peekVerImpl: () => '9.9.9',
-    curVerImpl: () => '3.3.1',
-    installImpl: async () => { seq.push('install'); return { ok: true, snapshotDir: 'C:\\snap\\x' }; },
-    gateImpl: async () => { seq.push('gate'); return { ok: true }; },
-  });
-  // 2026-09-13：终态不再是 UPDATED（重启能力已移除）—— 只安装并就位，交用户手动重启
-  assert.equal(okRun.code, 'INSTALLED_NEEDS_MANUAL_RESTART');
-  assert.equal(okRun.needsManualRestart, true, '一律如实报告需用户手动重启');
-  assert.deepEqual([okRun.from, okRun.to], ['3.3.1', '9.9.9']);
-  assert.deepEqual(seq, ['install', 'gate'], '只安装+过闸，不再杀旧进程/拉起服务/重启后自检');
-
-  // 闸门失败 → 自动快照回滚（既有语义不变；快照目录缺失时回滚如实失败但绝不抛出）
-  const rolled = await updater.runOneClickUpdate(silentIo(), 'web', {
-    findTgzImpl: () => 'C:\\staged\\bad.tgz',
-    peekVerImpl: () => '9.9.9',
-    curVerImpl: () => '3.3.1',
-    installImpl: async () => ({ ok: true, snapshotDir: 'C:\\snap\\y' }),
-    gateImpl: async () => ({ ok: false, layer: 'resolve', detail: 'missing x' }),
-    oldPidOverride: 0,
-  });
-  assert.equal(rolled.ok, false);
-  assert.equal(rolled.code, 'GATE_FAILED_ROLLED_BACK');
-  assert.equal(rolled.detail, 'missing x');
-});

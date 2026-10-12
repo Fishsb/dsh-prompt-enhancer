@@ -31,18 +31,7 @@
 | `models/stats` | client → host | 模型实测统计（扫会话投影聚合 TTFT / tokens-per-second，附 base/lite 预估秒数） | 只读 |
 | `models/autochain` | client → host | 自适应链 | 只读 |
 | `template/default` | client → host | 默认模板 | 只读 |
-| `update/check` | client → host | 版本检测（local 运行时读运行环境 package.json） | 只读 |
-| `update/pull` | client → host | 拉取清单文件 | 用户触发 |
-| `update/envcheck` | client → host | 环境检测 | 只读 |
 | `logs/last` | client → host | 诊断日志 | 只读 |
-| `plugins/inventory` | client → host | 插件清单 | 只读 |
-| `plugins/run` | client → host | 运行插件 | 管理 |
-| `plugins/stop` | client → host | 停止插件 | 管理 |
-| `plugins/undefine` | client → host | 取消定义 | 管理 |
-| `update/executorEnsure` | client → host | 拉起/对齐执行器（版本+内容哈希） | 用户触发 |
-| `update/install` | client → host | 安装已下载的 staged 包（sha256 校验 → 解包覆盖运行环境 → 写部署账本，返回 `{ok, installed, version, restartNeeded:true}`；**不重启**，装完提示手动重启 DSH） | 用户触发 |
-| `update/restartNeeded` | client → host | 检测未重启 | 只读 |
-| `update/diagTail` | client → host | 诊断日志尾部补取（只读·脱敏；更新/重启失败路径补 DSH err 日志根因） | 只读 |
 | `config/get` | client → host | 读取磁盘配置（$DSH_HOME/dsh-prompt-enhancer.config.json；DSH Desktop 动态端口配置恢复） | 只读 |
 | `config/set` | client → host | 写入磁盘配置（原子写 tmp+rename，≤1MB） | 用户触发 |
 | `voice/status` | client → host | 语音引擎就绪态（**委托官方 `ctx.speechToText.snapshot()`**）+ 规整就绪态 | 只读 |
@@ -63,12 +52,9 @@
 > | `models/current` | **A** 无参/只读 | 无参只读：读当前选择的模型 |
 > | `models/list` | **A** 无参/只读 | 无参只读：列举 provider 与模型 |
 > | `models/stats` | **A** 无参/只读 | 入参仅 provider/model/inputChars 展示用，非法值退化为空统计（无副作用） |
-> | `plugins/inventory` | **A** 无参/只读 | 只读：列举插件清单 |
 > | `template/default` | **A** 无参/只读 | 无参只读：返回内置模板目录 |
 > | `update/restartNeeded` | **A** 无参/只读 | 只读：文件 mtime 比对，无副作用 |
 > | `models/resolve` | **B** 有参·保持宽松 | 有参（provider/model）保持宽松：非法值由下游 resolveModelInfo 兜底，收紧急属 BREAKING |
-> | `plugins/stop` | **B** 有参·保持宽松 | 有参（pluginId）保持宽松：非法 id 由插件面自行返回 not-found |
-> | `plugins/undefine` | **B** 有参·保持宽松 | 有参（pluginId）保持宽松：同上 |
 > | `update/executorEnsure` | **B** 有参·保持宽松 | 有参（port）保持宽松：非法端口由执行器侧拒绝 |
 > | `update/pull` | **B** 有参·保持宽松 | 有参（repo/sessionId）保持宽松：本仓无调用点（handler 按决策保留），收紧收益为零 |
 >

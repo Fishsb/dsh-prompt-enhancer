@@ -27,8 +27,6 @@ function buildHost() {
   const pureChunk = require('../src/host/pure.js');
   const diagnosticsChunk = require('../src/host/diagnostics.js');
   const modelsChunk = require('../src/host/models.js');
-  const pluginsChunk = require('../src/host/plugins.js');
-  const updateChunk = require('../src/host/update.js');
   const enhanceChunk = require('../src/host/enhance-handlers.js');
 
   // Inject all chunks, looping until no marker remains (same policy as
@@ -37,8 +35,6 @@ function buildHost() {
   const injections = [
     ['// @dsh-diagnostics-inject', diagnosticsChunk],
     ['// @dsh-models-inject', modelsChunk],
-    ['// @dsh-plugins-inject', pluginsChunk],
-    ['// @dsh-update-inject', updateChunk],
     ['// @dsh-pure-inject', pureChunk],
     ['// @dsh-enhance-inject', enhanceChunk],
   ];

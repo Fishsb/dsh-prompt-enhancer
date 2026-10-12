@@ -67,7 +67,9 @@ dsh plugin --profile web remove dsh-prompt-enhancer
 
 ## 📦 Library notes
 
-Core logic lives in standalone Node modules, reusable from other scripts: `lib/updater-host.cjs` (update executor: download / verify / install / rollback), `lib/platform-service.cjs` (cross-platform service management), `lib/sys.cjs` (env & paths). See each module's header comments.
+Core logic lives in standalone Node modules, reusable from other scripts: `lib/platform-service.cjs` (cross-platform service management), `lib/sys.cjs` (env & paths). See each module's header comments.
+
+> P1-c (2026-10-13): the former `lib/updater-host.cjs` (the plugin's own update executor: download / verify / install / rollback) **has been retired** — plugin updates now go through the official plugin manager (see "Update / remove" above).
 
 ## 🎯 Usage (prompt enhancement)
 
@@ -88,7 +90,7 @@ Core logic lives in standalone Node modules, reusable from other scripts: `lib/u
 
 ## ⚙️ Configuration
 
-Settings → "Models & plugins":
+Settings → "Models & plugins" (since P1-c there are **only the "Model configuration" / "Optimization parameters" tabs** — the former "Plugins" tab is retired; plugin version management is back to the official plugin manager):
 
 | Tab | Description |
 |---|---|

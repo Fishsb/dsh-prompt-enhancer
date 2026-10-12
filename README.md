@@ -68,7 +68,9 @@ dsh plugin --profile web remove dsh-prompt-enhancer
 
 ## 📦 库说明
 
-核心逻辑拆分为独立 Node 模块，可复用：`lib/updater-host.cjs`（更新执行器：下载 / 校验 / 安装 / 回滚）、`lib/platform-service.cjs`（跨平台服务管理）、`lib/sys.cjs`（环境与路径）。详见各模块头注释。
+核心逻辑拆分为独立 Node 模块，可复用：`lib/platform-service.cjs`（跨平台服务管理）、`lib/sys.cjs`（环境与路径）。详见各模块头注释。
+
+> P1-c（2026-10-13）：原 `lib/updater-host.cjs`（插件自建更新执行器：下载 / 校验 / 安装 / 回滚）**已退役** —— 插件更新改走官方 plugin manager（见上方「更新 / 卸载」）。
 
 ## 🎯 使用（提示词增强）
 
@@ -89,7 +91,7 @@ dsh plugin --profile web remove dsh-prompt-enhancer
 
 ## ⚙️ 配置
 
-设置 →「模型与插件」：
+设置 →「模型与插件」（P1-c 起**只有「模型配置」/「优化参数」两个 tab**——原「插件管理」tab 已退役，插件版本管理交回官方 plugin manager）：
 
 | Tab | 说明 |
 |---|---|

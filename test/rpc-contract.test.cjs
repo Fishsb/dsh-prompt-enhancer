@@ -27,16 +27,18 @@ test('RPC-01 事实源一致性 --check 通过（注册面 / 文档面 / 申报�
 //   本条锁的是「注册面事实」，34 是 P1-a 前的实测值；P1-a 删掉 8 条 voice/*（model*/deploy*）
 //   ⇒ 事实变为 26 = 8(lib/index.cjs) + 18(plugin-host.js)。**判据强度不变**：仍是逐项严格等号
 //   （native/bundled/live/schema/gap 五处全等，未改成区间、未删断言、未 skip）。
-test('RPC-02 派生清单结构锁：26 = 8(lib/index.cjs) + 18(plugin-host.js)，交集 0，schema 11，具名申报 15', () => {
+// P1-c（2026-10-13）：数字锁 26 → **15**（native 8 → 4）。⚠ 事实同步，非改浅：
+//   仍是逐项严格等号。P1-c 删掉 4 条 plugins/* + 7 条 update/*（设置第三 tab 与更新执行器退役）。
+test('RPC-02 派生清单结构锁：15 = 4(lib/index.cjs) + 11(plugin-host.js)，交集 0，schema 6，具名申报 9', () => {
   const r = run(['--json']);
   assert.equal(r.ok, true, 'rpc-manifest --json 失败：\n' + r.out);
   const m = JSON.parse(r.out);
-  assert.equal(m.counts.native, 8, 'lib/index.cjs 注册面条数');
-  assert.equal(m.counts.bundled, 18, 'plugin-host.js 注册面条数');
-  assert.equal(m.counts.live, 26, '线上方法去重总数');
-  assert.equal(m.counts.schema, 11, 'schema 覆盖条数');
-  assert.equal(m.counts.gap, 15, '具名申报的无校验条数');
+  assert.equal(m.counts.native, 4, 'lib/index.cjs 注册面条数');
+  assert.equal(m.counts.bundled, 11, 'plugin-host.js 注册面条数');
+  assert.equal(m.counts.live, 15, '线上方法去重总数');
+  assert.equal(m.counts.schema, 6, 'schema 覆盖条数');
+  assert.equal(m.counts.gap, 9, '具名申报的无校验条数');
   assert.equal(m.noSchema.length, m.counts.gap, 'gap 明细与计数一致');
-  assert.ok(m.live.includes('update/install'), 'update/install 在位');
+  assert.ok(!m.live.includes('update/install'), 'P1-c：update/install 已退役（交回官方 plugin manager）');
   assert.ok(!m.live.includes('update/portRestart'), '已退役的重启 RPC 不得回流');
 });

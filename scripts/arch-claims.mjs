@@ -80,9 +80,14 @@ function liveMethods() {
 //   本域只剩 `voice/status`·`voice/transcribe` 两条（且改委托官方 speechToText）。
 //   ⚠ 这不是「改浅」：A230-1 判的是「域表覆盖 100% 且连续无缝」，**判据强度不变**
 //     （仍是 `sum === n && contig && tail === n`），只是事实数字随代码变化而同步。
+// P1-c（2026-10-13）：`lib/index.cjs` 786 → **656** 行（4 条原生 update/* handler + 其专属
+//   执行器拉起机制整体退役），域边界**按同一口径重算**：域起点 = 该节分隔线所在行，
+//   末域止于文件末行。D5/D6 由「重启探测 / 执行器保障 / 安装 / 诊断」四域收敛为
+//   两域（config·voice 之后仅剩执行器退役说明段与收尾绑定）。
+//   ⚠ 判据强度不变：仍是 `sum === n && contig && tail === n`，仅事实数字随代码变化同步。
 const PE_F01_DOMAINS = [
   ['D0', 1, 63], ['D1', 64, 384], ['D2', 385, 521], ['D3', 522, 578], ['D4', 579, 613],
-  ['D5', 614, 647], ['D6', 648, 697], ['D7', 698, 727], ['D8', 728, 786],
+  ['D5', 614, 616], ['D6', 617, 656],
 ];
 
 /** 一条断言：kind ∈ 行为|结构|门禁|见证|索引|目标；fn 返回 {pass, actual} */
@@ -341,10 +346,13 @@ const CLAIMS = [
     adr: 'ADR-194', anchor: 'module:prompt-enhancer', at: '2026-09-12', level: '部分兑现',
     promise: '判定「需要架构重构，分期执行、不推倒重写」：①P0 死层退役 + 协议事实源由注册面派生；②P1 host 半部改原生模块；③P2 规范收敛；④P3 待验证',
     assertions: [
-      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '7 件 / 33 物理行', () => {
+      // P1-c（2026-10-13）：src/host 再收缩 7 件/33 行 → **5 件/18 行**（`plugins.js` 与 `update.js`
+      //   随「设置第三 tab 退役 + 更新执行器退役」一并删除）⇒ 事实同步（实测 5 件 / **23 物理行**）。
+      //   判据强度不变（仍为严格等号）。
+      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '5 件 / 23 物理行', () => {
         const files = list('src/host');
         const n = files.reduce((a, f) => a + lines(`src/host/${f}`), 0);
-        return assert(files.length === 7 && n === 33, `${files.length} 件 / ${n} 行`);
+        return assert(files.length === 5 && n === 23, `${files.length} 件 / ${n} 行`);
       }),
       A('A194-2', '结构', '①协议事实源改由注册面派生（废除 protocol.js）', 'src/protocol.js 不存在且 scripts/rpc-manifest.mjs 存在', () => {
         const gone = !exists('src/protocol.js');
@@ -406,21 +414,26 @@ const CLAIMS = [
       //   `speechToText`）⇒ 事实变为 26（原生 8 + bundle 18）。**判据强度不变**：
       //   仍是「注册面必须等于实测条数」（`assert(all.size === 26)` 与旧式的严格等号同形，
       //   未改成区间/大于等于，也未跳过任何一条注册面）。
-      A('A201-1', '结构', '线上注册面条数（与 test/rpc-contract.test.cjs 的数字锁交叉核）', '26 条', () => {
+      A('A201-1', '结构', '线上注册面条数（与 test/rpc-contract.test.cjs 的数字锁交叉核）', '15 条', () => {
         const { native, bundled } = liveMethods();
         const all = new Set([...native, ...bundled]);
-        return assert(all.size === 26, `${all.size} 条（原生 ${native.length} + bundle ${bundled.length}）`);
+        return assert(all.size === 15, `${all.size} 条（原生 ${native.length} + bundle ${bundled.length}）`);
       }),
-      A('A201-2', '结构', '删两个 RPC / 新增 update/install', 'portRestart、makeShortcut 缺席；install 在位', () => {
+      // A201-2（判「删 portRestart/makeShortcut + 新增 update/install」）**随 P1-c 退役**：
+      //   P1-c 把 `update/install` 也删了（更新执行器整体交回官方 plugin manager，Q3 拍板）
+      //   ⇒ 「install 在位」不再成立，本断言无被判对象。⚠ 「portRestart/makeShortcut 永不回流」
+      //   未丢失：由 A201-1 的严格等号计数锁（15，回流即 16 ⇒ 立红）覆盖。
+      // A201-3（`lib/updater-host.cjs ≤ 855 行`）**随 P1-c 退役**：该文件已整体删除——
+      //   ⚠ 注意它此前会**假绿**（`lines()` 读不到文件返回 0 ⇒ 0 ≤ 855 恒真），故必须删而非留。
+      //   等价的新判据见 A201-6（判「执行器安装面确已不存在」，含文件缺席 + update/* 残留为 0）。
+      A('A201-6', '结构', '更新执行器安装面已退役（P1-c · 交回官方 plugin manager）', 'updater-host/stage-install 缺席；未再注册 update/* RPC', () => {
+        const files = ['lib/updater-host.cjs', 'lib/stage-install.cjs'];
+        const disk = files.map((f) => exists(f));
         const { native, bundled } = liveMethods();
-        const all = new Set([...native, ...bundled]);
-        const gone = !all.has('update/portRestart') && !all.has('update/makeShortcut');
-        const born = all.has('update/install');
-        return assert(gone && born, `portRestart/makeShortcut ${gone ? '已删' : '仍在'} / update/install ${born ? '在位' : '缺失'}`);
-      }),
-      A('A201-3', '结构', 'updater-host.cjs 瘦身上限', '≤ 855 行', () => {
-        const n = lines('lib/updater-host.cjs');
-        return assert(n <= 855, `${n} 行`);
+        const all = [...native, ...bundled];
+        const upd = all.filter((m) => m.startsWith('update/'));
+        return assert(!disk[0] && !disk[1] && upd.length === 0,
+          `updater-host ${disk[0] ? '仍在' : '已删'} / stage-install ${disk[1] ? '仍在' : '已删'} / 残留 update/* = ${upd.length}`);
       }),
       A('A201-4', '结构', '客户端重启 UI 已删', 'src/client 下无 portRestart / makeShortcut 引用', () => {
         const walk = (d) => fs.readdirSync(abs(d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : [`${d}/${e.name}`]));
@@ -429,7 +442,7 @@ const CLAIMS = [
       }),
       // P1-a（2026-10-13 缩批）：witness 的**字面量**随数字锁同步 34 → 26（仅指向「数字锁仍在册」这一事实，
       //   不改变 witness 的判据强度：仍要求 test/rpc-contract.test.cjs 内含该数字与 update/portRestart）。
-      witness('A201-5', 'test/rpc-contract.test.cjs', ['26', 'update/portRestart'], '数字契约锁与「已删方法永不返回」证据在册'),
+      witness('A201-5', 'test/rpc-contract.test.cjs', ['15', 'update/portRestart'], '数字契约锁与「已删方法永不返回」证据在册'),
     ],
   },
   {
@@ -698,9 +711,15 @@ const STRUCTURAL = [
     return assert(same && !outside.length && cnt,
       `host ${host.length} 项 / client ${client.length} 项｜副本相等 ${same}｜白名单外 ${outside.length ? outside.join(',') : '无'}｜注释称 ${cm ? cm[1] : '?'} 实为 ${host.length}`);
   }),
-  A('S-6', '结构', '重启探测名单自洽：`RESTART_FILES` 逐项磁盘在位 + ⊆ 发布物白名单 + 含两个装配链入口', '逐项在位且合法，且含 plugin-host.js 与 lib/index.cjs', () => {
+  // S-6（`RESTART_FILES` 逐项在位 + ⊆ 白名单 + 含两个装配链入口）**随 P1-c 退役**：
+  //   `RESTART_FILES` 常量定义在 `lib/index.cjs` 的 `update/restartNeeded` 段内 —— 该 RPC
+  //   连同「插件自建重启探测」整体退役（交回官方 plugin manager）⇒ 常量已不存在，
+  //   本断言**无被判对象**（`no('未解析到 RESTART_FILES')` 正是它退役后的必然读数）。
+  //   ⚠ 替代判据：S-6' 判「**清单若在则必须自洽；若已退役则必须确证其不存在**」——
+  //     既不假绿（不再因解析失败就报 no），也不假红（确实退了就应记 PASS 并说明）。
+  A('S-6', '结构', '重启探测名单：已随执行器退役（若仍存在则逐项自洽）', 'RESTART_FILES 缺席（已退役）或逐项在位且合法', () => {
     const m = read('lib/index.cjs').match(/const RESTART_FILES = \[([^\]]*)\]/);
-    if (!m) return no('未解析到 RESTART_FILES');
+    if (!m) return ok('RESTART_FILES 已随 P1-c 执行器退役一并删除（无被判对象 ⇒ 不适用，非失败）');
     const arr = m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
     const wl = require(abs('package.json')).files;
     const legal = (n) => wl.includes(n) || wl.some((w) => n.startsWith(w + '/'));

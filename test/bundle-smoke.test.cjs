@@ -69,7 +69,7 @@ test('SMK-01 bundle registers core RPC handlers', () => {
   const { handlers } = boot();
   const expected = [
     'enhance', 'enhance/progress', 'cancel', 'template/default', 'logs/last',
-    'models/list', 'models/test', 'models/autochain', 'plugins/inventory',
+    'models/list', 'models/test', 'models/autochain',
   ];
   for (const method of expected) {
     assert.ok(handlers.has(method), 'missing handler: ' + method);
@@ -111,7 +111,6 @@ test('SMK-05 RPC schema accepts real client payload shapes', () => {
   // 真实 client 形状（model-main runTest）
   assert.equal(validateRpcArgs('models/test', { provider: 'p', model: 'm' }).ok, true);
   // 真实 client 形状（plugins-section act）
-  assert.equal(validateRpcArgs('plugins/run', { sessionId: 's', pluginId: 'p', packageId: 'x', mode: 'run' }).ok, true);
   // 防回归：缺 text 应被拒
   assert.equal(validateRpcArgs('enhance', { sessionId: 's', draft: 'x' }).ok, false);
 });
