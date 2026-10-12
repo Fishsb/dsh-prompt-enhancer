@@ -269,7 +269,7 @@ async function main() {
   if (!IS_WIN) {
     skip('SYSTEM 上下文 modelOpenDir',
       'Windows-only：该环用 schtasks /ru SYSTEM 复现 Session 0 服务模式；当前平台 ' + process.platform +
-      ' 无 schtasks、亦无 Session 0 语义 ⇒ 本机无可自动复现的判据（须在 Windows 环境跑才判；本机不代跑、不报绿）');
+      ' 无 schtasks、亦无 Session 0 语义 ⇒ 本机无可自动复现的判据（该环只在 Windows 有可判对象；当前平台无 ⇒ 属未判全，不代跑、不报绿）');
   } else {
     try {
       fs.unlinkSync(sysResultFile());

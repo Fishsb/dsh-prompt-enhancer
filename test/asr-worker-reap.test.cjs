@@ -36,7 +36,7 @@ test('ASR-R1 源码结构：必须存在进程扫描兜底与清扫函数', () =
     'workerListenerPids 必须**调用** workerPidsByProcessScan()（只定义不用 = 发现面未修）');
 });
 
-test('ASR-R1b 行为腿：进程扫描把 worker 从"仅端口可见"里救出来（证发现面真变宽）', () => {
+test('ASR-R1b 行为腿：进程扫描把 worker 从"仅端口可见"里救出来（证发现面真变宽）', (t) => {
   // 钉住 M1 类变异：若发现面退回"只看端口"，这条必红。
   // 做法：临时篡改 worker.port 指向一个不存在的口，使端口通道对**真实 worker** 失效；
   // 新实现靠进程扫描仍应看得见它们（至少 >=1），旧实现会归零。
@@ -48,7 +48,14 @@ test('ASR-R1b 行为腿：进程扫描把 worker 从"仅端口可见"里救出�
     try { return cp.execSync("pgrep -f 'asr-worker\\.cjs'", { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
       .trim().split('\n').filter(Boolean).map(Number); } catch (e) { return []; }
   })();
-  if (real.length === 0) { console.log('  [未取材] 无 worker，跳过'); return; }
+  if (real.length === 0) {
+    // ⚠ 2026-10-12 收尾批：原为裸 `console.log + return` ⇒ 用例仍记 `ok`，**无 worker 时空转绿**
+    //   且不可观测（复验 2 · blocker 2）。改用 `t.skip()`：TAP 面留 `# SKIP`（`# skipped N`），
+    //   **不计 PASS**。⚠ 本次只改「取材失败时的报告方式」，**断言内容一字未动**，
+    //   也未给本文件加任何环境前置（它测的 lib/asr-models.cjs 是 P1 待删件）。
+    t.skip('[未取材] 无 asr-worker 进程 ⇒ 该行为腿无从取材（本机无 worker 时不再静默记 ok）');
+    return;
+  }
   try {
     // 让端口通道完全失效：指向一个没人听的动态口，并假设 3082 不是它们所在口的情况
     fs.writeFileSync(PORTS_FILE, JSON.stringify({ port: 59998, pid: 0, ts: Date.now() }), 'utf8');
@@ -89,7 +96,7 @@ test('ASR-R2b 行为腿：早退分支上仍必须完成清扫（真起进程验
     `ensureWorker 的返回值必须带 swept 字段以便观测清扫（实测返回: ${JSON.stringify(r)}）`);
 });
 
-test('ASR-R3 行为腿：进程扫描能看见端口通道看不见的 worker（真数据取材）', () => {
+test('ASR-R3 行为腿：进程扫描能看见端口通道看不见的 worker（真数据取材）', (t) => {
   // 用真实 /proc 扫描验证：当前机器的 worker 进程必须被枚举到。
   // 旧实现只看端口 ⇒ 动态口被覆盖者隐身；本判据要求「枚举数 >= 端口可见数」且不依赖端口文件。
   const cp = require('node:child_process');
@@ -100,8 +107,10 @@ test('ASR-R3 行为腿：进程扫描能看见端口通道看不见的 worker（
       .trim().split('\n').filter(Boolean).map(Number); } catch (e) { return []; }
   })();
   if (pgrep.length === 0) {
-    // 无 worker 时判据空转没有意义 —— 但要显式报"未取材"，不静默假绿
-    console.log('  [未取材] 本机当前无 asr-worker 进程，跳过行为腿（不计 PASS）');
+    // 无 worker 时判据空转没有意义 —— 2026-10-12 收尾批：由裸 `console.log + return`
+    // 改为 `t.skip()`，使其在 TAP 面**显式现形**（`# SKIP`，不计 PASS），不再静默变绿。
+    // 断言内容未动；未加环境前置。
+    t.skip('[未取材] 本机当前无 asr-worker 进程 ⇒ 行为腿无从取材（不计 PASS）');
     return;
   }
   assert.ok(all.length >= pgrep.length,
@@ -111,7 +120,7 @@ test('ASR-R3 行为腿：进程扫描能看见端口通道看不见的 worker（
   }
 });
 
-test('ASR-R4 行为腿：sweepStaleWorkers 幂等——只剩 1 个时不得再杀', () => {
+test('ASR-R4 行为腿：sweepStaleWorkers 幂等——只剩 1 个时不得再杀', (t) => {
   const m = require(SRC);
   // 不真杀：只验「若当前已 <=1，清扫必须无副作用」
   const before = m.workerListenerPids();
@@ -119,7 +128,10 @@ test('ASR-R4 行为腿：sweepStaleWorkers 幂等——只剩 1 个时不得再�
     const r = m.sweepStaleWorkers();
     assert.deepStrictEqual(r.killed, [], `已是单实例，清扫不得杀任何进程，实测杀了 ${JSON.stringify(r.killed)}`);
   } else {
-    console.log('  [跳过] 当前实例数 ' + before.length + ' > 1，不做幂等腿（避免判据自身改变机器状态）');
+    // ⚠ 2026-10-12 收尾批：此支是**有意处置**（实例数 >1 时不去真杀，避免判据自身改变机器状态）——
+    //   **处置逻辑保留不变**，只把报告方式由裸 `console.log` 改为 `t.skip()`，使「本腿未被真执行」
+    //   这件事在 TAP 面**显式现形**（`# SKIP`，不计 PASS），而不是留一行日志后仍记 `ok`。
+    t.skip('[跳过] 当前实例数 ' + before.length + ' > 1，不做幂等腿（避免判据自身改变机器状态）');
   }
 });
 
@@ -131,7 +143,7 @@ test('ASR-R5 反向：清扫不得保留"杀不到的隐身者"逻辑缺口', ()
   assert.ok(/pid\s*===\s*keep/.test(body), '必须显式跳过 keep 那个');
 });
 
-test('ASR-R6 直接腿：进程扫描必须自主发现真实 worker（不经端口通道）', () => {
+test('ASR-R6 直接腿：进程扫描必须自主发现真实 worker（不经端口通道）', (t) => {
   // ⚠ 本条的由来（独立复核实测）：ASR-R1b/R3 都经 workerListenerPids()（= 端口 ∪ 进程扫描）。
   //   实测把 workerPidsByProcessScan 变异成 `return []` 后，**两条用例仍全绿** —— 因为真实 worker
   //   常驻 3082 固定口，端口通道照样发现它 ⇒ 该变异在被测面上无差别（判据无牙，纯假绿）。
@@ -142,7 +154,11 @@ test('ASR-R6 直接腿：进程扫描必须自主发现真实 worker（不经端
     try { return cp.execSync("pgrep -f 'asr-worker\\.cjs'", { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
       .trim().split('\n').filter(Boolean).map(Number); } catch (e) { return []; }
   })();
-  if (real.length === 0) { console.log('  [未取材] 本机无 asr-worker 进程，跳过（不计 PASS）'); return; }
+  if (real.length === 0) {
+    // ⚠ 2026-10-12 收尾批：同 R1b/R3 —— 裸 `console.log + return` ⇒ `t.skip()`（显式现形、不计 PASS）。
+    t.skip('[未取材] 本机无 asr-worker 进程 ⇒ 直接腿无从取材（不计 PASS）');
+    return;
+  }
   assert.equal(typeof m.workerPidsByProcessScan, 'function',
     'workerPidsByProcessScan 必须导出——否则本判据无法直接咬住「摘掉进程扫描」的变异');
   const scanned = m.workerPidsByProcessScan();

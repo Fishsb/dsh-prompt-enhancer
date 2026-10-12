@@ -247,7 +247,13 @@ async function main() {
     // placeholder「选择一个工作区开始」）——此时 composer 槽位不渲染，插件按钮不会出现。
     // 本步只把页面推进到「可对话」态（点开工作区选择器），不改变任何被断言的内容。
     // 兼容：若本来就已经在对话页（enh-btn 已在），本步直接跳过。
-    const PREP_EXPR = "(function(){if(document.querySelector('.dsh-enh-btn'))return 'READY';var b=document.querySelectorAll('button');for(var i=0;i<b.length;i++){var t=(b[i].innerText||'').trim();if(/选择工作区|Select workspace|Choose workspace/i.test(t)){b[i].click();return 'PICKER_CLICKED';}}return 'WAIT';})()";
+    // ⚠ 2026-10-12 回修：原实现只匹配 innerText —— 但「选择工作区」**只在 WorkspaceChip 的 aria-label 上**
+    //   （官方 client.js:16104），该按钮 innerText 是**工作区显示名**（`:16118`）⇒ 在「已选工作区但仍在
+    //   选择态」的真选择页上连点都点不动，PREP 失效会把场面推给判别块。
+    //   ⇒ 改为按**可访问名（aria-label / title / innerText）**识别，中英文案集合对齐官方。
+    //   ⚠ 只扩大「识别」不扩大「点击面」：仍**只点可访问名确实指示工作区选择的那一个按钮**，
+    //     不放宽到「点任意按钮」、也不按位置点。
+    const PREP_EXPR = "(function(){if(document.querySelector('.dsh-enh-btn'))return 'READY';var b=document.querySelectorAll('button');for(var i=0;i<b.length;i++){var acc=((b[i].getAttribute('aria-label')||'')+' '+(b[i].title||'')+' '+(b[i].innerText||'')).toLowerCase();if(/选择工作区|choose workspace|select workspace/.test(acc)){b[i].click();return 'PICKER_CLICKED';}}return 'WAIT';})()";
     let prepped = await ev(PREP_EXPR);
     for (let i = 0; i < 10 && prepped === 'PICKER_CLICKED' && !(await ev("!!document.querySelector('.dsh-enh-btn')")); i++) {
       await sleep(800);
@@ -261,11 +267,32 @@ async function main() {
     //   避免把「装置没连上」报成「插件没挂载」（独立复验 §7.3 blocker 1）。
     let mountDetail = 'composer 槽位已渲染';
     if (!mounted) {
-      const pageDiag = await ev("(function(){var b=document.body;return JSON.stringify({href:location.href,title:document.title,txt:(b?(b.innerText||''):'').replace(/\\s+/g,' ').slice(0,160),hasCE:document.querySelectorAll('[contenteditable]').length,hasBtn:document.querySelectorAll('button').length});})()");
+      // 判别输入采集（装置层）。⚠ 2026-10-12 回修：**必须读可访问名（aria-label / title）**——
+      //   DSH 官方库把「选择工作区」只写在 WorkspaceChip 的 aria-label 上
+      //   （dsh-client-ui-conversation/lib/client.js:16104 `"aria-label": t("hero.chooseWorkspace")`），
+      //   而该按钮的 innerText 是**工作区显示名**（`:16118 children: label ?? t("hero.chooseWorkspace")`）⇒
+      //   在「已选工作区（chip 显示名字）但页面仍停在选择态」这个**最可能的真选择页形态**下，
+      //   只匹配 innerText 会漏判 ⇒ 把装置问题报成 ③「疑似产品问题」（正是本回修要治的缺陷的镜像）。
+      //   inert 优先取 DSH 自己的状态标记 `data-phase="inert"`（client.js:16286 定义），placeholder 仅作兜底。
+      const pageDiag = await ev("(function(){var b=document.body;var c=document.querySelector('[data-composer-input]');var ph=c?(c.getAttribute('data-placeholder')||''):'';var ib=!!document.querySelector('[data-composer-input][data-phase=\"inert\"]')||/选择一个工作区开始|Choose a workspace to start/i.test(ph);var bs=document.querySelectorAll('button');var pb=false;for(var i=0;i<bs.length;i++){var acc=((bs[i].getAttribute('aria-label')||'')+' '+(bs[i].title||'')+' '+(bs[i].innerText||'')).toLowerCase();if(/选择工作区|choose workspace|select workspace/.test(acc)){pb=true;break;}}return JSON.stringify({href:location.href,title:document.title,txt:(b?(b.innerText||''):'').replace(/\\s+/g,' ').slice(0,160),hasCE:document.querySelectorAll('[contenteditable]').length,hasBtn:bs.length,inert:ib,pickerBtn:pb,phase:(c?(c.getAttribute('data-phase')||''):'')});})()");
       let d = {}; try { d = JSON.parse(String(pageDiag)); } catch { /* ignore */ }
       const txt = String(d.txt || '');
       const isAuthPage = pre.status === 401 || /authentication required|reopen the URL printed/i.test(txt);
-      const isPicker = /选择工作区|Select workspace|Choose workspace|选择一个工作区开始/i.test(txt);
+      // ── ②PICKER：**结构位判据**（2026-10-12 收紧，替代原「body.innerText 前 160 字符」文本匹配）──
+      // 必须**同时**满足：① composer 处于「未就绪」结构态（优先 `data-phase="inert"`；兜底比对
+      // placeholder，中英两串都已对齐官方文案）；② 页面上确实存在「选择工作区」按钮——**按可访问名识别**
+      // （aria-label / title / innerText 三者任一命中即可），不再只看 innerText。
+      // 为什么必须收紧：旧实现只看 innerText —— 若**已进对话页**（真产品故障：插件未挂载）而首屏恰好含
+      // 「选择工作区」字样，会被归成②并写「非产品问题」⇒ **把产品故障报成装置问题**（与本回修目的相反）。
+      // 为什么不会漏判真 picker：真 picker 页恰是「composer inert + 选择器按钮」并存（本机实测的形态）。
+      // 为什么结构位拿不到时归③：**有意的保守取向** —— 结构位为假即不判②，宁可把真 picker 疑成产品
+      // （多一次人工判读），也不可把真产品故障放过；反向误判才是会掩盖故障的那种。
+      const isPicker = d.inert === true && d.pickerBtn === true;
+      // 文案兜底提示：文本像 picker 但结构位不支持 ⇒ 显式写出「按结构位归③」的理由，便于人工判读。
+      const textHintsPicker = /选择工作区|Select workspace|Choose workspace|选择一个工作区开始/i.test(txt);
+      const pickerDowngradeNote = (!isPicker && textHintsPicker)
+        ? '［注意：首屏文本含「选择工作区」字样，但结构位（composer inert=' + String(d.inert === true) + ' + 选择器按钮=' + String(d.pickerBtn === true) + '）不支持 ⇒ 按保守取向归③，请重点排查产品/装配］'
+        : '';
       // ⚠ 第三类必须再分「装置根本连不上」与「连上了但插件没挂载」——
       //   否则错端口/服务未启动会被误报成「疑似产品问题」，与本次回修的目的正相反。
       const isUnreachable = pre.status === 0;
@@ -275,16 +302,17 @@ async function main() {
         : isUnreachable
           ? '①b装置不可达（服务未启动/端口错/被拦截，非产品问题）：首页探测 ' + (pre.err || 'status=0') + ' href=' + d.href + ' title=' + JSON.stringify(d.title) + ' 首屏=' + JSON.stringify(txt.slice(0, 80))
           : isPicker
-            ? '②装置停在「工作区选择页」（自动选择未生效）：href=' + d.href + ' title=' + JSON.stringify(d.title) + ' 首屏=' + JSON.stringify(txt.slice(0, 80))
-            : '③已进入页面但插件未挂载（疑似产品/装配问题）：href=' + d.href + ' title=' + JSON.stringify(d.title) + ' 首屏=' + JSON.stringify(txt.slice(0, 80)) + ' contenteditable=' + d.hasCE + ' button=' + d.hasBtn;
+            ? '②装置停在「工作区选择页」（自动选择未生效，非产品问题）：结构位 composer[data-phase=' + JSON.stringify(String(d.phase)) + ']=inert 且存在「选择工作区」按钮；href=' + d.href + ' title=' + JSON.stringify(d.title)
+            : '③已进入页面但插件未挂载（**疑似**产品/装配问题，须结合上方 href/title/首屏与计数判读——本文案不能单独定案）：结构位 composer 未处于 inert 相位、未见「选择工作区」按钮；href=' + d.href + ' title=' + JSON.stringify(d.title) + ' 首屏=' + JSON.stringify(txt.slice(0, 80)) + ' contenteditable=' + d.hasCE + ' button=' + d.hasBtn + pickerDowngradeNote;
       mountDetail = label;
       console.log('   [判别] class=' + cls + ' status=' + pre.status + ' href=' + d.href);
       console.log('   [判别] title=' + JSON.stringify(d.title) + ' 首屏=' + JSON.stringify(txt.slice(0, 120)));
       console.log('   [判别] contenteditable=' + d.hasCE + ' button=' + d.hasBtn);
+      console.log('   [判别] 结构位 inert=' + String(d.inert === true) + ' pickerBtn=' + String(d.pickerBtn === true) + ' composerPhase=' + JSON.stringify(String(d.phase || '')));
       if (authBlocked || isAuthPage) console.log('   [判别] ⇒ 属①：装置没连上（未认证）。请按上文提示带 token 运行。');
       else if (isUnreachable) console.log('   [判别] ⇒ 属①b：装置不可达（检查 DSH web 是否启动 / --url 端口是否正确）。');
       else if (isPicker) console.log('   [判别] ⇒ 属②：装置仍在工作区选择页（非产品问题）。');
-      else console.log('   [判别] ⇒ 属③：页面已进入但插件未挂载 —— 这才需要怀疑产品/装配。');
+      else console.log('   [判别] ⇒ 属③：页面已进入但插件未挂载 —— 这才需要怀疑产品/装配。' + pickerDowngradeNote);
     }
     ok('plugin-mounted', mounted === true, mountDetail);
     if (!mounted) throw new Error('no plugin');

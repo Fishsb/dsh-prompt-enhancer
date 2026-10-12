@@ -204,19 +204,78 @@ test('P5-09 gate --json 的 summary 与 RING 行同源（计数不得与行面�
  *    于是「状态列」与「自报文本」会互相矛盾，这就是不依赖被污染通道的那条腿。
  *  `SKIP\s*[1-9]` 刻意只认 **非零** 计数：真仓 PASS 环的自报里就带「SKIP 0」（arch-claims）
  *  与「无 SKIP」（cards），按字样全局 grep 会把 PASS 误判为未判全（P5-08 已栽过一次）。 */
-const SELF_DECLARES_NOT_PASS = /未判全|退化位|SKIP\s*[1-9]/;
+/** 「未判/跳过」的**强措辞**：明确说"没判上"，无歧义，与计数无关。 */
+const UNJUDGED_STRONG = /未判全|退化位/;
+/** 语言宽容的「跳过/未判」词干（中英、大小写）。 */
+const UNJUDGED_STEM = '(?:SKIP|skip|Skipped|skipped|跳过|未判)';
+/** 词干与计数之间允许的**分隔/跨字**成分：分隔符（`:`/`：`/`=`）、量词（项/项数/个）、
+ *  以及中文**时态助词**（`了`/`过`）。⚠ 后两者是 2026-10-12 谓词回修补的：旧式只认
+ *  `[:：=]|项|项数|个`，于是 `跳过了 2 项`（词干与计数被「了」隔开）**漏咬**（复验 3 · D1）。
+ *  ⚠ 该组**刻意不含数字**：故 `跳过 0 项，另跳过 2 项` 的第一处匹配停在 `0`，不会跨子句吞到后面的计数。 */
+const UNJUDGED_GAP = '(?:[:：=]|项|项数|个|了|过)?';
+/** 词干后紧跟**非零**计数 ⇒ 声明了未判/跳过（源串；求值时**全局扫描**，见下）。
+ *  ⚠ 严格锚定在词干之后：`SKIP 0 · 在册未达 3` 取到的是 **0**（不是 3）⇒ 真 PASS 自报不误判。 */
+const UNJUDGED_COUNTED_SRC = UNJUDGED_STEM + '\\s*' + UNJUDGED_GAP + '\\s*(\\d+)';
+/** 否定式提及：`无 SKIP` / `不含 SKIP` / `零 SKIP` / `无需 SKIP` / `未跳过…` **不是**"声明未判"。
+ *  ⚠ 2026-10-12 谓词回修：词表补 **`未` / `无需` / `不用`**（复验 3 · D8「无需 SKIP」误判）。
+ *  ⚠ **不误剥正向声明的交互（必须实测自证，见 P5-10d）**：
+ *    · `未判全` 由 `UNJUDGED_STRONG` **在剥否定之前**先行命中 ⇒ 不受影响；
+ *    · `未判 2 项` 里 `未` 后接的是 `判`（词干为 `跳过|未判|SKIP|…`，`判` 本身不匹配任何词干）
+ *      ⇒ **不会被误剥**（实测：仍为 true）。 */
+const UNJUDGED_NEGATED = new RegExp('(?:无|不含|零|没有|无需|不用|未|no|without|not)\\s*' + UNJUDGED_STEM, 'gi');
+/** 裸英文 `SKIP`（**后面不跟数字**、且未被否定）才算声明未判 —— 只对英文词干启用；
+ *  中文裸 `跳过`/`未判` **刻意不纳入**（与 `未跳过任何判据`/`未判明` 一类真 PASS 措辞歧义，见「无法安全纳入」清单）。
+ *  ⚠ 负面前瞻 `(?!\s*(?:[-+]\s*)?\d)` 同时排除两类：
+ *    · **带符号异常计数**（复验 3 · D7 `SKIP -1`）——`-1`/`+1` 不是合法"跳过 n 项"读数；
+ *    · **已被计数式覆盖的 `SKIP 0`** ——这正是「裸 SKIP」的定义（**不带计数**）。
+ *      ⇒ 有了它，`SKIP 0 · 在册未达 3` 永远不会被裸英文支重新咬成 true（真 PASS 不误伤），
+ *        同时**不遮挡同一句里另一个真正的裸 `SKIP`**（旧式 `exec` 早退做不到）。 */
+const UNJUDGED_BARE_EN = /(?:\bSKIP\b|\bskip\b)(?!\s*(?:[-+]\s*)?\d)/;
+
+/** 环自报文本是否声明了「没判上」（未判全 / 退化位 / 带非零计数的跳过·未判 / 裸 SKIP）。
+ *
+ *  为什么需要收窄（复验 2 · blocker 1 / V4 实测）：旧谓词 `/未判全|退化位|SKIP\s*[1-9]/` 对
+ *  `SKIP`（无数字）/ `跳过 2` / `skip 2` / `未判 2 项` **四种写法全部放行** ⇒ 交叉判据的鉴别力
+ *  被绑死在"被守卫方自己写的那几个词"上。现改为**词干 + 非零计数**的语言宽容式，并逐条保住
+ *  「不误伤真 PASS 自报」的三条自证（见 P5-10 ③ 与 P5-10c）。
+ *
+ *  ⚠ 2026-10-12 谓词回修（复验 3 · 31 条对抗性用例挖出 6 处不符），逐条对应三条根因：
+ *   · **根因 1（系统性漏咬）**：旧式用 `exec()` **只取首个匹配** ⇒ 复合句里"先出现的 0"
+ *     把后面的正向声明整个压掉（D4 `未跳过 0 项，跳过 3 项` / D5 `跳过 0 项，另跳过 2 项` /
+ *     D6 `skip 0, then skip 2` 全部漏咬）。**现改为全局扫描、任一非零即真**。
+ *     真 PASS 不误伤靠两重保障：① 循环只认**非零**；② 裸英文支带**数字否前瞻**，
+ *     故 `SKIP 0` 既不会被计数支认成正向、也不会被裸英文支重新咬住。
+ *   · **根因 2（否定词缺失/跨字）**：否定词表补 `未|无需|不用`；词干与计数之间允许
+ *     `了|过`（D1 `跳过了 2 项`）。⚠ 关键交互已实测（P5-10d）：`未判全` 由强措辞先命中、
+ *     `未判 2 项` 不匹配任何否定式 ⇒ 二者**不被误剥**。
+ *   · **根因 3（负计数）**：裸英文支加 `[-+]` 排除（D7）。 */
+function selfDeclaresNotPass(s) {
+  let t = String(s == null ? '' : s);
+  if (UNJUDGED_STRONG.test(t)) return true;
+  // 先剥掉「否定式提及」，再判剩下的（否则 `无 SKIP 但有跳过 2` 会被否定前缀整体吞掉）
+  t = t.replace(UNJUDGED_NEGATED, ' ');
+  // 根因 1 修复：**全局扫描**全部「词干+计数」匹配，任一为正值即真（不再只看首个）。
+  const re = new RegExp(UNJUDGED_COUNTED_SRC, 'gi');
+  let m;
+  while ((m = re.exec(t)) !== null) {
+    if (Number(m[1]) > 0) return true;
+    if (m.index === re.lastIndex) re.lastIndex += 1;   // 防零宽匹配死循环
+  }
+  // 计数支无正向 ⇒ 再看**不带计数**的裸 SKIP（数字否前瞻保证 `SKIP 0` 不会落到这里被重咬）
+  return UNJUDGED_BARE_EN.test(t);
+}
 
 test('P5-10 三态语义【交叉判据】：环自报文本与状态列必须互相印证（SKIP 不得被印成 PASS）', () => {
   const r = run(GATE, ['--json']);
   const j = JSON.parse(r.stdout);
   const selfReport = (x) => String(x.summary || '');
-  const declared = j.rings.filter((x) => SELF_DECLARES_NOT_PASS.test(selfReport(x)));
+  const declared = j.rings.filter((x) => selfDeclaresNotPass(selfReport(x)));
   const statusSkips = j.rings.filter((x) => x.status === 'SKIP');
 
   // ── ① 交叉断言（核心·抓原始病最直接形态）────────────────────────────────
-  //   环自报里声明了「未判全 / 退化位 / SKIP n>0」（内容派生），其状态列**不得**为 PASS。
+  //   环自报里声明了「未判全 / 退化位 / 跳过 n>0」（内容派生），其状态列**不得**为 PASS。
   //   出口把 SKIP 翻成 PASS 时，这条必红（自报不动、状态列被动）。
-  const lied = j.rings.filter((x) => x.status === 'PASS' && SELF_DECLARES_NOT_PASS.test(selfReport(x)));
+  const lied = j.rings.filter((x) => x.status === 'PASS' && selfDeclaresNotPass(selfReport(x)));
   assert.deepEqual(lied.map((x) => x.id), [],
     '环自报里声明了「未判全/SKIP」，状态列却印成 PASS ⇒ 契约出口把 SKIP 翻成了 PASS（原始病）：'
     + JSON.stringify(lied.map((x) => x.id + ' → ' + selfReport(x))));
@@ -237,11 +296,12 @@ test('P5-10 三态语义【交叉判据】：环自报文本与状态列必须�
 
   // ── ③ 判别力自证：本判据的谓词必须真能咬住真 SKIP 自报、且不误伤 PASS 自报 ──
   //   （没有这一条，② 的「空集」可能是谓词恒假的产物 —— 那与本契约要治的假绿同族。）
-  assert.ok(SELF_DECLARES_NOT_PASS.test('环自报：未判全：断言 11 · SKIP 2（未判：A-2）'),
+  assert.ok(selfDeclaresNotPass('环自报：未判全：断言 11 · SKIP 2（未判：A-2）'),
     '谓词必须能识别真 SKIP 自报（取自真仓 cards 环形态 B 的真实 summary）');
-  assert.ok(!SELF_DECLARES_NOT_PASS.test('环自报：断言 37 通过 · 冲突 0 · SKIP 0 · 在册未达 3 · 在册缺陷 0'),
-    '「SKIP 0」是真 PASS 自报（arch-claims），谓词不得误判其为未判全');
-  assert.ok(!SELF_DECLARES_NOT_PASS.test('环自报：判据全过（无 SKIP、读侧干净）：断言 13 通过 · 冲突 0 · 真判 3/3'),
+  assert.ok(!selfDeclaresNotPass('环自报：断言 37 通过 · 冲突 0 · SKIP 0 · 在册未达 3 · 在册缺陷 0'),
+    '「SKIP 0」是真 PASS 自报（arch-claims），谓词不得误判其为未判全'
+    + '（⚠ 注意「SKIP 0 · 在册未达 3」中含其它非零数字，不得被它们带偏）');
+  assert.ok(!selfDeclaresNotPass('环自报：判据全过（无 SKIP、读侧干净）：断言 13 通过 · 冲突 0 · 真判 3/3'),
     '「无 SKIP」是真 PASS 自报（cards 形态 A），谓词不得误判');
 
   // ── ④ 保留原覆盖：verdict 与状态列自洽（不是核心，但不得丢）──────────────
@@ -252,6 +312,207 @@ test('P5-10 三态语义【交叉判据】：环自报文本与状态列必须�
     assert.equal(j.summary.verdict, 'NOT_FULLY_JUDGED', '有 SKIP 且无 FAIL 时 verdict 必须是 NOT_FULLY_JUDGED');
   } else {
     assert.equal(j.summary.verdict, 'ALL_PASS', '无 FAIL 无 SKIP 时 verdict 必须是 ALL_PASS');
+  }
+});
+
+test('P5-10c 【收窄自证】四类漏判写法必须被咬住；其余真 PASS 自报不得被误伤', () => {
+  // 复验 2 · blocker 1 / V4 的验收点：这四种写法旧谓词**全部放行**（实测 false），现必须**全部为真**。
+  const MUST_CATCH = [
+    ['裸 SKIP（不带数字）', '环自报：SKIP（未判：A-2）'],
+    ['中文「跳过 2」', '环自报：跳过 2 个判据'],
+    ['英文小写「skip 2」', '环自报：skip 2'],
+    ['「未判 2 项」', '环自报：未判 2 项'],
+  ];
+  for (const [label, text] of MUST_CATCH) {
+    assert.ok(selfDeclaresNotPass(text), '必须咬住 ' + label + '：' + JSON.stringify(text));
+  }
+  // 反向：真 PASS 自报（真仓五环的**真实** summary 全文）一律不得误伤
+  const MUST_NOT_CATCH = [
+    ['dead-code', '环自报：R1–R4 全过'],
+    ['rpc', '环自报：34 条线上方法一致 / schema 17 / 具名申报 17 / 0 孤儿 / 文档 100% 覆盖'],
+    ['prompts', '环自报：生成区与 skills/enhance 下的 md 源逐字一致（19 个常量，零漂移）'],
+    ['arch-claims', '环自报：断言 37 通过 · 冲突 0 · SKIP 0 · 在册未达 3 · 在册缺陷 0'],
+    ['cards(形态A)', '环自报：判据全过（无 SKIP、读侧干净）：断言 13 通过 · 冲突 0 · 真判 3/3'],
+    ['退化位对照（非 PASS 语义）: 无 SKIP 但有跳过 2', '环自报：无 SKIP 但有跳过 2'],
+  ];
+  // ⚠ 最后一条是**混合形态**（否定式提及 + 正向声明）：必须先剥否定再判，结果应为 true。
+  //    单独列出以免与上面「不得误伤」混为一谈 —— 这里期望 true。
+  assert.ok(selfDeclaresNotPass(MUST_NOT_CATCH[5][1]),
+    '混合形态（「无 SKIP 但有跳过 2」）必须判为声明未判（剥否定后仍有正向声明）');
+  for (const [label, text] of MUST_NOT_CATCH.slice(0, 5)) {
+    assert.ok(!selfDeclaresNotPass(text), '真 PASS 自报不得误伤（' + label + '）：' + JSON.stringify(text));
+  }
+  // 计数边界：0 与 >0
+  assert.ok(!selfDeclaresNotPass('环自报：跳过 0 项'), '「跳过 0」= 真 PASS 语义，不得判为未判');
+  assert.ok(selfDeclaresNotPass('环自报：skipped 1'), '「skipped 1」应判为未判');
+});
+
+test('P5-10d 【对抗性回归】D1–D11 逐条钉住（复验 3 挖出的 6 处不符，含本席与复验席判定不同处）', () => {
+  // ── 2026-10-12 谓词回修：把复验 3 的 31 条对抗性用例里点名的 D1–D11 **固化成断言** ──────
+  //   目的：这类「措辞覆盖不全」的窟窿今后由自动化抓住，不再靠下一轮人工对抗性测试。
+  //   期望值由本席判定并给依据；与复验席不一致的**逐条显式标注**（见 D3 / D7）。
+  const table = [
+    // [id, 文本, 期望, 依据]
+    ['D1', '环自报：跳过了 2 项', true,
+      '★复验席挖出的漏咬（「了」把词干与计数隔开）。语义上确实"跳过了 2 项" ⇒ 必须咬。已修：GAP 纳入 了/过。'],
+    ['D2', '环自报：已跳过 3 个判据', true,
+      '正向声明带非零计数 ⇒ 咬（改前已 true，回归保持）。'],
+    ['D3', '环自报：跳过 2 / 未跳过 2', true,
+      '⚠ **本席判定与复验席不同**（复验席期望 false）。理由见本用例末尾 D3 专项论证：'
+      + '该句含正向子句「跳过 2」= 契约要治的确切形态；为它引入「同句否定撤销正向」会连带把'
+      + '「跳过 3 项；未跳过 1 项」（真实跳过了 3）也判 false ⇒ **把 fail-loud 误判换成 fail-silent 漏咬**，'
+      + '与本契约要治的假绿同族。真 PASS 保障由 P5-10 ②「SKIP 集合与自报声明集合逐项一致」+ '
+      + '强措辞「未判全/退化位」承担（真 SKIP 环的自报里必有其一）。'],
+    ['D4', '环自报：未跳过 0 项，跳过 3 项', true,
+      '★系统性漏咬（exec 只取首个匹配，「先出现 0」压掉后面的 3）。已修：全局扫描取任一正向。'],
+    ['D5', '环自报：跳过 0 项，另跳过 2 项', true,
+      '★同上（复合句）。已修：全局扫描。'],
+    ['D6', '环自报：skip 0, then skip 2', true,
+      '★同上（英文复合句）。已修：全局扫描。'],
+    ['D7', '环自报：SKIP -1', false,
+      '⚠ **本席判定与复验席一致**（期望不咬）：负计数是**异常输入**，非合法「跳过 n 项」读数。'
+      + '已修：裸英文支加 (?!\\s*(?:[-+]\\s*)?\\d)。'],
+    ['D8', '环自报：无需 SKIP', false,
+      '★否定词表缺「无需」⇒ 误判。已修：否定词表补 未/无需/不用。'],
+    ['D9', '环自报：skip', true,
+      '裸英文 SKIP = 声明未判（设计如此，本仓里当且仅当表示 SKIP 态）。'],
+    ['D10a', '环自报：skipped=3', true, '分隔符/大小写宽容有效（= 号）。'],
+    ['D10b', '环自报：SKIP: 2', true, '冒号分隔。'],
+    ['D10c', '环自报：Skipped 4 items', true, '大小写 + 量词宽容。'],
+    ['D11', '环自报：skip 2.5', true, '小数计数仍取非零真值（2.5 ⇒ 取到 2）。'],
+    // 本席补充：真 PASS 侧不得被新增规则误伤（尤其全局扫描 + 裸英文新前瞻）
+    ['X1', '环自报：断言 37 通过 · 冲突 0 · SKIP 0 · 在册未达 3 · 在册缺陷 0', false,
+      '真 PASS：全句有计数但全为 0，且裸英文支被数字否前瞻挡住 ⇒ 不得被「3」带偏。'],
+    ['X2', '环自报：判据全过（无 SKIP、读侧干净）', false, '真 PASS：否定式提及。'],
+    ['X3', '环自报：未跳过任何判据', false, '真 PASS：否定前缀 + 裸中文词干不纳入。'],
+    ['X4', '环自报：SKIP +2', false, '带符号计数同属异常输入（与 D7 同族，本席补充）。'],
+    ['X5', '环自报：SKIP 0 · 另 SKIP', true,
+      '本席补充：同一句里「SKIP 0」不得**遮蔽**另一个真正的裸 SKIP（全局扫描 + 数字否前瞻的组合效果）。'],
+  ];
+  for (const [id, text, expect, why] of table) {
+    assert.equal(selfDeclaresNotPass(text), expect,
+      '对抗性用例 ' + id + ' 判定不符（期望 ' + expect + '）：' + JSON.stringify(text) + '｜依据：' + why);
+  }
+
+  // ── D3 专项论证（本席判定与复验席不同处，写清算式而非只写结论）──────────────────
+  //   复验席期望 false 的隐含规则是「同句后出现的否定可撤回前面的正向」。本席实测该规则的代价：
+  assert.equal(selfDeclaresNotPass('环自报：跳过 3 项；未跳过 1 项'), true,
+    'D3 论证：含正向子句「跳过 3 项」的真实形态必须**咬**（若为 false 即漏咬）'
+    + ' ⇒ 可见「同句否定撤销正向」会误伤此形态，故本席不采纳该规则。');
+  assert.equal(selfDeclaresNotPass('环自报：未跳过 1 项；跳过 3 项'), true,
+    'D3 论证（正向在后同样成立）：否定在前的复合句不得把后面的正向吞掉。');
+  //   反向确认：**纯否定**句仍必须不咬（否则否定剥离形同虚设）
+  assert.equal(selfDeclaresNotPass('环自报：未跳过任何判据'), false,
+    'D3 论证的另一面：纯否定句不得被咬（否则否定剥离失效）。');
+});
+
+test('P5-10e 【§2.2 关键交互自证】补「未」进否定词表后，三条正向措辞必须**不被误剥**', () => {
+  // ── 为什么单列：2.2 把 `未` 加进否定前缀（为修 D8「无需 SKIP」），带**误剥风险** ──────
+  //   风险链：`未` 命中否定前缀 ⇒ 吞掉其后的词干 ⇒ 正向声明被剥掉 ⇒ 漏咬。
+  //   本席不能只靠推演（任务书明确要求实测自证）。三条逐一实测：
+  //   ① `未判 2 项`：`未` 后接 `判`，而词干是 `跳过|未判|SKIP|…` —— `判` 单独不匹配任何词干
+  //      ⇒ 否定式 `(?:…|未)\s*(?:跳过|未判|SKIP…)` 需要 `未` **紧跟**词干才命中；
+  //      这里 `未判` 整体就是词干本身 ⇒ 不被误剥。
+  //   ② `未判全`：由 `UNJUDGED_STRONG` 在**剥否定之前**先行命中 ⇒ 与否定表无关。
+  //   ③ `未跳过任何判据`：`未` + 词干 `跳过` **正确命中**否定 ⇒ 剥掉 ⇒ 判 false（期望如此）。
+  assert.equal(selfDeclaresNotPass('环自报：未判 2 项'), true,
+    '关键交互①：「未判 2 项」必须**仍被咬**（不得因新增「未」否定词而误剥）');
+  assert.equal(selfDeclaresNotPass('环自报：未判全：断言 11 · SKIP 2（未判：A-2）'), true,
+    '关键交互②：「未判全」必须**仍被咬**（强措辞在剥否定前先命中）');
+  assert.equal(selfDeclaresNotPass('环自报：未跳过任何判据'), false,
+    '关键交互③：「未跳过任何判据」必须**仍不被咬**（否定剥离需正常生效）');
+  // 补充：否定词新增项各自生效（`无需`/`不用`），避免只修 D8 一处字面
+  assert.equal(selfDeclaresNotPass('环自报：无需 SKIP'), false, '「无需 SKIP」不得被咬（D8）');
+  assert.equal(selfDeclaresNotPass('环自报：不用 SKIP'), false, '「不用 SKIP」同族，不得被咬');
+  assert.equal(selfDeclaresNotPass('环自报：没有 SKIP'), false, '既有否定词「没有」仍生效（回归）');
+  // 反向：否定式**只**该剥紧跟的那个词干，不得把同句另一个正向声明一起剥掉
+  assert.equal(selfDeclaresNotPass('环自报：无 SKIP 但有跳过 2'), true,
+    '回归（既有 MUST_NOT_CATCH 混合形态）：剥否定后仍须咬住另一个正向声明');
+});
+
+test('P5-10b 措辞纪律（原 P5-10 第 2 条·等价强度补回）：有环未判时，**非 --json 的给人看的面**不得说「环 PASS/无 SKIP/全过」', (t) => {
+  // ── 2026-10-12 收尾批：补回**被真删**的那条断言 ──────────────────────────────
+  //   出处（修复前 efb3e8e 的 P5-10，逐字）：
+  //     `assert.ok(!/环 PASS/.test(r.stdout) || !/无 SKIP/.test(r.stdout), '有 SKIP 时不得出现「全过」措辞')`
+  //   改写 P5-10 为交叉判据时它被真删，且全仓 test/ 无等价物（复验 2 §1.7③ 查实）。
+  //   本用例以**等价强度**补回，并修掉原写法的两处弱点：
+  //     ① 原来靠 `r.stdout`（P5-10 跑的是 `--json`，那面里 `环 PASS` 根本不会出现）⇒ 原断言
+  //        在 `--json` 形态下几乎恒真。**现改为看非 --json 的给人看的面**（`环 PASS`/`无 SKIP`
+  //        只在那里出现），断言才对得准目标文案；
+  //     ② 原来内联在 P5-10 的 `if (skips.length)` 里 ⇒ 形态 A 下整块不执行。**现独立成条**，
+  //        并按「有未判环 ⇒ 必须执行」的口径处置：形态 A 无未判环时**显式 t.skip 并说明**
+  //        （而不是静默通过），形态 B 真执行。
+  const r = run(GATE, []);              // 非 --json：这才是「给人看的面」
+  const j = run(GATE, ['--json']);
+  const ju = JSON.parse(j.stdout).summary.unjudged;
+  if (!ju.length) {
+    // 形态 A：本仓无未判环 ⇒ 该文案纪律**无可适用对象**。诚实记 SKIP（不静默绿），
+    // 并同时用夹具证明该断言**不是恒真**（见 P5-10b2）。
+    t.skip('本形态无未判环 ⇒ 「有环未判时不得说全过」无可适用对象（该形态下的判别力由 P5-10b2 夹具承担）');
+    return;
+  }
+  // 形态 B：真有未判环 ⇒ 原断言真执行
+  assert.equal(ju.length > 0, true, '（前置）本形态确有未判环，断言必须真执行');
+  assert.ok(!/环 PASS/.test(r.out) || !/无 SKIP/.test(r.out),
+    '有环未判时，给人看的面不得出现「环 PASS」/「无 SKIP」措辞（原 P5-10 第 2 条，等价补回）；实测含环 PASS=' 
+    + /环 PASS/.test(r.out) + ' 含无 SKIP=' + /无 SKIP/.test(r.out));
+  // 加固：未判全时更不得出现「全过」字样（N4 措辞面假绿同族）
+  assert.ok(!/[✓⏭→]{0,2}\s*门禁链全过/.test(r.out),
+    '有环未判时不得打印「门禁链全过」（实测 stdout 含该行 ⇒ 措辞面假绿）');
+});
+
+test('P5-10b2 【夹具·判别力自证】「有环未判却打印全过」必须报红（证明 P5-10b 不是恒真）', () => {
+  // 为什么要夹具：真仓形态 A 下「有未判环」这一前提不存在（P5-10b 走 SKIP），
+  // 若只靠真仓，该断言在本机永不执行 ⇒ 又变成「只在某形态才跑」的空转断言（复验席点名的病）。
+  // 故用夹具**确定地**造出「有 SKIP」形态，并把 gate.mjs 的文案改成**违规**（含「环 PASS」/「无 SKIP」），
+  // 断言该用例的口径**必须报红**。判别力若不成立，本用例自己就会红。
+  const tmp = buildFixture();
+  try {
+    const gatePath = path.join(tmp, 'scripts', 'gate.mjs');
+    let g = fs.readFileSync(gatePath, 'utf8');
+    // 注入违规文案：把「未判全」那条 else-if 的文案换成「环 PASS（无 SKIP）」——正是被禁措辞
+    const before = g;
+    g = g.replace(
+      "else if (nOf('SKIP')) console.log('⏭ 门禁链未判全：PASS ' + nOf('PASS') + ' · SKIP ' + nOf('SKIP') + '（有环未判，本条不记通过）');",
+      "else if (nOf('SKIP')) console.log('✓ 门禁链全过：' + nOf('PASS') + ' 环 PASS（无 SKIP）');",
+    );
+    assert.notEqual(g, before, '夹具注入点应存在（gate.mjs 的未判全文案行）');
+    fs.writeFileSync(gatePath, g, 'utf8');
+    // 把五环换成两个哨兵环：一 SKIP 一 PASS ⇒ 确定「有环未判」，且不触发治理根依赖
+    let g2 = fs.readFileSync(gatePath, 'utf8');
+    const s = g2.indexOf('const RINGS = [');
+    const e = g2.indexOf('];', s);
+    const ESC_N = String.fromCharCode(92) + 'n';
+    fs.writeFileSync(path.join(tmp, 'scripts', '_b2-skip.mjs'),
+      'process.stderr.write("RING-STATE b2skip SKIP 夹具：未判全：断言 1 · SKIP 1' + ESC_N + '");' + NL, 'utf8');
+    fs.writeFileSync(path.join(tmp, 'scripts', '_b2-pass.mjs'),
+      'process.stderr.write("RING-STATE b2pass PASS 夹具：R1–R4 全过' + ESC_N + '");' + NL, 'utf8');
+    const synthetic = ['const RINGS = [',
+      "  { id: 'b2skip', script: 'scripts/_b2-skip.mjs', args: [] },",
+      "  { id: 'b2pass', script: 'scripts/_b2-pass.mjs', args: [] },",
+      '];'].join(NL);
+    g2 = g2.slice(0, s) + synthetic + g2.slice(e + 2);
+    fs.writeFileSync(gatePath, g2, 'utf8');
+
+    const res = spawnSync(process.execPath, ['scripts/gate.mjs'], { cwd: tmp, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+    const out = String(res.stdout || '') + String(res.stderr || '');
+    const jsonRes = spawnSync(process.execPath, ['scripts/gate.mjs', '--json'], { cwd: tmp, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+    let jj = null; try { jj = JSON.parse(jsonRes.stdout); } catch { jj = null; }
+    assert.ok(jj, '夹具 --json 必须可 parse：\n' + String(jsonRes.stdout).slice(0, 300));
+    // 前置：夹具必须是「有环未判」
+    assert.ok(jj.summary.unjudged.length > 0, '夹具必须造出未判环，否则判别力自证无效');
+    // 核心：违规文案在场 ⇒ 与 P5-10b 同口径的断言**必须为假**（证明它不是恒真）
+    const violates = /环 PASS/.test(out) && /无 SKIP/.test(out);
+    assert.equal(violates, true,
+      '夹具注入的违规文案应同时含「环 PASS」与「无 SKIP」（否则夹具无效）:\n' + out.slice(-400));
+    assert.ok(!(/环 PASS/.test(out) && /无 SKIP/.test(out)) === false,
+      'P5-10b 的口径必须能判假 ⇒ 判别力成立（该表达式为假即报红）');
+    // 直接以 P5-10b 的原式断言一次：在违规形态下它必须是**假**（若为真说明判据恒真）
+    const p510bExpr = !/环 PASS/.test(out) || !/无 SKIP/.test(out);
+    assert.equal(p510bExpr, false,
+      'P5-10b 的原式在该违规形态下必须为 false（若为 true ⇒ 判据恒真、无判别力）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
