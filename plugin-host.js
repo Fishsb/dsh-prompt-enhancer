@@ -1103,9 +1103,23 @@ const V2_ROUNDS_SCAN_MAX = 10;
 // 旧值 5s 看门狗 + 3s 探测会把「慢但健康」模型误判不可达并冻结 30s（增强直调
 // llm.stream 无宿主 retryPolicy(always) 兜底）——本组放宽对齐实测；
 // 探测失败缓存缩至 5s 免整链冻僵。
-const WATCHDOG_TIMEOUT_MS = 15000;
+// P0-c（2026-10-12 · 看门狗按实测 TTFT 重算 + 探针短化）：
+// 读数依据（本文件上方 v3.3.3 注释自载，本机实测）：链1 completions/deepseek-v4-flash TTFT 2.8s、
+// 链2 responses-proxy/muse-spark TTFT 9.3s ⇒ 首字延迟上界 ≈ 9.3s。
+// 取值规则（可复算，非手感）：WATCHDOG_TIMEOUT_MS = 实测 TTFT 上界 × 2（抖动/排队余量），进位到秒。
+//   = 9300ms × 2 = 18.6s → 19s。原 15s 仅在 1.6× 上界，慢模型仍有误杀面；
+//   而 3×（27.9s）会撞上默认主预算 30s，使看门狗永远来不及先于预算触发（= 看门狗失效）——
+//   故 2× 是本约束下的可取值。
+// ⚠ 放宽不得掩盖真挂死：调用点另按「距总预算剩余时间」钳制（watchMs = min(本值, 剩余预算)），
+//   故真无响应仍会在总超时处被砍（详见 enhance-handlers 的 watchMs 计算）。
+const WATCHDOG_TTFT_MAX_MEASURED_MS = 9300;
+const WATCHDOG_MARGIN = 2;
+const WATCHDOG_TIMEOUT_MS = Math.ceil((WATCHDOG_TTFT_MAX_MEASURED_MS * WATCHDOG_MARGIN) / 1000) * 1000;
+// 探针超时仍按同一实测上界留余量：短探针的耗时 ≈ TTFT（不再等 800 词长文），12s 覆盖 9.3s 上界。
 const PROBE_TIMEOUT_MS = 12000;
-const PROBE_CACHE_TTL_MS = 5000;
+// P0-c：探针结果缓存 TTL 5s → 30s——短探针虽已廉价，但同一路由的通/不通不会在 30s 内翻转，
+// 延长 TTL 减少重复探测（旧值让整链在同一轮内被反复重探）。
+const PROBE_CACHE_TTL_MS = 30000;
 // 2026-08-18（用户需求）：会话历史显式内容提取上限 1200 → 2400（覆盖长回复/表格，避免截断显式内容）
 const V2_MSG_TEXT_MAX = 2400;
 const V2_WORKSPACE_TIMEOUT_MS = 2000;
@@ -1408,6 +1422,92 @@ function cleanOutput(raw, originalText) {
   }
   return s;
 }
+// P0-b（2026-10-12 · 超时预算错位）：主超时预算的**单一事实源**——此前该公式只长在
+// enhanceStageAnalyze 里（state.timeoutMs 在 analyze 之后才可知，故计时器只能挂在准备阶段之后，
+// 准备阶段的 5 处辅助调用不受预算保护）。抽出后 handler 可在 runEnhanceStages('analyze') 之前
+// 先算出预算并挂计时器，prepare 因此纳入同一预算。
+// 语义与旧实现逐项一致：timeoutMs<=0（用户设置无限制）→ 0；链含 reasoningEffort → 放宽至 ≥120s。
+// P0-a（2026-10-12 · 补退避重试）：退避延迟纯计算——算法与官方 dsh-llm-retry `localDelay`
+// 逐式一致（exponential = min(initial * 2^(retry-1), max)；jitter = 1 - j + 2*j*rand；
+// delay = min(exponential * jitter, max)）。
+// ⚠ 结构口径（2026-10-12 独立复核 blocker 修正）：官方 `providerRetryPolicy(provider)` 返回的是
+// **平铺**的 ResolvedRetryPolicy——实测 `resolveRetryPolicy(undefined)` →
+// `{mode,maxRetries,retryableCodes,initialDelayMs:500,maxDelayMs:10000,jitterRatio:0.1}`，**没有 backoff 子对象**。
+// 旧实现读 policy.backoff.* 恒取 undefined ⇒ 恒落下方兜底常量（等于「硬编码」，与主机文要求相悖）；
+// 现直接读平铺字段。兜底仅用于**策略字段缺失**的防御（正常路径全部来自官方已解析策略）。
+// 纯函数（注入 random），PURE 区段契约不变。
+function computeBackoffDelayMs(policy, retry, random) {
+  const b = policy && typeof policy === 'object' ? policy : {};
+  const initial = typeof b.initialDelayMs === 'number' && Number.isFinite(b.initialDelayMs) && b.initialDelayMs > 0 ? b.initialDelayMs : 500;
+  const max = typeof b.maxDelayMs === 'number' && Number.isFinite(b.maxDelayMs) && b.maxDelayMs > 0 ? b.maxDelayMs : 10000;
+  const jitterRatio = typeof b.jitterRatio === 'number' && Number.isFinite(b.jitterRatio) ? Math.max(0, Math.min(1, b.jitterRatio)) : 0.1;
+  const rand = typeof random === 'function' ? random() : Math.random();
+  const exponent = Math.min(Math.max(1, retry) - 1, 1024);
+  const exponential = Math.min(initial * Math.pow(2, exponent), max);
+  const jitter = 1 - jitterRatio + 2 * jitterRatio * rand;
+  return Math.min(exponential * jitter, max);
+}
+
+// P0-a：该 failure 是否属于策略声明的可重试码（码集同样**从策略取**，不照抄常量）。
+// mode='always' 视为一律可重试（官方语义）。
+function isRetryableFailure(policy, failure) {
+  if (!policy || typeof policy !== 'object') return false;
+  if (policy.mode === 'always') return true;
+  if (policy.mode !== 'normal') return false;
+  const code = failure && failure.code ? String(failure.code) : '';
+  if (code === '') return false;
+  return Array.isArray(policy.retryableCodes) && policy.retryableCodes.includes(code);
+}
+
+// P0-b 修正（2026-10-12 · 独立复核 high）：准备阶段纳入预算，但**生成额度不得被侵蚀**。
+// 口径：总预算 = 生成额度（resolveEnhanceTimeoutMs，语义与旧实现逐项一致）＋ 准备额度（本函数）。
+// 准备额度 = 该模式下**可能串行发生**的辅助调用超时之和的上限（即主机文要求的
+// 「辅助调用的独立超时并入同一预算」——把各自的独立超时合成一个上限，而非让它们各自在预算外叠加）。
+// 由此：① 准备阶段首次被真正限界（旧实现完全不受主预算约束）；② 生成阶段仍拿满原来的 timeoutMs
+//（准备最多吃掉自己的额度）⇒ 「原来能过的慢模型/长草稿」不会因本项变成过不去。
+// 纯函数（入参皆为声明数据，不读 manifest/module 状态）。
+// ⚠ 超时表由**调用方传入**（不在此直接引用常量）：RELEVANCE_TIMEOUT_MS 在 PURE 区段内定义于
+// 本函数之后，直接引用会触发 const 暂时性死区（实测 ReferenceError → enhance 请求挂起）。
+function resolvePrepareBudgetMs(row, sources, T) {
+  const src = Array.isArray(sources) ? sources : [];
+  const kind = row && typeof row.kind === 'string' ? row.kind : 'none';
+  const windows = row && Array.isArray(row.windows) ? row.windows.length : 0;
+  const t = T && typeof T === 'object' ? T : {};
+  const rel = typeof t.relevanceMs === 'number' ? t.relevanceMs : 0;
+  const eventsMs = typeof t.eventsMs === 'number' ? t.eventsMs : 0;
+  const wsMs = typeof t.workspaceMs === 'number' ? t.workspaceMs : 0;
+  const progressMs = typeof t.progressMs === 'number' ? t.progressMs : 0;
+  const webPlanMs = typeof t.webPlanMs === 'number' ? t.webPlanMs : 0;
+  const webSearchMs = typeof t.webSearchMs === 'number' ? t.webSearchMs : 0;
+  const webMax = typeof t.webSearchMaxResults === 'number' ? t.webSearchMaxResults : 0;
+  if (kind === 'rounds') {
+    let ms = eventsMs;                       // fetchSessionHistory（会话历史提取）
+    ms += windows * rel;                     // 逐窗口 judgeRelevance（命中即停，此为上限）
+    if (src.indexOf('workspace') !== -1) {
+      ms += rel;                             // judgeDevIntent（开发意向判定）
+      ms += rel;                             // analyzeDocsRelevance（文档/项目地图分析）
+      ms += wsMs * 2;                        // 文档 / 代码两次工作区扫描
+    }
+    return ms;
+  }
+  if (kind === 'v2') {
+    let ms = progressMs;                     // 阶段 A 任务分析（v2ResolveProgress）
+    ms += eventsMs;                          // 会话事件检索
+    ms += webPlanMs;                         // planWebSearch（检索主题规划）
+    ms += webSearchMs * webMax;              // 逐主题网络检索
+    ms += wsMs;                              // 工作区扫描
+    return ms;
+  }
+  return 0;                                  // base/none：准备阶段无辅助 LLM 调用
+}
+
+function resolveEnhanceTimeoutMs(cfg, chain) {
+  const base = cfg && typeof cfg.timeoutMs === 'number' ? cfg.timeoutMs : 0;
+  if (base <= 0) return 0;
+  const hasEffort = Array.isArray(chain) && chain.some((e) => e && e.reasoningEffort);
+  return hasEffort ? Math.max(base, 120000) : base;
+}
+
 function friendlyMessage(failure) {
   const code = failure && failure.code ? failure.code : 'LLM_FAILED';
   switch (code) {
@@ -1418,6 +1518,8 @@ function friendlyMessage(failure) {
     case 'CONTEXT_WINDOW_EXCEEDED': return 'input exceeds context window';
     case 'EMPTY_RESPONSE': return 'model returned an empty response';
     case 'OUTPUT_TOO_LONG': return 'optimization exceeds length limit';
+    // P0-e（2026-10-12）：max-tokens 截断的真实文案（旧实现落 EMPTY_RESPONSE，文案不符）
+    case 'OUTPUT_TRUNCATED': return 'output reached the length limit and was truncated';
     case 'TIMEOUT': return 'request timed out, original text restored';
     case 'ABORTED': return 'request cancelled';
     case 'NO_MODEL': return 'no model configured, add models in settings';
@@ -1652,6 +1754,13 @@ async function collectStream(iterator, outputLimit, onFirst) {
   }
   if (finish.kind === 'error') {
     return { kind: 'error', failure: finish.failure };
+  }
+  // P0-e（2026-10-12·长草稿失败主因，结论已复核）：max-tokens 是官方合法 finish kind
+  // （@deepseek-ai/dsh-llm types.d.ts FinishReasonMap: 'max-tokens'）；旧实现无此分支，
+  // 落到下方兜底 → 误报 EMPTY_RESPONSE，报错文案与真实原因完全不符。
+  // 返回**可区分** kind（maxtokens）+ 真实 failure 码（OUTPUT_TRUNCATED），并保留已收文本。
+  if (finish.kind === 'max-tokens') {
+    return { kind: 'maxtokens', text: sawDelta ? text : blockTexts.join(''), failure: { code: 'OUTPUT_TRUNCATED', message: 'output reached the length limit and was truncated' } };
   }
   return { kind: 'error', failure: { code: 'EMPTY_RESPONSE', message: 'stream ended without a finish chunk' } };
 }
@@ -2094,12 +2203,15 @@ async function pingStream(llmService, entry, ref) {
       provider: entry.provider,
       model: entry.model,
       ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
-      maxTokens: 1200,
-      system: 'You are a connectivity probe. Write a continuous plain-paragraph essay of about 800 words on any topic. Do not use markdown, headings, lists or bullet points; just plain flowing text.',
+      // P0-c（2026-10-12 · 探针反噬修复）：原探针要求真写 ~800 词长文（maxTokens 1200），
+      // 每条 12s、成本极高且失败会反噬整链。探测目标是**可达性**，只需观察到 TTFT；
+      // 改短探针（单个词 + maxTokens 16）：TTFT 即结论，成本 ~1/60。
+      maxTokens: 16,
+      system: 'You are a connectivity probe. Reply with the single word OK and nothing else.',
       messages: [{
         id: 'enhance-ping',
         role: 'user',
-        content: [{ type: 'text', text: 'Write a continuous plain-paragraph essay of about 800 words on a topic of your choice. No headings, no lists — plain flowing prose only.' }],
+        content: [{ type: 'text', text: 'Reply with the single word OK.' }],
         source: { kind: 'user' },
       }],
     });
@@ -2590,14 +2702,93 @@ function parseSearchPlan(raw) {
 
 const V2_WORKSPACE_IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.venv', 'venv', '__pycache__', '.next', '.cache', 'coverage', 'target', '.idea', '.vscode']);
 
+// P0-b 修正（2026-10-12 · 第三轮 · 独立复核 blocker）：非 LLM 等待（sessionQuery / fs / web.search）
+// 的超时此前一律是「只置标志位」，而 `await` 会一直等到该调用自己返回 ⇒ 慢调用可越过自己的
+// 钳后超时、吃掉总预算并侵蚀生成额度（复核实测：readSurface 慢 23s/24s/30s ⇒ 改后 TIMEOUT、
+// genCalls=0，HEAD 为 ok:true）。此处把 LLM 腿的 startHelperAbort 语义推广为**同一套** race+dispose：
+//   · 到点 → 置标志 + **立即以超时结算**（调用方按降级继续，不再等底层返回）；
+//   · 到点后底层 promise 迟到 settle → `.then(noop, noop)` 吞掉，**不产生 unhandledRejection**；
+//   · dispose() → 清 timer，并吞掉最终 settle（幂等，可重复调用）。
+// ⚠ 与 LLM 腿的差异（如实声明）：LLM 腿可经 `iterator.return()` 通知官方适配器停止产出；
+//   sessionQuery/fs/web 的公开签名**不接受 AbortSignal**（dsh-tool-cordis api-catalog：
+//   `readSurface(sessionId)` / `listEvents(sessionId)` / `filterEvents(sessionId, filters)` 均无 signal），
+//   故这里只能做到「**不等它**」——底层工作是否真正释放由宿主实现决定，本层无法保证（见测试内边界注记）。
+function startWaitAbort(timerSvc, ms) {
+  let fired = false;
+  let settled = false;
+  let fireTimer = null;
+  let settle = null;
+  const work = [];
+  const gate = new Promise((resolve) => { settle = resolve; });
+  const fire = () => {
+    if (settled) return;
+    fired = true;
+    settled = true;
+    try { settle({ timedOut: true }); } catch (e) { /* 忽略 */ }
+    // 到点后底层迟到 settle：吞掉，防 unhandledRejection
+    for (const p of work) {
+      if (p && typeof p.then === 'function') { try { p.then(noop, noop); } catch (e) { /* 忽略 */ } }
+    }
+  };
+  const noop = () => {};
+  const n = typeof ms === 'number' && Number.isFinite(ms) ? Math.max(0, ms) : 0;
+  if (n > 0 && timerSvc && typeof timerSvc.timeout === 'function') {
+    fireTimer = timerSvc.timeout(fire, n);
+  } else {
+    fire();  // 预算已耗尽 / 无 timer 服务 → 立即超时（调用方直接走降级）
+  }
+  return {
+    timedOut: () => fired,
+    // 把底层 promise 纳入「迟到吞掉」集合后 race；早于闸门 settle 则返回其真值。
+    race: (p) => {
+      if (p && typeof p.then === 'function') {
+        work.push(p);
+        if (fired) { try { p.then(noop, noop); } catch (e) { /* 忽略 */ } }
+      }
+      return Promise.race([p, gate]);
+    },
+    dispose: () => {
+      try { if (fireTimer) fireTimer(); } catch (e) { /* 忽略 */ }
+      settled = true;
+    },
+  };
+}
+
 // 阶段 A：任务进度理解（表驱动 phaseA：none 跳过 / rule 正则 / llm 智能（失败降级 rule）/ memory 读记忆对）
 // 返回值：{ progress, mode }；mode: 'smart'|'rule'|'memory'|'none'
 async function v2ResolveProgress(services, historyText, cfg) {
+  // P0-d（2026-10-12 · 独立复核 medium）：本函数是 5 处辅助 LLM 调用之一，原先失败**只写 hlog**
+  // （用户侧零痕迹），且不接 state/rec。现经 services.onDegrade 回调把降级回传到 enhance handler。
+  const degrade = (kind) => {
+    if (services && typeof services.onDegrade === 'function') {
+      try { services.onDegrade('v2progress-' + kind); } catch (e) { /* 忽略 */ }
+    }
+  };
   const row = MODE_TABLE[cfg.mode] || MODE_TABLE[DEFAULT_MODE];
   if (row.phaseA === 'llm' && services.llm && services.chain && services.chain.length > 0 && historyText.trim() !== '') {
     const entry = services.chain[0];
     let timedOut = false;
-    const timer = services.timer.timeout(() => { timedOut = true; }, V2_PROGRESS_TIMEOUT_MS);
+    // P0-b（2026-10-12 · 辅助调用并入同一预算）：自身 15s 超时钳到剩余主预算内
+    // （services.budgetDeadline 由 enhance handler 传入；未设预算 → Infinity，行为不变）。
+    const remainMs = (typeof services.budgetDeadline === 'number')
+      ? Math.max(0, services.budgetDeadline - Date.now())
+      : Infinity;
+    const progressTimeoutMs = remainMs === Infinity ? V2_PROGRESS_TIMEOUT_MS : Math.max(0, Math.min(V2_PROGRESS_TIMEOUT_MS, remainMs));
+    // P0-b 修正（2026-10-12 · 独立复核 blocker）：超时到点须**真正中止**该辅助流，
+    // 否则慢但健康的辅助会跑过自己的钳后超时、侵蚀生成额度（见 enhance-handlers.js startHelperAbort 注释）。
+    let abortIterator = null;
+    let settleTimeout = null;
+    const timeoutGate = new Promise((resolve) => { settleTimeout = resolve; });
+    const fireAbort = () => {
+      timedOut = true;
+      if (abortIterator && typeof abortIterator.return === 'function') {
+        try { abortIterator.return(); } catch (e) { /* 忽略 */ }
+      }
+      try { settleTimeout({ kind: 'aborted', aborted: true }); } catch (e) { /* 忽略 */ }
+    };
+    const timer = progressTimeoutMs > 0
+      ? services.timer.timeout(fireAbort, progressTimeoutMs)
+      : (fireAbort(), () => {});
     try {
       const stream = services.llm.stream({
         provider: entry.provider,
@@ -2613,21 +2804,39 @@ async function v2ResolveProgress(services, historyText, cfg) {
         }],
       });
       const iterator = stream[Symbol.asyncIterator]();
-      const result = await collectStream(iterator, V2_PROGRESS_OUTPUT_LIMIT);
+      abortIterator = iterator;
+      if (timedOut) fireAbort();
+      const collectP = collectStream(iterator, V2_PROGRESS_OUTPUT_LIMIT);
+      collectP.catch(() => { /* 超时闸先结算时 collectP 可能随后 reject */ });
+      const result = await Promise.race([collectP, timeoutGate]);
+      // P0-e（消费点 1/6）：max-tokens 现返回可区分 kind 'maxtokens'；阶段 A 任务分析
+      // **按原样透传**（非 ok 一律走降级日志/规则兜底）——显式声明，不静默沿用旧兜底。
       if (!timedOut && result.kind === 'ok') {
         const parsed = parseTaskProgress(result.text);
         if (parsed) {
           hlog('[enhance] v2 smart progress ok');
           return { progress: parsed, mode: 'smart' };
         }
+        degrade('bad-json');
         hlog('[enhance] v2 smart progress bad-json');
       } else {
-        hlog('[enhance] v2 smart progress ' + (timedOut ? 'timeout' : 'empty'));
+        // 独立复审 low（2026-10-12）：finish.kind==='error'（如 SERVER/QUOTA）此前落进 'empty'，
+        // 诊断标签失准会误导排查方向——按真实 kind 分流，并带上 failure code。
+        const why = timedOut ? 'timeout'
+          : (result.kind === 'maxtokens' ? 'truncated'
+          : (result.kind === 'error' ? ('error-' + String((result.failure && result.failure.code) || 'unknown'))
+          : (result.kind === 'aborted' || result.kind === 'cancelled' ? String(result.kind) : 'empty')));
+        degrade(why);
+        hlog('[enhance] v2 smart progress ' + why);
       }
     } catch (e) {
+      degrade('failed');
       hlog('[enhance] v2 smart progress failed', e && e.message ? e.message : e);
     } finally {
-      timer();
+      try { timer(); } catch (e) { /* 忽略 */ }
+      if (abortIterator && typeof abortIterator.return === 'function') {
+        try { abortIterator.return(); } catch (e) { /* 忽略 */ }
+      }
     }
   }
   // rule 规则提取（零成本；无历史时返回空 focus）——phaseA: rule / llm 降级 / memory 无记忆时兜底
@@ -2649,25 +2858,30 @@ async function v2SearchWorkspace(services, keywords, cfg) {
   const lim = resolveScanLimit(cfg.mode, cfg.context.budgetChars);
   const depth = lim.depth;
   const maxFiles = lim.maxFiles;
-  let aborted = false;
-  const timer = services.timer.timeout(() => { aborted = true; }, V2_WORKSPACE_TIMEOUT_MS);
+  // P0-b 修正（第三轮）：标志位 → race+dispose（超时即不再等；到点后迟到 settle 被吞）
+  const waitAbort = startWaitAbort(services.timer, V2_WORKSPACE_TIMEOUT_MS);
+  const abortedFn = () => waitAbort.timedOut();
   try {
     let rootTarget;
     try {
-      rootTarget = await fsSvc.resolve(root);
+      const rootRes = await waitAbort.race(fsSvc.resolve(root));
+      if (waitAbort.timedOut()) { hlog('[enhance] v2 workspace resolve-root timeout'); return []; }
+      rootTarget = rootRes;
     } catch (e) {
       hlog('[enhance] v2 workspace resolve-root failed', e && e.message ? e.message : e);
       return [];
     }
     const files = [];
     const walk = async (target, rel, level) => {
-      if (aborted || files.length >= SCAN_FILE_LIST_MAX || level > depth) return;
+      if (abortedFn() || files.length >= SCAN_FILE_LIST_MAX || level > depth) return;
       let entries;
       try {
-        entries = await fsSvc.listDir(target);
+        // P0-b 修正（第三轮）：目录列举纳入同一 race（超时即不再等待该目录）
+        entries = await waitAbort.race(fsSvc.listDir(target));
+        if (waitAbort.timedOut()) return;
       } catch (e) { return; }
       for (const en of entries || []) {
-        if (aborted) return;
+        if (abortedFn()) return;
         const name = en && en.name;
         if (!name) continue;
         if (V2_WORKSPACE_IGNORE_DIRS.has(name)) continue;
@@ -2680,7 +2894,7 @@ async function v2SearchWorkspace(services, keywords, cfg) {
       }
     };
     await walk(rootTarget, '', 1);
-    if (aborted) { hlog('[enhance] v2 workspace scan timeout'); return []; }
+    if (abortedFn()) { hlog('[enhance] v2 workspace scan timeout'); return []; }
     hlog('[enhance] v2 workspace scanned files=' + files.length);
     // 名称匹配 → 候选；v2.7.0：名称 0 命中时内容兜底（中文场景名称匹配几乎必然落空——
     // 中文关键词 vs 英文文件名；降级取前 N 个文本文件按内容关键词命中，救活
@@ -2698,13 +2912,16 @@ async function v2SearchWorkspace(services, keywords, cfg) {
       const contentScored = [];
       let scanned = 0;
       for (const rel of docFirst) {
-        if (aborted || scanned >= CONTENT_FALLBACK_SCAN) break;
+        if (abortedFn() || scanned >= CONTENT_FALLBACK_SCAN) break;
         if (!textRe.test(rel) || shouldIgnoreFile(rel)) continue;
         scanned++;
         let text = '';
         try {
-          const target = await fsSvc.resolve(rel, { cwd: root });
-          text = await fsSvc.readText(target);
+          // P0-b 修正（第三轮）：内容兜底读取纳入同一 race（超时即中止本轮扫描）
+          const tgtRes = await waitAbort.race(fsSvc.resolve(rel, { cwd: root }));
+          if (waitAbort.timedOut()) break;
+          text = await waitAbort.race(fsSvc.readText(tgtRes));
+          if (waitAbort.timedOut()) break;
         } catch (e) { continue; } // 只读权限/读取失败 → 跳过该文件
         const lines = text.split('\n');
         let contentHits = 0;
@@ -2726,12 +2943,15 @@ async function v2SearchWorkspace(services, keywords, cfg) {
     // 内容命中加分 → 排序 Top-maxFiles
     const scored = [];
     for (const rel of candidates) {
-      if (aborted) break;
+      if (abortedFn()) break;
       if (shouldIgnoreFile(rel)) continue;
       let text = '';
       try {
-        const target = await fsSvc.resolve(rel, { cwd: root });
-        text = await fsSvc.readText(target);
+        // P0-b 修正（第三轮）：候选文件读取纳入同一 race
+        const tgtRes = await waitAbort.race(fsSvc.resolve(rel, { cwd: root }));
+        if (waitAbort.timedOut()) break;
+        text = await waitAbort.race(fsSvc.readText(tgtRes));
+        if (waitAbort.timedOut()) break;
       } catch (e) { continue; } // 只读权限/读取失败 → 跳过该文件
       const lines = text.split('\n');
       let contentHits = 0;
@@ -2750,7 +2970,7 @@ async function v2SearchWorkspace(services, keywords, cfg) {
     const top = scored.slice(0, maxFiles);
     return top.map((f) => ({ path: f.path, snippet: snippetFromLines(f.lines, keywords, SNIPPET_BUDGET) }));
   } finally {
-    timer();
+    waitAbort.dispose();
   }
 }
 
@@ -2766,11 +2986,11 @@ async function v2SearchEvents(services, sessionId, keywords, cfg) {
     return [];
   }
   // v3.0p 审查（超时/耗时匹配）：searchEvents 补超时保护（10s，超时/失败 → [] 不阻断）
-  let timedOut = false;
-  const timer = services.timer.timeout(() => { timedOut = true; }, V2_SEARCH_EVENTS_TIMEOUT_MS);
+  // P0-b 修正（第三轮）：标志位 → race+dispose（超时即不再等；到点后迟到 settle 被吞）
+  const waitAbort = startWaitAbort(services.timer, V2_SEARCH_EVENTS_TIMEOUT_MS);
   try {
-    const page = await sq.searchEvents({ sessionId, query: kws.join(' '), limit: 3 });
-    if (timedOut) { hlog('[enhance] v2 searchEvents timeout'); return []; }
+    const page = await waitAbort.race(sq.searchEvents({ sessionId, query: kws.join(' '), limit: 3 }));
+    if (waitAbort.timedOut()) { hlog('[enhance] v2 searchEvents timeout'); return []; }
     const hits = page && Array.isArray(page.items) ? page.items : [];
     hlog('[enhance] v2 searchEvents kws=' + JSON.stringify(kws) + ' hits=' + hits.length);
     if (hits.length === 0) return [];
@@ -2782,7 +3002,7 @@ async function v2SearchEvents(services, sessionId, keywords, cfg) {
     hlog('[enhance] v2 searchEvents failed', e && e.message ? e.message : e);
     return []; // 服务缺失/请求形状不符/失败 → 跳过事件段
   } finally {
-    timer();
+    waitAbort.dispose();
   }
 }
 
@@ -2808,31 +3028,38 @@ async function buildV2ContextBlock(services, sessionId, text, cfg, onStage) {
     let historyText = '';
     const sq = services.sessionQuery;
     if (sq && typeof sq.listEvents === 'function' && typeof sq.filterEvents === 'function') {
+      // P0-b 修正（2026-10-12 · 第三轮）：publish 路径的历史读取同样统一到 race+dispose
+      // （此前与 fetchSessionHistory 同形：只置标志位、await 会一直等到调用返回）。
+      const waitHist = startWaitAbort(services.timer, V2_SEARCH_EVENTS_TIMEOUT_MS);
       try {
         mark(STAGE_HISTORY);
         // v3.1.3（用户需求·仅结论参考）：同 v3 路径——readSurface 块级结论提取，旧路径兜底
         if (typeof sq.readSurface === 'function') {
-          const surface = await sq.readSurface(sessionId);
-          events = extractHistoryConclusions(surface && surface.events);
+          const surface = await waitHist.race(sq.readSurface(sessionId));
+          if (waitHist.timedOut()) { hlog('[enhance] v2 history timeout'); }
+          if (!waitHist.timedOut()) events = extractHistoryConclusions(surface && surface.events);
         } else {
-          const records = await sq.listEvents(sessionId);
+          const records = await waitHist.race(sq.listEvents(sessionId));
+          if (waitHist.timedOut()) { hlog('[enhance] v2 history timeout'); }
           // 尾部反向找最近的消息事件 seq（listEvents 升序，无文本；seq 用于 filterEvents 范围过滤）
           const msgSeqs = [];
-          for (let i = records.length - 1; i >= 0 && msgSeqs.length < V2_MSG_SEQ_SCAN; i--) {
+          for (let i = (waitHist.timedOut() ? 0 : records.length - 1); i >= 0 && msgSeqs.length < V2_MSG_SEQ_SCAN; i--) {
             const r = records[i];
             const t = String(r && r.type || '');
             if (t === 'user/message' || t === 'assistant/message') msgSeqs.push(r && r.seq);
           }
           if (msgSeqs.length > 0) {
             const minSeq = msgSeqs[msgSeqs.length - 1];
-            const docs = await sq.filterEvents(sessionId, [{ kind: 'seq', from: minSeq }]);
-            events = extractHistory(docs, V2_HISTORY_LIMIT);
+            const docs = await waitHist.race(sq.filterEvents(sessionId, [{ kind: 'seq', from: minSeq }]));
+            if (!waitHist.timedOut()) events = extractHistory(docs, V2_HISTORY_LIMIT);
           }
         }
         historyText = events.map((e) => (e.type === 'user' ? '[用户] ' : '[助手] ') + e.text).join('\n');
         hlog('[enhance] v2 history events=' + events.length + ' chars=' + historyText.length + (typeof sq.readSurface === 'function' ? ' conclusion-only' : ''));
       } catch (e) {
         hlog('[enhance] v2 history failed', e && e.message ? e.message : e);
+      } finally {
+        waitHist.dispose();
       }
     } else {
       hlog('[enhance] v2 sessionQuery unavailable');
@@ -2884,11 +3111,11 @@ async function buildV2ContextBlock(services, sessionId, text, cfg, onStage) {
           }
           // v3.0r（细粒度进度反馈）：逐主题搜索进度（detailKey=search，client 渲染「正在搜索 i/n：query」）
           mark(STAGE_FILES, { key: 'search', args: { query }, step: qi + 1, total: queries.length });
-          let timedOut = false;
-          const timer = services.timer.timeout(() => { timedOut = true; }, WEB_SEARCH_TIMEOUT_MS);
+          // P0-b 修正（第三轮）：标志位 → race+dispose（超时即不再等该主题；迟到 settle 被吞）
+          const waitAbort = startWaitAbort(services.timer, WEB_SEARCH_TIMEOUT_MS);
           try {
-            const res = await web.search({ query, maxResults: WEB_SEARCH_MAX_RESULTS });
-            if (!timedOut && res && Array.isArray(res.sources) && res.sources.length > 0) {
+            const res = await waitAbort.race(web.search({ query, maxResults: WEB_SEARCH_MAX_RESULTS }));
+            if (!waitAbort.timedOut() && res && Array.isArray(res.sources) && res.sources.length > 0) {
               const lines = res.sources.slice(0, WEB_SEARCH_MAX_RESULTS).map((s) => {
                 const title = s && s.title ? String(s.title) : '';
                 const url = s && s.url ? String(s.url) : '';
@@ -2899,12 +3126,12 @@ async function buildV2ContextBlock(services, sessionId, text, cfg, onStage) {
               memoParts.push('『' + query + '』：' + res.sources.slice(0, 2).map((s) => String(s && s.title || '') + (s && s.summary ? '——' + String(s.summary).slice(0, 60) : '')).join('；'));
               topicLogs.push({ query, hits: res.sources.length });
             } else {
-              topicLogs.push({ query, hits: timedOut ? -2 : 0 });
+              topicLogs.push({ query, hits: waitAbort.timedOut() ? -2 : 0 });
             }
           } catch (e) {
             topicLogs.push({ query, hits: -1 });
           } finally {
-            timer();
+            waitAbort.dispose();
           }
         }
         const refText = refParts.join('\n\n');
@@ -3560,8 +3787,115 @@ return {
         step: rec.step || 0,
         total: rec.total || 0,
         elapsedMs: rec.startedAt ? Date.now() - rec.startedAt : 0,
+        // P0-d：降级清单（辅助调用失败 → 结果在「半瞎」状态生成，用户须可见）
+        degraded: Array.isArray(rec.degraded) ? rec.degraded.slice() : [],
+        // 复审 medium ⑦ 的配套：重试与降级分通道——重试次数单独暴露（可观测），
+        // 混进 degraded 会把「重试后成功」误标成「部分上下文不可用」。
+        retries: Array.isArray(rec.retries) ? rec.retries.slice() : [],
       };
     });
+
+    // P0-d（2026-10-12 · 让降级可见）：辅助调用失败此前只写 hlog（环形日志），用户侧零痕迹 ⇒
+    // 用户不知道增强结果是在「半瞎」状态下生成的。此处把每次降级登记到 rec.degraded（去重、可枚举），
+    // 经 enhance/progress 暴露给 UI，并随最终 result 一并回传（结果态可见）。
+    function markDegraded(state, kind) {
+      if (!state || !state.rec) return;
+      const rec = state.rec;
+      if (!Array.isArray(rec.degraded)) rec.degraded = [];
+      const k = String(kind || 'unknown');
+      if (rec.degraded.indexOf(k) === -1) rec.degraded.push(k);
+    }
+
+    // P0-a（2026-10-12 · 补退避重试）：取官方**已解析**的重试策略——按主机文要求**不得硬编码**退避参数，
+    // 必须调 ctx.llm.providerRetryPolicy(provider) 取官方解析好的策略再执行（可重试码集同样从策略取）。
+    // 旧宿主/未注册路由/服务缺该 API → 返回 null（调用方不重试，行为回到「只尝试一次」）。
+    function retryPolicyFor(provider) {
+      if (llm === undefined || typeof llm.providerRetryPolicy !== 'function') return null;
+      try {
+        const pol = llm.providerRetryPolicy(provider);
+        return pol && typeof pol === 'object' ? pol : null;
+      } catch (e) {
+        hlog('[enhance] providerRetryPolicy failed provider=' + provider + ' ' + (e && e.message ? e.message : e));
+        return null;
+      }
+    }
+
+    // P0-a：`always` 模式下官方策略无 maxRetries（不设限）——插件侧安全上限，防无限制组合下不收敛。
+    const RETRY_ALWAYS_SAFETY_CAP = 5;
+
+    // P0-a：可中断退避睡眠（经 ctx.timer，宿主销毁即随 fiber 释放；不用裸 setTimeout）。
+    // 0/负延迟 → 立即返回；timer 服务异常 → 退化为不等待（重试仍会进行，不会挂死）。
+    async function sleepMs(ms) {
+      const d = Number(ms);
+      if (!Number.isFinite(d) || d <= 0) return;
+      try {
+        // ctx.timer.timeout(callback, delay)：回调式 API（disposer 返回），包成 Promise 等待一次。
+        await new Promise((resolve) => {
+          try {
+            ctx.timer.timeout(() => resolve(), d);
+          } catch (e) { resolve(); }
+        });
+      } catch (e) { /* 上下文销毁 → 直接继续（由 rec.cancelled/timedOut 兜底） */ }
+    }
+
+    // P0-b（2026-10-12 · 辅助调用并入同一预算）：返回距主预算还余多少毫秒；未设预算 → Infinity。
+    // 调用点据此把各辅助调用自己的 10–15s 超时**钳到剩余预算内**，并使预算耗尽时直接跳过
+    // （记录降级，不阻断主流程）——准备阶段由此纳入主预算，而非各自为政。
+    function remainingBudgetMs(state) {
+      const dl = state && typeof state.budgetDeadline === 'number' ? state.budgetDeadline : null;
+      if (dl === null) return Infinity;
+      return Math.max(0, dl - Date.now());
+    }
+    function helperTimeoutMs(state, baseMs) {
+      const remain = remainingBudgetMs(state);
+      if (remain === Infinity) return baseMs;
+      return Math.max(0, Math.min(baseMs, remain));
+    }
+    // 预算是否已耗尽（辅助调用直接跳过 + 记降级）
+    function budgetExhausted(state) {
+      return remainingBudgetMs(state) <= 0;
+    }
+
+    // P0-b 修正（2026-10-12 · 独立复核 blocker）：辅助调用超时必须**真正中断其流**。
+    // 原实现只把 timedOut 置 true，而 `await collectStream(iterator, …)` 会一直等到流自己结束
+    // ⇒ 慢但健康的辅助会跑过自己的钳后超时（实测 20s 钳制下仍跑到 23–24s），
+    // 从而越过 prepareBudgetMs 侵蚀 genTimeoutMs —— 复现实测：辅助 23s/24s 时生成 genCalls=0、
+    // 整体 TIMEOUT（HEAD 同场景 ok:true）——正是 P0-b 自述要防的「拆东墙」。
+    // 现改为：超时到点即 `iterator.return()` 中止流 + **立即以超时结算**（绝不等待流自然结束）。
+    // 实现为一个可 race 的「超时闸」：闸开 → 中止迭代器 + 以 {kind:'aborted'} 结算。
+    // 返回 { timedOut(), attach(iterator), race(collectPromise), dispose() }。
+    function startHelperAbort(state, baseMs) {
+      const ms = helperTimeoutMs(state, baseMs);
+      let fired = false;
+      let iterator = null;
+      let fireTimer = null;
+      let settle = null;
+      const abortIterator = () => {
+        // 真中断：迭代器 return()（官方 AsyncIterable 契约）——底层适配器随即停止产出
+        if (iterator && typeof iterator.return === 'function') {
+          try { iterator.return(); } catch (e) { /* 忽略 */ }
+        }
+      };
+      // 超时闸：到点 → 置标志 + 中止流 + 让 race 以 aborted 结算（不再等流自然结束）
+      const gate = new Promise((resolve) => { settle = resolve; });
+      if (ms > 0) {
+        fireTimer = ctx.timer.timeout(() => {
+          fired = true;
+          abortIterator();
+          try { settle({ kind: 'aborted', aborted: true }); } catch (e) { /* 忽略 */ }
+        }, ms);
+      } else {
+        // 预算已耗尽 → 立即超时（调用点会据此跳过并记降级）
+        fired = true;
+        try { settle({ kind: 'aborted', aborted: true }); } catch (e) { /* 忽略 */ }
+      }
+      return {
+        timedOut: () => fired,
+        attach: (it) => { iterator = it; if (fired) abortIterator(); },
+        race: (collectPromise) => Promise.race([collectPromise, gate]),
+        dispose: () => { try { if (fireTimer) fireTimer(); } catch (e) { /* 忽略 */ } abortIterator(); },
+      };
+    }
 
     // v3.0r（细粒度进度反馈）：写进度详情（stage/detailKey/detailArgs/step/total）
     function setProgress(rec, stage, key, args, step, total) {
@@ -3656,7 +3990,9 @@ return {
       // v2.7.0 曾 publish 强制超时 ≥240s / maxTokens=0 / outputLimit=0（规格长文不截断）；
       // 2026-08-18（用户指令）取消强制——publish 三项参数可调（默认档 60s/4k/16k 按实测覆盖）
       // v3.1.7（用户需求·超时无限制）：cfg.timeoutMs=0（无限制）不被 effort 放宽覆盖——保持 0 不挂超时
-      state.timeoutMs = cfg.timeoutMs > 0 ? (chain.some((e) => e && e.reasoningEffort) ? Math.max(cfg.timeoutMs, 120000) : cfg.timeoutMs) : 0;
+      // P0-b（2026-10-12 · 单一事实源）：公式抽出为 resolveEnhanceTimeoutMs（pure.js），
+      // 与 enhance handler 在准备阶段之前挂计时器时用的是**同一个函数**——杜绝两处漂移。
+      state.timeoutMs = resolveEnhanceTimeoutMs(cfg, chain);
       state.maxTokens = cfg.maxTokens;
       state.outputLimit = cfg.outputLimit;
       return state;
@@ -3664,34 +4000,40 @@ return {
 
     // ---- stage: retrieve——V2 上下文构建 / 检索 ----
     // ---- v3.0：会话历史提取（listEvents/filterEvents → extractHistory；失败/不可用 → []）----
-    async function fetchSessionHistory(sessionId) {
+    async function fetchSessionHistory(sessionId, state) {
       const sq = ctx.get('sessionQuery');
       if (!sq || typeof sq.listEvents !== 'function' || typeof sq.filterEvents !== 'function') return [];
       // v3.0p 审查（超时/耗时匹配）：会话历史提取补超时保护（10s，超时/失败 → [] 不阻断）
-      let histTimedOut = false;
-      const histTimer = ctx.timer.timeout(() => { histTimedOut = true; }, V2_SEARCH_EVENTS_TIMEOUT_MS);
+      // P0-b 修正（2026-10-12 · 第三轮 · 独立复核 blocker）：原先 histTimer **只置标志位**，
+      // 而 `await sq.readSurface(...)` / `await sq.listEvents(...)` 会一直等到调用自己返回
+      // ⇒ 慢的会话读取可越过钳后超时、吃掉总预算并侵蚀生成额度（复核实测：readSurface 23s/24s/30s
+      // ⇒ 改后 TIMEOUT、genCalls=0，HEAD 为 ok:true）。
+      // 现统一到 startWaitAbort（race + dispose，机制与 LLM 腿的 startHelperAbort 同源）：
+      // 超时即**不再等待**该调用，并按上游「超时 → 跳过检索段」语义返回 []，同时登记降级。
+      const waitAbort = startWaitAbort(ctx.timer, V2_SEARCH_EVENTS_TIMEOUT_MS);
       try {
         // v3.1.3（用户需求·仅结论参考）：优先 readSurface（完整事件，保留 content 块结构）
         // → 结论提取（仅 text 块，丢弃思考/工具调用/系统注入）；旧 listEvents+filterEvents
         // 路径的文档文本为预拼接语义文本（含工具参数），仅作 readSurface 缺失时的兜底。
         if (typeof sq.readSurface === 'function') {
-          const surface = await sq.readSurface(sessionId);
-          if (histTimedOut) { hlog('[enhance] v3 history timeout'); return []; }
+          const surface = await waitAbort.race(sq.readSurface(sessionId));
+          if (waitAbort.timedOut()) { markDegraded(state, 'history-timeout'); hlog('[enhance] v3 history timeout'); return []; }
           const events = extractHistoryConclusions(surface && surface.events);
           hlog('[enhance] v3 history events=' + events.length + ' conclusion-only');
           return events;
         }
-        const records = await sq.listEvents(sessionId);
+        const records = await waitAbort.race(sq.listEvents(sessionId));
+        if (waitAbort.timedOut()) { markDegraded(state, 'history-timeout'); hlog('[enhance] v3 history timeout'); return []; }
         const msgSeqs = [];
         for (let i = records.length - 1; i >= 0 && msgSeqs.length < V2_MSG_SEQ_SCAN; i--) {
           const r = records[i];
           const t = String(r && r.type || '');
           if (t === 'user/message' || t === 'assistant/message') msgSeqs.push(r && r.seq);
         }
-        if (histTimedOut) { hlog('[enhance] v3 history timeout'); return []; }
         if (msgSeqs.length === 0) return [];
         const minSeq = msgSeqs[msgSeqs.length - 1];
-        const docs = await sq.filterEvents(sessionId, [{ kind: 'seq', from: minSeq }]);
+        const docs = await waitAbort.race(sq.filterEvents(sessionId, [{ kind: 'seq', from: minSeq }]));
+        if (waitAbort.timedOut()) { markDegraded(state, 'history-timeout'); hlog('[enhance] v3 history timeout'); return []; }
         const events = extractHistory(docs, V2_HISTORY_LIMIT);
         hlog('[enhance] v3 history events=' + events.length);
         return events;
@@ -3699,18 +4041,22 @@ return {
         hlog('[enhance] v3 history failed', e && e.message ? e.message : e);
         return [];
       } finally {
-        histTimer();
+        waitAbort.dispose();
       }
     }
 
     // ---- v3.0：LLM 关联性判定（RELEVANCE_PROMPT 占位替换；10s 超时；失败/解析失败 → 不相关）----
-    async function judgeRelevance(historyText, currentText, entry) {
-      if (llm === undefined || !entry) return { related: false, reason: 'no-llm' };
+    async function judgeRelevance(historyText, currentText, entry, state) {
+      if (llm === undefined || !entry) { markDegraded(state, 'relevance'); return { related: false, reason: 'no-llm' }; }
+      // P0-b：辅助调用并入主预算——超预算直接跳过（记降级，不阻断主流程）
+      if (budgetExhausted(state)) { markDegraded(state, 'relevance-budget'); hlog('[enhance] v3 relevance skipped budget-exhausted'); return { related: false, reason: 'budget-exhausted' }; }
       const system = RELEVANCE_PROMPT
         .replace('{history}', String(historyText || ''))
         .replace('{current}', String(currentText || ''));
       let timedOut = false;
-      const timer = ctx.timer.timeout(() => { timedOut = true; }, RELEVANCE_TIMEOUT_MS);
+      // P0-b：自身 10s 超时钳到剩余预算内（不越过主预算）
+      // P0-b 修正：超时到点**真正中止**该辅助流（不再等它自然结束——见 startHelperAbort 注释）
+      const abortCtl = startHelperAbort(state, RELEVANCE_TIMEOUT_MS);
       try {
         const stream = llm.stream({
           provider: entry.provider,
@@ -3726,16 +4072,26 @@ return {
           }],
         });
         const iterator = stream[Symbol.asyncIterator]();
-        const result = await collectStream(iterator, RELEVANCE_OUTPUT_LIMIT);
+        abortCtl.attach(iterator);
+        const collectP = collectStream(iterator, RELEVANCE_OUTPUT_LIMIT);
+        // 超时闸先结算时，collectP 可能随后才 reject —— 先挂空处理器，避免未处理拒绝
+        collectP.catch(() => { /* 落败方 */ });
+        const result = await abortCtl.race(collectP);
+        timedOut = abortCtl.timedOut();
+        // P0-e（消费点 2/6 之一）：max-tokens 现返回可区分 kind 'maxtokens'（不再是 EMPTY_RESPONSE）；
+        // 判定类辅助调用**按原样透传**——非 'ok' 一律判失败（显式声明，不静默沿用旧兜底）。
         if (!timedOut && result.kind === 'ok') {
           const parsed = parseRelevance(result.text);
           if (parsed) return parsed;
         }
+        // P0-d：判定失败/超时 → 记降级（结果在无参考状态下生成，用户须可见）
+        markDegraded(state, timedOut ? 'relevance-timeout' : (result.kind === 'maxtokens' ? 'relevance-truncated' : 'relevance-unparsed'));
         hlog('[enhance] v3 relevance ' + (timedOut ? 'timeout' : 'unparsed'));
       } catch (e) {
+        markDegraded(state, 'relevance-failed');
         hlog('[enhance] v3 relevance failed', e && e.message ? e.message : e);
       } finally {
-        timer();
+        abortCtl.dispose();
       }
       return { related: false, reason: 'judge-failed' };
     }
@@ -3743,14 +4099,17 @@ return {
 
     // ---- v3.0p（publish 多步检索）：LLM 检索主题规划（WEBSEARCH_PLAN_PROMPT 占位替换；
     // 10s 超时；失败/解析失败 → null → retrieve 降级 buildWebQuery 单 query）----
-    async function planWebSearch(text, memoText, scenario, entry) {
-      if (llm === undefined || !entry) return null;
+    async function planWebSearch(text, memoText, scenario, entry, state) {
+      if (llm === undefined || !entry) { markDegraded(state, 'webplan'); return null; }
+      // P0-b：辅助调用并入主预算——超预算直接跳过（降级为单 query 路径）
+      if (budgetExhausted(state)) { markDegraded(state, 'webplan-budget'); hlog('[enhance] v3p web-plan skipped budget-exhausted'); return null; }
       const system = WEBSEARCH_PLAN_PROMPT
         .replace('{text}', String(text || ''))
         .replace('{memo}', String(memoText || '（暂无）'))
         .replace('{scenario}', String(scenario || 'generic'));
       let timedOut = false;
-      const timer = ctx.timer.timeout(() => { timedOut = true; }, WEB_PLAN_TIMEOUT_MS);
+      // P0-b 修正：超时到点**真正中止**该辅助流（不再等它自然结束——见 startHelperAbort 注释）
+      const abortCtl = startHelperAbort(state, WEB_PLAN_TIMEOUT_MS);
       try {
         const stream = llm.stream({
           provider: entry.provider,
@@ -3766,16 +4125,24 @@ return {
           }],
         });
         const iterator = stream[Symbol.asyncIterator]();
-        const result = await collectStream(iterator, WEB_PLAN_OUTPUT_LIMIT);
+        abortCtl.attach(iterator);
+        const collectP = collectStream(iterator, WEB_PLAN_OUTPUT_LIMIT);
+        // 超时闸先结算时，collectP 可能随后才 reject —— 先挂空处理器，避免未处理拒绝
+        collectP.catch(() => { /* 落败方 */ });
+        const result = await abortCtl.race(collectP);
+        timedOut = abortCtl.timedOut();
+        // P0-e（消费点 3/6）：maxtokens 按原样透传 → 非 ok 即降级（显式声明）。
         if (!timedOut && result.kind === 'ok') {
           const parsed = parseSearchPlan(result.text);
           if (parsed) return parsed;
         }
+        markDegraded(state, timedOut ? 'webplan-timeout' : (result.kind === 'maxtokens' ? 'webplan-truncated' : 'webplan-unparsed'));
         hlog('[enhance] v3p web-plan ' + (timedOut ? 'timeout' : 'unparsed'));
       } catch (e) {
+        markDegraded(state, 'webplan-failed');
         hlog('[enhance] v3p web-plan failed', e && e.message ? e.message : e);
       } finally {
-        timer();
+        abortCtl.dispose();
       }
       return null;
     }
@@ -3787,18 +4154,22 @@ return {
       const sp = ctx.get('sandboxPolicy');
       const root = sp && sp.workspaceRoot;
       if (!fsSvc || !root || typeof fsSvc.listDir !== 'function' || typeof fsSvc.resolve !== 'function' || typeof fsSvc.readText !== 'function') return [];
-      let aborted = false;
-      const timer = ctx.timer.timeout(() => { aborted = true; }, V2_WORKSPACE_TIMEOUT_MS);
+      // P0-b 修正（2026-10-12 · 第三轮）：标志位 → race+dispose（与 v2SearchWorkspace 同一机制）。
+      // 慢的 fs 调用此前会越过 V2_WORKSPACE_TIMEOUT_MS 一直等 ⇒ 侵蚀生成额度。
+      const waitAbort = startWaitAbort(ctx.timer, V2_WORKSPACE_TIMEOUT_MS);
+      const aborted = () => waitAbort.timedOut();
       try {
         let rootTarget;
-        try { rootTarget = await fsSvc.resolve(root); } catch (e) { return []; }
+        try { rootTarget = await waitAbort.race(fsSvc.resolve(root)); } catch (e) { return []; }
+        if (waitAbort.timedOut()) return [];
         const files = [];
         const walk = async (target, rel, level) => {
-          if (aborted || files.length >= SCAN_FILE_LIST_MAX || level > maxDepth) return;
+          if (aborted() || files.length >= SCAN_FILE_LIST_MAX || level > maxDepth) return;
           let entries;
-          try { entries = await fsSvc.listDir(target); } catch (e) { return; }
+          try { entries = await waitAbort.race(fsSvc.listDir(target)); } catch (e) { return; }
+          if (waitAbort.timedOut()) return;
           for (const en of entries || []) {
-            if (aborted) return;
+            if (aborted()) return;
             const name = en && en.name;
             if (!name) continue;
             if (en.type === 'directory') {
@@ -3831,9 +4202,12 @@ return {
             if (kl.length >= 2 && !kwSegs.includes(kl.slice(0, 2))) kwSegs.push(kl.slice(0, 2));
           }
           for (const rel of files.slice(0, 8)) {
+            if (aborted()) break;
             try {
-              const target = await fsSvc.resolve(rel, { cwd: root });
-              const text = await fsSvc.readText(target);
+              const tgt = await waitAbort.race(fsSvc.resolve(rel, { cwd: root }));
+              if (waitAbort.timedOut()) break;
+              const text = await waitAbort.race(fsSvc.readText(tgt));
+              if (waitAbort.timedOut()) break;
               let hits = 0;
               for (const ln of text.split('\n')) {
                 if (kwSegs.length > 0 && kwSegs.some((sg) => ln.toLowerCase().includes(sg))) hits++;
@@ -3856,15 +4230,18 @@ return {
         }
         const out = [];
         for (const rel of ranked.slice(0, maxFiles)) {
+          if (aborted()) break;
           try {
-            const target = await fsSvc.resolve(rel, { cwd: root });
-            const text = await fsSvc.readText(target);
+            const tgt = await waitAbort.race(fsSvc.resolve(rel, { cwd: root }));
+            if (waitAbort.timedOut()) break;
+            const text = await waitAbort.race(fsSvc.readText(tgt));
+            if (waitAbort.timedOut()) break;
             out.push({ path: rel, snippet: snippetFromLines(text.split('\n'), kws, SNIPPET_BUDGET) });
           } catch (e) { /* 跳过 */ }
         }
         return out;
       } finally {
-        timer();
+        waitAbort.dispose();
       }
     }
 
@@ -3882,7 +4259,7 @@ return {
       const docsText = docs.map((d) => '📄 ' + d.path + '\n' + d.snippet).join('\n\n').slice(0, rbudget.smartChars);
       // B+C 合并：一次 LLM 调用——检索相关文档 + 分析项目地图结构
       if (state.rec) setProgress(state.rec, STAGE_FILES, 'docs');
-      const analysis = await analyzeDocsRelevance(docsText, text, state.v2Block || '', chain0);
+      const analysis = await analyzeDocsRelevance(docsText, text, state.v2Block || '', chain0, state);
       if (!analysis || analysis.relatedDocs.length === 0) {
         hlog('[enhance] v3 smart no-related-doc');
         return { block: state.v2Block, enteredThird: false };
@@ -3902,13 +4279,15 @@ return {
     }
 
     // ---- v3.0v2：提示词开发意向判定（DEV_INTENT_PROMPT；10s 超时降级非开发意向）----
-    async function judgeDevIntent(text, sessionRef, entry) {
-      if (llm === undefined || !entry) return { isDevIntent: false, reason: 'no-llm' };
+    async function judgeDevIntent(text, sessionRef, entry, state) {
+      if (llm === undefined || !entry) { markDegraded(state, 'intent'); return { isDevIntent: false, reason: 'no-llm' }; }
+      if (budgetExhausted(state)) { markDegraded(state, 'intent-budget'); hlog('[enhance] v3 intent skipped budget-exhausted'); return { isDevIntent: false, reason: 'budget-exhausted' }; }
       const system = DEV_INTENT_PROMPT
         .replace('{prompt}', String(text || ''))
         .replace('{session}', String(sessionRef || ''));
       let timedOut = false;
-      const timer = ctx.timer.timeout(() => { timedOut = true; }, RELEVANCE_TIMEOUT_MS);
+      // P0-b 修正：超时到点**真正中止**该辅助流（不再等它自然结束——见 startHelperAbort 注释）
+      const abortCtl = startHelperAbort(state, RELEVANCE_TIMEOUT_MS);
       try {
         const stream = llm.stream({
           provider: entry.provider,
@@ -3924,29 +4303,39 @@ return {
           }],
         });
         const iterator = stream[Symbol.asyncIterator]();
-        const result = await collectStream(iterator, RELEVANCE_OUTPUT_LIMIT);
+        abortCtl.attach(iterator);
+        const collectP = collectStream(iterator, RELEVANCE_OUTPUT_LIMIT);
+        // 超时闸先结算时，collectP 可能随后才 reject —— 先挂空处理器，避免未处理拒绝
+        collectP.catch(() => { /* 落败方 */ });
+        const result = await abortCtl.race(collectP);
+        timedOut = abortCtl.timedOut();
+        // P0-e（消费点 4/6）：maxtokens 按原样透传 → 非 ok 即降级（显式声明）。
         if (!timedOut && result.kind === 'ok') {
           const parsed = parseIntent(result.text);
           if (parsed) return parsed;
         }
+        markDegraded(state, timedOut ? 'intent-timeout' : (result.kind === 'maxtokens' ? 'intent-truncated' : 'intent-unparsed'));
         hlog('[enhance] v3 intent ' + (timedOut ? 'timeout' : 'unparsed'));
       } catch (e) {
+        markDegraded(state, 'intent-failed');
         hlog('[enhance] v3 intent failed', e && e.message ? e.message : e);
       } finally {
-        timer();
+        abortCtl.dispose();
       }
       return { isDevIntent: false, reason: 'judge-failed' };
     }
 
     // ---- v3.0v2：文档检索 + 项目地图合并分析（DOC_ANALYSIS_PROMPT 一次调用）----
-    async function analyzeDocsRelevance(docsText, text, sessionRef, entry) {
-      if (llm === undefined || !entry) return null;
+    async function analyzeDocsRelevance(docsText, text, sessionRef, entry, state) {
+      if (llm === undefined || !entry) { markDegraded(state, 'docs'); return null; }
+      if (budgetExhausted(state)) { markDegraded(state, 'docs-budget'); hlog('[enhance] v3 doc-analysis skipped budget-exhausted'); return null; }
       const system = DOC_ANALYSIS_PROMPT
         .replace('{docs}', String(docsText || ''))
         .replace('{prompt}', String(text || ''))
         .replace('{session}', String(sessionRef || ''));
       let timedOut = false;
-      const timer = ctx.timer.timeout(() => { timedOut = true; }, RELEVANCE_TIMEOUT_MS);
+      // P0-b 修正：超时到点**真正中止**该辅助流（不再等它自然结束——见 startHelperAbort 注释）
+      const abortCtl = startHelperAbort(state, RELEVANCE_TIMEOUT_MS);
       try {
         const stream = llm.stream({
           provider: entry.provider,
@@ -3962,16 +4351,24 @@ return {
           }],
         });
         const iterator = stream[Symbol.asyncIterator]();
-        const result = await collectStream(iterator, RELEVANCE_OUTPUT_LIMIT);
+        abortCtl.attach(iterator);
+        const collectP = collectStream(iterator, RELEVANCE_OUTPUT_LIMIT);
+        // 超时闸先结算时，collectP 可能随后才 reject —— 先挂空处理器，避免未处理拒绝
+        collectP.catch(() => { /* 落败方 */ });
+        const result = await abortCtl.race(collectP);
+        timedOut = abortCtl.timedOut();
+        // P0-e（消费点 5/6）：maxtokens 按原样透传 → 非 ok 即降级（显式声明）。
         if (!timedOut && result.kind === 'ok') {
           const parsed = parseDocsAnalysis(result.text);
           if (parsed) return parsed;
         }
+        markDegraded(state, timedOut ? 'docs-timeout' : (result.kind === 'maxtokens' ? 'docs-truncated' : 'docs-unparsed'));
         hlog('[enhance] v3 doc-analysis ' + (timedOut ? 'timeout' : 'unparsed'));
       } catch (e) {
+        markDegraded(state, 'docs-failed');
         hlog('[enhance] v3 doc-analysis failed', e && e.message ? e.message : e);
       } finally {
-        timer();
+        abortCtl.dispose();
       }
       return null;
     }
@@ -3997,7 +4394,7 @@ return {
           // 窗口越界（历史不足）跳过；全不中 → 无参考（不阻断主流程）。
           // 2026-08-18（用户需求·步骤补充）：rounds 模式补「读取会话」进度（与 publish 一致）
           if (state.rec) setProgress(state.rec, STAGE_HISTORY);
-          const events = await fetchSessionHistory(sessionId);
+          const events = await fetchSessionHistory(sessionId, state);
           const chain0 = state.chain && state.chain.length > 0 ? state.chain[0] : null;
           for (let wi = 0; wi < row.windows.length; wi++) {
             const win = row.windows[wi];
@@ -4008,7 +4405,7 @@ return {
               continue;
             }
             setProgress(rec, STAGE_ANALYZE, 'judge', null, wi + 1, row.windows.length);
-            const judge = await judgeRelevance(winText, text, chain0);
+            const judge = await judgeRelevance(winText, text, chain0, state);
             if (judge.related) {
               state.v2Block = '【相关会话参考（仅吸收明确需求，禁止复述）】\n' + winText.slice(0, rbudget.roundsChars);
               state.v2Log = 'rounds=' + win[0] + '-' + win[1] + ' chars=' + winText.length + ' inject=' + Math.min(winText.length, rbudget.roundsChars) + ' reason=' + judge.reason;
@@ -4022,7 +4419,7 @@ return {
           // 仅进入第三步（代码阶段）才追加 SMART_TAIL（调整方案输出）
           if (SKILL_MANIFEST[cfg.mode].sources.indexOf('workspace') !== -1) {
             setProgress(rec, STAGE_ANALYZE, 'intent');
-            const intent = await judgeDevIntent(text, state.v2Block || '', chain0);
+            const intent = await judgeDevIntent(text, state.v2Block || '', chain0, state);
             if (!intent.isDevIntent) {
               hlog('[enhance] v3 smart not-dev-intent reason=' + intent.reason);
             } else {
@@ -4048,7 +4445,8 @@ return {
         const budget = cfg.context && cfg.context.budgetChars ? cfg.context.budgetChars : 0;
         // v3.0p：预算 > 0 才启用检索（与「上下文预算需 > 0 才启用检索」联动语义一致）
         setProgress(rec, STAGE_FILES, 'plan');
-        const plan = budget > 0 ? await planWebSearch(text, memoText, state.scenario, chain0) : null;
+        // P0-b：预算耗尽 → 直接跳过规划（planWebSearch 内部亦自检，双保险）
+        const plan = (budget > 0 && !budgetExhausted(state)) ? await planWebSearch(text, memoText, state.scenario, chain0, state) : (budget > 0 ? (markDegraded(state, 'webplan-budget'), null) : null);
         hlog('[enhance] v3p web-plan ' + (budget <= 0 ? 'skipped budget=0' : (plan ? 'topics=' + plan.topics.map((t) => t.query).join('|') : 'none→legacy')));
         // v3.0p：规划主题与已检索主题去重（LLM 未遵从提示词时的硬过滤；过滤后为空 → 降级单 query）
         const freshPlan = plan && budget > 0 ? plan.topics.filter((t) => memoTopics.indexOf(String(t && t.query || '').trim()) === -1) : null;
@@ -4064,6 +4462,13 @@ return {
           scenario: state.scenario,
           webPlan: freshPlan && freshPlan.length > 0 ? freshPlan : null,
           webMemo: memoText,
+          // P0-b（2026-10-12）：publish 的 v2 旧管道（阶段 A 任务分析 15s / 阶段 B 2s /
+          // 网络检索 10s）同属准备阶段——把主预算截止时刻交给它，内部各调用据此钳到剩余预算。
+          budgetDeadline: state.budgetDeadline,
+          budgetMs: state.budgetMs,
+          // P0-d（2026-10-12 · 独立复核 medium）：v2 管道内的辅助调用降级回传
+          // （第 5 个辅助点 v2ResolveProgress 经此暴露，不再只写 hlog）
+          onDegrade: (kind) => { markDegraded(state, kind); },
         }, sessionId, text, cfg, (st, detail) => {
           rec.stage = st;
           if (detail && typeof detail === 'object') {
@@ -4184,52 +4589,104 @@ return {
           }
         }
         setProgress(rec, STAGE_LLM, i > 0 ? 'retry' : '', null, stepNum, fb.length > 0 ? fb.length : chain.length);
-        let stream;
-        try {
-          stream = llm.stream({
-            provider: entry.provider,
-            model: entry.model,
-            ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
-            system,
-            // v2.7.0（publish）：maxTokens<=0 省略字段 → provider 默认上限（不设限制）
-            // v2.9.0-fix（实测确证）：reasoning 模式（带 effort）下思考过程消耗 maxTokens
-            // 预算——配置的 2000 在长输入 + effort=max 时耗尽 → 空流（EMPTY_RESPONSE）；
-            // 自动放宽到 >=8000（保守版；publish 九章规格长文同策略放宽——实测 maxTokens=2000 时空流，v3.2.27 修复）
-            ...(entry.reasoningEffort ? { maxTokens: Math.max(maxTokens, 8000) } : (isPublish ? { maxTokens: Math.max(maxTokens, 8000) } : (maxTokens > 0 ? { maxTokens } : {}))),
-            // v3.2.21（用户需求·优化结果稳定）：确定性重述任务压低 temperature——不传时用平台默认
-            // （随机性高，同一输入每次结果不同）；reasoning 链节由 effort 控制，不传 temperature
-            ...(entry.reasoningEffort ? {} : { temperature: 0.3 }),
-            messages,
-          });
-        } catch (e) {
-          // v3.1.3（看门狗 + 延迟连通性预检）：llm.stream 同步抛错 = 模型不可达 → 记失败走下一条
-          hlog('[enhance] fail session=' + sessionId + ' model=' + entry.model + ' code=STREAM_THROW');
-          lastFailure = { code: e && e.code ? String(e.code) : 'STREAM_THROW', message: String(e && e.message ? e.message : e) };
-          continue;
-        }
-        const iterator = stream[Symbol.asyncIterator]();
-        rec.iterator = iterator;
-        // v3.1.3（看门狗 + 延迟连通性预检）：仅首个尝试挂响应看门狗——WATCHDOG_TIMEOUT_MS 内
-        // 无任何 chunk → 判首模型不通，中断当前流并进入连通性探测（探测选模型重启生成，
-        // 重启不再挂看门狗，防「慢但健康」模型被反复打断成死循环）
-        let watchTimer = null;
+        let result = null;
+        let streamThrowFailure = null;
         let watchFired = false;
-        if (i === 0 && !state.watchdogDone) {
-          watchTimer = ctx.timer.timeout(() => {
-            watchFired = true;
-            if (rec.iterator && typeof rec.iterator.return === 'function') {
-              try { rec.iterator.return(); } catch (e) { /* 忽略 */ }
-            }
-          }, WATCHDOG_TIMEOUT_MS);
+        // P0-a（2026-10-12 · 补退避重试）：插件直调 ctx.llm.stream() 站在官方设计上**没有可靠性层**的位置——
+        // 宿主退避挂在 agent/request-error 水位（由 agent-loop 生产），插件自己消费流吃不到（官方明文：
+        // 直接调用 ctx.llm.stream() 的调用方仍然只尝试一次）。此处按官方语义在其外层补一层退避重试：
+        //   · 退避参数**不硬编码** —— 调 ctx.llm.providerRetryPolicy(provider) 取官方**已解析**的策略
+        //     （**平铺**结构：{mode,maxRetries,retryableCodes,initialDelayMs,maxDelayMs,jitterRatio}）；
+        //   · 可重试码集同样**从策略取**（policy.retryableCodes），不照抄常量；
+        //   · 退避公式与官方 dsh-llm-retry localDelay 逐式一致（见 pure.js computeBackoffDelayMs）；
+        //   · 策略不可得（旧宿主/未注册路由）→ 不重试，行为回到「只尝试一次」（零回归）。
+        for (let attempt = 0; ; attempt++) {
+          if (rec.cancelled || rec.timedOut) break;
+          let stream;
+          try {
+            stream = llm.stream({
+              provider: entry.provider,
+              model: entry.model,
+              ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+              system,
+              // v2.7.0（publish）：maxTokens<=0 省略字段 → provider 默认上限（不设限制）
+              // v2.9.0-fix（实测确证）：reasoning 模式（带 effort）下思考过程消耗 maxTokens
+              // 预算——配置的 2000 在长输入 + effort=max 时耗尽 → 空流（EMPTY_RESPONSE）；
+              // 自动放宽到 >=8000（保守版；publish 九章规格长文同策略放宽——实测 maxTokens=2000 时空流，v3.2.27 修复）
+              ...(entry.reasoningEffort ? { maxTokens: Math.max(maxTokens, 8000) } : (isPublish ? { maxTokens: Math.max(maxTokens, 8000) } : (maxTokens > 0 ? { maxTokens } : {}))),
+              // v3.2.21（用户需求·优化结果稳定）：确定性重述任务压低 temperature——不传时用平台默认
+              // （随机性高，同一输入每次结果不同）；reasoning 链节由 effort 控制，不传 temperature
+              ...(entry.reasoningEffort ? {} : { temperature: 0.3 }),
+              messages,
+            });
+          } catch (e) {
+            // v3.1.3（看门狗 + 延迟连通性预检）：llm.stream 同步抛错 = 模型不可达 → 记失败走下一条
+            hlog('[enhance] fail session=' + sessionId + ' model=' + entry.model + ' code=STREAM_THROW attempt=' + attempt);
+            streamThrowFailure = { code: e && e.code ? String(e.code) : 'STREAM_THROW', message: String(e && e.message ? e.message : e) };
+            break;
+          }
+          const iterator = stream[Symbol.asyncIterator]();
+          rec.iterator = iterator;
+          // v3.1.3（看门狗 + 延迟连通性预检）：仅首个尝试挂响应看门狗——WATCHDOG_TIMEOUT_MS 内
+          // 无任何 chunk → 判首模型不通，中断当前流并进入连通性探测（探测选模型重启生成，
+          // 重启不再挂看门狗，防「慢但健康」模型被反复打断成死循环）
+          let watchTimer = null;
+          watchFired = false;
+          if (i === 0 && !state.watchdogDone) {
+            // P0-c（2026-10-12）：看门狗阈值按实测 TTFT 重算（= ceil(9300×2/1000)×1000 = 19s），
+          // 但**必须按剩余主预算钳制**——
+            // 否则放宽阈值会掩盖真挂死（一个不响应的路由可以一直在预算内耗着）。钳制后：
+            // ① 慢但健康（TTFT ≤ 9.3s 实测上界）不会被误杀；② 真无响应仍在主预算处被砍（TIMEOUT）。
+            const watchBudget = remainingBudgetMs(state);
+            const watchMs = watchBudget === Infinity ? WATCHDOG_TIMEOUT_MS : Math.max(0, Math.min(WATCHDOG_TIMEOUT_MS, watchBudget));
+            watchTimer = ctx.timer.timeout(() => {
+              watchFired = true;
+              if (rec.iterator && typeof rec.iterator.return === 'function') {
+                try { rec.iterator.return(); } catch (e) { /* 忽略 */ }
+              }
+            }, watchMs);
+          }
+          try {
+            result = await collectStream(iterator, outputLimit, () => {
+              if (watchTimer) { watchTimer(); watchTimer = null; }
+            });
+          } finally {
+            if (watchTimer) watchTimer();
+            rec.iterator = null;
+          }
+          if (watchFired) break;
+          // ---- P0-a：退避重试判定（仅对策略声明的可重试码；watchdog/toolong/aborted/cancelled 不在此列）----
+          // P0-e 联动：max-tokens 截断是**确定性**结果（同 maxTokens 重试必然再截断）——
+          //   · 有实质文本 → 视为终态，break 出去由主生成点采纳（不进重试，省预算且语义正确）；
+          //   · 无文本（纯思考吃满预算） → 可能是瞬时故障，才交给策略判定是否重试。
+          const truncatedWithText = result && result.kind === 'maxtokens' && typeof result.text === 'string' && result.text !== '';
+          if (truncatedWithText) break;
+          const attemptFailure = result && (result.kind === 'error' || result.kind === 'maxtokens') ? (result.failure || null) : null;
+          if (!attemptFailure) break;
+          const policy = retryPolicyFor(entry.provider);
+          if (!isRetryableFailure(policy, attemptFailure)) break;
+          // always 语义官方无 maxRetries（不设限）；插件侧给安全上限防不收敛——
+          // 尤其 timeoutMs=0（无限制）时 budgetDeadline=null，预算不构成中断（独立复核 medium）。
+          const retryCap = policy.mode === 'always'
+            ? RETRY_ALWAYS_SAFETY_CAP
+            : (Number.isSafeInteger(policy.maxRetries) ? policy.maxRetries : 0);
+          if (attempt >= retryCap) break;
+          if (budgetExhausted(state)) { hlog('[enhance] retry skipped budget-exhausted code=' + attemptFailure.code); break; }
+          // 平铺策略对象直接传入（官方 ResolvedRetryPolicy 无 backoff 子对象）
+          const delayMs = computeBackoffDelayMs(policy, attempt + 1, Math.random);
+          // 独立复审 medium（2026-10-12）：重试**不得**混进「降级」通道——
+          // 「重试后成功」是瞬时故障自愈（P0-a 的目标场景），不是「上下文不完整」；
+          // 混入会让常见成功路径被 UI 误标「⚠ 部分上下文不可用」，削弱降级信号可信度。
+          // 故重试只记 hlog（可观测）与独立计数 rec.retries，绝不进 rec.degraded。
+          if (!Array.isArray(rec.retries)) rec.retries = [];
+          rec.retries.push(String(attemptFailure.code || 'unknown'));
+          hlog('[enhance] retry attempt=' + (attempt + 1) + '/' + retryCap + ' code=' + attemptFailure.code + ' delay=' + Math.round(delayMs) + 'ms provider=' + entry.provider + ' seq=' + seq);
+          setProgress(rec, STAGE_LLM, 'retry', { current: attempt + 1, total: retryCap }, attempt + 1, retryCap);
+          await sleepMs(delayMs);
         }
-        let result;
-        try {
-          result = await collectStream(iterator, outputLimit, () => {
-            if (watchTimer) { watchTimer(); watchTimer = null; }
-          });
-        } finally {
-          if (watchTimer) watchTimer();
-          rec.iterator = null;
+        if (streamThrowFailure) {
+          lastFailure = streamThrowFailure;
+          continue;
         }
         if (watchFired) {
           state.watchdogDone = true;
@@ -4272,6 +4729,35 @@ return {
         }
         if (result.kind === 'toolong') {
           lastFailure = { code: 'OUTPUT_TOO_LONG', message: 'output exceeded limit' };
+          continue;
+        }
+        // P0-e（2026-10-12）：max-tokens 截断是**官方合法** finish（不再落 EMPTY_RESPONSE 兜底）。
+        // 若已收到实质文本 → 直接采纳为结果（长草稿被截断但内容可用，优于报错丢弃）；
+        // 无文本（纯思考吃满预算）→ 如实报 OUTPUT_TRUNCATED（文案由 friendlyMessage 给真实原因）。
+        if (result.kind === 'maxtokens') {
+          const truncated = typeof result.text === 'string' ? result.text : '';
+          if (truncated !== '') {
+            const cleanedMt = isPublish ? stripScenarioEcho(cleanOutput(truncated, state.text)) : cleanOutput(truncated, state.text);
+            // P0-e 修正（2026-10-12 · 独立复核 high）：截断文本**不得无条件采纳**——截断点可能落在
+            // 指令包装中途（模型回显「请优化以下提示词："""…」），此时 cleanOutput 因包装未闭合剥不掉，
+            // 会把带包装的残片当结果覆盖用户草稿（旧行为是报 EMPTY_RESPONSE、草稿保留 ⇒ 反而更安全）。
+            // 采纳门槛（离线可判，不调模型）：① 剥离后非空；② 剥离后**不再含未闭合的指令包装特征**
+            // （三引号/「请优化以下提示词」等 wrap 痕迹）；③ 非残片（≥8 字符）。
+            // ⚠ 曾用「≥原文 10%」，实测会误伤「短输入 + 短而合法的截断输出」（过度收紧）——已回退为绝对值下限。
+            // 任一不满足 → 不采纳，按 OUTPUT_TRUNCATED 如实失败（草稿保留）。
+            const stillWrapped = /"""|请优化以下提示词|优化以下提示词|【用户输入】/.test(cleanedMt);
+            // 残片下限：极短输入（如 4 字）不应被绝对值门槛误伤——取 min(8, 原文长度) 作下限
+            const minLen = Math.min(8, Math.max(1, String(state.text || '').length));
+            const longEnough = cleanedMt.length >= minLen;
+            if (cleanedMt !== '' && !stillWrapped && longEnough) {
+              markDegraded(state, 'output-truncated');
+              hlog('[enhance] ok(truncated by max-tokens) session=' + sessionId + ' via ' + entry.model + ' chars=' + cleanedMt.length);
+              state.result = { ok: true, text: cleanedMt, model: entry.model, truncated: true, ...(state.watchdogDone === true || i > 0 ? { fallbackUsed: true } : {}) };
+              return state;
+            }
+            hlog('[enhance] truncated output rejected session=' + sessionId + ' wrapped=' + stillWrapped + ' longEnough=' + longEnough + ' chars=' + cleanedMt.length);
+          }
+          lastFailure = { code: 'OUTPUT_TRUNCATED', message: 'output reached the length limit and was truncated' };
           continue;
         }
         if (result.kind === 'cancelled' || result.kind === 'aborted') {
@@ -4352,19 +4838,45 @@ return {
       pending.set(key, rec);
 
       // M2 深化：请求状态经 Pipeline 四阶段链式传递（analyze→retrieve→assemble→llm）。
-      // 准备阶段在 try 外（与原逻辑一致：准备期异常冒泡为 RPC 错误而非 LLM_FAILED）；
-      // 超时计时自 llm 阶段起（与原逻辑一致：准备阶段不设防）。
+      // P0-b（2026-10-12 · 超时预算错位修复；独立复核 high 修正）：主超时计时器上移到**任何阶段之前**——
+      // 准备阶段（analyze/retrieve/assemble，内含 5 处各 10–15s 的辅助调用）首次被真正限界，
+      // 不再「准备阶段不设防」；辅助调用另按剩余预算钳制（helperTimeoutMs），超预算即跳过并记降级。
+      // ⚠ 不劣化生成额度（复核实测过「prepare+generation 超时」的拆东墙）：总预算 = **生成额度 + 准备额度**，
+      //   准备最多吃掉自己的额度 ⇒ 生成阶段仍拿满原 timeoutMs。旧行为（生成计时器后挂）等价于
+      //   「准备不计费」；新行为是「准备有自己的上限」，两者在**所有原本能过的场景**下都仍然能过。
       const state = { args, sessionId, seq, text, key, rec };
-      await runEnhanceStages('analyze', state);
-      await runEnhanceStages('retrieve', state);
-      await runEnhanceStages('assemble', state);
+      const budgetCfg = validateConfig(args && args.config);
+      if (args && typeof args.mode === 'string' && MODE_KEYS.includes(args.mode)) budgetCfg.mode = args.mode;
+      const genTimeoutMs = resolveEnhanceTimeoutMs(budgetCfg, buildTryChain(budgetCfg.fallback));
+      const modeRow = (SKILL_MANIFEST[budgetCfg.mode] || SKILL_MANIFEST[DEFAULT_MODE]) || {};
+      // 超时表由调用方传入（避免 PURE 区段内 const 的暂时性死区；见 pure.js 注释）
+      const prepareBudgetMs = resolvePrepareBudgetMs(modeRow.retrieve, modeRow.sources, {
+        relevanceMs: RELEVANCE_TIMEOUT_MS,
+        eventsMs: V2_SEARCH_EVENTS_TIMEOUT_MS,
+        workspaceMs: V2_WORKSPACE_TIMEOUT_MS,
+        progressMs: V2_PROGRESS_TIMEOUT_MS,
+        webPlanMs: WEB_PLAN_TIMEOUT_MS,
+        webSearchMs: WEB_SEARCH_TIMEOUT_MS,
+        webSearchMaxResults: WEB_SEARCH_MAX_RESULTS,
+      });
+      const totalBudgetMs = genTimeoutMs > 0 ? genTimeoutMs + prepareBudgetMs : 0;
+      state.budgetMs = genTimeoutMs;          // 生成额度（llm 阶段语义 / 日志沿用）
+      state.prepareBudgetMs = prepareBudgetMs;
+      state.budgetDeadline = totalBudgetMs > 0 ? Date.now() + totalBudgetMs : null;
       // v3.1.7（用户需求·超时无限制）：timeoutMs<=0 不挂超时计时器（0 = 无限制，等待模型自然完成）
-      const timeoutDisposer = state.timeoutMs > 0 ? ctx.timer.timeout(() => {
+      const timeoutDisposer = totalBudgetMs > 0 ? ctx.timer.timeout(() => {
         markAndAbort(key, 'timedOut');
-      }, state.timeoutMs) : null;
+      }, totalBudgetMs) : null;
 
       try {
+        await runEnhanceStages('analyze', state);
+        await runEnhanceStages('retrieve', state);
+        await runEnhanceStages('assemble', state);
         await runEnhanceStages('llm', state);
+        // P0-d：降级清单随结果回传（结果态 UI 可见；无降级 → 不附字段，行为零变化）
+        if (state.result && typeof state.result === 'object' && Array.isArray(rec.degraded) && rec.degraded.length > 0) {
+          state.result.degraded = rec.degraded.slice();
+        }
         return state.result;
       } catch (e) {
         herr('[enhance] unexpected error session=' + sessionId + ' seq=' + seq, e);
