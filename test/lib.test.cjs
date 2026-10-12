@@ -35,8 +35,6 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE, RETRIEVE_TABLE,
     MODE_BUDGET_OPTIONS, MODE_BUDGET_DEFAULT, BUDGET_RETRIEVE_TABLE, resolveRetrieveBudget,
     STAGE_SEQUENCE, STAGE_LABELS,
-    PLUGIN_VERSION, UPDATE_MANIFEST, parseVersion, compareVersions, versionStatus,
-    normalizeRepo, isValidTag, pickMaxTag, parseTagsPayload, validateManifestFiles, defaultDirFor,
     ENV_PROBE_KEYS, buildInstallArgs, buildRestartPlan, mergeEnvPath, buildTarballUrl, buildLocalInstallArgs };
 `);
 const {
@@ -102,25 +100,13 @@ const {
   resolveRetrieveBudget,
   STAGE_SEQUENCE,
   STAGE_LABELS,
-  PLUGIN_VERSION,
-  UPDATE_MANIFEST,
-  parseVersion,
-  compareVersions,
-  versionStatus,
-  normalizeRepo,
-  isValidTag,
-  pickMaxTag,
-  parseTagsPayload,
-  validateManifestFiles,
-  defaultDirFor,
   ENV_PROBE_KEYS,
   buildInstallArgs,
   buildRestartPlan,
   mergeEnvPath,
   buildTarballUrl,
   buildLocalInstallArgs,
-  stripScenarioEcho,
-} = pureFn();
+  stripScenarioEcho } = pureFn();
 
 test('wrapUserText 包装用户输入', () => {
   const out = wrapUserText('hi');
@@ -273,8 +259,7 @@ test('resolveModelInfoCached 命中缓存（第二次不重复解析）', async 
     resolveModelInfo: async (provider, model) => {
       calls += 1;
       return { provider, model, reasoning: { efforts: [{ id: 'high', name: 'High' }], defaultEffort: 'high' } };
-    },
-  };
+    } };
   const a = await resolveModelInfoCached(fakeLlm, 'p1', 'm1');
   const b = await resolveModelInfoCached(fakeLlm, 'p1', 'm1');
   assert.equal(calls, 1, '同键第二次应命中缓存');
@@ -286,8 +271,7 @@ test('resolveModelInfoCached 命中缓存（第二次不重复解析）', async 
 test('resolveModelInfoCached 不同键独立缓存', async () => {
   let calls = 0;
   const fakeLlm = {
-    resolveModelInfo: async () => { calls += 1; return { ok: true }; },
-  };
+    resolveModelInfo: async () => { calls += 1; return { ok: true }; } };
   await resolveModelInfoCached(fakeLlm, 'pA', 'mA');
   await resolveModelInfoCached(fakeLlm, 'pB', 'mB');
   assert.equal(calls, 2, '不同 provider/model 键应各自解析');
@@ -836,100 +820,6 @@ test('U13 既有用例回归计数', () => {
 // ================= v2.4.0 版本检测与一键更新 · 纯函数用例 =================
 // 方案「插件版本检测与一键更新方案.md」§2/§3：版本比较 / 归一化 / 检测目标。
 
-test('U30 PLUGIN_VERSION / UPDATE_MANIFEST 常量', () => {
-  assert.match(PLUGIN_VERSION, /^\d+\.\d+\.\d+$/, '本地版本须为纯 semver（v 前缀不保留）');
-  assert.deepEqual(UPDATE_MANIFEST, ['plugin-host.js', 'README.md', 'README.en.md', 'cordis.patch.yml']);
-});
-
-test('U31 parseVersion 归一化', () => {
-  assert.deepEqual(parseVersion('v2.4.0').seg, [2, 4, 0]);
-  assert.equal(parseVersion('v2.4.0').pre, null);
-  assert.equal(parseVersion('2.4').seg[2], 0, '缺段补 0');
-  assert.deepEqual(parseVersion('V1.2.3').seg, [1, 2, 3], '大写 V 前缀可去');
-  assert.deepEqual(parseVersion('2.4.0-rc.1').pre, ['rc', 1], '预发布：数值段转 number');
-  assert.deepEqual(parseVersion('2.4.0+build5').seg, [2, 4, 0], 'build 元数据剥离');
-  assert.equal(parseVersion('master').ok, false);
-  assert.equal(parseVersion('').ok, false);
-  assert.equal(parseVersion('  ').ok, false);
-  assert.equal(parseVersion('1.2.3.4').ok, false, '超过 3 段非法');
-  assert.equal(parseVersion('2.x').ok, false);
-  assert.equal(parseVersion(null).ok, false);
-});
-
-test('U32 compareVersions semver 比较', () => {
-  assert.equal(compareVersions('2.4.0', '2.3.3'), 1);
-  assert.equal(compareVersions('1.9.9', '2.0.0'), -1);
-  assert.equal(compareVersions('2.4.0', '2.4.0'), 0);
-  assert.equal(compareVersions('2.4', '2.4.0'), 0, '缺段等价');
-  assert.equal(compareVersions('2.4.0', '2.4.0-rc.1'), 1, '无预发布 > 有预发布');
-  assert.equal(compareVersions('2.4.0-rc.1', '2.4.0-rc.2'), -1);
-  assert.equal(compareVersions('2.4.0-alpha.1', '2.4.0-rc.1'), -1, '字符串段字典序');
-  assert.equal(compareVersions('2.4.0-rc', '2.4.0-rc.1'), -1, '前缀相同短者更小');
-  assert.equal(compareVersions('master', '2.0.0'), null, '无法解析 → null');
-});
-
-test('U33 versionStatus 状态判定', () => {
-  assert.equal(versionStatus('2.3.3', '2.4.0'), 'outdated');
-  assert.equal(versionStatus('2.4.0', '2.4.0'), 'current');
-  assert.equal(versionStatus('2.4.0', '2.3.3'), 'current', '本地领先仍为 current');
-  assert.equal(versionStatus('x', '2.0.0'), 'unknown');
-  assert.equal(versionStatus('2.0.0', 'y'), 'unknown');
-});
-
-test('U34 normalizeRepo / isValidTag 白名单', () => {
-  assert.equal(normalizeRepo('Fishsb/dsh-prompt-enhancer'), 'Fishsb/dsh-prompt-enhancer');
-  assert.equal(normalizeRepo('  a/b  '), 'a/b', '两侧空白去除');
-  assert.equal(normalizeRepo('a'), null);
-  assert.equal(normalizeRepo('a/b/c'), null);
-  assert.equal(normalizeRepo('../x'), null);
-  assert.equal(normalizeRepo('a/' + 'x'.repeat(100)), null, '超长非法');
-  assert.equal(normalizeRepo(''), null);
-  assert.equal(isValidTag('v2.4.0'), true);
-  assert.equal(isValidTag('2.4.0-rc.1'), true);
-  assert.equal(isValidTag('v2.4.0/evil'), false, '斜杠拒绝');
-  assert.equal(isValidTag('..'), false);
-  assert.equal(isValidTag('a b'), false, '空白拒绝');
-});
-
-test('U35 pickMaxTag 取最大可解析版本', () => {
-  const tags = [{ name: 'v1.0.0' }, { name: 'v2.3.3' }, { name: 'release-candidate' }, { name: 'v2.4.0' }];
-  assert.deepEqual(pickMaxTag(tags), { raw: 'v2.4.0', version: '2.4.0' });
-  assert.deepEqual(pickMaxTag([{ name: 'v2.4.0-rc.1' }, { name: 'v2.4.0' }]), { raw: 'v2.4.0', version: '2.4.0' });
-  assert.equal(pickMaxTag([{ name: 'master' }, { name: 'nightly' }]), null, '全不可解析 → null');
-  assert.equal(pickMaxTag([]), null);
-  assert.equal(pickMaxTag(null), null);
-});
-
-test('U36 defaultDirFor', () => {
-  assert.equal(defaultDirFor('D:\\lk\\deepseek', 'v2.4.0'), 'D:\\lk\\deepseek/dsh-prompt-enhancer-v2.4.0');
-  assert.equal(defaultDirFor('D:\\lk\\deepseek\\', 'v2.4.0'), 'D:\\lk\\deepseek/dsh-prompt-enhancer-v2.4.0', '尾部斜杠归一');
-  assert.equal(defaultDirFor('', 'v2.4.0'), '');
-  assert.equal(defaultDirFor(null, 'v2.4.0'), '');
-});
-
-test('U37 parseTagsPayload / validateManifestFiles（v2.4.1 新契约）', () => {
-  // parseTagsPayload：JSON 数组文本 → 数组；非法/非数组 → null
-  assert.equal(parseTagsPayload('[{"name":"v2.4.0"}]')[0].name, 'v2.4.0');
-  assert.equal(parseTagsPayload('{"message":"Not Found"}'), null, 'GitHub 错误对象非数组 → null');
-  assert.equal(parseTagsPayload('not json'), null);
-  assert.equal(parseTagsPayload(''), null);
-  assert.equal(parseTagsPayload(null), null);
-  // validateManifestFiles：恰好覆盖全部清单文件、无重复/多余、内容 ≤1MB
-  // （2026-09-19 D-1 修复：不再写死条数——用 UPDATE_MANIFEST.length 表达，条数漂移由门禁 arch-claims S-5 管）
-  const okFiles = UPDATE_MANIFEST.map((name) => ({ name, content: 'x' }));
-  const r1 = validateManifestFiles(okFiles);
-  assert.equal(r1.ok, true);
-  assert.equal(r1.files.length, UPDATE_MANIFEST.length);
-  assert.equal(validateManifestFiles(okFiles.slice(0, -1)).ok, false, '缺文件');
-  assert.equal(validateManifestFiles(okFiles.concat([{ name: 'extra.js', content: 'x' }])).ok, false, '多余文件');
-  assert.equal(validateManifestFiles([...okFiles, { name: 'README.md', content: 'dup' }]).ok, false, '重复文件');
-  assert.equal(validateManifestFiles([{ name: 'plugin-host.js', content: 'x'.repeat(1000001) }]).ok, false, '超 1MB');
-  assert.equal(validateManifestFiles(null).ok, false);
-  assert.equal(validateManifestFiles([{ name: 'plugin-host.js' }]).ok, false, '缺 content');
-});
-
-// v2.4.5（语义保真修正）：SYSTEM_PROMPT 关键契约断言。
-// SYSTEM_PROMPT 定义在 PURE 区段之前，此处直接从源码文本求值（单一事实源）。
 test('U39 SYSTEM_PROMPT 语义保真契约（v2.4.5）', () => {
   // —— 从源码提取 SYSTEM_PROMPT 数组并求值 ——
   const m = src.match(/const SYSTEM_PROMPT = \[([\s\S]*?)\n\];/);
@@ -1209,9 +1099,7 @@ test('U41 template.texts 每模式解析/迁移/超长忽略（v2.4.7）', () =>
     template: {
       mode: 'builtin',
       pick: { base: 'increment', smart: 'supplement', lite: 'dev', publish: 'custom:1' },
-      custom: { publish: [{ name: '甲', text: 'A' }, { name: '乙', text: 'B' }] },
-    },
-  });
+      custom: { publish: [{ name: '甲', text: 'A' }, { name: '乙', text: 'B' }] } } });
   assert.equal(newTpl.templatePick.base, 'increment', 'pick increment 应解析');
   assert.equal(newTpl.templatePick.smart, 'increment', '旧 pick supplement 应迁移为 increment');
   assert.equal(newTpl.templatePick.lite, 'increment', '旧 pick dev 应迁移为 increment');
@@ -1221,8 +1109,7 @@ test('U41 template.texts 每模式解析/迁移/超长忽略（v2.4.7）', () =>
   assert.equal(newTpl.templateCustom.publish[1].text, 'B', 'custom 条目 text 应解析');
   // ⑨ 越界/非法 pick 回退 default；超长/空文本条目忽略；name 截断
   const badPick = validateConfig({
-    template: { pick: { base: 'custom:9', lite: 'nope' }, custom: { base: [{ name: 'x'.repeat(60), text: 'a' }, { text: '' }, { text: 'ok' }] } },
-  });
+    template: { pick: { base: 'custom:9', lite: 'nope' }, custom: { base: [{ name: 'x'.repeat(60), text: 'a' }, { text: '' }, { text: 'ok' }] } } });
   assert.equal(badPick.templatePick.base, 'default', '越界 custom:9 应回退 default');
   assert.equal(badPick.templatePick.lite, 'default', '非法 pick 应回退 default');
   assert.equal(badPick.templateCustom.base.length, 2, '空 text 条目应忽略');
@@ -1486,10 +1373,8 @@ test('U67 collectStream onFirst 回调（v3.1.3）', async () => {
     return {
       [Symbol.asyncIterator]() {
         return {
-          async next() { return i < chunks.length ? { done: false, value: chunks[i++] } : { done: true }; },
-        };
-      },
-    };
+          async next() { return i < chunks.length ? { done: false, value: chunks[i++] } : { done: true }; } };
+      } };
   })();
   const r = await collectStream(it[Symbol.asyncIterator](), 8000, (c) => { calls++; first = c; });
   assert.equal(r.kind, 'ok');

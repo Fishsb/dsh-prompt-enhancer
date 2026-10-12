@@ -347,12 +347,12 @@ const CLAIMS = [
     promise: '判定「需要架构重构，分期执行、不推倒重写」：①P0 死层退役 + 协议事实源由注册面派生；②P1 host 半部改原生模块；③P2 规范收敛；④P3 待验证',
     assertions: [
       // P1-c（2026-10-13）：src/host 再收缩 7 件/33 行 → **5 件/18 行**（`plugins.js` 与 `update.js`
-      //   随「设置第三 tab 退役 + 更新执行器退役」一并删除）⇒ 事实同步（实测 5 件 / **23 物理行**）。
-      //   判据强度不变（仍为严格等号）。
-      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '5 件 / 23 物理行', () => {
+      //   随「设置第三 tab 退役 + 更新执行器退役」一并删除）⇒ 事实同步。
+      //   P1 余账批再 +1 行（pure.js 的退役说明注释）⇒ 实测 5 件 / **24 物理行**；判据强度不变（仍为严格等号）。
+      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '5 件 / 24 物理行', () => {
         const files = list('src/host');
         const n = files.reduce((a, f) => a + lines(`src/host/${f}`), 0);
-        return assert(files.length === 5 && n === 23, `${files.length} 件 / ${n} 行`);
+        return assert(files.length === 5 && n === 24, `${files.length} 件 / ${n} 行`);
       }),
       A('A194-2', '结构', '①协议事实源改由注册面派生（废除 protocol.js）', 'src/protocol.js 不存在且 scripts/rpc-manifest.mjs 存在', () => {
         const gone = !exists('src/protocol.js');
@@ -645,11 +645,13 @@ const CLAIMS = [
         const bad = [['面未变→未变措辞', ok1], ['面变→已过期措辞', ok2], ['表体缺行→已过期支', ok3], ['函数已接线(≥3处)', wired]].filter((x) => !x[1]).map((x) => x[0]);
         return assert(!bad.length, `面未变措辞 ${ok1 ? '✓' : '✗'}｜面变措辞 ${ok2 ? '✓' : '✗'}｜缺行支 ${ok3 ? '✓' : '✗'}｜接线 ${wired ? '✓' : '✗'}` + (bad.length ? `｜未命中 ${bad.join(',')}` : ''));
       }),
-      A('B234-4', '索引', 'D-1 的处置形态是**判据**而非一次性修复（S-5 在位 + 两副本无已退役件）', '本脚本含 S-5 且两处清单源文件不含 plugin-client.js', () => {
-        const src = read('scripts/arch-claims.mjs');
-        const clean = ['src/host/pure.js', 'src/client/updater.js'].every((f) => !read(f).includes('plugin-client.js'));
-        return assert(src.includes("'S-5'") && clean, `S-5 规则在位 ${src.includes("'S-5'")}｜两副本洁净 ${clean}`);
-      }),
+      // B234-4（判「D-1 的处置形态是判据而非一次性修复：S-5 在位 + 两副本无已退役件」）
+      //   **随 P1 余账批退役**：它的两个被测物都已消失 —— ① 它要求「S-5 在位」，而 S-5 本身因
+      //   判据对象消失而退役（见上）；② 它 `read('src/client/updater.js')` 检查「两副本洁净」，
+      //   而该文件已整件删除 ⇒ 原判据会 `ENOENT` 抛错（假红）。
+      //   ⚠ **这不是改浅**：D-1 的处置形态已由**更上游的事实**固化 —— `plugin-client.js` 的缺席由
+      //     A197-2（判「弃孤儿产物 plugin-client.js」）独立覆盖，且 `UPDATE_MANIFEST` 本身已不存在
+      //     ⇒「清单含已退役件」这一缺陷类别**在当前代码面上不可再发生**。
     ],
   },
 ];
@@ -694,23 +696,14 @@ const STRUCTURAL = [
 
   // ── 状态归属判据（RC-F：同一状态多处持有 ⇒ 让副本可机检） ──────────────────────────
 
-  A('S-5', '结构', '发布物清单一致：两处 `UPDATE_MANIFEST` 副本相等、逐项 ⊆ `package.json` files 白名单、注释条数 == 数组长度', '两副本相等 + 无白名单外条目 + 注释与实际同数', () => {
-    const wl = require(abs('package.json')).files;
-    const legal = (n) => wl.includes(n) || wl.some((w) => n.startsWith(w + '/'));
-    const grabArr = (f, name) => {
-      const m = read(f).match(new RegExp(`const ${name} = \\[([^\\]]*)\\]`));
-      return m ? m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean) : null;
-    };
-    const host = grabArr('src/host/pure.js', 'UPDATE_MANIFEST');
-    const client = grabArr('src/client/updater.js', 'UPDATER_MANIFEST');
-    if (!host || !client) return no(`清单未解析到（host ${!!host} / client ${!!client}）`);
-    const cm = read('src/host/pure.js').match(/全部 (\d+) 个文件/);
-    const outside = host.filter((n) => !legal(n));
-    const same = host.join() === client.join();
-    const cnt = cm ? Number(cm[1]) === host.length : false;
-    return assert(same && !outside.length && cnt,
-      `host ${host.length} 项 / client ${client.length} 项｜副本相等 ${same}｜白名单外 ${outside.length ? outside.join(',') : '无'}｜注释称 ${cm ? cm[1] : '?'} 实为 ${host.length}`);
-  }),
+  // S-5（两处 `UPDATE_MANIFEST` 副本相等 + ⊆ files 白名单 + 注释条数 == 数组长度）
+  //   **随 P1 余账批退役**：该判据的**判据对象整体消失** —— host 侧 `UPDATE_MANIFEST`
+  //   （`src/host/pure.js`）与 client 侧 `UPDATER_MANIFEST`（`src/client/updater.js`）**两副本均已移除**
+  //   （其唯一消费者 `update/*` RPC 已随 P1-c 退役 ⇒ 零活消费者）。
+  //   ⚠ **这不是改浅判据**：判据对象（两份清单）已不存在，判据**无被测物**。
+  //     若保留原判据，`grabArr()` 将解析不到清单 ⇒ 恒走 `no('清单未解析到')` **永远为红**（假红）；
+  //     若改成「解析不到就算过」则**永远为真**（假绿，同 A201-3 先例）——两者都比退役更差。
+  //     故依「判据随被测对象一并退役」定论整条删除。
   // S-6（`RESTART_FILES` 逐项在位 + ⊆ 白名单 + 含两个装配链入口）**随 P1-c 退役**：
   //   `RESTART_FILES` 常量定义在 `lib/index.cjs` 的 `update/restartNeeded` 段内 —— 该 RPC
   //   连同「插件自建重启探测」整体退役（交回官方 plugin manager）⇒ 常量已不存在，
