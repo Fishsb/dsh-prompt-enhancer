@@ -967,8 +967,9 @@ test('U40 prompts 外置一致性（v2.4.6）：生成区 = prompts/*.md 逐行�
     return new Function('return [' + m[1] + '].join(\'\\n\');')();
   };
   const mdOf = (file) => {
-    // v3.2.23（技能集合化）：事实源迁移到 skills/enhance/（按相对路径）
-    const lines = readFileSync(join(__dirname, '..', 'skills', 'enhance', file), 'utf8').split('\n');
+    // v3.2.23（提示词集合化）：事实源迁移到 prompts/enhance/（按相对路径）
+    // P1-d（2026-10-13 去技能化改名）：skills/enhance/ ⇒ prompts/enhance/
+    const lines = readFileSync(join(__dirname, '..', 'prompts', 'enhance', file), 'utf8').split('\n');
     while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
     return lines.join('\n');
   };
@@ -976,17 +977,17 @@ test('U40 prompts 外置一致性（v2.4.6）：生成区 = prompts/*.md 逐行�
   assert.ok(src.includes('// ==PROMPTS-BEGIN=='), '应含生成区起始标记');
   assert.ok(src.includes('// ==PROMPTS-END=='), '应含生成区结束标记');
   // 逐文件核对：生成常量 === md 内容（路径按技能包结构）
-  assert.equal(extractConst('SYSTEM_PROMPT'), mdOf('base/system.md'), 'SYSTEM_PROMPT 应与 skills/enhance/base/system.md 一致');
-  assert.equal(extractConst('TASK_ANALYSIS_PROMPT'), mdOf('assemble/task-analysis.md'), 'TASK_ANALYSIS_PROMPT 应与 skills/enhance/assemble/task-analysis.md 一致');
+  assert.equal(extractConst('SYSTEM_PROMPT'), mdOf('base/system.md'), 'SYSTEM_PROMPT 应与 prompts/enhance/base/system.md 一致');
+  assert.equal(extractConst('TASK_ANALYSIS_PROMPT'), mdOf('assemble/task-analysis.md'), 'TASK_ANALYSIS_PROMPT 应与 prompts/enhance/assemble/task-analysis.md 一致');
   // v3.2.20（防回显护栏并入纪律模板）：CONTEXT_GUARD 移除，纪律模板为唯一事实源
-  assert.equal(extractConst('DISCIPLINE_PROMPT'), mdOf('discipline.md'), 'DISCIPLINE_PROMPT 应与 skills/enhance/discipline.md 一致');
+  assert.equal(extractConst('DISCIPLINE_PROMPT'), mdOf('discipline.md'), 'DISCIPLINE_PROMPT 应与 prompts/enhance/discipline.md 一致');
   // 模板体系扩展（2026-08-18 修订）：T2 增量模板事实源——每模式专属（base/lite/standard/smart/publish）
-  assert.equal(extractConst('SYSTEM_INCREMENT_PROMPT'), mdOf('base/increment.md'), 'SYSTEM_INCREMENT_PROMPT 应与 skills/enhance/base/increment.md 一致');
-  assert.equal(extractConst('SYSTEM_INCREMENT_LITE_PROMPT'), mdOf('lite/increment.md'), 'SYSTEM_INCREMENT_LITE_PROMPT 应与 skills/enhance/lite/increment.md 一致');
-  assert.equal(extractConst('SYSTEM_INCREMENT_STANDARD_PROMPT'), mdOf('standard/increment.md'), 'SYSTEM_INCREMENT_STANDARD_PROMPT 应与 skills/enhance/standard/increment.md 一致');
-  assert.equal(extractConst('SYSTEM_INCREMENT_SMART_PROMPT'), mdOf('smart/increment.md'), 'SYSTEM_INCREMENT_SMART_PROMPT 应与 skills/enhance/smart/increment.md 一致');
-  assert.equal(extractConst('SYSTEM_INCREMENT_PUBLISH_PROMPT'), mdOf('publish/increment.md'), 'SYSTEM_INCREMENT_PUBLISH_PROMPT 应与 skills/enhance/publish/increment.md 一致');
-  assert.equal(extractConst('CONTINUE_PROMPT'), mdOf('assemble/continue.md'), 'CONTINUE_PROMPT 应与 skills/enhance/assemble/continue.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_PROMPT'), mdOf('base/increment.md'), 'SYSTEM_INCREMENT_PROMPT 应与 prompts/enhance/base/increment.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_LITE_PROMPT'), mdOf('lite/increment.md'), 'SYSTEM_INCREMENT_LITE_PROMPT 应与 prompts/enhance/lite/increment.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_STANDARD_PROMPT'), mdOf('standard/increment.md'), 'SYSTEM_INCREMENT_STANDARD_PROMPT 应与 prompts/enhance/standard/increment.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_SMART_PROMPT'), mdOf('smart/increment.md'), 'SYSTEM_INCREMENT_SMART_PROMPT 应与 prompts/enhance/smart/increment.md 一致');
+  assert.equal(extractConst('SYSTEM_INCREMENT_PUBLISH_PROMPT'), mdOf('publish/increment.md'), 'SYSTEM_INCREMENT_PUBLISH_PROMPT 应与 prompts/enhance/publish/increment.md 一致');
+  assert.equal(extractConst('CONTINUE_PROMPT'), mdOf('assemble/continue.md'), 'CONTINUE_PROMPT 应与 prompts/enhance/assemble/continue.md 一致');
 });
 
 // v3.2.23（技能集合化）：SKILL_MANIFEST 结构断言——5 模式 + 模板引用 + retrieve 声明与 pure RETRIEVE_TABLE 等价
@@ -1016,7 +1017,7 @@ test('U40c SKILL_MANIFEST 技能元数据契约（v3.2.23）', () => {
 test('U40b 参考吸收规则存在于全部参考相关 prompt（2026-08-17）', () => {
   const { readFileSync } = require('node:fs');
   const { join } = require('node:path');
-  const readPrompt = (file) => readFileSync(join(__dirname, '..', 'skills', 'enhance', file), 'utf8');
+  const readPrompt = (file) => readFileSync(join(__dirname, '..', 'prompts', 'enhance', file), 'utf8');
   // v3.2.24（规则落点 L2）：参考规则独立技能文件 reference-guide.md（retrieve 命中才条件注入）
   const guard = readPrompt('retrieval/reference-guide.md');
   assert.ok(guard.includes('吸收进优化后的提示词'), 'reference-guide 应要求吸收参考明确需求（L2 条件注入）');
@@ -1094,7 +1095,7 @@ test('U39b 模式专属默认模板契约（v3.1.8）', () => {
 test('U39c 每模式增量模板契约（保守增量 + 方向差异化，2026-08-18）', () => {
   const { readFileSync } = require('node:fs');
   const { join } = require('node:path');
-  const readPrompt = (file) => readFileSync(join(__dirname, '..', 'skills', 'enhance', file), 'utf8');
+  const readPrompt = (file) => readFileSync(join(__dirname, '..', 'prompts', 'enhance', file), 'utf8');
   const inc = readPrompt('base/increment.md');
   const incLite = readPrompt('lite/increment.md');
   const incStandard = readPrompt('standard/increment.md');

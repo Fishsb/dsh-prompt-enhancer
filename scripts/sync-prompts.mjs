@@ -30,9 +30,10 @@ const HOST = path.join(ROOT, 'src', 'host', 'app.js');
 const BEGIN = '// ==PROMPTS-BEGIN==';
 const END = '// ==PROMPTS-END==';
 
-// v3.2.23（用户需求·技能集合化）：事实源从平铺 prompts/ 迁移到技能包 skills/enhance/——
+// v3.2.23（用户需求·提示词集合化）：事实源从平铺 prompts/ 迁移到提示词包 prompts/enhance/——
+// P1-d（2026-10-13 去技能化改名）：根目录 skills/enhance/ ⇒ prompts/enhance/，包级 SKILL.md ⇒ PACKAGE.md（正文零改动）。
 // 常量名映射保持兼容（SYSTEM_PROMPT 等不变，供 enhance-handlers/pure 引用不改名）。
-const SKILL_ROOT = 'skills/enhance';
+const SKILL_ROOT = 'prompts/enhance';
 const NAME_MAP = {
   'base/system.md': 'SYSTEM_PROMPT',
   'base/increment.md': 'SYSTEM_INCREMENT_PROMPT',
@@ -56,7 +57,7 @@ const NAME_MAP = {
   'discipline.md': 'DISCIPLINE_PROMPT',
 };
 
-// 自动发现：扫描技能包内全部 .md（排除 SKILL.md），按相对路径查 NAME_MAP 得常量名；
+// 自动发现：扫描提示词包内全部 .md（排除包级/模式级 PACKAGE.md），按相对路径查 NAME_MAP 得常量名；
 // 缺失映射直接报错（新增技能文件必须登记），保序按 NAME_MAP 声明顺序。
 function discoverSources() {
   const found = [];
@@ -65,8 +66,8 @@ function discoverSources() {
       const rel = prefix + ent.name;
       const full = path.join(dir, ent.name);
       if (ent.isDirectory()) walk(full, rel + '/');
-      else if (ent.name.endsWith('.md') && ent.name !== 'SKILL.md') {
-        if (!NAME_MAP[rel]) throw new Error('技能文件未在 NAME_MAP 登记: ' + rel);
+      else if (ent.name.endsWith('.md') && ent.name !== 'PACKAGE.md') {
+        if (!NAME_MAP[rel]) throw new Error('提示词文件未在 NAME_MAP 登记: ' + rel);
         found.push(rel);
       }
     }
@@ -77,7 +78,7 @@ function discoverSources() {
 }
 const SOURCES = discoverSources();
 
-// —— v3.2.23 技能元数据：解析 SKILL.md frontmatter（YAML 子集：顶层 key / 嵌套对象 / JSON 值）——
+// —— v3.2.23 元数据：解析 PACKAGE.md frontmatter（YAML 子集：顶层 key / 嵌套对象 / JSON 值）——
 function parseFrontmatter(relPath) {
   const raw = fs.readFileSync(path.join(ROOT, relPath), 'utf8');
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw);
@@ -113,14 +114,16 @@ function tryJson(v) {
 }
 
 // 生成 SKILL_MANIFEST（templates 直接引用同作用域常量）与 SKILL_RETRIEVE_BUDGETS（包级预算表）
+// ⚠ 常量名保留 SKILL_* 前缀（P1-d S2 裁定：改名会波及 enhance-handlers.js 的 5 处**逻辑**引用，
+//   而该文件本批仅授权改注释 ⇒ 改名面 > 收益，保留原名）。
 function buildSkillManifest() {
-  const pkg = parseFrontmatter(SKILL_ROOT + '/SKILL.md') || {};
+  const pkg = parseFrontmatter(SKILL_ROOT + '/PACKAGE.md') || {};
   const modes = Array.isArray(pkg.modes) ? pkg.modes : [];
-  const lines = ['// v3.2.23（技能集合化）：SKILL_MANIFEST 由 skills/enhance/*/SKILL.md frontmatter 生成',
+  const lines = ['// v3.2.23（提示词集合化）：SKILL_MANIFEST 由 ' + SKILL_ROOT + '/*/PACKAGE.md frontmatter 生成',
     'const SKILL_MANIFEST = {'];
   for (const mode of modes) {
-    const fm = parseFrontmatter(SKILL_ROOT + '/' + mode + '/SKILL.md');
-    if (!fm) throw new Error(mode + '/SKILL.md 缺 frontmatter');
+    const fm = parseFrontmatter(SKILL_ROOT + '/' + mode + '/PACKAGE.md');
+    if (!fm) throw new Error(mode + '/PACKAGE.md 缺 frontmatter');
     const t1 = NAME_MAP[mode + '/system.md'];
     const t2 = NAME_MAP[mode + '/increment.md'];
     lines.push('  ' + JSON.stringify(mode) + ': { name: ' + JSON.stringify(fm.name || 'enhance-' + mode) +

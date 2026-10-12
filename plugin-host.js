@@ -1017,7 +1017,7 @@ const DISCIPLINE_PROMPT = [
   '直接输出最终结果，结束。',
 ].join('\n');
 
-// v3.2.23（技能集合化）：SKILL_MANIFEST 由 skills/enhance/*/SKILL.md frontmatter 生成
+// v3.2.23（提示词集合化）：SKILL_MANIFEST 由 prompts/enhance/*/PACKAGE.md frontmatter 生成
 const SKILL_MANIFEST = {
   "base": { name: "enhance-base", mode: "base", templates: { t1: SYSTEM_PROMPT, t2: SYSTEM_INCREMENT_PROMPT }, retrieve: {"kind":"none","windows":[]}, sources: [], rules: [{"rule":"reference-guide","when":"参考块/记忆命中"}] },
   "lite": { name: "enhance-lite", mode: "lite", templates: { t1: SYSTEM_LITE_PROMPT, t2: SYSTEM_INCREMENT_LITE_PROMPT }, retrieve: {"kind":"rounds","windows":[[1,1]]}, sources: ["session"], rules: [{"rule":"reference-guide","when":"参考块/记忆命中"}] },
@@ -2616,9 +2616,9 @@ function parseRelevance(raw) {
 // ================= v3.0 模式重构 · 检索策略表 =================
 // kind: none（不检索）/ rounds（会话轮次窗口 LLM 关联判定，命中即停）/ v2（旧管道：文件/事件/网络）
 // windows: [from, to] 1-based 轮次窗口（1 = 最近一轮；轮 = user 消息锚点及其回复）
-// v3.2.23（技能集合化）：检索策略声明事实源已迁移到 skills/enhance/*/SKILL.md frontmatter
+// v3.2.23（提示词集合化）：检索策略声明事实源已迁移到 prompts/enhance/*/PACKAGE.md frontmatter
 // （SKILL_MANIFEST 生成，enhance-handlers 已改读 SKILL_MANIFEST）；此处保留仅供 PURE 区段
-// 单测切片 + U40c 一致性断言防漂移——改检索策略请改 SKILL.md，勿在此手改。
+// 单测切片 + U40c 一致性断言防漂移——改检索策略请改 PACKAGE.md，勿在此手改。
 const RETRIEVE_TABLE = {
   base: { kind: 'none', windows: [] },
   lite: { kind: 'rounds', windows: [[1, 1]] },
@@ -3705,7 +3705,7 @@ return {
       // （pick=custom:<index>）；解析见 pure.js resolveTemplateSystem——旧配置（无 pick）自动迁移
       // （custom+texts 非空仍生效），行为与旧版等价；旧内置键 supplement/dev 按 increment 处理；非法选中回退 T1。
       // v2.7.0（一键发布）：publish 模式内置专用九章规格 system（custom 模板仍可覆盖）
-      // v3.2.23（技能集合化）：模式→模板映射由 SKILL_MANIFEST 驱动（skills/enhance/*/SKILL.md frontmatter 声明）
+      // v3.2.23（提示词集合化）：模式→模板映射由 SKILL_MANIFEST 驱动（prompts/enhance/*/PACKAGE.md frontmatter 声明）
       const BUILTIN_TEMPLATES = {};
       for (const _m of Object.keys(SKILL_MANIFEST)) {
         BUILTIN_TEMPLATES[_m] = [SKILL_MANIFEST[_m].templates.t1, SKILL_MANIFEST[_m].templates.t2];
@@ -4158,7 +4158,7 @@ return {
       const text = state.text;
       const sessionId = state.sessionId;
       const rec = state.rec;
-      const row = SKILL_MANIFEST[cfg.mode].retrieve || SKILL_MANIFEST[DEFAULT_MODE].retrieve; // v3.2.23 retrieve 声明化（skills/*/SKILL.md）
+      const row = SKILL_MANIFEST[cfg.mode].retrieve || SKILL_MANIFEST[DEFAULT_MODE].retrieve; // v3.2.23 retrieve 声明化（prompts/*/PACKAGE.md）
       state.v2Block = '';
       state.v2Log = 'none';
       if (state.isContinuation) {
@@ -4276,7 +4276,7 @@ return {
         }
       }
       // v3.2.24（规则落点 L2）：参考使用规则改为条件注入——参考块/记忆命中才追加（v3.2.20 并入 discipline 无条件，
-      // 现拆为独立 REFERENCE_GUIDE 技能文件按需加载，无参考场景省 tokens）；L0 纪律保持精简。
+      // 现拆为独立 REFERENCE_GUIDE 提示词文件按需加载，无参考场景省 tokens）；L0 纪律保持精简。
       if (state.v2Block !== '' || state.memoryActive) state.system = state.system + '\n\n' + REFERENCE_GUIDE;
       return state;
     }    // ---- stage: assemble——消息组装 / 日志 ----
