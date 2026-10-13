@@ -276,7 +276,33 @@ for (const line of git(diffArgs).split('\n')) {
     }
     return [...names];
   };
-  const countIn = (file, re) => { try { return (fs.readFileSync(file, 'utf8').match(re) || []).length; } catch { return 0; } };
+  // ── T3（P2-2 余账 · 2026-10-13）：语料面从「全文出现」收紧为「**引用形态**」──────
+  // F-1 盲区（P2-2 报告）：旧口径用 `\b<name>\b` 判命中 ⇒ **名字被文本提及**（注释 /
+  //   字符串 / 测试夹具里的字面量）也会算成"有消费者"。实证代价：P2-2 的自证装置
+  //   把变异名写进测试文件 ⇒ R5 把变异体算成「仅测试覆盖」⇒ **假绿**（详见 P2-2 §2.4）。
+  //
+  // 收紧后的「引用」定义（**任一形态命中即算引用**）：
+  //   (a) 调用形态 `name(`               —— 含 `require` 解构后的函数调用；
+  //   (b) 成员形态 `.name` / `?.name`    —— `M.name` / `sys.name` 等取用（含测试 `M.foo`）；
+  //   (c) **解构/导入形态** `{ … name … }` 出现在 `require(` / `import` / `const {` 附近；
+  //   (d) 对象字面量键 `name:` 或 `name,` **位于 `{` 行内同行**（表驱动用法，如 REFINE_PROMPT 作属性值）。
+  // ⚠ 仍**不判**同文件内私有函数的死码、不判对象字段（覆盖边界不变）。
+  // ⚠ 收紧方向 = 更严（把"提及"从引用里剔除）⇒ **不是改浅**；不加宽任何既有约束。
+  const refPattern = (name) => {
+    const n = name.replace(/\$/g, '\\$');
+    return new RegExp('(?:\\b' + n + '\\s*\\()' +                       // (a) 调用
+      '|(?:[.?]\\s*' + n + '\\b)' +                                       // (b) 成员取用
+      '|(?:\\{[^}]*\\b' + n + '\\b[^}]*\\})' +                        // (c) 解构/导入表
+      '|(?:(?:^|[,{])\\s*' + n + '\\s*[:,])');                            // (d) 键位（对象字面量）
+  };
+  // 同一符号在**同文件内**的引用不计（自指不算活）——与 P2-1/P2-2 口径一致。
+  const hasRef = (file, name) => {
+    let txt = '';
+    try { txt = fs.readFileSync(file, 'utf8'); } catch { return false; }
+    // 剥注释：// 行注释与 /* */ 块注释（防"已删清单"式注释计入引用）
+    txt = txt.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+    return refPattern(name).test(txt);
+  };
   let r5bad = 0; let r5checked = 0; let r5covered = 0;
   const coveredRows = [];
   for (const rel of TARGETS) {
@@ -286,23 +312,22 @@ for (const line of git(diffArgs).split('\n')) {
     if (!names) { fail('R5', rel + ' 未找到 `module.exports = {` 面（口径失效，须先对齐解析器）'); r5bad++; continue; }
     for (const name of names) {
       r5checked++;
-      const re = new RegExp('\\b' + name.replace(/\$/g, '\\$') + '\\b', 'g');
       let prodHits = 0;
       for (const f of prodCorpus) {
         if (path.resolve(f) === path.resolve(abs)) continue;
-        if (countIn(f, re) > 0) { prodHits++; break; }
+        if (hasRef(f, name)) { prodHits++; break; }
       }
       if (prodHits > 0) continue;
       let testHits = 0;
-      for (const f of testCorpus) { if (countIn(f, re) > 0) { testHits++; break; } }
+      for (const f of testCorpus) { if (hasRef(f, name)) { testHits++; break; } }
       if (testHits > 0) { r5covered++; coveredRows.push(rel + ':' + name); continue; }
-      fail('R5', rel + ' 导出 ' + name + ' 全仓（含 test/）零引用 ⇒ 死码');
+      fail('R5', rel + ' 导出 ' + name + ' 全仓（含 test/）无引用形态 ⇒ 死码');
       r5bad++;
     }
   }
   if (!r5bad) {
-    pass('R5', r5checked + ' 个 lib 导出符号均有消费者（' + (r5checked - r5covered) + ' 生产在用 · ' + r5covered + ' 仅测试覆盖）');
-    if (coveredRows.length) console.log('INFO | R5 | 仅测试覆盖（口径：算"被覆盖"，不算"被使用"）：' + coveredRows.join(' '));
+    pass('R5', r5checked + ' 个 lib 导出符号均有引用形态（' + (r5checked - r5covered) + ' 生产在用 · ' + r5covered + ' 仅测试覆盖）');
+    if (coveredRows.length) console.log('INFO | R5 | 仅测试覆盖（口径：算"被覆盖"，不算"被使用"；T3 收紧后 = 有引用形态但只在 test/）：' + coveredRows.join(' '));
   }
 }
 

@@ -112,3 +112,44 @@ test('DCG-R5b R5 不随 --range 变化（判现状事实，不是判本次 diff�
     assert.equal(pickR5(a.out), pickR5(b.out), 'R5 在两模式下读数必须逐字相同（R1 才是 diff 判据）');
   });
 });
+
+// ── T3（P2-2 余账）：F-1 盲区回归锁 ——「名字被文本提及」不得算作引用 ──────────────
+// 病历：R5 旧口径用 \b<name>\b 全文匹配 ⇒ 注释/字符串里的**名字提及**也算"有消费者"。
+//   P2-2 的自证装置就踩过它（变异名写进测试文件 ⇒ R5 判定为"仅测试覆盖" ⇒ 假绿）。
+// T3 收紧为「引用形态」（调用/成员/解构/键位）+ **剥注释**。
+// ⚠ 本锁用**运行时拼接**造变异名（既有教训：不得写回字面量），且**只在注释里提它的名字**。
+
+test('DCG-R5c T3 盲区已收口：仅注释提及的名字不得算作消费者（正向）', () => {
+  const v = 't3Only' + 'CommentMention';
+  withFixture((dir) => {
+    const p = path.join(dir, 'lib', 'asr.cjs');
+    const s = fs.readFileSync(p, 'utf8');
+    fs.writeFileSync(p, s.replace('module.exports = {',
+      'function ' + v + '() { return 1; }\nmodule.exports = { ' + v + ','), 'utf8');
+    // 只在**注释**里提它的名字（模拟 F-1 场景）
+    const q = path.join(dir, 'scripts', 'sync-runtime.mjs');
+    const t = fs.readFileSync(q, 'utf8');
+    fs.writeFileSync(q, '// ' + v + '（纯注释提及，不构成引用）\n' + t, 'utf8');
+  }, (dir) => {
+    const r = runGate(dir);
+    assert.equal(r.code, 1, '仅注释提及 ⇒ 必须仍判红（旧口径会假绿）');
+    assert.match(r.out, /FAIL \| R5 \|[^\n]*无引用形态/, 'FAIL 行须给"无引用形态"归因');
+  });
+});
+
+test('DCG-R5d 反向：真调用形态存在时不得误报（负控）', () => {
+  withFixture((dir) => {
+    // 造一个**真调用点**：函数定义 + 导出 + 另一文件用 `name(` 调用
+    const p = path.join(dir, 'lib', 'asr.cjs');
+    const s = fs.readFileSync(p, 'utf8');
+    const v = 't3Real' + 'Call';
+    fs.writeFileSync(p, s.replace('module.exports = {',
+      'function ' + v + '() { return 1; }\nmodule.exports = { ' + v + ','), 'utf8');
+    const q = path.join(dir, 'scripts', 'sync-runtime.mjs');
+    const t = fs.readFileSync(q, 'utf8');
+    fs.writeFileSync(q, t + '\nconst _probe = require("../lib/asr.cjs").' + v + '();\n', 'utf8');
+  }, (dir) => {
+    const r = runGate(dir);
+    assert.doesNotMatch(r.out, /t3RealCall/, '真调用形态存在 ⇒ R5 不得报它（防误报）');
+  });
+});
