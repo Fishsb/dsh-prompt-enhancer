@@ -67,23 +67,30 @@ test('VOICE-P06 voice/status·voice/transcribe RPC 注册（P2-3：域 = lib/rpc
 });
 
 // ---- 4. client 产物注入 ----
-// P1-a（2026-10-13 缩批）：断言面随退役更新 —— VoiceMicButton/RecordRTC 已退役（按钮交官方、
-// 采集改原生 MediaRecorder）；**判据强度不变**（仍逐项断言「产物含该能力」，只是换成现行实现）。
-test('VOICE-P07 lib/client.cjs 产物含语音逻辑（P1-a：原生采集 + 热键通道）', () => {
+// P2-补做（2026-10-13 · UD-0016）：热键改走官方按钮路径 ⇒ 判据面随退役更新（**强度不变**）：
+// 产物须含**派发点击官方按钮**的接线与热键纯函数，且**不得**再含自建采集链。
+test('VOICE-P07 lib/client.cjs 产物含语音逻辑（P2：热键派发点击官方按钮）', () => {
   const client = readFileSync(join(__dirname, '..', 'lib', 'client.cjs'), 'utf8'); // 唯一 client 载体
   assert.ok(client.includes('VoiceHotkeyHost'), '产物缺热键通道组件');
   assert.ok(client.includes('VoiceSection'), '产物缺 VoiceSection');
-  assert.ok(client.includes("host.call('voice/transcribe'"), '产物缺 voice/transcribe 调用');
+  assert.ok(client.includes('startOfficial'), '产物缺「派发点击官方开始按钮」（本批形态变更的落点）');
+  assert.ok(client.includes('stopOfficial'), '产物缺「派发点击官方停止按钮」');
   assert.ok(client.includes('isEnhancing'), '产物缺 isEnhancing');
-  assert.ok(client.includes('new window.MediaRecorder'), '产物缺原生 MediaRecorder 采集');
   assert.ok(!client.includes('function RecordRTC'), 'RecordRTC vendor 应已退役（P1-a）');
+  // 自建采集链退役（UD-0016）：产物不得再含自建录音入口与自行转写**调用**
+  // （⚠ 看调用形态，不看裸串：hotkey.js 的退役说明注释里会提到该 RPC 名，那是允许的）
+  assert.equal(client.includes('startVoiceRecording'), false, '产物不得再含自建录音入口');
+  assert.equal(client.includes("host.call('voice/transcribe'"), false, '产物不得再含自行调 voice/transcribe 的调用点');
+  assert.equal(client.includes('stopVoiceRecording'), false, '产物不得再含自建停止入口');
 });
 
-test('VOICE-P08 client 产物含 voice 状态机与双暂存逻辑', () => {
+test('VOICE-P08 client 产物含 voice 状态机与热键可见失败面', () => {
   const client = readFileSync(join(__dirname, '..', 'lib', 'client.cjs'), 'utf8'); // P1a：唯一 client 载体
   assert.ok(client.includes("'voicePendingEnhance'") || client.includes('voicePendingEnhance'), '产物缺 pending 暂存文案引用');
-  assert.ok(client.includes('insertVoiceText'), '产物缺 insertVoiceText');
-  assert.ok(client.includes('submitting') && client.includes('adjudicating'), '产物缺发送期暂存判定');
+  // P2（UD-0016）：热键改为驱动官方链 ⇒ 双暂存逻辑随自建链退役；判据换成**可见失败面**（不得静默失败）
+  assert.ok(client.includes('VOICE_BUSY'), '产物缺「录音中」忙提示');
+  assert.ok(client.includes('VOICE_OFFICIAL_UNAVAILABLE'), '产物缺「官方按钮不可用」提示（不得静默失败）');
+  assert.ok(client.includes('endedInFeedback'), '产物缺官方失败出口判定（TASK §3.3 缺口修复）');
 });
 
 // ---- 5. lib/asr.cjs sanitize ----
@@ -275,12 +282,12 @@ test('VOICE-P24 产物含 autoEnhance 触发链路 + i18n 键平衡（v3.2.17 +3
   assert.ok(client.includes('voiceAutoEnhanceOn'), '产物缺自动增强开 i18n 引用');
   assert.ok(client.includes('voiceAutoEnhanceOff'), '产物缺自动增强关 i18n 引用');
   assert.ok(client.includes('voiceAutoEnhanceTip'), '产物缺自动增强提示 i18n 引用');
-  // 触发链路（P1-a：现位于 VoiceHotkeyHost）：识别填入后按 autoEnhance 判定调用 enhance
-  assert.ok(client.includes('insertVoiceText'), '产物缺 insertVoiceText（已搬入 hotkey.js）');
+  // 触发链路（P2 · UD-0016：现位于 VoiceHotkeyHost 的**官方路径**出口）：官方写回落地后按 autoEnhance 调用 enhance
   assert.ok(client.includes('VoiceHotkeyHost'), '产物缺热键通道组件（承载自动增强触发）');
   assert.ok(client.includes('autoEnhance === true'), '产物缺 autoEnhance 触发判定');
-  assert.ok(client.includes('typeof enhance === \'function\''), '产物缺 enhance 自动触发调用');
-  // i18n 键平衡（v3.2.17 +3 键 → 40）
+  assert.ok(client.includes("typeof enhance !== 'function'"), '产物缺 enhance 可用性守卫（自动触发调用）');
+  assert.ok(client.includes('endedInFeedback'), '产物缺官方失败出口判定（失败时不得进入等写回）');
+  // i18n 键平衡（P2：+4 键 → 44）
   const i18n = readFileSync(join(__dirname, '..', 'src', 'client', 'i18n.js'), 'utf8');
   const m = i18n.match(/module\.exports = \"([\s\S]*)\"\s*;?\s*$/);
   const body = m ? m[1] : i18n;
@@ -288,6 +295,6 @@ test('VOICE-P24 产物含 autoEnhance 触发链路 + i18n 键平衡（v3.2.17 +3
   const en = body.split('const EN = {')[1] || '';
   const z = (zh.match(/voice[A-Za-z]+:/g) || []).length;
   const e = (en.match(/voice[A-Za-z]+:/g) || []).length;
-  assert.ok(z >= 40, 'ZH voice 键不足 40（实际 ' + z + '）');
+  assert.ok(z >= 44, 'ZH voice 键不足 44（实际 ' + z + '）');
   assert.equal(z, e, 'ZH/EN voice 键不平衡: ' + z + ' vs ' + e);
 });

@@ -154,33 +154,39 @@ test('VADSIL-P11 不回归：host 侧 sanitizeVoiceCfg 白名单与 client 同�
 });
 
 // ───────────── 落点改造：两条入口共用同一入口 ─────────────
-test('VADSIL-P12 共用同一入口：recorder.js 与 official-bridge.js 都调 vadSilenceMsOf/vadRequiredQuiet', () => {
+test('VADSIL-P12 共用同一入口：静音档位由 bridge 的包装 VAD 单一入口驱动（自建链已退役）', () => {
   const rec = decodeChunk('src/client/voice/recorder.js');
   const br = decodeChunk('src/client/voice/official-bridge.js');
-  // 热键路径：帧数由配置动态计算 + 由调用方传入静音时长
-  assert.ok(rec.includes('vadRequiredQuiet(silenceMs)'), 'recorder 缺「按参数动态计算帧数」');
-  assert.ok(rec.includes('vadSilenceMsOf(voiceCfgState.value)'), 'recorder 缺「取配置值」');
-  assert.equal(rec.includes('const VAD_REQUIRED_QUIET'), false, 'recorder 不得再有固定帧数常量（§7.4 要求动态化）');
-  // ⚠ 注释中保留「旧写法」字样是允许的（记录退役写法）；判据看**活代码**：
+  // P2-补做（2026-10-13 · UD-0016）：自建采集链退役 ⇒ VAD 只剩**一条链路**（bridge 包装 VAD）。
+  // 判据强度不变：仍逐项断言「按配置动态计算 + 取同一配置值 + 不得有固定帧数常量」。
   const liveRec = rec.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.equal(liveRec.trim(), '', 'recorder.js 活代码须已空壳（自建采集链退役，仅留说明注释）');
   assert.equal(/\bconst VAD_SILENCE_MS\b/.test(liveRec), false, 'recorder 活代码不得再有硬编码静音时长常量');
-  assert.equal(/\bconst OVB_SILENCE_MS\b/.test(br.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n')), false, 'bridge 活代码不得再有硬编码静音时长常量');
-  // 官方路径：同一入口
-  assert.ok(br.includes('requiredQuiet'), 'bridge 缺动态帧数');
-  assert.ok(br.includes('vadSilenceMsOf(voiceCfgState.value)'), 'bridge 缺「取同一配置值」');
+  assert.equal(/\bconst VAD_REQUIRED_QUIET\b/.test(liveRec), false, 'recorder 活代码不得再有固定帧数常量');
+  // 包装 VAD：同一入口（唯一在用的落点）
+  assert.ok(br.includes('vadRequiredQuiet(vadSilenceMsOf(voiceCfgState.value))'), 'bridge 缺「经同一入口按配置动态计算帧数」');
   assert.equal(br.includes('const OVB_REQUIRED_QUIET'), false, 'bridge 不得再有固定帧数常量');
+  assert.equal(/\bconst OVB_SILENCE_MS\b/.test(br.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n')), false, 'bridge 活代码不得再有硬编码静音时长常量');
+  // 退役后不得再有第二条 VAD 实现（防止「退役了却留着第二份真相」）
+  assert.equal(rec.includes('setInterval'), false, 'recorder 活代码不得再有自建 VAD 轮询');
 });
 
-test('VADSIL-P13 须保留：自适应底噪校准与触发门 heardSpeech 两条路径都在位', () => {
+test('VADSIL-P13 须保留：自适应底噪校准与触发门 heardSpeech 在包装 VAD 中在位', () => {
   const rec = decodeChunk('src/client/voice/recorder.js');
   const br = decodeChunk('src/client/voice/official-bridge.js');
-  for (const [name, src] of [['recorder', rec], ['official-bridge', br]]) {
+  // P2-补做（UD-0016）：两条路径收敛为一条（wrapper VAD）⇒ 只判该条；记录退役事实的那一份不带活代码。
+  for (const [name, src] of [['official-bridge', br]]) {
     assert.ok(src.includes('heardSpeech'), name + ' 缺触发门 heardSpeech（未说话不得触发，防误停）');
     assert.ok(/CALIBRATE_FRAMES/.test(src), name + ' 缺自适应底噪校准采样帧数');
     assert.ok(/NOISE_FACTOR/.test(src), name + ' 缺自适应阈值系数');
     assert.ok(/THRESHOLD_MAX/.test(src), name + ' 缺阈值上限');
     // 触发门语义：必须先 heardSpeech 才计静音帧
     assert.ok(/else if \(heardSpeech\)/.test(src), name + ' 触发门用法被改（须保持「先听到语音才计静音」）');
+  }
+  // 退役面：recorder.js 活代码不得再留第二套校准常量（防「退役了却留着第二份真相」）
+  const recLive = rec.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  for (const sym of ['heardSpeech', 'CALIBRATE_FRAMES', 'NOISE_FACTOR', 'THRESHOLD_MAX']) {
+    assert.equal(recLive.includes(sym), false, 'recorder 活代码不得再有 ' + sym + '（自建 VAD 已退役）');
   }
 });
 
