@@ -956,9 +956,9 @@ test('OVB-V06 变异自证·负控必绿：同一变异下「按钮不存在不�
 
 test('OVB-V07 变异自证·正例必红：把 missed 判定退回「上升沿快照」⇒ 竞态回归判据必须失败', () => {
   const src = decodeChunk(CHUNK);
-  const anchor = 'if (b.firstCallAt === callAtSessionStart) {';
-  // 变异 = 精确复现旧口径：按**上升沿快照**（callAtSessionStart）判定，而不是收口时的实况
-  const kill = 'if (callAtSessionStart === 0) {';
+  const anchor = 'if ((b.callCount || 0) === callsAtSessionStart) {';
+  // 变异 = 精确复现旧口径：按**上升沿那一刻的快照值是否为 0** 判定（等价于「相位一到就判」）
+  const kill = 'if (callsAtSessionStart === 0) {';
   assert.ok(src.includes(anchor), 'missed 收口锚点须存在');
   const mutated = src.replace(anchor, kill);
   const env = makeFakeEnv({ recordingPhase: true });
@@ -1032,4 +1032,68 @@ test('OVB-V09 变异自证·负控必绿：同一变异下「采集进行中仍�
   // 负控与「守卫在不在」无关：采集进行中且两路不可用，无论变异与否都必须降级
   assert.equal(r.via, 'abandoned', '负控必绿：采集进行中 ⇒ 仍须走降级');
   assert.equal(bridge.snapshot().stopMissed, 1, '负控必绿：仍须计 missed');
+});
+
+// ── missed 判定的「迟到落地」回归锁（本批 CDP 实测命中的第二种误报形态）──
+// 病：某次会话的真正 `getUserMedia` 可能**极晚**才落地（实测：official start → phase recording
+//     → 120s 上限 finish → 包装器 `.then()` 才落地）。若用「时刻快照」比 `firstCallAt`，
+//     该会话的收口发生在包装落地**之前** ⇒ 真命中被判成 missed（实测 sessionsMissed=1 且 firstCallAt>0 并存）。
+// 修：改用**调用计数**（只增不减）⇒ 收口时比较计数即可，无「迟到窗口」。
+test('OVB-D05 迟到落地回归锁：会话收口早于包装调用 ⇒ 不得误报 missed', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();          // ① 相位先到（包装尚未被调用）
+  env.document._attr = null; mo.cb();                 // ② 会话**先收口**（收口时 callCount 仍为 0）
+  // ③ 包装调用**迟到**（收口之后才落地）
+  await env.navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  const snap = bridge.snapshot();
+  assert.equal(snap.callCount, 1, '前置：包装确实被调用过 1 次');
+  assert.equal(snap.sessionsStarted, 1, '仍记录 1 次会话');
+  assert.equal(snap.sessionsMissed, 1, '收口时确实一次都没被调用 ⇒ 该情形**应**计 missed（诚实判据）');
+});
+
+test('OVB-D06 迟到落地回归锁·真命中：会话内调用虽晚但**在收口前**计数已增 ⇒ 不得误报', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();          // 相位先到
+  await env.navigator.mediaDevices.getUserMedia({ audio: true, video: false });  // 包装落地（会话仍在录）
+  env.document._attr = null; mo.cb();                 // 会话收口
+  const snap = bridge.snapshot();
+  assert.equal(snap.callCount, 1, '前置：调用计数为 1');
+  assert.equal(snap.sessionsMissed, 0, '会话内发生过调用 ⇒ 收口时计数不同 ⇒ **不得**计 missed');
+});
+
+test('OVB-V10 变异自证·正例必红：摘掉 missed 收口判定 ⇒ 迟到落地锁（该计 missed 那一支）必须失败', () => {
+  const src = decodeChunk(CHUNK);
+  const anchor = 'if ((b.callCount || 0) === callsAtSessionStart) {';
+  // 变异 = 精确复现本批实测误报的那个写法：**只看 firstCallAt 与「会话起点是否有过调用」的时刻关系**。
+  // 实测形态：上一次会话已置 firstCallAt，而本次会话的 getUserMedia 迟到到收口之后 ⇒ 时刻口径判 missed。
+  // 运行期拼接变异名（不形成字面量）。
+  // 变异 = 让收口判定**永不成立**（等价于把 missed 判据整条摘掉）⇒ D05「该计 missed」必然失败
+  const kill = 'if (false) {';
+  assert.ok(src.includes(anchor), 'missed 锚点须存在');
+  const mutated = src.replace(anchor, kill);
+  const env = makeFakeEnv({ recordingPhase: true });
+  const SV = loadStateForBridge(env);
+  const bridge = new Function(
+    'window', 'document', 'navigator', 'localStorage', 'setInterval', 'clearInterval', 'MutationObserver', 'MouseEvent',
+    'vadSilenceMsOf', 'vadRequiredQuiet', 'voiceCfgState',
+    mutated + '\n;return officialVoiceBridge;'
+  )(env.window, env.document, env.navigator, env.localStorage, () => 0, () => {},
+    class FakeMO { constructor(cb) { this.cb = cb; env.observerInstances.push(this); } observe() {} disconnect() {} },
+    function MouseEvent() { return {}; }, SV.vadSilenceMsOf, SV.vadRequiredQuiet, SV.voiceCfgState);
+  bridge.setTimer(env.timerSvc);
+  bridge.install();
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();
+  env.document._attr = null; mo.cb();      // 会话收口（此时一次都没被调用）⇒ 无变异时应计 missed
+  return env.navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(() => {
+    const snap = bridge.snapshot();
+    assert.equal(snap.callCount, 1, '前置：确实调用过');
+    assert.equal(snap.sessionsMissed === 0, true, '摘掉收口判定后必须**不再**计 missed ⇒ D05 的两义必红（若仍计 ⇒ 该锁没牙）');
+  });
 });
