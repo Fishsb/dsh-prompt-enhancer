@@ -240,15 +240,21 @@ test('OVB-P02 兜底：无官方停止按钮时用 MediaRecorder 实例停（且
   assert.equal(rec.stopCalls, 1, '兜底路径须停掉 MediaRecorder 实例恰好 1 次');
 });
 
-test('OVB-P03 显式降级：A1/A2 都不可用 ⇒ stopped=false + 记录降级原因（不假装已停）', async () => {
+test('OVB-P03 显式降级：采集进行中且 A1/A2 都不可用 ⇒ stopped=false + 记录降级原因（不假装已停）', async () => {
   const env = makeFakeEnv({ recordingPhase: true, noStopButton: true });
   const bridge = loadBridge(env);
   bridge.install();
   await env.navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  // ⚠ N-1 语义（本批）：只有「**采集确在进行中**」才允许计降级 ⇒ 必须先把官方相位置为 recording
+  //   （否则属「会话已收尾/未开」分支，按新语义**不得**写 abandonReason）。
+  env.document._attr = 'recording';
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  mo.cb();
   const r = bridge.stopOfficial();
   assert.equal(r.stopped, false, '不得假装已停');
   assert.equal(r.via, 'abandoned', '须走显式降级路径');
   assert.ok(bridge.snapshot().abandonReason, '必须记录降级原因');
+  assert.equal(bridge.snapshot().stopMissed, 1, '采集进行中且两路不可用 ⇒ 恰好计 1 次 missed');
 });
 
 // ───────────────────────────── 负控 ─────────────────────────────
@@ -472,6 +478,54 @@ test('OVB-F02 失败出口：未出现 feedback 时不得误报（负控）', ()
   const snap = bridge.snapshot();
   assert.equal(snap.endedInFeedback, false, '成功收尾不得带失败标记');
   assert.ok(snap.lastEndedAt > 0, '成功收尾须记结束时刻（自动增强据此等写回）');
+});
+
+// ───────────── N-1 回归锁：会话已收尾/未开 ⇒ 不得计 missed、不得写 abandonReason ─────────────
+// 实测病（第 25 轮运行期）：一次**正常手动停**之后，相位停在 feedback（节点不消失）⇒ 静默 VAD 仍在跑；
+// 它在**录音器已释放**时到阈值 ⇒ 旧实现照记 stopMissed + 写 abandonReason（第一优先分支）
+// ⇒ 设置页此后**一直**显示「自动停已降级」，而自动停从未失败。
+test('OVB-N04 N-1 回归锁：会话已收尾（相位非 recording）⇒ 不得计 missed、不得写降级原因', () => {
+  const env = makeFakeEnv({ recordingPhase: true, noStopButton: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  // 会话走完：进入 recording 再收尾到 feedback（节点**不消失**——正是实测形态）
+  env.document._attr = 'recording'; mo.cb();
+  env.document._attr = 'feedback'; mo.cb();
+  const before = bridge.snapshot();
+  assert.equal(before.stopMissed, 0, '前置：尚未计 missed');
+  // 静默 VAD 迟到触发（录音器已释放、停止按钮也不在）
+  const r = bridge.stopOfficial();
+  assert.equal(r.stopped, false, '不得假装已停');
+  assert.equal(r.via, 'no-active-session', '会话已收尾 ⇒ 必须走「无进行中会话」分支');
+  const after = bridge.snapshot();
+  assert.equal(after.stopMissed, 0, 'N-1：会话已收尾 ⇒ **不得**计 stopMissed（诊断不得说反话）');
+  assert.equal(after.abandonReason, '', 'N-1：会话已收尾 ⇒ **不得**写 abandonReason（否则诊断区常挂「已降级」）');
+});
+
+test('OVB-N05 N-1 回归锁：节点已卸载（idle）后迟到触发 ⇒ 同样不得计 missed/写原因', () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();
+  env.document._attr = null; mo.cb();              // 成功收尾：节点消失
+  const r = bridge.stopOfficial();
+  assert.equal(r.via, 'no-active-session', '无进行中会话 ⇒ 不得走降级分支');
+  assert.equal(bridge.snapshot().stopMissed, 0, 'N-1：不得计 missed');
+  assert.equal(bridge.snapshot().abandonReason, '', 'N-1：不得写 abandonReason');
+});
+
+test('OVB-N06 N-1 反向锁（不得修过头）：采集**进行中**且两路不可用 ⇒ 仍须计 missed + 写原因', () => {
+  const env = makeFakeEnv({ recordingPhase: true, noStopButton: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();       // 采集确在进行中
+  const r = bridge.stopOfficial();
+  assert.equal(r.via, 'abandoned', '采集进行中且两路不可用 ⇒ 必须显式降级（不得被 N-1 修复顺手改没）');
+  assert.equal(bridge.snapshot().stopMissed, 1, '仍须计 missed');
+  assert.ok(bridge.snapshot().abandonReason, '仍须留下降级原因');
 });
 
 // ───────────────── 不静默失效 ─────────────────────────────
@@ -928,4 +982,54 @@ test('OVB-V07 变异自证·正例必红：把 missed 判定退回「上升沿�
     assert.equal(snap.firstCallAt > 0, true, '前置：包装确实落地过');
     assert.equal(snap.sessionsMissed > 0, true, '退回旧口径后必须误报 missed（若仍为 0 ⇒ 竞态判据没牙）');
   });
+});
+
+// ── N-1 修复的变异自证（变异名一律**运行时拼接**，且为判据的合法输入）──
+test('OVB-V08 变异自证·正例必红：把 N-1 守卫退回旧口径 ⇒ N-1 回归锁必须失败', () => {
+  const src = decodeChunk(CHUNK);
+  const guard = 'if (!ovb' + 'RecordingNow()) {';
+  assert.ok(src.includes(guard), 'N-1 守卫锚点须存在');
+  const mutated = src.replace(guard, 'if (false) {');
+  const env = makeFakeEnv({ recordingPhase: true, noStopButton: true });
+  const S8 = loadStateForBridge(env);
+  const bridge = new Function(
+    'window', 'document', 'navigator', 'localStorage', 'setInterval', 'clearInterval', 'MutationObserver', 'MouseEvent',
+    'vadSilenceMsOf', 'vadRequiredQuiet', 'voiceCfgState',
+    mutated + '\n;return officialVoiceBridge;'
+  )(env.window, env.document, env.navigator, env.localStorage, () => 0, () => {},
+    class FakeMO { constructor(cb) { this.cb = cb; env.observerInstances.push(this); } observe() {} disconnect() {} },
+    function MouseEvent() { return {}; }, S8.vadSilenceMsOf, S8.vadRequiredQuiet, S8.voiceCfgState);
+  bridge.setTimer(env.timerSvc);
+  bridge.install();
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();
+  env.document._attr = 'feedback'; mo.cb();        // 会话已收尾（实测病形态）
+  const r = bridge.stopOfficial();
+  const snap = bridge.snapshot();
+  // 退回旧口径 ⇒ 照记 missed + 写原因 ⇒ N-1 回归锁的两条断言必红
+  const wouldPass = (r.via !== 'no-active-session' && snap.stopMissed === 0 && snap.abandonReason === '');
+  assert.equal(wouldPass, false, '退回旧口径后 N-1 回归锁必须为红（若仍绿 ⇒ 该锁没牙）');
+});
+
+test('OVB-V09 变异自证·负控必绿：同一变异下「采集进行中仍须降级」的反向锁仍须通过', () => {
+  const src = decodeChunk(CHUNK);
+  const guard = 'if (!ovb' + 'RecordingNow()) {';
+  const mutated = src.replace(guard, 'if (false) {');
+  const env = makeFakeEnv({ recordingPhase: true, noStopButton: true });
+  const S9 = loadStateForBridge(env);
+  const bridge = new Function(
+    'window', 'document', 'navigator', 'localStorage', 'setInterval', 'clearInterval', 'MutationObserver', 'MouseEvent',
+    'vadSilenceMsOf', 'vadRequiredQuiet', 'voiceCfgState',
+    mutated + '\n;return officialVoiceBridge;'
+  )(env.window, env.document, env.navigator, env.localStorage, () => 0, () => {},
+    class FakeMO { constructor(cb) { this.cb = cb; env.observerInstances.push(this); } observe() {} disconnect() {} },
+    function MouseEvent() { return {}; }, S9.vadSilenceMsOf, S9.vadRequiredQuiet, S9.voiceCfgState);
+  bridge.setTimer(env.timerSvc);
+  bridge.install();
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();       // 采集**进行中**
+  const r = bridge.stopOfficial();
+  // 负控与「守卫在不在」无关：采集进行中且两路不可用，无论变异与否都必须降级
+  assert.equal(r.via, 'abandoned', '负控必绿：采集进行中 ⇒ 仍须走降级');
+  assert.equal(bridge.snapshot().stopMissed, 1, '负控必绿：仍须计 missed');
 });
