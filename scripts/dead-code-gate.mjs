@@ -199,8 +199,154 @@ for (const line of git(diffArgs).split('\n')) {
   }
 }
 
+// ==== R5 lib/** 导出面必须有「生产活消费者」（P2-2 · 2026-10-13）====
+// 背景（P2-1 实证）：`lib/index.cjs` 曾压着 315 行自指死簇（executor 生命周期整段，
+//   簇外零调用点），而 **gate 五环全绿** —— 因为 R1 只扫 `src/`、R2 只扫 client chunk、
+//   R4 只判 `src/host` 与装配清单等值 ⇒ **`lib/**` 当时完全没有任何死代码机检**。
+//   本规则补这个盲区（属「会掩盖其他问题 / 让失败不可观测」类缺陷的修复）。
+//
+// ── 判据口径（**只判导出面，不做全文件级可达性分析**）────────────────────
+// 对一个 `lib/*.cjs` 的**导出符号**，按引用来源分三档：
+//   · USED          —— 存在**生产消费者**（`src/` · `lib/` · `scripts/` · `plugin-host.js`）
+//                      ⇒ PASS（这是唯一"活"的定义）
+//   · COVERED-ONLY  —— **只有 `test/**` 引用**（无生产消费者）⇒ **仍 PASS，另打 INFO 行**
+//                      （口径：算"被覆盖"，**不算"被使用"**；两类分开报，不混为一谈）
+//   · NO-CONSUMER   —— **全仓（含 `test/**`）零引用** ⇒ **FAIL**（真死码）
+//
+// ── 为什么只判 NO-CONSUMER 就够（"牙"在哪）────────────────────────────────
+// P2-1 的死簇形态正是「零外部消费者」：簇内互相调用（自指）**不产生**任何文件外引用。
+//   本规则对**任何新导出**都会问"文件外有没有人用" ⇒ 裸加无消费者导出**必然变红**。
+//   变异自证见 P2-2 报告 §T1（临时加无消费者导出 ⇒ R5 FAIL ⇒ 还原 ⇒ PASS）。
+//
+// ── 明确的不覆盖项（如实声明，不冒充已覆盖）──────────────────────────────
+//   ① **不判**「有生产消费者但该消费者自身路径不可达」（需 AST 可达性，勘察席已标未验证）；
+//   ② **不判**同文件内私有函数的死码（本轮范围外）；
+//   ③ **不判** `lib/client.cjs` —— 生成物（`npm run build` 产物）、54 行、无 `module.exports = {`
+//      面、其面是浏览器侧 `window.__ModuleLoader__`（无静态消费者）⇒ 结构性不适用；
+//   ④ **`--range` 不参与本规则**：R1 用 diff 是因为它判"**本次新增**声明"；R5 判的是
+//      **整个 `lib/` 面的现状事实**，与本次提交改了什么无关 ⇒ 在 `HEAD`（工作树 vs HEAD）
+//      与 `HEAD~1..HEAD`（提交区间）**两种模式下行为完全相同**。⚠ 这一差异是刻意的：
+//      R5 若也随 diff 走，则"死码在更早的提交里加入"时本环会永远看不见它（正是 P2-1 的形态）。
+//   ⑤ 引用判定用**词界正则**（`\b<name>\b`）而非 AST ⇒ 注释里的同名提及会计为引用。
+//      本规则因此**偏保守**（宁漏不误报）；R1 的既有实现同口径。
+{
+  const TARGETS = ['lib/asr.cjs', 'lib/index.cjs', 'lib/integrity.cjs', 'lib/maintain-lib.cjs',
+    'lib/net-proxy.cjs', 'lib/platform-service.cjs', 'lib/rpc-schema.cjs', 'lib/sys.cjs'];
+  // 生产消费者面（**不含** test/）：src · lib · scripts · plugin-host.js
+  const prodCorpus = [];
+  const walkProd = (dir) => {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) { if (!/^(node_modules|\.git|dist|assets|release-notes)$/.test(ent.name)) walkProd(full); continue; }
+      if (/\.(cjs|mjs|js)$/.test(ent.name)) prodCorpus.push(full);
+    }
+  };
+  for (const d of ['src', 'lib', 'scripts']) { const full = path.join(ROOT, d); if (fs.existsSync(full)) walkProd(full); }
+  const hostEntry = path.join(ROOT, 'plugin-host.js');
+  if (fs.existsSync(hostEntry)) prodCorpus.push(hostEntry);
+  // test 面（单独一类，只用于区分 COVERED-ONLY 与 NO-CONSUMER）
+  const testCorpus = [];
+  const testDir = path.join(ROOT, 'test');
+  if (fs.existsSync(testDir)) {
+    for (const ent of fs.readdirSync(testDir, { withFileTypes: true })) {
+      if (ent.isDirectory()) continue;
+      if (/\.(cjs|mjs|js)$/.test(ent.name)) testCorpus.push(path.join(testDir, ent.name));
+    }
+  }
+  /** 解析 `module.exports = { … }` 的**值侧**符号名（支持 `k: v` 别名与 shorthand） */
+  const parseExportNames = (code) => {
+    const at = code.indexOf('module.exports = {');
+    if (at < 0) return null;
+    const begin = code.indexOf('{', at);
+    let depth = 0; let end = -1;
+    for (let i = begin; i < code.length; i++) {
+      if (code[i] === '{') depth++;
+      else if (code[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (end < 0) return null;
+    const body = code.slice(begin + 1, end).split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
+    const names = new Set();
+    for (const seg of body.split(',')) {
+      const t = seg.trim();
+      if (!t) continue;
+      const alias = t.match(/^([A-Za-z_$][\w$]*)\s*:\s*([A-Za-z_$][\w$]*)$/);
+      if (alias) { names.add(alias[2]); continue; }
+      const plain = t.match(/^([A-Za-z_$][\w$]*)$/);
+      if (plain) names.add(plain[1]);
+    }
+    return [...names];
+  };
+  const countIn = (file, re) => { try { return (fs.readFileSync(file, 'utf8').match(re) || []).length; } catch { return 0; } };
+  let r5bad = 0; let r5checked = 0; let r5covered = 0;
+  const coveredRows = [];
+  for (const rel of TARGETS) {
+    const abs = path.join(ROOT, rel);
+    if (!fs.existsSync(abs)) { fail('R5', rel + ' 缺失（R3 亦判，此处只提示）'); r5bad++; continue; }
+    const names = parseExportNames(fs.readFileSync(abs, 'utf8'));
+    if (!names) { fail('R5', rel + ' 未找到 `module.exports = {` 面（口径失效，须先对齐解析器）'); r5bad++; continue; }
+    for (const name of names) {
+      r5checked++;
+      const re = new RegExp('\\b' + name.replace(/\$/g, '\\$') + '\\b', 'g');
+      let prodHits = 0;
+      for (const f of prodCorpus) {
+        if (path.resolve(f) === path.resolve(abs)) continue;
+        if (countIn(f, re) > 0) { prodHits++; break; }
+      }
+      if (prodHits > 0) continue;
+      let testHits = 0;
+      for (const f of testCorpus) { if (countIn(f, re) > 0) { testHits++; break; } }
+      if (testHits > 0) { r5covered++; coveredRows.push(rel + ':' + name); continue; }
+      fail('R5', rel + ' 导出 ' + name + ' 全仓（含 test/）零引用 ⇒ 死码');
+      r5bad++;
+    }
+  }
+  if (!r5bad) {
+    pass('R5', r5checked + ' 个 lib 导出符号均有消费者（' + (r5checked - r5covered) + ' 生产在用 · ' + r5covered + ' 仅测试覆盖）');
+    if (coveredRows.length) console.log('INFO | R5 | 仅测试覆盖（口径：算"被覆盖"，不算"被使用"）：' + coveredRows.join(' '));
+  }
+}
+
+// ==== R6 注入面复长哨兵（P2-2 · T2 · 2026-10-13）====
+// 背景（P2-1 的 F-2 盲区点名）：`.cmd` / schtasks **命令注入面**的三条锚定判据
+//   （`A146-3` · `RPCG-02` · `RPCG-04` 末两条）随执行器退役**全部消失** ⇒ 该面自此
+//   **再无任何判据在看**。当前无活代码故非活缺陷，**但复长不会报警**。本规则是那个哨兵。
+//
+// ── 形态选择：源码锚定式（选项 ①），不是缺席式（②）──────────────────────
+// 理由：②（"该面已退役且若复长须伴随安全化判据"）**无法机检"若复长"这个条件** ——
+//   它必然退化成「现在没有 ⇒ 恒过」= **恒真判据（同 A201-3 假绿）**，正是本批禁止的形态。
+//   ① 则把哨兵做在**可证伪的形态**上：直接断言源码里**不得出现未安全化的命令拼接**，
+//   一旦有人把 `.cmd` / schtasks / shell 命令拼回来，**立刻变红** ⇒ 哨兵真能报警。
+//
+// ── 判据内容（两条，都是"出现即 FAIL"）──────────────────────────────────
+//   (a) 系统面文件**不得**出现 `.cmd` 文件生成 / schtasks 计划任务调用；
+//   (b) **不得**出现"shell 赋值 + 字符串拼接"的裸拼形态（`'set "X=' + …`），
+//       其正确形态是经 `cmdSafeValue()` 一类安全化函数转义 —— 出现裸拼即 FAIL
+//       （即：要么用安全化函数，要么它根本不该在）。
+//
+// ⚠ **这不是"现在没有所以过"**：判据读的是**源码中真的没有该形态**这一可证伪事实，
+//   变异自证见 P2-2 报告 §T2（临时加回 `'set "X=' + v` ⇒ R6 FAIL ⇒ 还原 ⇒ PASS）。
+{
+  const INJECTION_FILES = ['lib/index.cjs', 'lib/sys.cjs', 'lib/platform-service.cjs', 'lib/net-proxy.cjs'];
+  const cmdGen = /(?:schtasks|['"]\.cmd['"])/;
+  const bareSet = /['"]set\s+["']?\s*[A-Z_][A-Z0-9_]*\s*=\s*['"]\s*\+/;
+  let r6bad = 0; let r6checked = 0;
+  for (const rel of INJECTION_FILES) {
+    const abs = path.join(ROOT, rel);
+    if (!fs.existsSync(abs)) continue;
+    r6checked++;
+    const lines = fs.readFileSync(abs, 'utf8').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i];
+      if (/^\s*(\/\/|\*|\/\*)/.test(ln)) continue; // 注释行不计（防"已删清单"式误报）
+      if (cmdGen.test(ln)) { fail('R6', rel + ':' + (i + 1) + ' 命令/任务生成面复长（.cmd 生成或 schtasks 调用）: ' + ln.trim().slice(0, 80)); r6bad++; }
+      if (bareSet.test(ln)) { fail('R6', rel + ':' + (i + 1) + ' 裸拼 shell 赋值（未经 cmdSafeValue 一类安全化）: ' + ln.trim().slice(0, 80)); r6bad++; }
+    }
+  }
+  if (!r6bad) pass('R6', r6checked + ' 个系统面文件的注入点已退役且无裸拼复长（哨兵在位）');
+}
+
 console.log(failures ? ('\n✗ 门禁未通过（' + failures + ' 处）') : '\n✅ 死代码门禁通过');
 // 状态行与下面的退出码**同源同处**产出：不另算一遍，免出第二个裁决点。
 emitRingState('dead-code', failures ? 'FAIL' : 'PASS',
-  failures ? failures + ' 处 FAIL（R1–R4）' : 'R1–R4 全过');
+  failures ? failures + ' 处 FAIL（R1–R6）' : 'R1–R6 全过');
 process.exitCode = failures ? 1 : 0;
