@@ -37,7 +37,7 @@
 | `voice/status` | client → host | 语音引擎就绪态（**委托官方 `ctx.speechToText.snapshot()`**）+ 规整就绪态 | 只读 |
 | `voice/transcribe` | client → host | 音频（16k mono PCM16 WAV data URL）→ **委托官方 `ctx.speechToText`** 识别 → 可选规整，返回 `{text,raw,refined}` | 用户触发 |
 
-> 注：`models/*` / `logs/*` / `template/*` / `enhance*` / `cancel` 共 **11** 条注册于 `plugin-host.js`（经 `lib/index.cjs` 桥接）；`config/*` / `voice/status`·`voice/transcribe` 共 **4** 条直接注册于 `lib/index.cjs`。两侧同挂 `/dsh-prompt-enhancer/rpc`，合计 **15** 条（以两文件 `harness.handle(` 枚举逐条对照，可由 `node scripts/rpc-manifest.mjs` 复算）。
+> 注：`models/*` / `logs/*` / `template/*` / `enhance*` / `cancel` 共 **11** 条注册于 `plugin-host.js`（由 `lib/index.cjs` 读出 `BODY` 并桥接）；`config/*` / `voice/status`·`voice/transcribe` 共 **4** 条注册于 **host 半部 `lib/` 侧的真 CommonJS 模块**——`config/*` 在 `lib/rpc-config.cjs`、`voice/*` 在 `lib/rpc-voice.cjs`（P2-3 拆分批起；`lib/index.cjs` 现为**薄装配入口**，自身不注册 RPC）。两侧同挂 `/dsh-prompt-enhancer/rpc`，合计 **15** 条（以 `harness.handle(` 枚举逐条对照 —— **P2-3 起派生面 = `lib/` 下全部非生成 `.cjs` + `plugin-host.js`**，可由 `node scripts/rpc-manifest.mjs` 复算）。
 >
 > ⚠ **历史**（**已退役，不再注册**）：`plugins/*`（4）· `update/check`·`update/pull`·`update/envcheck`（3）· `update/executorEnsure`·`update/install`·`update/restartNeeded`·`update/diagTail`（4）· `update/portRestart`·`update/makeShortcut`（2）· `voice/model*`·`voice/deploy*`（8）⇒ 共 21 条已随「插件管理 tab 退役 / 更新执行器退役 / 插件内重启能力退役 / P1-a 语音缩批」移除。**上方表格为现行集合，本节历史条目仅供旧版本对照，不代表现行能力。**
 

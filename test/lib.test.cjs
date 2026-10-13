@@ -1215,7 +1215,8 @@ test('U44 mergeEnvPath PATH 合并去重（v2.5.0）', () => {
   assert.equal(mergeEnvPath('C:\\A;;D:\\B', ''), 'C:\\A;D:\\B', '空段忽略');
 });
 
-// v2.5.0：环境探测计划契约（与 lib/index.cjs probeEnv 的 key 一一对应）。
+// v2.5.0：环境探测计划契约（与 host 侧 probeEnv facade 返回的 key 一一对应；
+// P2-3（2026-10-13 拆分批）起该 facade 位于 lib/harness.cjs，原 lib/index.cjs 内联定义已随域拆分移出）。
 // v2.7.0：收敛为重启阶段真实依赖 5 项；v2.7.1：恢复 net 网络预检 → 6 项。
 // v3.2.1-o：exec-port（更新端口独立）删除——readServicePort 对默认端口必然解析失败、
 // v3.2 执行器动态端口 fallback 后已无意义；替换为 port-mode（3080 托管模式）+ port-pid（当前 PID）→ 7 项。
