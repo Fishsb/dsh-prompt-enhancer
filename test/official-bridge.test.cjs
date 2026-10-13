@@ -114,7 +114,11 @@ function makeFakeEnv(opts) {
     MediaRecorder: o.noRecorder ? undefined : FakeMediaRecorder,
     __dshPeDisableOfficialBridge: o.disabled === true,
     __dshSpeechVoiceActivityHook: o.officialHook || undefined,
-    addEventListener() {}, removeEventListener() {},
+    // F-18 回归锁：记录监听器，使测试能驱动**真实**的 keydown/keyup 处理器（而非另写一套假处理器）
+    _ls: {},
+    addEventListener(type, fn) { (this._ls[type] = this._ls[type] || []).push(fn); },
+    removeEventListener(type, fn) { if (this._ls[type]) this._ls[type] = this._ls[type].filter((f) => f !== fn); },
+    _fire(type, ev) { for (const fn of (this._ls[type] || [])) fn(ev); },
   };
   const documentStub = {
     // 初始必须为 null（真实 DOM 在录音开始前**根本没有**该属性）——需要相位的用例自行置位并驱动 observer
@@ -659,10 +663,19 @@ function buildHotkeyHost(env, bridge, opts) {
   const o = opts || {};
   const mini = makeMiniReact();
   const timerRegs = [];
-  const timerSvcLocal = { interval: (fn, ms) => { const r = { fn, ms, cleared: false }; timerRegs.push(r); return () => { r.cleared = true; }; } };
+  const timerSvcLocal = {
+    interval: (fn, ms) => { const r = { fn, ms, kind: 'interval', cleared: false }; timerRegs.push(r); return () => { r.cleared = true; }; },
+    // F-18：补停用 timeout 步进 ⇒ 测试可确定性地驱动 tick（不必等真实时钟）
+    timeout: (fn, ms) => { const r = { fn, ms, kind: 'timeout', cleared: false }; timerRegs.push(r); return () => { r.cleared = true; }; },
+  };
   bridge.setTimer(timerSvcLocal);
-  const voiceCfgState = { value: { autoEnhance: o.autoEnhance === true, vad: { enabled: true }, hotkey: { enabled: false, combo: '' }, refine: {} }, listeners: new Set(), synced: true };
+  // F-18：热键监听器只在「已启用且有组合键」时注册 ⇒ 需要驱动真实处理器的用例须传 hotkey:true
+  const hkCombo = o.hotkeyCombo || 'Backquote';
+  const voiceCfgState = { value: { autoEnhance: o.autoEnhance === true, vad: { enabled: true }, hotkey: { enabled: o.hotkey === true, combo: o.hotkey === true ? hkCombo : '' }, refine: {} }, listeners: new Set(), synced: true };
   const enhanceCalls = [];
+  // F-18：持久 store 桩 —— 组件通过 storeFor(sessionId) 写 `error` 作为「失败可见」出口，
+  //   旧桩每次返回新对象 ⇒ 写进去看不见。改为稳定对象，使该出口可被断言。
+  const storeStub = { phase: 'idle', error: null, backup: '', enhanced: '', seq: 0, memoryRounds: [], optimized: false, lastModel: '', fallbackUsed: false, degraded: [], truncated: false };
   const src = decodeChunk('src/client/voice/hotkey.js');
   const factory = new Function(
     'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'voiceHotkeyDisplay', 'parseVoiceHotkey',
@@ -675,7 +688,7 @@ function buildHotkeyHost(env, bridge, opts) {
     mini.React,
     { call: () => Promise.resolve({ ok: true }) },
     voiceCfgState, () => () => {}, (c) => c, () => null, () => false, () => false,
-    () => () => {}, () => ({ phase: 'idle' }),
+    () => () => {}, () => storeStub,
     async () => { throw new Error('should not record'); }, async () => null, () => false,
     () => Promise.resolve({ filled: true }), () => {},
     (...a) => { enhanceCalls.push(a); },   // enhance 桩
@@ -684,7 +697,18 @@ function buildHotkeyHost(env, bridge, opts) {
   );
   const props = { sessionId: o.sessionId || 'sess-x', inputActions: { setDraft() {} }, input: { draft: o.draft0 || '' } };
   const render = (draft) => { if (draft !== undefined) props.input = { draft }; mini.begin(); api.VoiceHotkeyHost(props); mini.runEffects(); };
-  return { render, props, enhanceCalls, timerRegs, voiceCfgState, mini };
+  // 驱动生产代码里的真实热键处理器（windows stub 记录的监听器）
+  // ⚠ 必须显式给四个修饰键为 false：matchVoiceHotkey 用 `e.ctrlKey === hk.ctrl` 严格比较，
+  //   缺字段（undefined）会与 hk 的 false 不等 ⇒ 匹配失败、处理器直接 return（实测踩到）。
+  const KEYDOWN = (extra) => Object.assign({
+    code: 'Backquote', key: '`', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false,
+    repeat: false, preventDefault() {}, stopPropagation() {},
+  }, extra || {});
+  const keydown = () => env.window._fire('keydown', KEYDOWN());
+  const keyup = () => env.window._fire('keyup', KEYDOWN());
+  // 跑所有未清除的 timeout 步进（模拟时钟推进）
+  const runTimeouts = (max) => { let n = 0; for (const r of timerRegs) { if (!r.cleared && r.kind === 'timeout') { r.cleared = true; r.fn(); n += 1; if (max && n >= max) break; } } return n; };
+  return { render, props, enhanceCalls, timerRegs, voiceCfgState, mini, keydown, keyup, runTimeouts, store: storeStub };
 }
 
 test('OVB-A01 官方路径·自动增强：会话结束 + 写回落地 ⇒ autoEnhance 触发增强（有限轮询）', () => {
@@ -1170,4 +1194,113 @@ test('OVB-V10 变异自证·正例必红：摘掉 missed 收口判定 ⇒ 迟到
     assert.equal(snap.callCount, 1, '前置：确实调用过');
     assert.equal(snap.sessionsMissed === 0, true, '摘掉收口判定后必须**不再**计 missed ⇒ D05 的两义必红（若仍计 ⇒ 该锁没牙）');
   });
+});
+
+// ── F-18 修复的回归锁（2026-10-13·收尾批）─────────────────────────────────────
+// 病：长按松开时若「启动尚未落地/停止派发太早」⇒ 旧实现**只写 `longReleaseRef` 标记、无人消费**
+//     ⇒ 「松开即停」（README 承诺）静默落空，且**不留任何读数**（症状：已松手、官方仍在录音）。
+// 修：两条进入路径都补**有界**消费（真派发停止并校验是否生效）；成功/失败都留读数。
+test('OVB-R01 F-18：长按松开时启动尚未落地 ⇒ 必须在启动落地后**补停**，且 stopClicks 恰好 1', async () => {
+  // ⚠ 必须 recordingPhase:true —— 该开关决定「相位节点数组」是否存在（false ⇒ 数组为空 ⇒ 相位永远查不到）。
+  //   本组要的是「松开时相位**尚未**出现、随后才出现」，故节点须存在、`_attr` 初始为 null 由用例控制。
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const host = buildHotkeyHost(env, bridge, { autoEnhance: false, hotkey: true, sessionId: 'sess-r1' });
+  host.render('');
+  // 长按：按下 → 真实时间过阈值（500ms 是生产常量，不可改）→ 松开
+  host.keydown();
+  await new Promise((r) => setTimeout(r, 620));
+  host.keyup();
+  // 松开后官方启动才落地（相位出现）⇒ 桥报 recording；补停轮询应能真的派发到停止按钮
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();
+  const snapMid = bridge.snapshot();
+  for (let i = 0; i < 20; i++) host.runTimeouts(1);
+  const snap = bridge.snapshot();
+  assert.equal(snapMid.recording, true, '前置：官方确已进入采集态（补停窗口内）');
+  assert.equal(snap.stopClicks, 1, 'F-18：补停必须恰好派发 1 次停止（旧实现为 0 = 松开即停落空）');
+  assert.equal(snap.stopMissed, 0, '补停成功 ⇒ 不得记 missed');
+});
+
+test('OVB-R02 F-18：补停**成功**后不得再补（不得重复派发）⇒ stopClicks 不 >1', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const host = buildHotkeyHost(env, bridge, { autoEnhance: false, hotkey: true, sessionId: 'sess-r2' });
+  host.render('');
+  host.keydown();
+  await new Promise((r) => setTimeout(r, 620));
+  host.keyup();
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();
+  for (let i = 0; i < 40; i++) host.runTimeouts(1);   // 远超上限地驱动
+  const snap = bridge.snapshot();
+  assert.equal(snap.stopClicks, 1, 'F-18：补停成功即停 ⇒ stopClicks 必须恰好 1（>1 = 重复派发）');
+});
+
+test('OVB-R03 F-18：补停**失败**必须留可见读数（不得静默）', async () => {
+  const env = makeFakeEnv({ recordingPhase: true, noStopButton: true });  // 停止按钮不可用 ⇒ 补停必败
+  const bridge = loadBridge(env);
+  bridge.install();
+  const host = buildHotkeyHost(env, bridge, { autoEnhance: false, hotkey: true, sessionId: 'sess-r3' });
+  host.render('');
+  host.keydown();
+  await new Promise((r) => setTimeout(r, 620));
+  host.keyup();
+  // 官方进入采集态但**没有停止按钮** ⇒ 每次补停都会落到显式降级
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();
+  for (let i = 0; i < 40; i++) host.runTimeouts(1);
+  const snap = bridge.snapshot();
+  assert.equal(snap.stopClicks, 0, '前置：确实一次都没停掉');
+  assert.equal(host.store.error, 'VOICE_OFFICIAL_UNAVAILABLE', 'F-18：补停失败必须在组件状态留错误（可见面不得静默）');
+});
+
+test('OVB-R04 F-18 变异自证：退回「只写标记、无消费」⇒ OVB-R01 必红', async () => {
+  const src = decodeChunk('src/client/voice/hotkey.js');
+  // 变异 = 精确复现旧写法：只置标记，不启动补停轮询
+  const anchor = "        longReleaseRef.current = true;\n        scheduleDeferredStop();";
+  assert.ok(src.includes(anchor), 'F-18 消费锚点须存在');
+  const mutated = src.replace(anchor, "        longReleaseRef.current = true;");
+  assert.ok(!mutated.includes('scheduleDeferredStop();\n      }\n      return;'), '变异后不得再启动补停（否则变异无效）');
+  // 用变异源码建一个宿主，断言补停**不会**发生 ⇒ 证明 OVB-R01 的判据有牙
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const mini = makeMiniReact();
+  const timerRegs = [];
+  const timerSvcLocal = {
+    interval: (fn, ms) => { const r = { fn, ms, kind: 'interval', cleared: false }; timerRegs.push(r); return () => { r.cleared = true; }; },
+    timeout: (fn, ms) => { const r = { fn, ms, kind: 'timeout', cleared: false }; timerRegs.push(r); return () => { r.cleared = true; }; },
+  };
+  bridge.setTimer(timerSvcLocal);
+  const voiceCfgState = { value: { autoEnhance: false, vad: { enabled: true }, hotkey: { enabled: true, combo: 'Backquote' }, refine: {} }, listeners: new Set() };
+  const storeStub = { phase: 'idle', error: null, backup: '', enhanced: '', seq: 0, memoryRounds: [], optimized: false, lastModel: '', fallbackUsed: false, degraded: [], truncated: false };
+  const factory = new Function(
+    'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'voiceHotkeyDisplay', 'parseVoiceHotkey',
+    'matchVoiceHotkey', 'isEnhancing', 'subscribe', 'storeFor', 'startVoiceRecording', 'stopVoiceRecording',
+    'isVoiceRecording', 'insertVoiceText', 'notify', 'enhance', 'timerSvc', 'officialVoiceBridge', 'makeT', 'ZH',
+    'MarqueeSelect', 'CollapsibleSection', 'setInterval', 'clearInterval', 'setTimeout', 'navigator', 'window',
+    mutated + '\n;return { VoiceHotkeyHost };'
+  );
+  const api = factory(
+    mini.React, { call: () => Promise.resolve({ ok: true }) },
+    voiceCfgState, () => () => {}, (c) => c, () => null, () => false, () => false,
+    () => () => {}, () => storeStub,
+    async () => { throw new Error('x'); }, async () => null, () => false,
+    () => Promise.resolve({ filled: true }), () => {}, () => {},
+    timerSvcLocal, bridge, (p) => (k) => k, {}, null, null,
+    setInterval, clearInterval, setTimeout, env.navigator, env.window
+  );
+  const props = { sessionId: 'sess-r4', inputActions: { setDraft() {} }, input: { draft: '' } };
+  mini.begin(); api.VoiceHotkeyHost(props); mini.runEffects();
+  env.window._fire('keydown', { code: 'Backquote', key: '`', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, repeat: false, preventDefault() {}, stopPropagation() {} });
+  await new Promise((r) => setTimeout(r, 620));
+  env.window._fire('keyup', { code: 'Backquote', key: '`', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, repeat: false, preventDefault() {}, stopPropagation() {} });
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();
+  for (let i = 0; i < 40; i++) { for (const r of timerRegs) { if (!r.cleared && r.kind === 'timeout') { r.cleared = true; r.fn(); } } }
+  const snap = bridge.snapshot();
+  assert.equal(snap.stopClicks, 0, '变异（只写标记、无消费）下补停**不会**发生 ⇒ OVB-R01 的 stopClicks===1 判据有牙');
 });
