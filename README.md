@@ -22,10 +22,13 @@ DeepSeek Harness (DSH) 插件。**两大核心能力**：
 
 ### 2. 语音识别（💬）
 
-用官方 🎤 录音按钮（或本插件快捷键）开始说话，识别（交由官方 `speechToText` 服务）→ 可选规整（去口水词）→ 填入草稿 → 可一键优化。**说完停顿自动停止**（VAD 静音检测），录音仅内存中转不落盘。
+用官方 🎤 录音按钮（或本插件快捷键）开始说话，识别（交由官方 `speechToText` 服务）→ 可选规整（去口水词）→ 填入草稿 → 可一键优化。录音仅内存中转不落盘。
+
+**两条录音入口能力一致**：插件的**静音自动停**与**自动增强**在**插件快捷键路径**与**官方麦克风按钮路径**上**都提供**——点官方麦克风按钮时，插件通过包装浏览器标准录音接口观测**同一路**采集（只观测、不改行为），判静音后触发官方自身的停止，官方「转写→写回」链路不受影响。
 
 - **识别交由官方** — 识别引擎与模型由 DSH 官方 `speechToText` 提供（含其设置页），插件不再自带引擎、不下载模型（发布物精简）
-- **说完自动停** — VAD 静音检测，无需手动停止（最长 60 秒自动结束）
+- **说完自动停** — VAD 静音检测，无需手动停止；含自适应底噪校准，静音判定时长可配（1–5 秒，默认 2 秒）
+- **官方路径同样生效** — 点官方麦克风按钮时同样触发上述自动停与自动增强（插件只观测、不改官方链路）
 - **快捷键唤醒** — 可录制全局快捷键，点按 / 长按双触发
 - **文本规整** — 识别结果可选经基座 LLM 规整，去口语化
 - **自动增强** — 开启后识别填入草稿即自动触发提示词增强
@@ -44,15 +47,15 @@ dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.4.2
 
 > ℹ️ **版本说明**：最新 tag **`v3.4.2`（2026-10-09）**已包含 **Windows 平台修复**——修复 Windows 上宿主启动约 5 秒后**静默退出**（worker 进程扫描在 Windows 上把本机全部 node 进程（含宿主自身）当 worker 回收，导致宿主杀掉自己；表现为界面永久停在「自动重连中」），上面的命令直接装该 tag。
 >
-> 历史版本要点：**v3.4.1**（2026-10-06）已包含 **DSH 0.2.x 兼容性修复**——修复插件在 DSH `0.2.0` 及以后被宿主兼容性门拒绝装载、✨/🎤 与设置页卡片全部消失的问题（Issue #11 / #12）。若你此前按旧说明装的是 `#main`，按上面命令重装即可锁到已发布版本。
+> 历史版本要点：**v3.4.1**（2026-10-06）已包含 **DSH 0.2.x 兼容性修复**——修复插件在 DSH `0.2.0` 及以后被宿主兼容性门拒绝装载、✨/🎤 与设置页卡片全部消失的问题（Issue #11 / #12；⚠ 该处 🎤 指**当时**由本插件自建的按钮，该按钮已于后续版本退役，现输入框的 🎤 由官方控件提供）。若你此前按旧说明装的是 `#main`，按上面命令重装即可锁到已发布版本。
 >
 > 更早：**v3.4.0**（2026-09-19）起包含 ✨ 官方槽位契约修复（Issue #8 / #10）与云端语音修复（Issue #9），并**移除了插件内重启能力**（更新后请手动重启 DSH）。详见 [release notes](release-notes/3.4.0.md)。
 >
 > 需本机已装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 且 `pnpm` 在 PATH 中。
 >
-> **客户端兼容性（语音识别）**：🎤 语音输入依赖客户端注入 `inputActions.setDraft`（官方 web client 已满足）；第三方客户端若实现同一契约即可加载，能力集不同时语音输入自动**降级**（无插入能力 → 识别结果追加到草稿末尾；完全不注入 → 🎤 禁用并提示）。**识别引擎与模型改由官方 `speechToText` 负责**：插件自身**不携带引擎、不下载模型**；引擎与模型的选择、获取都在官方语音设置里完成。详见 [兼容性矩阵](docs/compatibility-matrix.md)（客户端依赖边界与槽位契约）。
+> **客户端兼容性（语音识别）**：输入框工具行的 **🎤 由官方语音控件提供**（`@deepseek-ai/dsh-experimental-client-ui-voice-input`，槽位 `conversation.input.activity`），**不是本插件渲染的元素**；插件自建 🎤 已退役。本插件的语音增值**内置无 UI**：快捷键通道（`conversation.input.right`，热键→录音→识别→填入）与官方路径的自动停/自动增强。这些增值依赖客户端注入 `inputActions.setDraft`（官方 web client 已满足）；第三方客户端若实现同一契约即可加载，能力集不同时增值路径自动**降级**（无插入能力 → 识别结果追加到草稿末尾；完全不注入 → 增值路径停用并提示；**官方 🎤 自身仍可用**）。**识别引擎与模型改由官方 `speechToText` 负责**：插件自身**不携带引擎、不下载模型**；引擎与模型的选择、获取都在官方语音设置里完成。详见 [兼容性矩阵](docs/compatibility-matrix.md)（客户端依赖边界与槽位契约）。
 >
-> **输入框工具行（✨/🎤）客户端契约**：输入框右侧按钮与错误提示挂载在会话级槽位 `conversation.input.right` / `conversation.input.dock`。官方渲染器（`@deepseek-ai/dsh-client-ui-renderer` ≥ 0.1.2-rc.1，web 与 DSH Desktop 同源）向槽位条目注入 **`sessionId` prop + `useSession`/`useInput` 选择器 hook + `inputActions` prop**（不提供 `props.session` / `props.input`）；插件自该修复（Issue #8 / #10，commit `0197ae7`，自 `v3.4.0` 起随 tag 发布）起按该契约取值，并兼容旧宿主（提供 `props.session` / `props.input` 形态）。第三方客户端渲染器若以其它方式提供会话/输入状态，需实现同一契约（`sessionId` + 上述 hooks 与 actions），✨/🎤 方可显示。
+> **输入框工具行客户端契约**：**✨** 按钮与错误提示挂载在会话级槽位 `conversation.input.right` / `conversation.input.dock`（**🎤 不在本契约内**——它由官方控件渲染于 `conversation.input.activity`）。官方渲染器（`@deepseek-ai/dsh-client-ui-renderer` ≥ 0.1.2-rc.1，web 与 DSH Desktop 同源）向槽位条目注入 **`sessionId` prop + `useSession`/`useInput` 选择器 hook + `inputActions` prop**（不提供 `props.session` / `props.input`）；插件自该修复（Issue #8 / #10，commit `0197ae7`，自 `v3.4.0` 起随 tag 发布）起按该契约取值，并兼容旧宿主（提供 `props.session` / `props.input` 形态）。第三方客户端渲染器若以其它方式提供会话/输入状态，需实现同一契约（`sessionId` + 上述 hooks 与 actions），**✨** 方可显示（官方 🎤 不受本契约约束）。
 
 
 更新 / 卸载：
@@ -81,7 +84,7 @@ dsh plugin --profile web remove dsh-prompt-enhancer
 
 ## 📸 效果展示
 
-**语音识别**（输入框 🎤 录音按钮，说完自动停）：
+**语音识别**（**官方** 🎤 录音按钮；本插件为其提供说完自动停）：
 
 ![语音识别](docs/screenshots/voice-main.png)
 

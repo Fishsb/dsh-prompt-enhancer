@@ -22,10 +22,13 @@ The ✨ button in the composer toolbar triggers an independent LLM call and rewr
 
 ### 2. Voice recognition (💬)
 
-Use the official 🎤 record button (or this plugin's hotkey) to start listening; the transcript (produced by the official `speechToText` service) → optional refinement (de-filler) → filled into the draft → can be enhanced with one click. **Stops automatically on silence** (VAD), audio stays in memory only and is never written to disk.
+Use the official 🎤 record button (or this plugin's hotkey) to start listening; the transcript (produced by the official `speechToText` service) → optional refinement (de-filler) → filled into the draft → can be enhanced with one click. Audio stays in memory only and is never written to disk.
+
+**Both recording entry points behave the same**: the plugin's **auto-stop on silence** and **auto-enhance** are offered on **both** the **hotkey path** and the **official microphone button path** — when you click the official microphone button, the plugin observes the **same** capture by wrapping the browser's standard recording API (observation only, no behaviour change) and, on detecting silence, triggers the official control's own stop, so the official "transcribe → insert" chain is unaffected.
 
 - **Transcription delegated to the official service** — the recognition engine and models come from DSH's official `speechToText` (including its settings page); the plugin ships no engine and downloads no models (slim release)
-- **Stops on silence** — VAD silence detection, no manual stop needed (auto-stops after at most 60 seconds)
+- **Stops on silence** — VAD silence detection, no manual stop needed; with adaptive noise-floor calibration, and a configurable silence duration (1-5 s, default 2 s)
+- **Works on the official path too** — clicking the official microphone button triggers the same auto-stop and auto-enhance (the plugin only observes; it does not modify the official chain)
 - **Hotkey wake** — recordable global hotkey, tap / long-press dual trigger
 - **Transcript refinement** — optionally refine the transcript through the base LLM to remove filler words
 - **Auto-enhance** — when on, filling the draft after recognition automatically triggers prompt enhancement
@@ -44,15 +47,15 @@ Restart DSH (`dsh web`) after installing — the ✨ button appears in the compo
 
 > ℹ️ **Version note**: the latest tag **`v3.4.2` (2026-10-09)** contains the **Windows platform fix** — it fixes the host **silently exiting about 5 seconds after start** on Windows (the worker process scan treated every node process on the machine — including the host itself — as a worker to reap, so the host killed itself; the UI then sat on "reconnecting" forever). The command above installs that tag.
 >
-> Earlier releases: **v3.4.1** (2026-10-06) contains the **DSH 0.2.x compatibility fix** — it fixes the plugin being rejected at load time by the host's compatibility gate on DSH `0.2.0` and later, which made ✨/🎤 and the settings card disappear entirely (Issue #11 / #12). If you previously installed `#main` under the old note, re-running the command above pins you to a released version.
+> Earlier releases: **v3.4.1** (2026-10-06) contains the **DSH 0.2.x compatibility fix** — it fixes the plugin being rejected at load time by the host's compatibility gate on DSH `0.2.0` and later, which made ✨/🎤 and the settings card disappear entirely (Issue #11 / #12; ⚠ that 🎤 was the plugin's own button **at that time**; it has since been retired and the composer's 🎤 is now provided by the official control). If you previously installed `#main` under the old note, re-running the command above pins you to a released version.
 >
 > Older: **v3.4.0** (2026-09-19) added the ✨ official slot-contract fix (Issue #8 / #10) and the cloud ASR fix (Issue #9), and **removed the in-plugin restart capability** (restart DSH manually after an update) — see [release notes](release-notes/3.4.0.md).
 >
 > Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) installed locally and `pnpm` in PATH.
 >
-> **Client compatibility (voice recognition)**: 🎤 voice input relies on the client injecting `inputActions.setDraft` (the official web client satisfies this); third-party clients implementing the same contract can load it, and when the capability set differs, voice input **degrades gracefully** (no insert capability → transcript appended to the end of the draft; no injection at all → 🎤 disabled with a notice). **The recognition engine and models are delegated to the official `speechToText` service**: the plugin itself ships **no engine** and **downloads no models**; choosing and obtaining engines/models happens in the official voice settings. See [compatibility notes](docs/compatibility-matrix.md) (client dependency boundary and slot contract).
+> **Client compatibility (voice recognition)**: the **🎤 in the composer toolbar is provided by the official voice control** (`@deepseek-ai/dsh-experimental-client-ui-voice-input`, slot `conversation.input.activity`) and is **not an element rendered by this plugin**; the plugin's own 🎤 has been retired. This plugin's voice value-adds are **UI-less**: the hotkey channel (`conversation.input.right`; hotkey → record → transcribe → insert) plus auto-stop/auto-enhance on the official path. These value-adds rely on the client injecting `inputActions.setDraft` (the official web client satisfies this); third-party clients implementing the same contract can load it, and when the capability set differs the value-add paths **degrade gracefully** (no insert capability → transcript appended to the end of the draft; no injection at all → value-add paths disabled with a notice; **the official 🎤 itself still works**). **The recognition engine and models are delegated to the official `speechToText` service**: the plugin itself ships **no engine** and **downloads no models**; choosing and obtaining engines/models happens in the official voice settings. See [compatibility notes](docs/compatibility-matrix.md) (client dependency boundary and slot contract).
 >
-> **Composer toolbar (✨/🎤) client contract**: the composer buttons and the error strip mount on the session-scoped slots `conversation.input.right` / `conversation.input.dock`. The official renderer (`@deepseek-ai/dsh-client-ui-renderer` ≥ 0.1.2-rc.1; web and DSH Desktop share the same source) injects **a `sessionId` prop, `useSession`/`useInput` selector hooks, and an `inputActions` prop** into slot entries (it never provides `props.session` / `props.input`); the plugin reads state through that contract since that fix (Issue #8 / #10, commit `0197ae7`, released with `v3.4.0`) and keeps a fallback for older hosts that provide the `props.session` / `props.input` shape. Third-party client renderers must implement the same contract (`sessionId` plus the hooks and actions above) for ✨/🎤 to render.
+> **Composer toolbar client contract**: the **✨** button and the error strip mount on the session-scoped slots `conversation.input.right` / `conversation.input.dock` (**🎤 is outside this contract** — it is rendered by the official control on `conversation.input.activity`). The official renderer (`@deepseek-ai/dsh-client-ui-renderer` ≥ 0.1.2-rc.1; web and DSH Desktop share the same source) injects **a `sessionId` prop, `useSession`/`useInput` selector hooks, and an `inputActions` prop** into slot entries (it never provides `props.session` / `props.input`); the plugin reads state through that contract since that fix (Issue #8 / #10, commit `0197ae7`, released with `v3.4.0`) and keeps a fallback for older hosts that provide the `props.session` / `props.input` shape. Third-party client renderers must implement the same contract (`sessionId` plus the hooks and actions above) for **✨** to render (the official 🎤 is not bound by this contract).
 
 Update / remove:
 
@@ -80,7 +83,7 @@ Core logic lives in standalone Node modules, reusable from other scripts: `lib/p
 
 ## 📸 See it work
 
-**Voice recognition** (the 🎤 record button, stops on silence):
+**Voice recognition** (the **official** 🎤 record button; this plugin adds stop-on-silence):
 
 ![Voice recognition](docs/screenshots/voice-main.png)
 
