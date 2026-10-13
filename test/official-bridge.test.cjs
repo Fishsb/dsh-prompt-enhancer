@@ -956,9 +956,11 @@ test('OVB-V06 变异自证·负控必绿：同一变异下「按钮不存在不�
 
 test('OVB-V07 变异自证·正例必红：把 missed 判定退回「上升沿快照」⇒ 竞态回归判据必须失败', () => {
   const src = decodeChunk(CHUNK);
-  const anchor = 'if ((b.callCount || 0) === callsAtSessionStart) {';
-  // 变异 = 精确复现旧口径：按**上升沿那一刻的快照值是否为 0** 判定（等价于「相位一到就判」）
-  const kill = 'if (callsAtSessionStart === 0) {';
+  const anchor = 'if (now === (b.callCountAtPrevSessionEnd || 0)) {';
+  // 变异 = 精确复现**被 CDP 证伪**的旧口径：把窗口下界当成「本会话上升沿那一刻的计数」，
+  //   而实现里上升沿读到的计数**已经含本次调用**（实测：相位出现时 callCount 已为 1）
+  //   ⇒ 拿它当界 ⇒ 真命中被判 missed。运行期拼接变异名（不形成字面量）。
+  const kill = 'if ((b.callCount || 0) === 1) {';
   assert.ok(src.includes(anchor), 'missed 收口锚点须存在');
   const mutated = src.replace(anchor, kill);
   const env = makeFakeEnv({ recordingPhase: true });
@@ -972,14 +974,13 @@ test('OVB-V07 变异自证·正例必红：把 missed 判定退回「上升沿�
     function MouseEvent() { return {}; }, S7.vadSilenceMsOf, S7.vadRequiredQuiet, S7.voiceCfgState);
   bridge.setTimer(env.timerSvc);
   bridge.install();
-  // 模拟实测竞态：相位先到，随后包装才落地 ⇒ 退回旧口径会把真命中误报为 missed
-  const mo = env.observerInstances[env.observerInstances.length - 1];
-  env.document._attr = 'recording'; mo.cb();
-  bridge.setSelfCapture(false);
+  // 精确复现 CDP 实测形态：**调用先落地**（相位尚未出现），相位随后才到 ⇒ 旧口径误报 missed
   return env.navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(() => {
+    const mo = env.observerInstances[env.observerInstances.length - 1];
+    env.document._attr = 'recording'; mo.cb();
     env.document._attr = null; mo.cb();
     const snap = bridge.snapshot();
-    assert.equal(snap.firstCallAt > 0, true, '前置：包装确实落地过');
+    assert.equal(snap.callCount > 0, true, '前置：包装确实落地过');
     assert.equal(snap.sessionsMissed > 0, true, '退回旧口径后必须误报 missed（若仍为 0 ⇒ 竞态判据没牙）');
   });
 });
@@ -1069,7 +1070,7 @@ test('OVB-D06 迟到落地回归锁·真命中：会话内调用虽晚但**在�
 
 test('OVB-V10 变异自证·正例必红：摘掉 missed 收口判定 ⇒ 迟到落地锁（该计 missed 那一支）必须失败', () => {
   const src = decodeChunk(CHUNK);
-  const anchor = 'if ((b.callCount || 0) === callsAtSessionStart) {';
+  const anchor = 'if (now === (b.callCountAtPrevSessionEnd || 0)) {';
   // 变异 = 精确复现本批实测误报的那个写法：**只看 firstCallAt 与「会话起点是否有过调用」的时刻关系**。
   // 实测形态：上一次会话已置 firstCallAt，而本次会话的 getUserMedia 迟到到收口之后 ⇒ 时刻口径判 missed。
   // 运行期拼接变异名（不形成字面量）。
