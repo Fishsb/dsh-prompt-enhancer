@@ -1,7 +1,7 @@
 {
   "name": "dsh-prompt-enhancer",
   "version": "3.4.2",
-  "description": "DeepSeek Harness (DSH) plugin: one-click prompt enhancement (✨) and voice recognition (💬, cloud/local dual engines) for the composer",
+  "description": "DeepSeek Harness (DSH) plugin: one-click prompt enhancement (✨) and voice recognition (💬, via the official speechToText service) for the composer",
   "main": "lib/index.cjs",
   "type": "commonjs",
   "files": [

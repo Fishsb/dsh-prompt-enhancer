@@ -37,11 +37,12 @@
 | `voice/status` | client → host | 语音引擎就绪态（**委托官方 `ctx.speechToText.snapshot()`**）+ 规整就绪态 | 只读 |
 | `voice/transcribe` | client → host | 音频（16k mono PCM16 WAV data URL）→ **委托官方 `ctx.speechToText`** 识别 → 可选规整，返回 `{text,raw,refined}` | 用户触发 |
 
-> 注：`models/*` / `plugins/*` / `logs/*` / `template/*` / `update/check`·`update/pull`·`update/envcheck` / `enhance*` / `cancel` 共 18 条注册于 `plugin-host.js`（经 `lib/index.cjs` 桥接）；`config/*` / `voice/status`·`voice/transcribe` / `update/executorEnsure`·`update/install`·`update/restartNeeded`·`update/diagTail` 共 8 条直接注册于 `lib/index.cjs`（P1-a 缩批：`voice/*` 自 10 条收敛为 2 条——引擎/云端/模型下载/运行时部署 8 条退役，识别交官方 `speechToText`）。两侧同挂 `/dsh-prompt-enhancer/rpc`，合计 **26** 条（插件内重启能力退役后重算：`update/portRestart` / `update/makeShortcut` 两条 RPC 已移除，`update/install` 与 `update/diagTail` 为现行集合；以两文件 `harness.handle(` 枚举逐条对照）。
+> 注：`models/*` / `logs/*` / `template/*` / `enhance*` / `cancel` 共 **11** 条注册于 `plugin-host.js`（经 `lib/index.cjs` 桥接）；`config/*` / `voice/status`·`voice/transcribe` 共 **4** 条直接注册于 `lib/index.cjs`。两侧同挂 `/dsh-prompt-enhancer/rpc`，合计 **15** 条（以两文件 `harness.handle(` 枚举逐条对照，可由 `node scripts/rpc-manifest.mjs` 复算）。
+>
+> ⚠ **历史**（**已退役，不再注册**）：`plugins/*`（4）· `update/check`·`update/pull`·`update/envcheck`（3）· `update/executorEnsure`·`update/install`·`update/restartNeeded`·`update/diagTail`（4）· `update/portRestart`·`update/makeShortcut`（2）· `voice/model*`·`voice/deploy*`（8）⇒ 共 21 条已随「插件管理 tab 退役 / 更新执行器退役 / 插件内重启能力退役 / P1-a 语音缩批」移除。**上方表格为现行集合，本节历史条目仅供旧版本对照，不代表现行能力。**
 
-> 注：`update/executorEnsure` / `update/install` / `update/restartNeeded` 在 host RPC 清单中保留（部分版本由 client 直连执行器 3081），见 executor RPC；执行器自插件内重启能力退役后只负责**下载 / 校验 / 安装 / 回滚**，不再重启。
 
-> 注（**P2 · 2026-09-19 · 参数校验申报**）：上述 34 条中 **17 条有参数校验**（`lib/rpc-schema.cjs` 的 `schemas`），另 **17 条无校验且在此具名申报**——**禁止按类别笼统豁免**；新增线上方法却不申报、或申报过期，都会被 `node scripts/rpc-manifest.mjs --check` 拒绝（事实源由注册面派生，不靠人工清点）。
+> 注（**P2 · 2026-09-19 · 参数校验申报**）：上述 **15 条中 6 条有参数校验**（`lib/rpc-schema.cjs` 的 `schemas`），另 **9 条无校验且在此具名申报**——**禁止按类别笼统豁免**；新增线上方法却不申报、或申报过期，都会被 `node scripts/rpc-manifest.mjs --check` 拒绝（事实源由注册面派生，不靠人工清点）。
 >
 > | 方法 | 桶 | 理由 |
 > |---|---|---|
@@ -53,19 +54,14 @@
 > | `models/list` | **A** 无参/只读 | 无参只读：列举 provider 与模型 |
 > | `models/stats` | **A** 无参/只读 | 入参仅 provider/model/inputChars 展示用，非法值退化为空统计（无副作用） |
 > | `template/default` | **A** 无参/只读 | 无参只读：返回内置模板目录 |
-> | `update/restartNeeded` | **A** 无参/只读 | 只读：文件 mtime 比对，无副作用 |
 > | `models/resolve` | **B** 有参·保持宽松 | 有参（provider/model）保持宽松：非法值由下游 resolveModelInfo 兜底，收紧急属 BREAKING |
-> | `update/executorEnsure` | **B** 有参·保持宽松 | 有参（port）保持宽松：非法端口由执行器侧拒绝 |
-> | `update/pull` | **B** 有参·保持宽松 | 有参（repo/sessionId）保持宽松：本仓无调用点（handler 按决策保留），收紧收益为零 |
 >
 > **A 桶** = 无参 / 只读 / 无副作用入参，无可校验之物。**B 桶 = 有入参但保持宽松**——补校验会把既有「静默容忍」的调用变成 **400**，属**已发布对外行为变更**，须单列并标 BREAKING 由用户拍板，故本轮**只申报不收紧**（圆桌决策 A 的边界）。
-### executor RPC（`127.0.0.1:3081/rpc`）
+### executor RPC（`127.0.0.1:3081/rpc`）· **已退役**
 
-| 方法 | 说明 |
-|---|---|
-| `ping` | 心跳 / 版本 |
-| `status` | 当前状态 |
-| `apply` | 安装（下载 → sha256 校验 → 落 staging → 安装 → 失败回滚；**不含重启**） |
+> ⚠ **P1-c（2026-10-13）：插件自建更新执行器整体退役**（`lib/updater-host.cjs` 已整件删除，3081 端口不再由本插件使用）——更新 / 安装全量交回官方 plugin manager。
+>
+> 历史方法（**仅供旧版本对照，现行不存在**）：`ping`（心跳/版本）· `status`（当前状态）· `apply`（安装：下载 → sha256 校验 → 落 staging → 安装 → 失败回滚，不含重启）。
 
 ---
 
@@ -89,13 +85,11 @@
 | `customModels` | array | `[]` | 自定义模型 |
 | `order` | array | 内置 | 模型顺序 |
 
-### updater 配置
+### updater 配置 · **已退役**
 
-| key | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `updater.serviceName` | string | `dsh-web` | 服务名 |
-| `updater.profile` | string | `web` | profile |
-| `updater.executorPort` | number | `3081` | 执行器端口 |
+> ⚠ **P1-c（2026-10-13）判定：整节为幽灵配置**。判定依据（全仓 grep 原始读数）：`updater.serviceName` / `updater.profile` / `updater.executorPort` 三键在 `lib/` · `src/` · `plugin-host.js` · `scripts/` · `test/` 中**零命中** ⇒ **无任何代码读写**（配置读写面 = `config/get`·`config/set` 的 `$DSH_HOME/dsh-prompt-enhancer.config.json`，其中不含 `updater.*`）。
+>
+> 历史键（**仅供旧版本对照，现行无代码读写**）：`updater.serviceName`（服务名，默认 `dsh-web`）· `updater.profile`（profile，默认 `web`）· `updater.executorPort`（执行器端口，默认 `3081`）——三者随「插件自建更新执行器退役」一并失活。
 
 ### client localStorage
 
@@ -113,12 +107,12 @@
 | ≤ 2.8.3 | 隐式 | 0.1.5 / 0.1.6 | 无显式协议版本 |
 | 3.0.0（重构目标） | `protocolVersion: 1` | `protocolVersion: 1` | 显式协商 |
 | 3.2.x | `protocolVersion: 1` | 0.1.12+（内容哈希重建） | update/portRestart 独立化（服务模式 schtasks / 默认模式脚本）；执行器专注一键更新/watchdog（该 RPC 与 watchdog 已于 3.3.x 之后的迭代退役，此处仅作历史版本对照） |
-| 3.3.x – 3.4.2（当前） | `protocolVersion: 1` | 0.1.12+（内容哈希重建） | v3.3.3 起执行器副本同步 `undici` 依赖（缺失时代理能力降级为直连，进程不崩）；`update/serviceInstall` 已移除（不再提供 nssm 服务化安装入口）；**插件内重启能力退役**——`update/portRestart` / `update/makeShortcut`、执行器 `restart` 方法、watchdog 与维护救援 CLI 全部移除；新增 `update/install`（安装已下载的 staged 包），**装完提示手动重启 DSH 生效** |
+| 3.3.x – 3.4.2（当前） | `protocolVersion: 1` | **已退役（无）** | ⚠ **P1-c（2026-10-13）：更新执行器整体退役**（`lib/updater-host.cjs` / `lib/stage-install.cjs` 已删）⇒ **executor protocol 概念不再适用**，更新/安装交回官方 plugin manager；**插件内重启能力退役**（`update/portRestart` / `update/makeShortcut` / 执行器 `restart` / watchdog / 维护救援 CLI 全部移除）；**`update/install` 亦已退役**（勿再误读为现行能力）——装完由官方流程提示重启 DSH 生效 |
 
 兼容策略：
 
 - host 与 client 通过 `protocolVersion` 协商，不匹配时返回明确错误。
-- executor 版本由 `EXECUTOR_VERSION` + **内容哈希**（.executor-hash）管理，`executorEnsure` 负责对齐（代码变自动重建，不依赖手动 bump）。
+- ~~executor 版本由 `EXECUTOR_VERSION` + 内容哈希（.executor-hash）管理，`executorEnsure` 负责对齐~~ → **P1-c（2026-10-13）已退役**：执行器与 `executorEnsure` 均不存在，本策略作废（保留删除线仅供历史对照）。
 - 旧 client + 新 host：优先兼容层；无法兼容时提示刷新/升级。
 - 版本检测：本地版本**运行时读运行环境 package.json**（非构建硬编码），发版后产物与版本号天然一致。
 
@@ -132,7 +126,7 @@
 
 > **已移除（2026-10-06）**：`@deepseek-ai/dsh-client-runtime` 原列于上表首位（peer + `dsh.client.inject` 同名，边界 `^0.1.0-rc.6`）。该包自 DSH `0.2.0` 起**已从发行物中消失**（0.2.0-rc.2 的 62 个 `dsh-client-*` 中无它；npm 末版 `0.1.1-rc.2` @2026-08-21 后停发），而 `^0.1.0-rc.6` 在 semver 上**不含 0.2.x** ⇒ 二者叠加使插件在 0.2.0-rc.2 上被 `evaluatePluginCompatibility` 判为不兼容并 deny（远端 issue #11 / #12 与本机 `skipping profile bundle` 同根因）。实测本仓**对该包零真实引用**（`src/`、`lib/`、`scripts/`、`test/`、`cordis.patch.yml`、`plugin-host.js`、`README*` 全零命中；产物 `lib/client.cjs` 唯一 `require` 是 `'react'`），故**直接移除声明**而非放宽版本。依据与逐条证据见 `docs/internal/适配勘察-2026-10-06.md`（§3.1/§3.4）与 CHANGELOG `[Unreleased]` 2026-10-06 条目。
 
-说明：`package.json` `dependencies` 实测仅 `undici`（执行器副本由 `ensureExternalExecutor` 同步 `node_modules/undici`）；P1-a（2026-10-13）后**不再服务语音模型下载**——本地引擎及其模型获取链路已整体退役（识别改交官方 `speechToText`，见本文件 §语音条目与 `docs/internal/P1-a-缩批施工-2026-10-12.md`）；host 半部与执行器不声明 peerDependency。上表由 `package.json` `peerDependencies` 与 README「输入框工具行（✨/🎤）客户端契约」段落实读得出，改 peerDependency 或槽位契约时须同步本节。
+说明：`package.json` `dependencies` 实测仅 `undici`（⚠ **P1-c 起执行器已退役，`ensureExternalExecutor` 亦已随 P2-1 删除** ⇒ **undici 不再被复制到执行器目录**；该依赖仍被 `lib/net-proxy.cjs` 的出网代理链使用）；P1-a（2026-10-13）后**不再服务语音模型下载**——本地引擎及其模型获取链路已整体退役（识别改交官方 `speechToText`，见本文件 §语音条目与 `docs/internal/P1-a-缩批施工-2026-10-12.md`）；host 半部与执行器不声明 peerDependency。上表由 `package.json` `peerDependencies` 与 README「输入框工具行（✨/🎤）客户端契约」段落实读得出，改 peerDependency 或槽位契约时须同步本节。
 
 > ⚠️ **声明面一致性契约**：`peerDependencies` 的包名集合与 `dsh.client.inject` 必须**逐项相等**（本节即该事实的记录处）；改一侧必须同步另一侧，否则形成自相矛盾的声明面。可复跑校验：`node -e "const p=require('./package.json');console.log(JSON.stringify(Object.keys(p.peerDependencies).sort())===JSON.stringify([...p.dsh.client.inject].sort()))"` 应为 `true`。
 
@@ -144,4 +138,4 @@
 2. 所有 RPC 方法名不得随意变更；变更必须走 `protocolVersion`。
 3. 配置迁移必须可回退，禁止静默丢失用户设置。
 4. 多 profile（web/headless/自定义）必须继续支持。
-5. 安装/更新必须走**受控通道**：一键更新仅接受 GitHub Release 的 npm pack tgz（固定仓库 `buildTarballUrl`）+ staging 目录内的本地 tgz（路径白名单校验）；v3.2.2 起安装为**直接解包复制到运行环境目录**（`System32\tar.exe` + 文件级覆盖，不再经 `dsh plugin add`/pnpm——规避操作运行中 profile 卡死，v3.2.1-r 根因修复）；禁止任意路径/任意命令执行安装。
+5. 安装/更新必须走**受控通道**：~~一键更新仅接受 GitHub Release 的 npm pack tgz（固定仓库 `buildTarballUrl`）+ staging 目录内的本地 tgz（路径白名单校验）；v3.2.2 起安装为直接解包复制到运行环境目录（`System32\tar.exe` + 文件级覆盖）~~ → ⚠ **P1-c（2026-10-13）：上述「插件自建安装通道」已整体退役**（`lib/updater-host.cjs` / `lib/stage-install.cjs` 已删），现行安装/更新**全量走官方 plugin manager**（`dsh plugin add/update`）。⚠ **本条红线表达的原则仍然有效并继续适用**：**禁止任意路径 / 任意命令执行安装** —— 安装包的来源与解包路径必须受控（现行形态 = 官方 plugin manager 的既有约束）；**不得为任何功能的实现引入「从任意 URL / 任意本地路径直接执行安装」的旁路**。

@@ -33,6 +33,11 @@ function mkFixture() {
   return dir;
 }
 
+function runRpc(dir) {
+  const r = spawnSync(process.execPath, ['scripts/rpc-manifest.mjs', '--check'], { cwd: dir, encoding: 'utf8' });
+  return { code: r.status, out: String(r.stdout || '') + String(r.stderr || '') };
+}
+
 function runGate(dir, extra = []) {
   const r = spawnSync(process.execPath, ['scripts/dead-code-gate.mjs', ...extra], { cwd: dir, encoding: 'utf8' });
   return { code: r.status, out: String(r.stdout || '') + String(r.stderr || '') };
@@ -151,5 +156,53 @@ test('DCG-R5d 反向：真调用形态存在时不得误报（负控）', () => 
   }, (dir) => {
     const r = runGate(dir);
     assert.doesNotMatch(r.out, /t3RealCall/, '真调用形态存在 ⇒ R5 不得报它（防误报）');
+  });
+});
+
+// ── RPC 文档真值双向判据回归锁（P2 文档真值批 · 2026-10-13）─────────────────────
+// 病历：`scripts/rpc-manifest.mjs` 的文档判据**原是单向的**（只判 `missingInDoc` = 线上有而文档无），
+//   **不判反向**（文档有、线上无 = 幽灵）⇒ RPC 退役后文档条目**静默留存**，而门禁五环全绿
+//   （CHG-029 一类：用户可读处不得描述不存在的能力）。
+// ⚠ 难点：文档**合法地**会出现已退役方法名（历史对照 / 「已退役」说明）⇒ 判据只取
+//   「`### host RPC` 小节内、行首 `|` 的表格行」的**第一列反引号名**；blockquote 历史注不判。
+// ⚠ 变异名一律**运行时拼接 + 合法小写 RPC 名形态**（两条都是 P2-2 得来的教训：字面量会污染语料面、
+//   非法形态会被形态过滤器挡下 ⇒ 自证无效）。
+
+test('RPC-DOC-1 双向判据有牙：文档当前清单里加不存在的方法名 ⇒ 必须 FAIL · exit 1', () => {
+  const ghost = 'ghost/' + 'mutant-probe';
+  withFixture((dir) => {
+    const p = path.join(dir, 'docs', 'compatibility-matrix.md');
+    const s = fs.readFileSync(p, 'utf8');
+    fs.writeFileSync(p, s.replace('| `enhance` | client → host | 执行增强 | 用户触发 |',
+      '| `enhance` | client → host | 执行增强 | 用户触发 |\n| `' + ghost + '` | client → host | 变异体 | 只读 |'), 'utf8');
+  }, (dir) => {
+    const r = runRpc(dir);
+    assert.equal(r.code, 1, '文档当前清单含幽灵必须 exit 1（若为 0 则是单向判据/恒真）');
+    assert.match(r.out, /幽灵条目/, 'FAIL 行必须给"幽灵条目"归因');
+    assert.match(r.out, /RING-STATE rpc FAIL/, '状态出口须同源报 FAIL');
+  });
+});
+
+test('RPC-DOC-2 负控：不注入时双向判据必须 PASS · exit 0（防"恒红"）', () => {
+  withFixture(null, (dir) => {
+    const r = runRpc(dir);
+    assert.equal(r.code, 0, '正常态必须 exit 0');
+    assert.match(r.out, /双向/, '须打印双向判据读数');
+    assert.match(r.out, /RING-STATE rpc PASS/, '状态出口须同源报 PASS');
+  });
+});
+
+test('RPC-DOC-3 历史条目不误报：幽灵名只出现在 blockquote 历史注 ⇒ 不得报错', () => {
+  const ghost = 'ghost/' + 'historic-only';
+  withFixture((dir) => {
+    const p = path.join(dir, 'docs', 'compatibility-matrix.md');
+    const s = fs.readFileSync(p, 'utf8');
+    // 放进 blockquote 历史注（行首 `>`）—— 合法历史对照形态
+    fs.writeFileSync(p, s.replace('> ⚠ **历史**（**已退役，不再注册**）：',
+      '> ⚠ **历史**（**已退役，不再注册**）：\n> · `' + ghost + '`（变异体，仅历史说明）·'), 'utf8');
+  }, (dir) => {
+    const r = runRpc(dir);
+    assert.equal(r.code, 0, '历史注里的旧方法名不得被误报为幽灵（否则历史对照与判据直接冲突）');
+    assert.doesNotMatch(r.out, /幽灵条目/, '不得出现幽灵归因');
   });
 });

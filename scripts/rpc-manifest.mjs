@@ -58,10 +58,46 @@ const DECLARED_NO_SCHEMA = {
   'models/resolve': 'B 有参（provider/model）保持宽松：非法值由下游 resolveModelInfo 兜底，收紧急属 BREAKING',
 };
 
+/**
+ * 文档「当前清单」提取（T3 · 2026-10-13 · 判据单向 → 双向）。
+ *
+ * 背景：旧判据只判 `missingInDoc`（线上有、文档无 = 漏写），**不判反向**（文档有、线上无 = 幽灵）
+ *   ⇒ RPC 退役后文档条目静默留存，而门禁五环全绿（CHG-029 一类：用户可读处不得描述不存在的能力）。
+ *
+ * ⚠ 难点：文档**合法地**会出现已退役方法名（历史版本对照 / 「已退役」说明 / 删除线）⇒ 判据必须
+ *   能区分「当前清单」与「历史/说明」。采用的区分方案（**刻意选窄、宁漏不误报**）：
+ *     只取 **`### host RPC` 小节内、行首为 `|` 的表格行**、且取**第一列反引号内的名字**。
+ *     —— 理由：① 历史/说明条目一律写成 `> 注：…` / `> ⚠ 历史…`（**blockquote**，行首是 `>`，不匹配）；
+ *     ② 删除线形态 `~~…~~` 不在表格行首单元格内（现档为 blockquote 内）；
+ *     ③ 「宁漏」可接受：本判据补的是**表格（当前清单的正式载体）**；blockquote 里散落的旧名不再逐字判
+ *        （那会与"历史对照合法"直接冲突）——**覆盖边界如实声明，不冒充全覆盖**。
+ *   ⇒ 本判据 = 「**§2 当前 RPC 表里列出的每个方法名都必须在线上**」。
+ */
+function deriveCurrentDocMethods() {
+  const lines = read('docs/compatibility-matrix.md').split('\n');
+  const start = lines.findIndex((l) => /^###\s+host RPC/.test(l));
+  if (start < 0) return { ok: false, methods: [] };
+  const out = new Set();
+  for (let i = start + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^###\s/.test(l) || /^##\s/.test(l)) break;      // 下一个小节即止
+    if (!l.startsWith('|')) continue;                       // 只取表格行（行首 |），排除 > 引注
+    const first = l.slice(1).split('|')[0];                  // 第一列
+    for (const m of first.matchAll(/`([^`]+)`/g)) {
+      const name = m[1];
+      if (/^[a-z][a-z0-9-]*(\/[a-z][a-z0-9-]*)*$/.test(name)) out.add(name);   // 只收 RPC 名形态
+    }
+  }
+  return { ok: true, methods: [...out].sort() };
+}
+
 const { native, bundled, live, intersection } = deriveLiveMethods();
 const schemas = schemaKeys();
 const doc = read('docs/compatibility-matrix.md');
 const missingInDoc = live.filter((m) => !doc.includes('`' + m + '`'));
+const currentDoc = deriveCurrentDocMethods();
+// 反向判据：文档「当前清单」小节里列出的方法名，必须在线上
+const ghostInDoc = currentDoc.methods.filter((m) => !live.includes(m));
 const gap = live.filter((m) => !schemas.includes(m));
 const declared = Object.keys(DECLARED_NO_SCHEMA).sort();
 const orphanSchema = schemas.filter((m) => !live.includes(m));
@@ -70,6 +106,8 @@ const fails = [];
 if (native.length === 0 || bundled.length === 0) fails.push('注册面解析为空（lib/index.cjs 或 plugin-host.js 未匹配到 harness.handle）');
 if (intersection.length) fails.push('双半部注册面交集非空（接线错误）: ' + intersection.join(', '));
 if (missingInDoc.length) fails.push('线上方法未出现在 docs/compatibility-matrix.md: ' + missingInDoc.join(', '));
+if (!currentDoc.ok) fails.push('文档当前 RPC 清单小节未找到（### host RPC）——解析口径失效，须先对齐');
+else if (ghostInDoc.length) fails.push('文档当前清单含线上不存在的方法（幽灵条目）: ' + ghostInDoc.join(', '));
 const undeclared = gap.filter((m) => !declared.includes(m));
 const stale = declared.filter((m) => !gap.includes(m));
 if (undeclared.length) fails.push('线上无 schema 且未申报（禁止静默增长）: ' + undeclared.join(', '));
@@ -80,6 +118,7 @@ const manifest = {
   derivedFrom: ['lib/index.cjs', 'plugin-host.js'],
   counts: { native: native.length, bundled: bundled.length, live: live.length, schema: schemas.length, gap: gap.length },
   live, schemaCovered: live.filter((m) => schemas.includes(m)), noSchema: gap,
+  docCurrent: currentDoc.methods, ghostInDoc,
 };
 
 if (args.includes('--json')) console.log(JSON.stringify(manifest, null, 2));
@@ -88,6 +127,7 @@ else {
   console.log('  注册面: lib/index.cjs ' + native.length + ' + plugin-host.js ' + bundled.length + ' = 去重 ' + live.length + '（交集 ' + intersection.length + '）');
   console.log('  schema 覆盖: ' + manifest.schemaCovered.length + '/' + live.length + '；显式申报无校验: ' + gap.length);
   console.log('  文档面 docs/compatibility-matrix.md 覆盖: ' + (live.length - missingInDoc.length) + '/' + live.length);
+  console.log('  双向判据: 漏写 ' + missingInDoc.length + ' 条 · 幽灵（文档当前清单有、线上无）' + ghostInDoc.length + ' 条 / 文档当前清单 ' + currentDoc.methods.length + ' 条');
 }
 
 if (args.includes('--check')) {
@@ -98,9 +138,9 @@ if (args.includes('--check')) {
     emitRingState('rpc', 'FAIL', fails.length + ' 条不变量失败：' + fails.map((f) => f.split('：')[0].split(':')[0]).join(' / '));
     process.exit(1);
   }
-  console.log('\n✓ RPC 事实源一致：' + live.length + ' 条线上方法 / ' + schemas.length + ' 条有校验 / ' + gap.length + ' 条已具名申报不校验 / 0 孤儿 / 文档 100% 覆盖');
+  console.log('\n✓ RPC 事实源一致：' + live.length + ' 条线上方法 / ' + schemas.length + ' 条有校验 / ' + gap.length + ' 条已具名申报不校验 / 0 孤儿 / 文档 100% 覆盖（含双向：' + currentDoc.methods.length + ' 条文档当前清单全部在线）');
   emitRingState('rpc', 'PASS',
-    live.length + ' 条线上方法一致 / schema ' + schemas.length + ' / 具名申报 ' + gap.length + ' / 0 孤儿 / 文档 100% 覆盖');
+    live.length + ' 条线上方法一致 / schema ' + schemas.length + ' / 具名申报 ' + gap.length + ' / 0 孤儿 / 文档 100% 覆盖（双向 ' + currentDoc.methods.length + ' 条）');
 } else {
   // 本环只在 --check 下做判定：无该旗时退出码不反映判定，**不得记 PASS**（如实报 SKIP）。
   emitRingState('rpc', 'SKIP', '未带 --check（清单/--json 为报表形态，未判一致性）');
