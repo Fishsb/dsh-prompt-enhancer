@@ -76,6 +76,15 @@ const occurrences = (s, re) => (s.match(re) || []).length;
  * **判定式不变**（仍严格 `=== 0`），仍属「在册未达」。
  */
 const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+
+/**
+ * **装配用** `new Function` 求值点的形态（P2 载体决策 A 批 2026-10-13 · A197-3 改判）。
+ * 装配点的特征签名：第一实参是**字符串字面量 `'harness'`**（BODY 的求值入参名）——
+ * `new Function('harness', BODY)(harness)`。与之相对，`new Function(pureText + …)` 这类
+ * **非装配**求值（PURE 片段提取）首参是表达式 ⇒ 不匹配。
+ * ⚠ 本形态**只用于分辨「装配点」**，不主张覆盖所有 `new Function` 用法（见 A197-3 的不覆盖声明）。
+ */
+const ASSEMBLY_EVAL = /new Function\(\s*'harness'/g;
 const list = (p) => fs.readdirSync(abs(p));
 
 /**
@@ -428,17 +437,28 @@ const CLAIMS = [
       //     谓词方向相反，两条并存 ⇒ 判据面永久含一对**不可能同真**的断言，读者无法分辨现行口径。
       //   ⚠ **不是改浅**：① A230-2 **保留且不得改浅**——它是 ADR-230 自己设的**触发绊线**
       //     （「若实测到拆分被无 require 硬墙挡住，再回到是否立项换装载形态」），载体一变即红，
-      //     是功能不是缺陷；② 本条承载的轨迹**由 ADR-197 自身断言继续在册**（A197-1 `≤120 行` /
-      //     A197-3 `new Function = 0` 均仍为 ⧗ 在册未达）⇒ **信息不丢**。
+      //     是功能不是缺陷；② 本条承载的轨迹**由 ADR-197 自身断言继续在册**（A197-1 `≤120 行`
+      //     已由 P2-3 拆分**真实达标**；A197-3 已由 `UD-0013`（载体选 A）**改判为**
+      //     「装配用求值点恰好一处且限定入口」并**通过**）⇒ **信息不丢**，且两条现均**非**「在册未达」。
       //   ⚠ **不得**改成恒真 / skip / 区间 / 白名单绕过（同 A201-2·A201-3·S-5·B234-4 的处置惯例）：
       //     恒真即假绿（A201-3 先例），skip 即把「已作废」谎报成「本地面缺位」。
     ],
     // pending 段随 A194-5 退役一并清空：原唯一条目（A194-5 的「载体折叠未换」依据）已随该断言
-    // 退役而失去判据对象；同一条依据**仍完整保存在 ADR-197 的 pending（A197-1 / A197-3）里**，
-    // 故不丢信息（S-3 只要求「每条 TARGET 有依据」，无 TARGET 即无此义务）。
+    // 退役而失去判据对象；同一条依据**仍完整保存在 ADR-197 的 pending（A197-1 / A197-3）里**
+    //（2026-10-13 更新：其中 A197-3 已由 `UD-0013` 关闭该轨迹、A197-1 已真实达标
+    //  ⇒ 两条**均不再是「在册未达」**，pending 条目保留作决定留痕）⇒ 故不丢信息
+    //  （S-3 只要求「每条 `kind === '目标'` 的断言有依据」，无此类断言即无此义务）。
   },
   {
-    adr: 'ADR-197', anchor: 'module:prompt-enhancer', at: '2026-09-12', level: '在册未达',
+    adr: 'ADR-197', anchor: 'module:prompt-enhancer', at: '2026-09-12', level: '部分兑现',
+    // ⚠ level 由「在册未达」改为「**部分兑现**」（2026-10-13 · 载体决策 A / `UD-0013`）：
+    //   A197-1（≤120 行）已由 P2-3 拆分**真实达标**（109 行）；A197-3 已**改判并通过**
+    //   （「装配用求值点恰好一处且限定入口」）；A197-2/A197-4 一直通过。
+    //   ⚠ 唯一仍**未兑现**的是 promise 里的两项：①「领域逻辑分层」的终局形态、
+    //     ②「自建基础设施换官方缝」。⇒ 取「部分兑现」而非「已兑现」（**不为好看而改**）。
+    //   ⚠ 另：promise 原文含「弃 chunk/marker/new Function 装配」一节 —— 该节已由 `UD-0013`
+    //     裁定**关闭**（载体选 A：保动态安装）。promise 文本属 ADR 历史原文，本批**不改史**；
+    //     其失效由 A197-3 自身的改判注释与上面这段说明承载。
     promise: '终局目标架构：lib/index.js ≤120 行只做装配 + 领域逻辑分层 + 自建基础设施换官方缝 + 弃 chunk/marker/new Function 装配',
     assertions: [
       A('A197-1', '目标', '装配薄化：lib/index.cjs ≤ 120 行', '≤120 行', () => {
@@ -451,16 +471,45 @@ const CLAIMS = [
         const builder = !read('scripts/build-client.mjs').includes("'plugin-client.js'");
         return assert(disk && whitelist && builder, `磁盘${disk ? '无' : '有'} / 白名单${whitelist ? '无' : '有'} / 构建${builder ? '不产出' : '仍产出'}`);
       }),
-      A('A197-3', '目标', '弃 chunk/marker/new Function 装配', 'new Function 装配点 = 0（剥注释计数）', () => {
-        // P2-3（2026-10-13 拆分批）：装配点判定面不变（仍判 entry `lib/index.cjs`）；
-        //   `new Function('harness', BODY)` 桥接**仍在 entry**（载体三选一未拍板，本批不许动载体）
-        //   ⇒ 本判据仍为「在册未达」。
-        // ⚠ P2 复核处置批（2026-10-13 · F5）：改为**剥注释后**计数 —— 原口径把 `:39` 载体约束
-        //   注释里的 `new Function(` 也算一处（读数 2，与报告/文档的 1 不符，属"说明文字污染读数"）。
-        //   剥注释后读数 = **1**（唯一真装配点 `:54`）。⚠ **判定式一字未改**（仍严格 `=== 0`），
-        //   不是"解析不到就算过"（那种改法会让本判据恒真 = 假绿）。
-        const n = occurrences(codeOnly(read('lib/index.cjs')), /new Function\(/g);
-        return assert(n === 0, `new Function = ${n} 处（剥注释）`);
+      // ── A197-3 **改判**（2026-10-13 · 载体决策 A / `UD-0013`）─────────────────────────────
+      // **为什么必须改判（不是可选项）**：用户拍板**载体选 A**（保动态安装）⇒
+      //   `lib/index.cjs` 的 `new Function('harness', BODY)` 桥接**长期保留** ⇒
+      //   原判据（「装配点 = 0」）**按设计不可达**。依既有规则（`A201-3` 先例）：
+      //   **恒红与恒绿同类，都比退役更差**（恒红=制造噪音，会训练后来者忽略真信号）⇒ 必须改判。
+      //   方向取自 `docs/internal/P2-立项勘察-2026-10-13.md:336`：从「求值路径退役」
+      //   改为「**限定文件集内可拆分**」。
+      // **新形态**：判「**装配用求值点恰好一处，且仅存在于装配入口**」。
+      //   ⚠ 口径按**形态**（`new Function('harness', …)` 这一装配签名，见 `ASSEMBLY_EVAL`）分辨。
+      //   ⚠ 为什么用「形态」而非「一律计数」（2026-10-13 实测依据）：扫描面扩到全 `lib/` 后，
+      //     实测 `lib/` 内有**两处** `new Function` —— 本入口，以及 `lib/sys.cjs:94` 的
+      //     `new Function(pureText + …)`（`extractPure`：把 plugin-host.js 的 `==PURE==` 切片求值
+      //     以取出 5 个纯函数）。后者是 v2.6.0 `6ce3097` 引入的 **PURE 提取辅助**（早于 P2 全部
+      //     批次、有测试 `SYS-05`、被 `lib/harness.cjs:24` 消费），**与载体决策 A 无关**；
+      //     若按「一律计数 == 1」判会留下**恒红**判据（正是本批要消除的形态）。
+      //     ⇒ 判「**装配点**」而非「所有 new Function」，**忠实于原承诺语义**
+      //     （原判据标题即「弃 chunk/marker/new Function **装配**」）。
+      //   ⚠ 牙齿**不少于原判据**且**多出两个方向**：① 第二处**装配点**出现在任何其它文件 ⇒ 红；
+      //     ② 装配点**迁出入口**（入口归零）⇒ 红。原判据只管「入口有没有」，本判据管「恰好一处且位置受限」。
+      //   ⚠ 本判据**不覆盖什么**（如实声明）：不判求值点的**输入安全性**（`BODY` 来源/是否被污染）、
+      //     不判 `BODY` 内容、不判 chunk/marker 装配形态（由 R4 的 `src/host` 等值集管）、
+      //     不判 `plugin-host.js` 内部（无模块系统，由 A230-2 管）、**不判非装配用途的
+      //     `new Function`**（如 `lib/sys.cjs` 的 PURE 提取 —— 超出本判据语义，另有其自身测试覆盖）。
+      A('A197-3', '结构', '装配用 new Function 求值点恰好一处且限定在装配入口（载体决策 A 后的可判形态）', '装配点 == 1 处，且该点位于 lib/index.cjs', () => {
+        const ENTRY = 'lib/index.cjs';
+        const targets = libManifest.libHandwrittenTargets();   // 同一事实源（轮次 16 收敛）
+        const hits = [];
+        for (const rel of targets) {
+          const n = occurrences(codeOnly(read(rel)), ASSEMBLY_EVAL);
+          if (n > 0) hits.push({ file: rel, n });
+        }
+        const total = hits.reduce((a, h) => a + h.n, 0);
+        const inEntry = hits.filter((h) => h.file === ENTRY).reduce((a, h) => a + h.n, 0);
+        const elsewhere = hits.filter((h) => h.file !== ENTRY);
+        const detail = `装配点 ${total} 处｜入口 ${inEntry} 处`
+          + (hits.length ? `｜分布 [${hits.map((h) => h.file + '×' + h.n).join(', ')}]` : '')
+          + `｜扫描面 ${targets.length} 件手改 .cjs`;
+        return assert(total === 1 && inEntry === 1 && elsewhere.length === 0,
+          detail + (elsewhere.length ? `｜⚠ 入口外出现装配点: ${elsewhere.map((h) => h.file).join(',')}` : ''));
       }),
       A('A197-4', '结构', '半部通信保留 HTTP（/rpc 兼容别名）', "RPC_PATH = '/dsh-prompt-enhancer/rpc'", () => {
         // P2-3（2026-10-13）：RPC_PATH 仍定义在 entry `lib/index.cjs`（未随拆分搬走）⇒ 判定面不变。
@@ -470,7 +519,22 @@ const CLAIMS = [
     ],
     pending: [
       { id: 'A197-1', reason: 'ADR-230 修订该轨迹：改为按 9 域分批（首批 D8），且换装载形态是拆分收益的前置项' },
-      { id: 'A197-3', reason: '同上：载体折叠未换，chunk/new Function 装配仍在（ADR-230 §四-3）' },
+      // ⚠ 本条目**保留为「决定记录」**（`UD-0013` 关闭该轨迹），措辞已订正为「已裁定」语气，
+      //   **不留「待办」语气**（后者会误导后来者以为还欠着）。
+      //   ⚠ **订正说明（TASK §3② 的「移除」选项）**：原指令给的是「订正**或移除**」——
+      //     ⚠「移除」在 **`kind === '目标'` 的前提下是错的**：`S-3`（`:785`）收集**每条**
+      //     `kind === '目标'` 的断言（`c.assertions.filter((a) => a.kind === '目标')`，**不区分
+      //     pass/fail**）并要求非空 pending ⇒ 删条目会报 `✗ S-3 无依据：A197-3`。
+      //     该形态**已实测复现**（2026-10-13 变异自证，见本批报告 §2）。
+      //   ⚠ 但本判据的 kind 在本批已由 `'目标'` 改为**`'结构'`**（理由见 A197-3 本体注释：
+      //     改判后它是**守现状的结构约束**，不再是 unmet 目标）⇒ 此后 **`S-3` 不再要求本条目**，
+      //     且**退出码语义反而更强**：`'目标'` 类失败只进 `pendingTargets`（**不影响 exit code**，
+      //     见 `:913` `conflicts` 定义与 `:1193` 的 `ringState`），而 `'结构'` 类失败进 `conflicts`
+      //     ⇒ **exit 1（阻断）**。这正是选 `'结构'` 的原因（牙齿只增不减）。
+      //   ⇒ 保留本条目**仅为留痕**；即便删掉也不再影响任何判据（与「移除」的原始风险不同）。
+      { id: 'A197-3', reason: '**已由用户拍板 `USER-DECISIONS.md` `UD-0013`（载体选 A：保动态安装）关闭该轨迹** ——'
+        + '「弃 chunk/marker/new Function 装配」不再是目标；本判据已改判为「**装配用求值点恰好一处且仅存在于装配入口**」'
+        + '（守现状的结构约束，不再以「装配点 = 0」为目标；kind 亦由 `目标` 改为 `结构`）。' },
     ],
   },
   {
