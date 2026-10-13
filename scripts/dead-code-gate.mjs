@@ -19,6 +19,36 @@ const fail = (r, m) => { failures++; console.log('FAIL | ' + r + ' | ' + m); };
 const pass = (r, m) => console.log('PASS | ' + r + ' | ' + m);
 const git = (a) => { const r = spawnSync('git', ['-c', 'safe.directory=*', '-C', ROOT, ...a], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 30000 }); return r.status === 0 ? r.stdout : ''; };
 
+/**
+ * ⚠⚠ 单一事实源（P2 复核处置批 2026-10-13 · 处置 F1/F2）：`lib/` 侧的**全部手改 .cjs 模块**。
+ *
+ * 病历：R5 的 `TARGETS`（硬编码 12 件）与 R6 的 `INJECTION_FILES`（硬编码 4 件）此前**各写一份**，
+ *   与 `arch-claims.mjs` 的 `PE_F01_LIB_MANIFEST`（13 件）**三份互不相等且无判据锁它们相等**
+ *   ⇒ 新建 `lib/<新文件>.cjs` 并在入口接线后：**R5 不扫它、R6 不扫它、A230-1/A230-5 双绿**
+ *   —— 死码与注入面复长**全链不可观测**（复核实证，见 F1/F2）。
+ * ⇒ 现改为**从磁盘枚举派生**（与 `rpc-manifest.mjs` / `arch-claims.mjs` 的注册面枚举**同一规则**）：
+ *   枚举 `lib/` 下全部 `.cjs`，**排除具名声明的构建产物** `client.cjs`（它由 build-client.mjs
+ *   生成、非手改面，其防漂移由 `build-client --check` 负责）。排除项是**具名白名单**，不是通配
+ *   ⇒ 任何**新**文件自动进入扫描面（这正是本批要修的失效形态）。
+ *
+ * ⚠ 本枚举**不覆盖什么**（如实声明）：
+ *   ① 不扫 `test/**`（R5 的消费者语料**含** test/，但被扫的**目标**只有 lib/ 手改模块）；
+ *   ② 不扫 `src/**`（其死码由 R4 的等值集 + build 装配链管）；
+ *   ③ **动态后果（复核指出的关键一条）**：R5 判的是**导出面**——若某文件把导出**删掉**，
+ *      其内部函数即**脱离 R5 视野**（`lib/net-proxy.cjs` 与 `lib/sys.cjs` 已发生，见 F3）。
+ *      本枚举把**扫描面**补齐到全 `lib/`，但**不**改变「R5 只判导出面」这一边界；
+ *      文件内私有函数的死码**仍需**另立判据（F3 的处置见本批 T2：直接删除已知隐形死码）。
+ */
+const GENERATED_LIB = new Set(['client.cjs']);   // 具名声明的构建产物（非手改面）
+function libTargets() {
+  const dir = path.join(ROOT, 'lib');
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter((f) => f.endsWith('.cjs') && !GENERATED_LIB.has(f))
+    .sort()
+    .map((f) => 'lib/' + f);
+}
+
 // ---- diff 新增行 ----
 const addedByFile = new Map();
 let curFile = null;
@@ -230,13 +260,10 @@ for (const line of git(diffArgs).split('\n')) {
 //   ⑤ 引用判定用**词界正则**（`\b<name>\b`）而非 AST ⇒ 注释里的同名提及会计为引用。
 //      本规则因此**偏保守**（宁漏不误报）；R1 的既有实现同口径。
 {
-  // ⚠ P2-3（2026-10-13 拆分批）：补充新增的域模块（否则新文件在死码判据面**之外**）。
-  //   `lib/harness.cjs` / `lib/rpc-http.cjs` / `lib/rpc-config.cjs` / `lib/rpc-voice.cjs`
-  //   —— 这是 TASK §3.3 明令的同步点；遗漏会使新模块死码不可观测。
-  //   `lib/client.cjs` 仍**不在**本表：它是构建产物（非手改面），由 build-client --check 防漂移。
-  const TARGETS = ['lib/asr.cjs', 'lib/index.cjs', 'lib/integrity.cjs', 'lib/maintain-lib.cjs',
-    'lib/net-proxy.cjs', 'lib/platform-service.cjs', 'lib/rpc-schema.cjs', 'lib/sys.cjs',
-    'lib/harness.cjs', 'lib/rpc-http.cjs', 'lib/rpc-config.cjs', 'lib/rpc-voice.cjs'];
+  // ⚠ P2 复核处置批（2026-10-13 · F1）：改为**从磁盘枚举派生**（`libTargets()`），
+  //   不再硬编码 —— 与 `rpc-manifest.mjs` / `arch-claims.mjs` 收敛到同一枚举规则：
+  //   `lib/` 全部 `.cjs` 减具名生成物 `client.cjs`。新文件**自动**进入扫描面。
+  const TARGETS = libTargets();
   // 生产消费者面（**不含** test/）：src · lib · scripts · plugin-host.js
   const prodCorpus = [];
   const walkProd = (dir) => {
@@ -356,7 +383,10 @@ for (const line of git(diffArgs).split('\n')) {
 // ⚠ **这不是"现在没有所以过"**：判据读的是**源码中真的没有该形态**这一可证伪事实，
 //   变异自证见 P2-2 报告 §T2（临时加回 `'set "X=' + v` ⇒ R6 FAIL ⇒ 还原 ⇒ PASS）。
 {
-  const INJECTION_FILES = ['lib/index.cjs', 'lib/sys.cjs', 'lib/platform-service.cjs', 'lib/net-proxy.cjs'];
+  // ⚠ P2 复核处置批（2026-10-13 · F2）：同 R5，改为**从同一枚举器派生**——
+  //   原硬编码 4 件与 R5 的 12 件、A230-1 的 13 件三份互不相等；新文件里复长注入面
+  //   （`schtasks` / 裸拼 `set`）此前**全链不可观测**。现扫描面 = 全部 `lib/` 手改模块。
+  const INJECTION_FILES = libTargets();
   const cmdGen = /(?:schtasks|['"]\.cmd['"])/;
   const bareSet = /['"]set\s+["']?\s*[A-Z_][A-Z0-9_]*\s*=\s*['"]\s*\+/;
   let r6bad = 0; let r6checked = 0;

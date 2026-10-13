@@ -262,3 +262,35 @@ test('A230-1/A230-5 负控：不注入时两判据必须 PASS · exit 0（防"�
     assert.doesNotMatch(r.out, /✗ A230-5/, 'A230-5 不得为红');
   });
 });
+
+// ── P2 复核处置批回归锁（2026-10-13）────────────────────────────────────────────
+// 病历（复核 F1/F2/F8）：R5 的 `TARGETS` 与 R6 的 `INJECTION_FILES` 曾是**硬编码清单**，
+//   与 A230-1 的声明清单三份互不相等且无锁 ⇒ 新建 `lib/<新文件>.cjs` 后**两张网都不覆盖它**
+//   （死码 / 注入面复长全链不可观测）。S-6 同形（只读 `lib/index.cjs`，引回别的文件不报）。
+// ⇒ 三条均已改为 `lib/` 全枚举派生；以下锁把"新文件必须入网"固化成机检。
+// ⚠ 变异名一律**运行时拼接 + 合法 `.cjs` 名形态**（P2-2 / P2-2余账 / P2-3 三度教训）。
+
+test('R5/R6 派生面有牙：新建 lib/<新文件>.cjs 后，R5 与 R6 都必须覆盖到它', () => {
+  const mut = 'zz' + 'probe-lock.cjs';          // 运行时拼接
+  const fn = 'zzLock' + 'Export';                // 运行时拼接
+  withFixture((dir) => {
+    fs.writeFileSync(path.join(dir, 'lib', mut),
+      `'use strict';\nfunction ${fn}() { return 1; }\nmodule.exports = { ${fn} };\nconst c = 'schtasks /create';\n`);
+  }, (dir) => {
+    const r = runGate(dir);
+    assert.equal(r.code, 1, '新 lib 文件必须被门禁覆盖（否则 R5/R6 有硬编码盲区）');
+    assert.match(r.out, new RegExp('R5 \\| lib/' + mut.replace('.', '\\.')), 'R5 必须扫到新文件');
+    assert.match(r.out, new RegExp('R6 \\| lib/' + mut.replace('.', '\\.')), 'R6 必须扫到新文件');
+  });
+});
+
+test('S-6 牙齿已扩到 lib/** ：在非 index.cjs 的文件里引回 RESTART_FILES 必须被判', () => {
+  withFixture((dir) => {
+    const p = path.join(dir, 'lib', 'sys.cjs');
+    fs.writeFileSync(p, fs.readFileSync(p, 'utf8') + "\nconst RESTART_FILES = ['zz-nonexistent-lock.js'];\n", 'utf8');
+  }, (dir) => {
+    const r = runArch(dir);
+    assert.equal(r.code, 1, 'lib/sys.cjs 里的不自洽 RESTART_FILES 必须被判红（原只读 index.cjs ⇒ 假绿）');
+    assert.match(r.out, /S-6/, 'FAIL 必须点名 S-6');
+  });
+});

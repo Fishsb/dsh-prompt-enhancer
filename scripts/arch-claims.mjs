@@ -65,6 +65,16 @@ const exists = (p) => fs.existsSync(abs(p));
 const read = (p) => fs.readFileSync(abs(p), 'utf8');
 const lines = (p) => read(p).split('\n').length;   // 口径：物理行 = split('\n').length
 const occurrences = (s, re) => (s.match(re) || []).length;
+
+/**
+ * 剥注释后的代码文本（P2 复核处置批 2026-10-13 · 处置 F5）。
+ * 病历：`A197-3` 原用 `occurrences(read('lib/index.cjs'), /new Function\(/g)` ⇒ **注释里提到
+ *   `new Function(` 也算一处**（实测 `lib/index.cjs:39` 的载体约束注释命中 ⇒ 读数 2，而同批
+ *   报告/文档写 1）。⇒ 判据读数被"说明文字"污染，与判据意图（**真装配点** = 0）不符。
+ * 现改为剥注释后计数（与 `dead-code-gate.mjs` 的 R5 引用判定**同一口径**），读数 = 1（真装配点）；
+ * **判定式不变**（仍严格 `=== 0`），仍属「在册未达」。
+ */
+const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 const list = (p) => fs.readdirSync(abs(p));
 
 /**
@@ -443,12 +453,16 @@ const CLAIMS = [
         const builder = !read('scripts/build-client.mjs').includes("'plugin-client.js'");
         return assert(disk && whitelist && builder, `磁盘${disk ? '无' : '有'} / 白名单${whitelist ? '无' : '有'} / 构建${builder ? '不产出' : '仍产出'}`);
       }),
-      A('A197-3', '目标', '弃 chunk/marker/new Function 装配', 'new Function 装配点 = 0', () => {
-        // P2-3（2026-10-13 拆分批）：装配点判定面不变（仍判 entry `lib/index.cjs`）——
+      A('A197-3', '目标', '弃 chunk/marker/new Function 装配', 'new Function 装配点 = 0（剥注释计数）', () => {
+        // P2-3（2026-10-13 拆分批）：装配点判定面不变（仍判 entry `lib/index.cjs`）；
         //   `new Function('harness', BODY)` 桥接**仍在 entry**（载体三选一未拍板，本批不许动载体）
-        //   ⇒ 本判据读数**不变**（仍 = 1，在册未达）。⚠ 未改浅：仍严格 `=== 0`。
-        const n = occurrences(read('lib/index.cjs'), /new Function\(/g);
-        return assert(n === 0, `new Function = ${n} 处`);
+        //   ⇒ 本判据仍为「在册未达」。
+        // ⚠ P2 复核处置批（2026-10-13 · F5）：改为**剥注释后**计数 —— 原口径把 `:39` 载体约束
+        //   注释里的 `new Function(` 也算一处（读数 2，与报告/文档的 1 不符，属"说明文字污染读数"）。
+        //   剥注释后读数 = **1**（唯一真装配点 `:54`）。⚠ **判定式一字未改**（仍严格 `=== 0`），
+        //   不是"解析不到就算过"（那种改法会让本判据恒真 = 假绿）。
+        const n = occurrences(codeOnly(read('lib/index.cjs')), /new Function\(/g);
+        return assert(n === 0, `new Function = ${n} 处（剥注释）`);
       }),
       A('A197-4', '结构', '半部通信保留 HTTP（/rpc 兼容别名）', "RPC_PATH = '/dsh-prompt-enhancer/rpc'", () => {
         // P2-3（2026-10-13）：RPC_PATH 仍定义在 entry `lib/index.cjs`（未随拆分搬走）⇒ 判定面不变。
@@ -778,9 +792,21 @@ const STRUCTURAL = [
   //   本断言**无被判对象**（`no('未解析到 RESTART_FILES')` 正是它退役后的必然读数）。
   //   ⚠ 替代判据：S-6' 判「**清单若在则必须自洽；若已退役则必须确证其不存在**」——
   //     既不假绿（不再因解析失败就报 no），也不假红（确实退了就应记 PASS 并说明）。
-  A('S-6', '结构', '重启探测名单：已随执行器退役（若仍存在则逐项自洽）', 'RESTART_FILES 缺席（已退役）或逐项在位且合法', () => {
-    const m = read('lib/index.cjs').match(/const RESTART_FILES = \[([^\]]*)\]/);
-    if (!m) return ok('RESTART_FILES 已随 P1-c 执行器退役一并删除（无被判对象 ⇒ 不适用，非失败）');
+  // ⚠ P2 复核处置批（2026-10-13 · F8）：原判据只读 `lib/index.cjs` ⇒ **牙齿可绕**：
+  //   把 `RESTART_FILES` 引回 `lib/**` 的**其它文件**（如新建 `lib/x.cjs` 或塞进 `lib/sys.cjs`）
+  //   时本判据**不报**（复核实测）——即"看起来在守、实际不守"。现扩为 **`lib/**` 全枚举扫描**
+  //   （保留守卫与牙齿），任一文件出现该清单即走「逐项自洽」分支。
+  A('S-6', '结构', '重启探测名单：已随执行器退役（若在 `lib/**` 任一处复现则必须逐项自洽）', 'RESTART_FILES 缺席（已退役）或逐项在位且合法', () => {
+    // 扫描面 = lib/ 下全部 .cjs（含拆分后的域模块；排除构建产物 client.cjs）
+    const libFiles = list('lib').filter((f) => f.endsWith('.cjs') && f !== 'client.cjs');
+    const hits = [];
+    for (const f of libFiles) {
+      const m = read('lib/' + f).match(/const RESTART_FILES = \[([^\]]*)\]/);
+      if (m) hits.push({ file: 'lib/' + f, m });
+    }
+    if (hits.length === 0) return ok(`RESTART_FILES 已随 P1-c 执行器退役一并删除（无被判对象 ⇒ 不适用，非失败）｜扫描面 lib/ 全网 ${libFiles.length} 件`);
+    if (hits.length > 1) return assert(false, `RESTART_FILES 在 ${hits.length} 处复现（应唯一）：${hits.map((h) => h.file).join(', ')}`);
+    const m = hits[0].m;
     const arr = m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
     const wl = require(abs('package.json')).files;
     const legal = (n) => wl.includes(n) || wl.some((w) => n.startsWith(w + '/'));
@@ -788,7 +814,7 @@ const STRUCTURAL = [
     const outside = arr.filter((f) => !legal(f));
     const entries = arr.includes('plugin-host.js') && arr.includes('lib/index.cjs');
     return assert(!missing.length && !outside.length && entries,
-      `${arr.length} 项｜缺文件 ${missing.length ? missing.join(',') : '无'}｜白名单外 ${outside.length ? outside.join(',') : '无'}｜入口齐 ${entries}`);
+      `[${hits[0].file}] ${arr.length} 项｜缺文件 ${missing.length ? missing.join(',') : '无'}｜白名单外 ${outside.length ? outside.join(',') : '无'}｜入口齐 ${entries}`);
   }),
   A('S-7', '结构', 'i18n 全局平衡：`ZH` 与 `EN` 顶层键集相等且非空', '两语言键集完全相同（0 差异）', () => {
     const raw = read('src/client/i18n.js');

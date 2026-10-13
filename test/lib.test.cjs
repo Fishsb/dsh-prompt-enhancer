@@ -1523,12 +1523,14 @@ const libSrc = (rel) => readFileSync(join(__dirname, '..', rel), 'utf8');
 //     改成「找不到就算过」则**永远为真**（假绿，同 A201-3/S-5 先例）——两者都比退役更差。
 // LIBWIRE-04 **随 P1-c 退役**：其判据对象（stage-install.cjs / executorEnsure / updater-host.cjs）
 //   已随执行器退役一并删除 ⇒ 无被判对象，整条删除（不留空壳、不改恒真）。
-test('LIBWIRE-05 net-proxy.cjs undici 惰性加载与降级直连在位', () => {
-  const src = libSrc('lib/net-proxy.cjs');
-  assert.match(src, /try \{\s*\n\s*const u = require\('undici'\)/, 'undici 必须 try/catch 惰性加载（缺失不崩进程）');
-  assert.match(src, /undici unavailable, proxy disabled/, '降级必须留痕（日志可取证）');
-  assert.match(src, /function httpsGetDirect/, '降级直连实现必须在位（内置 https.request，无代理可用）');
-});
+// LIBWIRE-05 **随 P2 复核处置批（2026-10-13 · F3）退役**：其判据对象是 `lib/net-proxy.cjs` 的
+//   undici 惰性加载 + 降级直连（`httpsGetDirect`）。复核实测该文件的 undici 出口族
+//   （`httpsGetProxied` / `httpsGetDirect` / `agentForProxy`，共 217 行）从**唯一活导出**
+//   `curlProxyArgs` 出发**不可达**、全仓零消费者 ⇒ 整体删除，`undici` 依赖亦随之移除
+//   ⇒ **无被判对象**。
+//   ⚠ 这不是改浅：保留原用例则三条 `assert.match` 因源码中不再有这些模式而**永远为红**（假红）；
+//     改成「找不到就算过」则**永远为真**（假绿，同 A201-3 / S-5 / A146-3 先例）——两者都比退役更差。
+//   ⚠ 仍在册的**未改**断言：`curlProxyArgs` 相关面（本文件其它用例）与 4 条价值项，均未触碰。
 
 // LIBWIRE-06 **随 P1-c 退役**：其判据对象（stage-install.cjs / executorEnsure / updater-host.cjs）
 //   已随执行器退役一并删除 ⇒ 无被判对象，整条删除（不留空壳、不改恒真）。

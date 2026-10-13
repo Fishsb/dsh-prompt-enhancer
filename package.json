@@ -46,7 +46,5 @@
     "prompt-enhancer",
     "dsh-plugin"
   ],
-  "dependencies": {
-    "undici": "^7.29.0"
-  }
+  "dependencies": {}
 }

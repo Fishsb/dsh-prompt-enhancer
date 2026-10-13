@@ -44,7 +44,15 @@ function deriveLiveMethods() {
   const bundled = grab('plugin-host.js');
   const live = [...new Set([...native, ...bundled])].sort();
   const intersection = native.filter((x) => bundled.includes(x));
-  return { native, bundled, live, intersection };
+  // ⚠ P2 复核处置批（2026-10-13 · F7）：`derivedFrom` 一度是**硬编码字面量**
+  //   `['lib/index.cjs','plugin-host.js']`，与拆分后的真实派生面（枚举整个 lib/）不符。
+  //   现由**派生代码同源产出**，不留字面量 ⇒ 扫描面再变时读数自动跟随。
+  const nativeFiles = fs.readdirSync(path.join(ROOT, 'lib'))
+    .filter((f) => f.endsWith('.cjs') && !generated.has(f))
+    .sort()
+    .map((f) => 'lib/' + f);
+  const derivedFrom = [...nativeFiles, 'plugin-host.js'];
+  return { native, bundled, live, intersection, derivedFrom };
 }
 
 /** schema 面：lib/rpc-schema.cjs 的 schemas 对象顶层键 */
@@ -103,11 +111,29 @@ function deriveCurrentDocMethods() {
   return { ok: true, methods: [...out].sort() };
 }
 
-const { native, bundled, live, intersection } = deriveLiveMethods();
+const { native, bundled, live, intersection, derivedFrom } = deriveLiveMethods();
 const schemas = schemaKeys();
 const doc = read('docs/compatibility-matrix.md');
+/**
+ * 文档面判定（P2 复核处置批 2026-10-13 · 处置 F6：两方向**口径对称**）。
+ *
+ * 病历：`missingInDoc` 用**全文** `doc.includes(...)`，而 `ghostInDoc` 用**§2 小节表格** ⇒ 不对称。
+ *   后果（复核实证）：把 §2「当前清单」表格里的一行删掉**不报警** —— 因为那 9 条无 schema 的
+ *   方法在下面的「具名申报表」里**另有一份具名条目**，全文匹配仍被满足 ⇒ 当前清单表可以被删空
+ *   而不触发任何判据。
+ * ⇒ 现改为**双口径**：① `missingInDoc`（**全文**，保留作兜底——覆盖 blockquote / 正文里的提及）；
+ *   ② `missingInTable`（**§2 当前清单表内**，与 `ghostInDoc` 的解析面**完全同一小节同一张表** ⇒ 对称）。
+ *   两者任一非空即 FAIL，失败信息**分别点名**是哪种缺失，避免互相遮蔽。
+ *
+ * ⚠ 本判据**不覆盖什么**（如实声明）：
+ *   · 不判「§2 表格里的**说明文字**是否准确」（只判方法名存在性）；
+ *   · 不判 blockquote 历史区里的方法名（那里合法保留已退役条目，见 `deriveCurrentDocMethods`）；
+ *   · 不判 §2 之外的其它小节（如 §4.1 客户端依赖表）。
+ */
 const missingInDoc = live.filter((m) => !doc.includes('`' + m + '`'));
 const currentDoc = deriveCurrentDocMethods();
+// 正向判据（**表格内**，与反向同口径）：线上每条方法名都必须出现在 §2 当前清单表内
+const missingInTable = live.filter((m) => !currentDoc.methods.includes(m));
 // 反向判据：文档「当前清单」小节里列出的方法名，必须在线上
 const ghostInDoc = currentDoc.methods.filter((m) => !live.includes(m));
 const gap = live.filter((m) => !schemas.includes(m));
@@ -117,7 +143,8 @@ const orphanSchema = schemas.filter((m) => !live.includes(m));
 const fails = [];
 if (native.length === 0 || bundled.length === 0) fails.push('注册面解析为空（lib/index.cjs 或 plugin-host.js 未匹配到 harness.handle）');
 if (intersection.length) fails.push('双半部注册面交集非空（接线错误）: ' + intersection.join(', '));
-if (missingInDoc.length) fails.push('线上方法未出现在 docs/compatibility-matrix.md: ' + missingInDoc.join(', '));
+if (missingInDoc.length) fails.push('线上方法未出现在 docs/compatibility-matrix.md（全文）: ' + missingInDoc.join(', '));
+if (missingInTable.length) fails.push('线上方法未出现在 docs/compatibility-matrix.md 的 **§2 当前清单表**内（漏写/被删行）: ' + missingInTable.join(', '));
 if (!currentDoc.ok) fails.push('文档当前 RPC 清单小节未找到（### host RPC）——解析口径失效，须先对齐');
 else if (ghostInDoc.length) fails.push('文档当前清单含线上不存在的方法（幽灵条目）: ' + ghostInDoc.join(', '));
 const undeclared = gap.filter((m) => !declared.includes(m));
@@ -127,10 +154,10 @@ if (stale.length) fails.push('申报已过期（声明了但线上已不缺）: 
 if (orphanSchema.length) fails.push('schema 有、线上无的孤儿条目: ' + orphanSchema.join(', '));
 
 const manifest = {
-  derivedFrom: ['lib/index.cjs', 'plugin-host.js'],
+  derivedFrom,   // ⚠ P2 复核处置批（F7）：由 deriveLiveMethods() 同源产出，非字面量
   counts: { native: native.length, bundled: bundled.length, live: live.length, schema: schemas.length, gap: gap.length },
   live, schemaCovered: live.filter((m) => schemas.includes(m)), noSchema: gap,
-  docCurrent: currentDoc.methods, ghostInDoc,
+  docCurrent: currentDoc.methods, ghostInDoc, missingInTable,
 };
 
 if (args.includes('--json')) console.log(JSON.stringify(manifest, null, 2));
@@ -139,7 +166,7 @@ else {
   console.log('  注册面: lib/index.cjs ' + native.length + ' + plugin-host.js ' + bundled.length + ' = 去重 ' + live.length + '（交集 ' + intersection.length + '）');
   console.log('  schema 覆盖: ' + manifest.schemaCovered.length + '/' + live.length + '；显式申报无校验: ' + gap.length);
   console.log('  文档面 docs/compatibility-matrix.md 覆盖: ' + (live.length - missingInDoc.length) + '/' + live.length);
-  console.log('  双向判据: 漏写 ' + missingInDoc.length + ' 条 · 幽灵（文档当前清单有、线上无）' + ghostInDoc.length + ' 条 / 文档当前清单 ' + currentDoc.methods.length + ' 条');
+  console.log('  双向判据: 漏写(全文) ' + missingInDoc.length + ' 条 · 漏写(§2 表内) ' + missingInTable.length + ' 条 · 幽灵（文档当前清单有、线上无）' + ghostInDoc.length + ' 条 / 文档当前清单 ' + currentDoc.methods.length + ' 条');
 }
 
 if (args.includes('--check')) {
