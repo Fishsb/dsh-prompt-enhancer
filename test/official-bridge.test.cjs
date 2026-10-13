@@ -732,6 +732,46 @@ test('OVB-A03 官方路径·自动增强：草稿始终未变 ⇒ 不得误触�
   assert.equal(host.timerRegs.every((r) => r.cleared), true, '必须有轮询上限（停止轮询，不得无限跑）');
 });
 
+// ⚠ 本用例精确复现**本批真实语音链实测**命中的形态（V-5 的断点）：
+//   官方 `finish()` 的顺序是 `insertText(...)` **然后** `setPhase("idle")`
+//   ⇒ 相位节点消失（bridge 判「收口」）时，**写回已经落地**。
+//   旧实现只在「收口那一刻」才快照基线 ⇒ 基线 = 写回后的草稿 ⇒ 永远测不到 delta ⇒ 自动增强永不触发。
+test('OVB-A04 官方路径·自动增强（实测形态）：写回**先于**收口落地 ⇒ 仍必须触发增强', () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const host = buildHotkeyHost(env, bridge, { autoEnhance: true, sessionId: 'sess-a4' });
+  host.render('')                                   // 渲染#1：注册订阅（基线 = 空草稿）
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();         // 会话开始（此刻基线被记录 = 空草稿）
+  host.render('官方写回的文字');                      // ⭐ 写回**先**落地（相位仍在 recording）
+  env.document._attr = null; mo.cb();                // 收口（相位消失）
+  let fired = false;
+  for (const r of host.timerRegs) { if (!r.cleared) { r.fn(); fired = true; } }
+  assert.equal(fired, true, '轮询必须真的跑过');
+  assert.equal(host.enhanceCalls.length, 1, '写回先于收口 ⇒ 仍须恰好触发 1 次增强（旧实现此处为 0 = V-5 断点）');
+});
+
+test('OVB-A05 官方路径·自动增强：跨会话基线不串（第二会话以自己的起点为准）', () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const host = buildHotkeyHost(env, bridge, { autoEnhance: true, sessionId: 'sess-a5' });
+  host.render('');
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  // 第一会话：有写回 ⇒ 触发 1 次
+  env.document._attr = 'recording'; mo.cb();
+  host.render('第一段写回');
+  env.document._attr = null; mo.cb();
+  for (const r of host.timerRegs) { if (!r.cleared) r.fn(); }
+  assert.equal(host.enhanceCalls.length, 1, '第一会话触发 1 次');
+  // 第二会话：无写回（草稿保持第一段）⇒ 不得再触发
+  env.document._attr = 'recording'; mo.cb();
+  env.document._attr = null; mo.cb();
+  for (const r of host.timerRegs) { for (let i = 0; i < 60 && !r.cleared; i++) r.fn(); }
+  assert.equal(host.enhanceCalls.length, 1, '第二会话无写回 ⇒ 不得误触发（基线须随会话重置）');
+});
+
 // ───────────────────────────── 接线契约（防"注释有、代码无"） ─────────────────────────────
 test('OVB-W01 接线：buildclient 装配清单与 skeleton 注入标记均在位', () => {
   const build = fs.readFileSync(path.join(ROOT, 'scripts', 'build-client.mjs'), 'utf8');
