@@ -25,10 +25,22 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const args = process.argv.slice(2);
 
-/** 注册面派生：插件双半部的 harness.handle 并集 */
+/**
+ * 注册面派生：插件双半部的 harness.handle 并集。
+ *
+ * ⚠ P2-3（2026-10-13 拆分批）：`lib/index.cjs` 已拆为「薄装配入口 + 按域 lib/*.cjs」，
+ *   **原生注册面随实现分布在多个文件**（config/* → lib/rpc-config.cjs；voice/* → lib/rpc-voice.cjs）。
+ *   若此处仍只扫 `lib/index.cjs`，`native` 会**静默变 0**（随后有人改数字锁 = 改浅）。
+ *   ⇒ 派生面改为**枚举 lib/ 下全部非生成 .cjs**（排除构建产物 client.cjs —— 那是 client 半部，
+ *   不注册 host RPC；含 `harness.handle('x'` 即计入）。`native` 的**语义与数字（4）不变**。
+ */
 function deriveLiveMethods() {
   const grab = (f) => [...read(f).matchAll(/harness\.handle\(\s*'([^']+)'/g)].map((m) => m[1]);
-  const native = grab('lib/index.cjs');
+  const generated = new Set(['client.cjs']);   // 构建产物：非 host 注册面（`node scripts/build-client.mjs`）
+  const native = fs.readdirSync(path.join(ROOT, 'lib'))
+    .filter((f) => f.endsWith('.cjs') && !generated.has(f))
+    .sort()
+    .flatMap((f) => grab('lib/' + f));
   const bundled = grab('plugin-host.js');
   const live = [...new Set([...native, ...bundled])].sort();
   const intersection = native.filter((x) => bundled.includes(x));

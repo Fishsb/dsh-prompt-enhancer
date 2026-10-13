@@ -230,8 +230,13 @@ for (const line of git(diffArgs).split('\n')) {
 //   ⑤ 引用判定用**词界正则**（`\b<name>\b`）而非 AST ⇒ 注释里的同名提及会计为引用。
 //      本规则因此**偏保守**（宁漏不误报）；R1 的既有实现同口径。
 {
+  // ⚠ P2-3（2026-10-13 拆分批）：补充新增的域模块（否则新文件在死码判据面**之外**）。
+  //   `lib/harness.cjs` / `lib/rpc-http.cjs` / `lib/rpc-config.cjs` / `lib/rpc-voice.cjs`
+  //   —— 这是 TASK §3.3 明令的同步点；遗漏会使新模块死码不可观测。
+  //   `lib/client.cjs` 仍**不在**本表：它是构建产物（非手改面），由 build-client --check 防漂移。
   const TARGETS = ['lib/asr.cjs', 'lib/index.cjs', 'lib/integrity.cjs', 'lib/maintain-lib.cjs',
-    'lib/net-proxy.cjs', 'lib/platform-service.cjs', 'lib/rpc-schema.cjs', 'lib/sys.cjs'];
+    'lib/net-proxy.cjs', 'lib/platform-service.cjs', 'lib/rpc-schema.cjs', 'lib/sys.cjs',
+    'lib/harness.cjs', 'lib/rpc-http.cjs', 'lib/rpc-config.cjs', 'lib/rpc-voice.cjs'];
   // 生产消费者面（**不含** test/）：src · lib · scripts · plugin-host.js
   const prodCorpus = [];
   const walkProd = (dir) => {

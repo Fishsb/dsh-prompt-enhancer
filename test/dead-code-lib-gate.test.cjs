@@ -33,6 +33,14 @@ function mkFixture() {
   return dir;
 }
 
+function runArch(dir) {
+  // ⚠ P2-3 夹具口径：先 --write 让投影与**本夹具环境**对齐，再 --check。
+  //   否则得到的是与判据无关的读数漂移（投影为本机生成），不是判据失效。
+  spawnSync(process.execPath, ['scripts/arch-claims.mjs', '--write'], { cwd: dir, encoding: 'utf8' });
+  const r = spawnSync(process.execPath, ['scripts/arch-claims.mjs', '--check'], { cwd: dir, encoding: 'utf8' });
+  return { code: r.status, out: String(r.stdout || '') + String(r.stderr || '') };
+}
+
 function runRpc(dir) {
   const r = spawnSync(process.execPath, ['scripts/rpc-manifest.mjs', '--check'], { cwd: dir, encoding: 'utf8' });
   return { code: r.status, out: String(r.stdout || '') + String(r.stderr || '') };
@@ -204,5 +212,53 @@ test('RPC-DOC-3 历史条目不误报：幽灵名只出现在 blockquote 历史�
     const r = runRpc(dir);
     assert.equal(r.code, 0, '历史注里的旧方法名不得被误报为幽灵（否则历史对照与判据直接冲突）');
     assert.doesNotMatch(r.out, /幽灵条目/, '不得出现幽灵归因');
+  });
+});
+
+// ── A230-1/A230-5 拆分判据回归锁（P2-3 拆分批 · 2026-10-13）──────────────────────
+// 病历：A230-1 原判「**单文件内**域行区间之和 == lines('lib/index.cjs') 且连续无缝」。
+//   P2-3 拆域后该判据对象**整体消失**（域不再共享一个文件的行空间）⇒ 改判为
+//   **文件级等值集**（`lib/` 磁盘 .cjs == 声明的域清单，多一件即 FAIL）+ **拆分产物无孤儿**
+//   （A230-5：每个域模块必须被入口 require 接线）。牙齿**同等或更强**（多出"文件级孤儿"面）。
+// ⚠ 变异名一律**运行时拼接 + 合法 `.cjs` 名形态**（判据的合法输入）——两条都是 P2-2/P2-2余账
+//   得来的教训：字面量会污染被测语料面（假绿），非法形态会被形态过滤器挡下（自证失效）。
+// ⚠ 夹具须 `git init`（S-8 行尾契约需要 git 元数据）且先 `--write` 对齐本环境的投影，
+//   否则得到的是**与判据无关的读数漂移**（实测踩到过），不是判据失效。
+
+test('A230-1 等值集有牙：lib/ 出现未声明的域文件 ⇒ 必须 FAIL · exit 1', () => {
+  const mut = 'z' + 'zmutant.cjs';
+  withFixture((dir) => {
+    fs.writeFileSync(path.join(dir, 'lib', mut), "'use strict';\nmodule.exports = {};\n");
+  }, (dir) => {
+    const r = runArch(dir);
+    assert.equal(r.code, 1, '未声明的 lib/*.cjs 必须 exit 1（若为 0 则等值集判据失效）');
+    assert.match(r.out, /A230-1/, 'FAIL 必须点名 A230-1');
+    assert.match(r.out, /未声明（多一件）/, 'FAIL 必须给"未声明"归因');
+  });
+});
+
+test('A230-5 孤儿有牙：域模块声明了却未被入口 require ⇒ 必须 FAIL · exit 1', () => {
+  withFixture((dir) => {
+    // 文件在磁盘 + 两处清单都声明 + 入口**不** require ⇒ 必须报"未接线"
+    fs.writeFileSync(path.join(dir, 'lib', 'zzwire.cjs'), "'use strict';\nmodule.exports = {};\n");
+    const ac = path.join(dir, 'scripts', 'arch-claims.mjs');
+    const t = fs.readFileSync(ac, 'utf8')
+      .replace("  'client.cjs':", "  'zzwire.cjs': '变异：声明但未接线',\n  'client.cjs':")
+      .replace("'rpc-voice.cjs'];", "'rpc-voice.cjs', 'zzwire.cjs'];");
+    fs.writeFileSync(ac, t, 'utf8');
+  }, (dir) => {
+    const r = runArch(dir);
+    assert.equal(r.code, 1, '声明却未接线必须 exit 1（孤儿模块）');
+    assert.match(r.out, /A230-5/, 'FAIL 必须点名 A230-5');
+    assert.match(r.out, /未接线/, 'FAIL 必须给"未接线"归因');
+  });
+});
+
+test('A230-1/A230-5 负控：不注入时两判据必须 PASS · exit 0（防"恒红"）', () => {
+  withFixture(null, (dir) => {
+    const r = runArch(dir);
+    assert.equal(r.code, 0, '正常态必须 exit 0');
+    assert.doesNotMatch(r.out, /✗ A230-1/, 'A230-1 不得为红');
+    assert.doesNotMatch(r.out, /✗ A230-5/, 'A230-5 不得为红');
   });
 });

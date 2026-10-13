@@ -67,35 +67,66 @@ const lines = (p) => read(p).split('\n').length;   // 口径：物理行 = split
 const occurrences = (s, re) => (s.match(re) || []).length;
 const list = (p) => fs.readdirSync(abs(p));
 
-/** 线上 RPC 注册面派生（与 rpc-manifest.mjs 同一规则：扫插件双半部的 harness.handle） */
+/**
+ * 线上 RPC 注册面派生（与 rpc-manifest.mjs 同一规则：扫插件双半部的 harness.handle）。
+ * ⚠ P2-3（2026-10-13 拆分批）：`lib/index.cjs` 拆域后原生注册面分布在 `lib/*.cjs`
+ *   （config/* → rpc-config.cjs；voice/* → rpc-voice.cjs）。若仍只扫 `lib/index.cjs`，
+ *   `native` 静默变 0 ⇒ 与 rpc-manifest 派生面**不一致**（两处事实源漂移）。
+ *   ⇒ 与 rpc-manifest.mjs 同步：枚举 `lib/` 下全部非生成 .cjs（排除构建产物 client.cjs）。
+ */
 function liveMethods() {
   const grab = (f) => [...read(f).matchAll(/harness\.handle\(\s*'([^']+)'/g)].map((m) => m[1]);
-  return { native: grab('lib/index.cjs'), bundled: grab('plugin-host.js') };
+  const generated = new Set(['client.cjs']);
+  const native = fs.readdirSync(abs('lib'))
+    .filter((f) => f.endsWith('.cjs') && !generated.has(f))
+    .sort()
+    .flatMap((f) => grab('lib/' + f));
+  return { native, bundled: grab('plugin-host.js') };
 }
 
-/** PE-F01 域边界表（ADR-230 的声明面；行范围 [起, 止]，均含端点，物理行口径） */
-// P1-a（2026-10-13 缩批）：域边界随 `lib/index.cjs` 缩短而**重算**（839 → 786 行）。
-//   重算口径与原表**逐字一致**：域起点 = 该节分隔线（`// ===`）所在行，末域止于文件末行；
-//   D4（语音面）由 88 行缩为 35 行 —— 因为 8 条 `voice/model*`·`voice/deploy*` 已退役，
-//   本域只剩 `voice/status`·`voice/transcribe` 两条（且改委托官方 speechToText）。
-//   ⚠ 这不是「改浅」：A230-1 判的是「域表覆盖 100% 且连续无缝」，**判据强度不变**
-//     （仍是 `sum === n && contig && tail === n`），只是事实数字随代码变化而同步。
-// P1-c（2026-10-13）：`lib/index.cjs` 786 → **656** 行（4 条原生 update/* handler + 其专属
-//   执行器拉起机制整体退役），域边界**按同一口径重算**：域起点 = 该节分隔线所在行，
-//   末域止于文件末行。D5/D6 由「重启探测 / 执行器保障 / 安装 / 诊断」四域收敛为
-//   两域（config·voice 之后仅剩执行器退役说明段与收尾绑定）。
-// P2-1（2026-10-13 清死簇）：`lib/index.cjs` 656 → **319** 行（判据口径 `lines()`，见 :66；
-//   `wc -l` 读数 = 318，差 1 是尾换行，两者都对、判据用 `lines()`）。删除物 = 原
-//   :64-382「executor lifecycle」整段（executorCall/ensureExternalExecutor/spawnExecutor*/
-//   buildExecutorTaskXml/cmdSafeValue/xmlEscape/currentUserSid/sleep/CRLF/readLatestExecutorVersion/
-//   resolveExecutorLogPath）+ 5 个死 import（http / child_process / platform-service /
-//   maintain-lib / node:crypto）—— 其调用点已随 P1-c 执行器退役全部消失（簇外引用只剩注释）。
-//   域边界**按同一口径重算**（域起点 = 该节分隔线所在行；D5 = 退役说明段，末域 D6 止于末行）。
-//   ⚠ 判据强度不变：仍是 `sum === n && contig && tail === n`，仅事实数字随代码变化同步。
-const PE_F01_DOMAINS = [
-  ['D0', 1, 44], ['D1', 45, 79], ['D2', 80, 182], ['D3', 183, 239], ['D4', 240, 274],
-  ['D5', 275, 289], ['D6', 290, 319],
-];
+/**
+ * PE-F01 **域清单**（ADR-230 的声明面）。
+ *
+ * ⚠ P2-3（2026-10-13 拆分批）改判：原判据是「**单文件内**的域行范围表」——
+ *   行数和 == `lines('lib/index.cjs')`、首域 1 起、连续无缝、末域止于末行。
+ *   **拆分后该判据对象整体消失**（域不再共享一个文件的行空间）⇒ 依既有退役规则，
+ *   改判合法。**但不许悄悄变松** ⇒ 换成**同一意图的等值集形态**（覆盖 100% / 无缝隙 /
+ *   无重叠 → 文件集等值 + 无未接线孤儿），牙齿**同等或更强**：
+ *     · 旧：表内行区间必须无缝覆盖 1..n（漏一段 ⇒ 红）
+ *     · 新：`lib/` 磁盘 .cjs 集合必须与下表**逐键等值**（**多一件即 FAIL** —— 与 R4 的
+ *       `src/host` 等值集同思路）；且**每个拆分产物必须被入口 `require` 接线**（声明了
+ *       却没接线 = 孤儿模块 ⇒ 红）。后者是新判据**多出**的牙齿（旧判据管不到"文件级孤儿"）。
+ *
+ * ⚠ 本判据**不覆盖**（如实声明）：① 不再判「单文件内的行区间切分」（对象已消失）；
+ *   ② 不判各文件**内部**的代码是否属于其声明的域（那是 code review 面，非机检面）；
+ *   ③ 不判 `src/host/**`（那由 R4 的等值集管）。
+ */
+const PE_F01_LIB_MANIFEST = {
+// 历史沿革（判据对象已随 P2-3 拆分整体消失，保留供追溯）：
+//   · `lib/index.cjs` 行数轨迹：839（P1-a 前）→ 786（P1-a 缩批）→ 656（P1-c 执行器退役）
+//     → 319（P2-1 清死簇）→ **109（P2-3 拆分，`lines()` 口径）**。
+//   · 旧 A230-1 判「单文件内域行区间之和 == lines('lib/index.cjs') 且连续无缝」——
+//     拆分后域不再共享一个文件的行空间 ⇒ **该判据对象整体消失** ⇒ 改判（见上方说明）。
+  // —— P2-3 拆分批产物（本次新增的域模块；`PE_F01_SPLIT_PRODUCTS` 同步维护）——
+  'index.cjs': 'D0 装配入口（requires · BODY · new Function 桥接 · module.exports · apply）',
+  'harness.cjs': 'D1 harness facade（BODY 求值入参）',
+  'rpc-http.cjs': 'D2 RPC 网关与 HTTP 栅栏（来源校验 / 1MiB 上限 / 路由注册）',
+  'rpc-config.cjs': 'D3 配置持久化（config/get · config/set）',
+  'rpc-voice.cjs': 'D4 语音 RPC（voice/status · voice/transcribe）',
+  // —— 拆分前既有的 lib 模块（本批未拆分，登记以维持等值集语义）——
+  'sys.cjs': '既有：环境 / 路径 / probe',
+  'asr.cjs': '既有：ASR refine / sanitize / 出网',
+  'net-proxy.cjs': '既有：出网代理',
+  'platform-service.cjs': '既有：跨平台服务',
+  'integrity.cjs': '既有：sha256',
+  'maintain-lib.cjs': '既有：装配维护',
+  'rpc-schema.cjs': '既有：RPC schema 单一事实源',
+  'client.cjs': '⚠ 构建产物（scripts/build-client.mjs 生成；非手改面，仍须登记）',
+};
+
+/** P2-3 拆分批的**域模块产物**白名单（须被入口 require 接线；见 A230-5）。 */
+const PE_F01_SPLIT_PRODUCTS = ['harness.cjs', 'rpc-http.cjs', 'rpc-config.cjs', 'rpc-voice.cjs'];
+
 
 /** 一条断言：kind ∈ 行为|结构|门禁|见证|索引|目标；fn 返回 {pass, actual} */
 const A = (id, kind, detail, expect, fn) => ({ id, kind, detail, expect, fn });
@@ -320,7 +351,8 @@ const CLAIMS = [
       }),
       A('A146-2', '行为', '1MiB 请求体上限', '超限 → __tooLarge；正常体照常解析', async () => {
         const { EventEmitter } = require('node:events');
-        const lim = read('lib/index.cjs').match(/RPC_BODY_LIMIT\s*=\s*(\d+)\s*\*\s*(\d+)/);
+        // P2-3（2026-10-13 拆分批）：RPC_BODY_LIMIT 随「RPC 网关域」移至 lib/rpc-http.cjs（重锚，非放宽）
+        const lim = read('lib/rpc-http.cjs').match(/RPC_BODY_LIMIT\s*=\s*(\d+)\s*\*\s*(\d+)/);
         const size = lim ? Number(lim[1]) * Number(lim[2]) : 0;
         const req = new EventEmitter();
         req.destroy = () => {};
@@ -412,10 +444,14 @@ const CLAIMS = [
         return assert(disk && whitelist && builder, `磁盘${disk ? '无' : '有'} / 白名单${whitelist ? '无' : '有'} / 构建${builder ? '不产出' : '仍产出'}`);
       }),
       A('A197-3', '目标', '弃 chunk/marker/new Function 装配', 'new Function 装配点 = 0', () => {
+        // P2-3（2026-10-13 拆分批）：装配点判定面不变（仍判 entry `lib/index.cjs`）——
+        //   `new Function('harness', BODY)` 桥接**仍在 entry**（载体三选一未拍板，本批不许动载体）
+        //   ⇒ 本判据读数**不变**（仍 = 1，在册未达）。⚠ 未改浅：仍严格 `=== 0`。
         const n = occurrences(read('lib/index.cjs'), /new Function\(/g);
         return assert(n === 0, `new Function = ${n} 处`);
       }),
       A('A197-4', '结构', '半部通信保留 HTTP（/rpc 兼容别名）', "RPC_PATH = '/dsh-prompt-enhancer/rpc'", () => {
+        // P2-3（2026-10-13）：RPC_PATH 仍定义在 entry `lib/index.cjs`（未随拆分搬走）⇒ 判定面不变。
         const m = read('lib/index.cjs').match(/RPC_PATH\s*=\s*'([^']+)'/);
         return assert(!!m && m[1] === '/dsh-prompt-enhancer/rpc', m ? m[1] : '未找到 RPC_PATH');
       }),
@@ -486,13 +522,24 @@ const CLAIMS = [
     adr: 'ADR-230', anchor: 'feature:pe-f01', at: '2026-09-18', level: '已兑现',
     promise: 'P3 装配契约：lib/index.cjs 按 9 域划界且 100% 覆盖；拆分按域分批；plugin-host.js 无 require 是结构约束（判据未声明入边 = 0 降级，不虚报）',
     assertions: [
-      A('A230-1', '结构', '域边界表覆盖 100%（域表行数和 == 文件物理行数，且域连续无缝）', `域和 == ${lines('lib/index.cjs')} 且首域 1 起 / 末域止于末行`, () => {
-        const n = lines('lib/index.cjs');
-        const sum = PE_F01_DOMAINS.reduce((a, [, s, e]) => a + (e - s + 1), 0);
-        let contig = PE_F01_DOMAINS[0][1] === 1;
-        for (let i = 1; i < PE_F01_DOMAINS.length; i += 1) contig = contig && PE_F01_DOMAINS[i][1] === PE_F01_DOMAINS[i - 1][2] + 1;
-        const tail = PE_F01_DOMAINS[PE_F01_DOMAINS.length - 1][2];
-        return assert(sum === n && contig && tail === n, `域和 ${sum} vs 实测 ${n}｜连续 ${contig}｜末域止 ${tail}`);
+      A('A230-1', '结构', 'lib/ 域清单等值集（多一件即 FAIL）—— 覆盖 100% / 无缝隙 / 无重叠的拆分后形态', 'lib/ 磁盘 .cjs 集合 == 声明清单（逐键等值）且各域文件非空', () => {
+        const declared = Object.keys(PE_F01_LIB_MANIFEST).sort();
+        const disk = list('lib').filter((f) => f.endsWith('.cjs')).sort();
+        const extra = disk.filter((f) => !declared.includes(f));
+        const missing = declared.filter((f) => !disk.includes(f));
+        // 各域文件非空（空文件 = 声明了却没内容的缝隙）
+        const empty = declared.filter((f) => !disk.includes(f) ? false : lines(`lib/${f}`) <= 1);
+        return assert(extra.length === 0 && missing.length === 0 && empty.length === 0,
+          `声明 ${declared.length} 件 / 磁盘 ${disk.length} 件`
+          + (extra.length ? `｜⚠ 未声明（多一件）: ${extra.join(',')}` : '')
+          + (missing.length ? `｜⚠ 声明但缺失: ${missing.join(',')}` : '')
+          + (empty.length ? `｜⚠ 空域文件: ${empty.join(',')}` : '')
+          + '｜全部非空');
+      }),
+      A('A230-5', '结构', '拆分产物无孤儿：每个域模块都必须被入口 require 接线（声明了却没接线 ⇒ 红）', `入口 require 覆盖 ${PE_F01_SPLIT_PRODUCTS.length} 个域模块`, () => {
+        const entry = read('lib/index.cjs');
+        const unwired = PE_F01_SPLIT_PRODUCTS.filter((f) => !new RegExp(`require\\(\\s*'\\./${f.replace('.', '\\.')}'`).test(entry));
+        return assert(unwired.length === 0, unwired.length ? `未接线: ${unwired.join(',')}` : `${PE_F01_SPLIT_PRODUCTS.length}/${PE_F01_SPLIT_PRODUCTS.length} 个域模块均被入口 require`);
       }),
       A('A230-2', '结构', '载体约束事实：plugin-host.js 内无模块系统', 'require( 计数 == 0', () => {
         const n = occurrences(read('plugin-host.js'), /require\(/g);

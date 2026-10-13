@@ -58,14 +58,18 @@ test('RPCG-03 readBody：超 1MiB 请求体拒绝缓冲（返回 __tooLarge）',
 //   / `BODY_TOO_LARGE` / `RPC_BODY_LIMIT`）—— 它们是 RPC 入口安全面的**源码级**锚定，且对象仍在。
 //   ⚠ 不是改浅：收窄的是**对象已消失的那两条**；留在册的四条**强度逐字不变**，且删掉的两条若保留，
 //     其 `src.includes('…cmdSafeValue(dshBin, true)')` 将**永远为红**（假红）。
-test('RPCG-04 源码锚定：RPC 入口带来源栅栏与体积门', () => {
+// P2-3（2026-10-13 拆分批）：源码锚**重锚**到 `lib/rpc-http.cjs`（HTTP 栅栏与体积门随域移动），
+//   **四条断言原样保留、逐字不变**（强度未改），另加 1 条「入口接线」断言。
+test('RPCG-04 源码锚定：RPC 入口带来源栅栏与体积门（P2-3：实现域 = lib/rpc-http.cjs）', () => {
   const fs = require('node:fs');
   const path = require('node:path');
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'index.cjs'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'rpc-http.cjs'), 'utf8');
   assert.ok(src.includes('if (!isTrustedRpcRequest(request)) {'), '缺少来源栅栏调用');
   assert.ok(src.includes("code: 'FORBIDDEN_ORIGIN'"), '缺少 403 契约码');
   assert.ok(src.includes("code: 'BODY_TOO_LARGE'"), '缺少 413 契约码');
   assert.ok(src.includes('const RPC_BODY_LIMIT = 1024 * 1024;'), '缺少体积上限常量');
+  const entry = fs.readFileSync(path.join(__dirname, '..', 'lib', 'index.cjs'), 'utf8');
+  assert.ok(entry.includes("require('./rpc-http.cjs')"), '入口未接线 rpc-http.cjs（拆分后成为孤儿模块）');
 });
 
 test('RPCG-05 registerRpcRoute 端到端冒烟：跨站 403 / 同源放行分发 / 超大体积 413 / 非 POST 405', async () => {

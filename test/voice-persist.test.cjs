@@ -51,13 +51,19 @@ test('VOICE-P05 rpc-schema 单一事实源：lib 副本含 voice/*，死层副�
 });
 
 // ---- 3. lib/index.cjs 注册 ----
-test('VOICE-P06 lib/index.cjs 注册 voice/status·voice/transcribe + config/set merge', () => {
-  const src = readFileSync(join(__dirname, '..', 'lib', 'index.cjs'), 'utf8');
+// P2-3（2026-10-13 拆分批）：源码锚**重锚**（voice 域实现移至 lib/rpc-voice.cjs；
+//   asr require 与 merge 语义分别落在 rpc-voice.cjs / rpc-config.cjs），**断言一条不减**
+//   —— 仍是 4 条（两条 harness.handle + asr require + merge 语义）；另加 1 条入口接线断言。
+test('VOICE-P06 voice/status·voice/transcribe RPC 注册（P2-3：域 = lib/rpc-voice.cjs，入口须接线）', () => {
+  const src = readFileSync(join(__dirname, '..', 'lib', 'rpc-voice.cjs'), 'utf8');
   assert.ok(src.includes("harness.handle('voice/status'"), '未注册 voice/status');
   assert.ok(src.includes("harness.handle('voice/transcribe'"), '未注册 voice/transcribe');
-  assert.ok(src.includes("require('./asr.cjs')"), '未 require asr.cjs');
-  // config/set merge 语义（多写入方）
-  assert.ok(src.includes('顶层键级 merge'), 'config/set 未升级 merge 语义');
+  const cfg = readFileSync(join(__dirname, '..', 'lib', 'rpc-config.cjs'), 'utf8');
+  // config/set merge 语义（多写入方）—— 随域移至 rpc-config.cjs
+  assert.ok(cfg.includes('顶层键级 merge'), 'config/set 未升级 merge 语义');
+  const entry = readFileSync(join(__dirname, '..', 'lib', 'index.cjs'), 'utf8');
+  assert.ok(entry.includes("require('./asr.cjs')"), '入口未 require asr.cjs');
+  assert.ok(entry.includes("require('./rpc-voice.cjs')"), '入口未接线 rpc-voice.cjs（拆分后成为孤儿模块）');
 });
 
 // ---- 4. client 产物注入 ----

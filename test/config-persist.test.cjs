@@ -39,12 +39,17 @@ test('CFG-P05 rpc-schema 单一事实源：lib 副本含 config/*，死层副本
     '死层副本 src/host/rpc-schema.js 复活了——双架构不得回归（P1b）');
 });
 
-test('CFG-P06 lib/index.cjs 注册 config/get·config/set RPC', () => {
-  const src = readFileSync(join(__dirname, '..', 'lib', 'index.cjs'), 'utf8');
-  assert.ok(src.includes("harness.handle('config/get'"), 'lib/index.cjs 未注册 config/get');
-  assert.ok(src.includes("harness.handle('config/set'"), 'lib/index.cjs 未注册 config/set');
+// P2-3（2026-10-13 拆分批）：源码锚**重锚**（实现随拆分移至 lib/rpc-config.cjs），
+//   **断言一条不减**（仍是 4 条：两条 harness.handle + 配置路径常量 + 原子写）；
+//   另加 1 条「入口接线」断言（拆分的完整前提：index.cjs 必须 require 该域模块）。
+test('CFG-P06 config/get·config/set RPC 注册（P2-3：实现域 = lib/rpc-config.cjs，入口须接线）', () => {
+  const src = readFileSync(join(__dirname, '..', 'lib', 'rpc-config.cjs'), 'utf8');
+  assert.ok(src.includes("harness.handle('config/get'"), 'rpc-config.cjs 未注册 config/get');
+  assert.ok(src.includes("harness.handle('config/set'"), 'rpc-config.cjs 未注册 config/set');
   assert.ok(src.includes('dsh-prompt-enhancer.config.json'), '配置文件路径常量缺失');
   assert.ok(src.includes('renameSync'), '原子写（renameSync）缺失');
+  const entry = readFileSync(join(__dirname, '..', 'lib', 'index.cjs'), 'utf8');
+  assert.ok(entry.includes("require('./rpc-config.cjs')"), '入口未接线 rpc-config.cjs（拆分后成为孤儿模块）');
 });
 
 test('CFG-P07 lib/client.cjs 产物含 syncConfigFromHost/hostSync（构建注入防漂移）', () => {
@@ -54,8 +59,9 @@ test('CFG-P07 lib/client.cjs 产物含 syncConfigFromHost/hostSync（构建注�
 });
 
 // ---- v3.2.5（语音模块）：config/set 顶层键级 merge 语义 ----
-test('CFG-P08 lib/index.cjs config/set 含 merge 实现（多写入方防互相清空）', () => {
-  const src = readFileSync(join(__dirname, '..', 'lib', 'index.cjs'), 'utf8');
+// P2-3（2026-10-13）：重锚到 lib/rpc-config.cjs（merge 实现随域移动）；**两条断言原样保留**。
+test('CFG-P08 config/set 含 merge 实现（多写入方防互相清空）· 实现域 lib/rpc-config.cjs', () => {
+  const src = readFileSync(join(__dirname, '..', 'lib', 'rpc-config.cjs'), 'utf8');
   assert.ok(src.includes('顶层键级 merge'), 'config/set 未升级 merge 语义');
   assert.ok(src.includes('for (const k of Object.keys(patch)) merged[k] = patch[k]'), 'merge 合并逻辑缺失');
 });
