@@ -26,6 +26,17 @@ const decodeChunk = (rel) => {
   return JSON.parse('"' + m[1] + '"');
 };
 
+// §7.4 起：official-bridge 依赖 state.js 的单一事实源（vadSilenceMsOf / vadRequiredQuiet / voiceCfgState）。
+// 测试注入**真实的 state.js**（而非桩），以保证「两条入口共用同一值」在测试里也是同一份实现。
+function loadStateForBridge(env) {
+  const src = decodeChunk('src/client/voice/state.js');
+  const factory = new Function(
+    'localStorage', 'host',
+    src + '\n;return { vadSilenceMsOf, vadRequiredQuiet, voiceCfgState };'
+  );
+  return factory(env.localStorage, { call: () => Promise.resolve({ ok: false }) });
+}
+
 // ── 假浏览器环境 ────────────────────────────────────────────────────────────
 // 用假件把「静音达标」推到底：先给高 RMS（有语音），再给低 RMS（静音）达 2s/100ms = 20 帧。
 function makeFakeEnv(opts) {
@@ -139,8 +150,10 @@ function makeFakeEnv(opts) {
 // 求值 chunk：注入假全局，返回桥对象 + 观察句柄
 function loadBridge(env) {
   const src = decodeChunk(CHUNK);
+  const S = loadStateForBridge(env);
   const factory = new Function(
     'window', 'document', 'navigator', 'localStorage', 'setInterval', 'clearInterval', 'MutationObserver', 'MouseEvent',
+    'vadSilenceMsOf', 'vadRequiredQuiet', 'voiceCfgState',
     src + '\n;return officialVoiceBridge;'
   );
   let seq = 0;
@@ -149,7 +162,8 @@ function loadBridge(env) {
     (fn, ms) => { const rec = { fn, ms, cleared: false, id: ++seq }; env.timers.push(rec); return rec.id; },
     (id) => { const rec = env.timers.find((r) => r.id === id); if (rec) rec.cleared = true; },
     class FakeMO { constructor(cb) { this.cb = cb; env.observerInstances.push(this); } observe() {} disconnect() {} },
-    function MouseEvent(type, init) { return { type, init }; }
+    function MouseEvent(type, init) { return { type, init }; },
+    S.vadSilenceMsOf, S.vadRequiredQuiet, S.voiceCfgState
   );
   bridge.setTimer(env.timerSvc);
   return bridge;
@@ -598,8 +612,10 @@ function applyMutation(src, kind) {
 
 function loadMutant(env, kind) {
   const src = applyMutation(decodeChunk(CHUNK), kind);
+  const S = loadStateForBridge(env);
   const factory = new Function(
     'window', 'document', 'navigator', 'localStorage', 'setInterval', 'clearInterval', 'MutationObserver', 'MouseEvent',
+    'vadSilenceMsOf', 'vadRequiredQuiet', 'voiceCfgState',
     src + '\n;return officialVoiceBridge;'
   );
   let seq = 0;
@@ -608,7 +624,8 @@ function loadMutant(env, kind) {
     (fn, ms) => { const rec = { fn, ms, cleared: false, id: ++seq }; env.timers.push(rec); return rec.id; },
     (id) => { const rec = env.timers.find((r) => r.id === id); if (rec) rec.cleared = true; },
     class FakeMO { constructor(cb) { this.cb = cb; env.observerInstances.push(this); } observe() {} disconnect() {} },
-    function MouseEvent(type, init) { return { type, init }; }
+    function MouseEvent(type, init) { return { type, init }; },
+    S.vadSilenceMsOf, S.vadRequiredQuiet, S.voiceCfgState
   );
   bridge.setTimer(env.timerSvc);
   return bridge;
@@ -656,8 +673,10 @@ test('OVB-V04 变异自证·幂等判据有牙：破坏幂等 ⇒ 层数判据�
   // 运行期拼接变异：删掉幂等短路
   const mutated = src.replace(before, 'if (false) return false;');
   const env = makeFakeEnv({});
+  const S4 = loadStateForBridge(env);
   const factory = new Function(
     'window', 'document', 'navigator', 'localStorage', 'setInterval', 'clearInterval', 'MutationObserver', 'MouseEvent',
+    'vadSilenceMsOf', 'vadRequiredQuiet', 'voiceCfgState',
     mutated + '\n;return officialVoiceBridge;'
   );
   let seq = 0;
@@ -666,7 +685,8 @@ test('OVB-V04 变异自证·幂等判据有牙：破坏幂等 ⇒ 层数判据�
     (fn, ms) => { const rec = { fn, ms, cleared: false, id: ++seq }; env.timers.push(rec); return rec.id; },
     () => {},
     class FakeMO { constructor() {} observe() {} disconnect() {} },
-    function MouseEvent() { return {}; }
+    function MouseEvent() { return {}; },
+    S4.vadSilenceMsOf, S4.vadRequiredQuiet, S4.voiceCfgState
   );
   bridge.install();
   const first = env.navigator.mediaDevices.getUserMedia;
