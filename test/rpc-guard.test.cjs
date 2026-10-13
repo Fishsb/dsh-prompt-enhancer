@@ -28,14 +28,14 @@ test('RPCG-01 isTrustedRpcRequest：同源放行 / 跨源跨站拒绝 / 无来�
     'Origin host 与 Host 头不一致即拒绝');
 });
 
-test('RPCG-02 cmdSafeValue：剔除双引号与换行、按需转义 %（SYSTEM 任务注入面）', () => {
-  assert.equal(indexMod.cmdSafeValue('C:\\Program Files\\x\\node.exe'), 'C:\\Program Files\\x\\node.exe', '含空格路径原样');
-  assert.equal(indexMod.cmdSafeValue('a" & calc & "b'), 'a & calc & b', '双引号剔除 → 无法闭合引号注入 & 命令');
-  assert.equal(indexMod.cmdSafeValue('a\r\nb'), 'a b', 'CR/LF 折叠为空格（防换行注入新命令行）');
-  assert.equal(indexMod.cmdSafeValue('100%path%'), '100%path%', '默认不转义 %');
-  assert.equal(indexMod.cmdSafeValue('100%path%', true), '100%%path%%', 'set 行/命令行内 % 转义为 %%');
-  assert.equal(indexMod.cmdSafeValue(null), '', 'null 安全空串');
-});
+// RPCG-02（`cmdSafeValue`：剔除双引号与换行、按需转义 %）**随 P2-1 清死簇退役**（2026-10-13）：
+//   其判据对象 `cmdSafeValue` 的唯一调用点 = 执行器 `.cmd` / schtasks 任务生成（`buildExecutorTaskXml`
+//   / `spawnExecutor` 族），该族已随 P1-c 执行器退役整体消失；P2-1 实测簇外引用只剩注释后，
+//   把函数本体与该内部导出面一并删除 ⇒ **无被判对象**。
+//   ⚠ 这不是改浅：保留原用例则 `indexMod.cmdSafeValue` 为 undefined ⇒ 首行即抛 TypeError，
+//     用例**永远为红**（假红）；改成「无此函数就跳过」则**永远为真**（假绿，同 A201-3 先例）。
+//   ⚠ 组级意图未被削弱：本文件的 RPC 安全面仍由 RPCG-01（来源栅栏）/ RPCG-03（1MiB 体积门）/
+//     RPCG-04（源码锚定，本轮收窄为栅栏+体积门，见下）/ RPCG-05（端到端 403/413/405 冒烟）覆盖。
 
 test('RPCG-03 readBody：超 1MiB 请求体拒绝缓冲（返回 __tooLarge）', async () => {
   const req = new EventEmitter();
@@ -52,7 +52,13 @@ test('RPCG-03 readBody：超 1MiB 请求体拒绝缓冲（返回 __tooLarge）',
   assert.deepEqual(await p2, { method: 'config/get' }, '正常体积照常解析');
 });
 
-test('RPCG-04 源码锚定：handler 入口带来源栅栏与体积门，cmd 生成点全走 cmdSafeValue', () => {
+// RPCG-04 **P2-1 收窄**（2026-10-13）：原名「…cmd 生成点全走 cmdSafeValue」，其末两条断言
+//   （`DSH_DSH_BIN` 裸拼检测 + `cmdSafeValue` 走过检测）的判据对象（.cmd 生成点）已随执行器退役删除
+//   ⇒ 两条一并移除。**保留四条 HTTP 栅栏 / 体积门源码锚定**（`isTrustedRpcRequest` / `FORBIDDEN_ORIGIN`
+//   / `BODY_TOO_LARGE` / `RPC_BODY_LIMIT`）—— 它们是 RPC 入口安全面的**源码级**锚定，且对象仍在。
+//   ⚠ 不是改浅：收窄的是**对象已消失的那两条**；留在册的四条**强度逐字不变**，且删掉的两条若保留，
+//     其 `src.includes('…cmdSafeValue(dshBin, true)')` 将**永远为红**（假红）。
+test('RPCG-04 源码锚定：RPC 入口带来源栅栏与体积门', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'index.cjs'), 'utf8');
@@ -60,8 +66,6 @@ test('RPCG-04 源码锚定：handler 入口带来源栅栏与体积门，cmd 生
   assert.ok(src.includes("code: 'FORBIDDEN_ORIGIN'"), '缺少 403 契约码');
   assert.ok(src.includes("code: 'BODY_TOO_LARGE'"), '缺少 413 契约码');
   assert.ok(src.includes('const RPC_BODY_LIMIT = 1024 * 1024;'), '缺少体积上限常量');
-  assert.equal(src.includes('\'set "DSH_DSH_BIN=\' + String(dshBin)'), false, '仍有裸拼 DSH_DSH_BIN');
-  assert.ok(src.includes('\'set "DSH_DSH_BIN=\' + cmdSafeValue(dshBin, true)'), 'DSH_DSH_BIN 未走 cmdSafeValue');
 });
 
 test('RPCG-05 registerRpcRoute 端到端冒烟：跨站 403 / 同源放行分发 / 超大体积 413 / 非 POST 405', async () => {

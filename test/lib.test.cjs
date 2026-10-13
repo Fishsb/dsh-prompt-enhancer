@@ -1511,16 +1511,15 @@ const libSrc = (rel) => readFileSync(join(__dirname, '..', rel), 'utf8');
 //   其判据对象 = `lib/asr-deploy.cjs` 与该模块的 require 绑定；P1-a 已删除该模块
 //   （voice/deployRuntime·voice/deployStatus 两条 RPC 一并退役）⇒ 本用例**无被判对象**。
 //   ⚠ 依「测试随被删代码一并退役」定论：**整条删除**，不留空壳/不改成恒真。
-//   ⚠ 本组（LIBWIRE）的**其余 5 条**（02–06：stage-install·executor·net-proxy·updater-host）
-//     仍在册并继续覆盖各自模块的 require 接线不变量 —— 组级意图未被削弱。
+//   ⚠ 本组（LIBWIRE）仍留在册的用例继续覆盖各自模块的 require 接线不变量 —— 组级意图未被削弱。
 // LIBWIRE-02 **随 P1-c 退役**：其判据对象（stage-install.cjs / executorEnsure / updater-host.cjs）
 //   已随执行器退役一并删除 ⇒ 无被判对象，整条删除（不留空壳、不改恒真）。
-test('LIBWIRE-03 ensureExternalExecutor 必须同步 undici 至 executor 独立目录', () => {
-  const src = libSrc('lib/index.cjs');
-  assert.match(src, /require\.resolve\('undici'\)/, 'ensureExternalExecutor 必须以 require.resolve 定位 undici 并复制（executor 自包含依赖，防 MODULE_NOT_FOUND）');
-  assert.match(src, /path\.join\(root, 'node_modules', 'undici'\)/, 'undici 必须复制到 executorRoot/node_modules/undici（零传递依赖，单目录即可）');
-});
-
+// LIBWIRE-03（`ensureExternalExecutor` 必须同步 undici 至 executor 独立目录）**随 P2-1 清死簇退役**：
+//   其判据对象是 `lib/index.cjs` 内 `ensureExternalExecutor` 的 undici 复制逻辑（`require.resolve('undici')`
+//   + `path.join(root,'node_modules','undici')`）。P1-c 已退役执行器、P2-1 实测该函数**簇外零引用**
+//   后把函数本体整段删除 ⇒ **无被判对象**。
+//   ⚠ 这不是改浅：保留原用例则两条 `assert.match` 因源码中不再有这两个模式而**永远为红**（假红）；
+//     改成「找不到就算过」则**永远为真**（假绿，同 A201-3/S-5 先例）——两者都比退役更差。
 // LIBWIRE-04 **随 P1-c 退役**：其判据对象（stage-install.cjs / executorEnsure / updater-host.cjs）
 //   已随执行器退役一并删除 ⇒ 无被判对象，整条删除（不留空壳、不改恒真）。
 test('LIBWIRE-05 net-proxy.cjs undici 惰性加载与降级直连在位', () => {

@@ -84,10 +84,17 @@ function liveMethods() {
 //   执行器拉起机制整体退役），域边界**按同一口径重算**：域起点 = 该节分隔线所在行，
 //   末域止于文件末行。D5/D6 由「重启探测 / 执行器保障 / 安装 / 诊断」四域收敛为
 //   两域（config·voice 之后仅剩执行器退役说明段与收尾绑定）。
+// P2-1（2026-10-13 清死簇）：`lib/index.cjs` 656 → **319** 行（判据口径 `lines()`，见 :66；
+//   `wc -l` 读数 = 318，差 1 是尾换行，两者都对、判据用 `lines()`）。删除物 = 原
+//   :64-382「executor lifecycle」整段（executorCall/ensureExternalExecutor/spawnExecutor*/
+//   buildExecutorTaskXml/cmdSafeValue/xmlEscape/currentUserSid/sleep/CRLF/readLatestExecutorVersion/
+//   resolveExecutorLogPath）+ 5 个死 import（http / child_process / platform-service /
+//   maintain-lib / node:crypto）—— 其调用点已随 P1-c 执行器退役全部消失（簇外引用只剩注释）。
+//   域边界**按同一口径重算**（域起点 = 该节分隔线所在行；D5 = 退役说明段，末域 D6 止于末行）。
 //   ⚠ 判据强度不变：仍是 `sum === n && contig && tail === n`，仅事实数字随代码变化同步。
 const PE_F01_DOMAINS = [
-  ['D0', 1, 63], ['D1', 64, 384], ['D2', 385, 521], ['D3', 522, 578], ['D4', 579, 613],
-  ['D5', 614, 616], ['D6', 617, 656],
+  ['D0', 1, 44], ['D1', 45, 79], ['D2', 80, 182], ['D3', 183, 239], ['D4', 240, 274],
+  ['D5', 275, 289], ['D6', 290, 319],
 ];
 
 /** 一条断言：kind ∈ 行为|结构|门禁|见证|索引|目标；fn 返回 {pass, actual} */
@@ -328,18 +335,19 @@ const CLAIMS = [
         return assert(size === 1024 * 1024 && over.__tooLarge === true && normal.method === 'config/get',
           `上限 ${size} B｜超限 ${over.__tooLarge === true ? '__tooLarge' : '未短路'}｜正常体 ${normal.method === 'config/get' ? '解析成功' : '解析失败'}`);
       }),
-      A('A146-3', '行为', 'cmdSafeValue：剥双引号 / 折 CRLF / 按需转义 %', '4/4 正确', () => {
-        const c = indexMod.cmdSafeValue;
-        const cases = [
-          [c('a" & calc & "b'), 'a & calc & b', '剥双引号'],
-          [c('a\r\nb'), 'a b', '折 CRLF'],
-          [c('100%path%'), '100%path%', '默认不转义'],
-          [c('100%path%', true), '100%%path%%', 'set 行转义'],
-        ];
-        const bad = cases.filter(([got, want]) => got !== want);
-        return assert(!bad.length, bad.length ? `错 ${bad.map((x) => x[2]).join(',')}` : '4/4 正确');
-      }),
-      witness('A146-4', 'test/rpc-guard.test.cjs', ['RPCG-01', 'RPCG-02', 'RPCG-03', 'RPCG-04', 'RPCG-05'], '端到端冒烟证据仍在册（403/413/405/栅栏放行）'),
+      // A146-3（`cmdSafeValue`：剥双引号 / 折 CRLF / 按需转义 %）**随 P2-1 清死簇退役**：
+      //   其判据对象 `cmdSafeValue` 的唯一调用点 = 执行器 `.cmd` / schtasks 任务生成
+      //   （`buildExecutorTaskXml`/`spawnExecutor` 族），该族已随 P1-c 执行器退役整体消失；
+      //   P2-1 实测「簇外引用只剩注释」后把函数本体与该导出面一并删除 ⇒ **无被判对象**。
+      //   ⚠ 这不是改浅：若保留原断言，`indexMod.cmdSafeValue` 为 undefined ⇒ `c(...)` 抛错，
+      //     该条**永远为红**（假红）；若改成「无此函数就算过」则**永远为真**（假绿，同
+      //     A201-3/S-5 先例）。两者都比退役更差，故依「判据随被测对象一并退役」整条删除。
+      //   ⚠ 不丢信息：ADR-146 的行为面仍由 A146-1（来源栅栏四态）/A146-2（1MiB 上限）/
+      //     A146-4（端到端冒烟见证）覆盖；被删的只是「.cmd 注入面安全化」这一子面。
+      //   ⚠ 门禁盲区（登记，本轮不修）：`.cmd` / schtasks 任务生成的**注入面**自此**再无任何
+      //     判据在看**（A146-3 已退、其下 RPCG-02/RPCG-04 两条亦退）。当前该面自身也已无代码，
+      //     故不是活缺陷；但**若将来重新引入命令注入点，判据面必须同步补回**。
+      witness('A146-4', 'test/rpc-guard.test.cjs', ['RPCG-01', 'RPCG-03', 'RPCG-04', 'RPCG-05'], '端到端冒烟证据仍在册（403/413/405/栅栏放行）'),
     ],
   },
   {
@@ -369,12 +377,25 @@ const CLAIMS = [
         const hit = fs.readFileSync(GOV_EVENTS, 'utf8').split('\n').filter((l) => l.includes('PE-F07')).length;
         return assert(hit > 0, `日志内 PE-F07 出现 ${hit} 次`);
       }),
-      A('A194-5', '目标', '②P1 host 半部改原生 Node 模块（真 require）', 'plugin-host.js 内 require( 计数 > 0', () => {
-        const n = occurrences(read('plugin-host.js'), /require\(/g);
-        return assert(n > 0, `require( = ${n}（bundle 载体无模块系统）`);
-      }),
+      // A194-5（`'②P1 host 半部改原生 Node 模块（真 require）'`：`plugin-host.js` 内 `require(` > 0）
+      //   **随 P2-0 退役**（2026-10-13）。退役依据（ADR 原文，`/mnt/d/FF/.internal/events.jsonl`）：
+      //   · ADR-197 §① 已把「换装载形态」**改判**为「前置项」——其 pending 依据原文：「ADR-230
+      //     修订该轨迹：改为按 9 域分批（首批 D8），且**换装载形态是拆分收益的前置项**」；
+      //   · ADR-230 decision ③ 二次降级为「**不立项**」：「`plugin-host.js` 内 `require(`=0 是
+      //     **结构性约束不是可优化项**……终局要让它们彻底模块化，前提是先换装载形态」。
+      //   ⇒ 本条的「终局目标」地位已被两次改判取代，**已无消费方**。
+      //   ⚠ **逻辑互斥是本条最硬的退役理由**：它与 A230-2（同文件 `require(` == 0，当前 PASS）
+      //     谓词方向相反，两条并存 ⇒ 判据面永久含一对**不可能同真**的断言，读者无法分辨现行口径。
+      //   ⚠ **不是改浅**：① A230-2 **保留且不得改浅**——它是 ADR-230 自己设的**触发绊线**
+      //     （「若实测到拆分被无 require 硬墙挡住，再回到是否立项换装载形态」），载体一变即红，
+      //     是功能不是缺陷；② 本条承载的轨迹**由 ADR-197 自身断言继续在册**（A197-1 `≤120 行` /
+      //     A197-3 `new Function = 0` 均仍为 ⧗ 在册未达）⇒ **信息不丢**。
+      //   ⚠ **不得**改成恒真 / skip / 区间 / 白名单绕过（同 A201-2·A201-3·S-5·B234-4 的处置惯例）：
+      //     恒真即假绿（A201-3 先例），skip 即把「已作废」谎报成「本地面缺位」。
     ],
-    pending: [{ id: 'A194-5', reason: '载体折叠未换：终局轨迹已由 ADR-197 §① 改判、并由 ADR-230 §四-3 坐实「无 require ⇒ 系统面逻辑必然留在 lib/」' }],
+    // pending 段随 A194-5 退役一并清空：原唯一条目（A194-5 的「载体折叠未换」依据）已随该断言
+    // 退役而失去判据对象；同一条依据**仍完整保存在 ADR-197 的 pending（A197-1 / A197-3）里**，
+    // 故不丢信息（S-3 只要求「每条 TARGET 有依据」，无 TARGET 即无此义务）。
   },
   {
     adr: 'ADR-197', anchor: 'module:prompt-enhancer', at: '2026-09-12', level: '在册未达',
