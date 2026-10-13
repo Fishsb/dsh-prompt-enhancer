@@ -42,6 +42,9 @@ function buildClient() {
   // mic-button / voice-insert 已退役（按钮 UI 交官方；热键与填入逻辑搬入 hotkey.js）。
   const voiceStateChunk = require('../src/client/voice/state.js');
   const voiceRecorderChunk = require('../src/client/voice/recorder.js');
+  // P2-补做（2026-10-13 · CHG-011 / §4.6.2.6 · UD-0014 选 B）：官方录音路径增值桥
+  // （包装标准 API 只观测；静音监测 + 自动增强挂到官方路径 ⇒ 两条入口能力一致）
+  const voiceOfficialBridgeChunk = require('../src/client/voice/official-bridge.js');
   const voiceHotkeyChunk = require('../src/client/voice/hotkey.js');
   const voiceSectionChunk = require('../src/client/voice/voice-section.js');
   // Inject all chunks, looping until no marker remains: component chunks may
@@ -65,6 +68,7 @@ function buildClient() {
     ['// @dsh-client-comp-model-plugins-section-inject\n', modelPluginsSectionChunk],
     ['// @dsh-client-voice-state-inject\n', voiceStateChunk],
     ['// @dsh-client-voice-recorder-inject\n', voiceRecorderChunk],
+    ['// @dsh-client-voice-official-bridge-inject\n', voiceOfficialBridgeChunk],
     ['// @dsh-client-voice-hotkey-inject\n', voiceHotkeyChunk],
     ['// @dsh-client-voice-comp-section-inject\n', voiceSectionChunk],
     ['// @dsh-client-styles-inject\n', stylesChunk],
