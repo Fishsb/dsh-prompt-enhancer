@@ -294,3 +294,38 @@ test('S-6 牙齿已扩到 lib/** ：在非 index.cjs 的文件里引回 RESTART_
     assert.match(r.out, /S-6/, 'FAIL 必须点名 S-6');
   });
 });
+
+// ── S-9 / 排除集回归锁（P2 窄复核处置批 2026-10-13 · F-1）────────────────────────────
+// 病历：`libTargets()` 的**排除集**曾是单点可漂移 —— 多排除一个真实手改模块 ⇒
+//   R5 覆盖 83→65 符号、R6 12→11，而 `gate` 绿、`A230-1` 绿、上一批两条回归锁也绿 ⇒ 全链零红。
+//   上一批的锁只验「**新文件是否入网**」，**恰恰漏了「排除集被偷偷扩大」**这一形态。
+// ⇒ 本条补上：**被排除件必须件件有构建脚本写盘点**（无写盘点 = 偷排除）。
+// ⚠ 同时保留「新文件自动入网」的验证（两形态都锁住）。
+test('S-9 排除集不可漂移：偷排除一个真实手改模块 ⇒ arch-claims 必红并点名 S-9', () => {
+  const victim = 'platform-' + 'service.cjs';   // 运行时拼接（合法模块名）
+  withFixture((dir) => {
+    const p = path.join(dir, 'scripts', 'lib', 'lib-manifest.mjs');
+    const s = fs.readFileSync(p, 'utf8');
+    const before = s;
+    const after = s.replace('  if (derived.size > 0) return [...derived].sort();',
+      "  derived.add('" + victim + "');\n  if (derived.size > 0) return [...derived].sort();");
+    if (after === before) throw new Error('S-9 变异未生效（锚点漂移）');
+    fs.writeFileSync(p, after, 'utf8');
+  }, (dir) => {
+    const r = runArch(dir);
+    assert.equal(r.code, 1, '偷排除手改模块必须 exit 1（原：全链零红）');
+    assert.match(r.out, /S-9/, 'FAIL 必须点名 S-9');
+    assert.match(r.out, new RegExp('偷排除: ' + victim.replace('.', '\\.')), 'FAIL 必须点出被偷排除的文件');
+  });
+});
+
+test('S-9 负控：不动任何东西 ⇒ S-9 PASS 且 R5/R6 覆盖面为基线（83/12）', () => {
+  withFixture(null, (dir) => {
+    const r = runArch(dir);
+    assert.equal(r.code, 0, '基线必须 exit 0');
+    assert.doesNotMatch(r.out, /✗ S-9/, 'S-9 不得为红');
+    const g = runGate(dir);
+    assert.match(g.out, /R5 \| 83 个 lib 导出符号/, 'R5 覆盖面须为基线 83 符号');
+    assert.match(g.out, /R6 \| 12 个系统面文件/, 'R6 覆盖面须为基线 12 文件');
+  });
+});

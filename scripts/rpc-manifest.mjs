@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitRingState, installCrashGuard, installStdoutHygiene } from './lib/ring-state.mjs';
+import * as libManifest from './lib/lib-manifest.mjs';
 
 installCrashGuard('rpc');
 installStdoutHygiene();   // 本环 --json 的 stdout 是机读数据面 ⇒ 契约行不得污染它
@@ -36,21 +37,16 @@ const args = process.argv.slice(2);
  */
 function deriveLiveMethods() {
   const grab = (f) => [...read(f).matchAll(/harness\.handle\(\s*'([^']+)'/g)].map((m) => m[1]);
-  const generated = new Set(['client.cjs']);   // 构建产物：非 host 注册面（`node scripts/build-client.mjs`）
-  const native = fs.readdirSync(path.join(ROOT, 'lib'))
-    .filter((f) => f.endsWith('.cjs') && !generated.has(f))
-    .sort()
-    .flatMap((f) => grab('lib/' + f));
+  // ⚠ P2 窄复核处置批（2026-10-13 · F-1）：排除集/枚举收敛到单一事实源 `scripts/lib/lib-manifest.mjs`
+  //   （此前本文件自持一份 `generated` 字面量 ⇒ 与 dead-code-gate / arch-claims 三处可各自漂移）。
+  const native = libManifest.libHandwrittenTargets().flatMap((f) => grab(f));
   const bundled = grab('plugin-host.js');
   const live = [...new Set([...native, ...bundled])].sort();
   const intersection = native.filter((x) => bundled.includes(x));
   // ⚠ P2 复核处置批（2026-10-13 · F7）：`derivedFrom` 一度是**硬编码字面量**
   //   `['lib/index.cjs','plugin-host.js']`，与拆分后的真实派生面（枚举整个 lib/）不符。
   //   现由**派生代码同源产出**，不留字面量 ⇒ 扫描面再变时读数自动跟随。
-  const nativeFiles = fs.readdirSync(path.join(ROOT, 'lib'))
-    .filter((f) => f.endsWith('.cjs') && !generated.has(f))
-    .sort()
-    .map((f) => 'lib/' + f);
+  const nativeFiles = libManifest.libHandwrittenTargets();
   const derivedFrom = [...nativeFiles, 'plugin-host.js'];
   return { native, bundled, live, intersection, derivedFrom };
 }

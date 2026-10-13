@@ -42,6 +42,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 // 状态出口契约（P5）：本环的 SKIP/冲突/漂移 → 三态映射只在**下面 --check 出口一处**作出。
 import { emitRingState, installCrashGuard } from './lib/ring-state.mjs';
+import * as libManifest from './lib/lib-manifest.mjs';
 import { resolveGovRoot } from './lib/gov-root.mjs';
 
 installCrashGuard('arch-claims');
@@ -86,11 +87,8 @@ const list = (p) => fs.readdirSync(abs(p));
  */
 function liveMethods() {
   const grab = (f) => [...read(f).matchAll(/harness\.handle\(\s*'([^']+)'/g)].map((m) => m[1]);
-  const generated = new Set(['client.cjs']);
-  const native = fs.readdirSync(abs('lib'))
-    .filter((f) => f.endsWith('.cjs') && !generated.has(f))
-    .sort()
-    .flatMap((f) => grab('lib/' + f));
+  // ⚠ P2 窄复核处置批（2026-10-13 · F-1）：与 dead-code-gate / rpc-manifest 共用同一事实源
+  const native = libManifest.libHandwrittenTargets().flatMap((f) => grab(f));
   return { native, bundled: grab('plugin-host.js') };
 }
 
@@ -749,6 +747,23 @@ const PE_ADR_SET = CLAIMS.map((c) => c.adr).sort();
 const DEFECTS = [];
 
 const STRUCTURAL = [
+  // ── S-9（P2 窄复核处置批 2026-10-13 · 处置 F-1）：**排除集不得被偷偷扩大** ──────────────
+  // 病历：`libTargets()` 的排除集（原 `GENERATED_LIB`）是**单点可漂移且无人复核**的 ——
+  //   多排除一个真实手改模块 ⇒ **R5 覆盖面 83→65 符号、R6 12→11**，而 `gate` 绿、`A230-1` 绿、
+  //   上一批的两条回归锁也绿（它们只验「新文件是否入网」，**不验排除集**）⇒ 全链零红。
+  // ⇒ 本条锁死：**排除集 == 构建脚本的真实写盘点**（由 `lib-manifest.mjs` 同源派生），
+  //   且**每个被排除件都必须是构建产物**（有构建脚本写它），**不得**出现"无写盘点的排除项"。
+  A('S-9', '结构', 'lib/ 排除集不可漂移：被排除件必须件件有构建脚本写盘点（无写盘点 = 偷排除 ⇒ 红）', '排除集 ⊆ 构建脚本写盘点集合，且排除集非空', () => {
+    const gen = libManifest.generatedLibFiles();
+    // 独立取证：从构建脚本正文里现取「写 lib/ 下文件」的盘点（不采信 lib-manifest 的返回值）
+    const builderSrc = read('scripts/build-client.mjs');
+    const written = new Set();
+    for (const m of builderSrc.matchAll(/writeFileSync\(\s*join\(root,\s*'lib',\s*'([^']+)'/g)) written.add(m[1]);
+    const unjustified = gen.filter((f) => !written.has(f));
+    return assert(gen.length > 0 && unjustified.length === 0,
+      `排除 ${gen.length} 件 [${gen.join(',')}]｜构建写盘点 [${[...written].join(',')}]`
+      + (unjustified.length ? `｜⚠ 无写盘点的偷排除: ${unjustified.join(',')}` : '｜逐件有据'));
+  }),
   A('S-1', '结构', '分母完整性：判据表覆盖的 ADR 集合 == 声明的 PE 决策集（出处 nav_graph mode=adrs）', '7 条且逐条对应', () => {
     // 声明面（出处：`nav_graph mode=adrs`，锚点匹配 /pe-f\d|prompt-enhancer/，采集 2026-09-19）。
     // 新增 PE 决策必须同步加行，否则 S-1（本处）与 S-2（治理日志交叉核对）都会红。
@@ -798,7 +813,7 @@ const STRUCTURAL = [
   //   （保留守卫与牙齿），任一文件出现该清单即走「逐项自洽」分支。
   A('S-6', '结构', '重启探测名单：已随执行器退役（若在 `lib/**` 任一处复现则必须逐项自洽）', 'RESTART_FILES 缺席（已退役）或逐项在位且合法', () => {
     // 扫描面 = lib/ 下全部 .cjs（含拆分后的域模块；排除构建产物 client.cjs）
-    const libFiles = list('lib').filter((f) => f.endsWith('.cjs') && f !== 'client.cjs');
+    const libFiles = libManifest.libHandwrittenTargets().map((f) => f.replace(/^lib\//, ''));
     const hits = [];
     for (const f of libFiles) {
       const m = read('lib/' + f).match(/const RESTART_FILES = \[([^\]]*)\]/);

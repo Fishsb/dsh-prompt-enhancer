@@ -115,64 +115,107 @@ test('RPCG-05 registerRpcRoute 端到端冒烟：跨站 403 / 同源放行分发
   assert.equal(res.code, 405, '非 POST 仍 405');
 });
 
-// ── RPCG-06（P2 复核处置批 2026-10-13 · T6）：**入口装载链 L3 冒烟** ────────────────────
-// 与 RPCG-05 的**分工**（两者互补，不重复、不互相遮蔽）：
-//   · RPCG-05 = 直接调 `registerRpcRoute(ctx)`（**网关实现**单测）：403 跨站 / 413 超限 /
-//     405 非 POST / 404 未知方法 —— 它验的是"网关这段代码本身对不对"。
-//   · RPCG-06 = 走 **`apply(ctx)`（真实宿主形态）**：`inject(['webServer']) → effect → registerRpcRoute`
-//     —— 它验的是 RPCG-05 **结构性看不见**的那一层：**入口 → 各域模块的 require 图与接线**
-//     （P2-3 把 RPC 分到 lib/rpc-*.cjs 后新增的失效面：某域模块**未接线**、`require` 路径写错、
-//      `handlers` Map 传错实例 ⇒ 域 handler 在实际入口下**取不到**）。
-//   ⚠ 关键：`RPCG-05` 直接注入自建 ctx 调 `registerRpcRoute`，**绕过了入口**；若 `lib/rpc-config.cjs`
-//     没被 `lib/index.cjs` require 或路径写错，RPCG-05 仍会**全绿**，而本用例必红。
-//   ⇒ 这正是 P2-3 报告 §9 U-1 登记的「运行期真实加载」的**机内可做部分**（不重启 DSH）。
-test('RPCG-06 入口装载链 L3 冒烟：apply() 真实注册路由 + 经注册 handler 走通 config/get 往返', async () => {
+// ── RPCG-06（P2 复核处置批 2026-10-13 · T6；窄复核处置批 2026-10-13 · 处置 F-2）────────
+// **入口装载链 L3 冒烟** —— 与 RPCG-05 的**分工**（互补，不重复、不互相遮蔽）：
+//   · RPCG-05 = 直接调 `registerRpcRoute(ctx)`（**网关实现**单测）：403/413/405/404。
+//   · RPCG-06 = 走 **`apply(ctx)`（真实宿主形态）**：验 RPCG-05 **结构性看不见**的那一层 ——
+//     **入口 → 各域模块的 require 图与接线**（P2-3 新增失效面：域模块未接线 / require 路径写错 /
+//     handlers 传错实例 ⇒ 该域 handler 在实际入口下**取不到**）。
+//
+// ⚠ **窄复核 F-2 修复**：原实现**只打 `config/get` 一条** ⇒ 断掉 `rpcVoice.register` 时
+//   `voice/*` 返回 404 而本用例**仍绿**（自述覆盖「域模块未接线」这一类，实际只覆盖 1/4 个域）。
+//   现改为：**从注册面派生**应被接线的原生方法集（同一事实源 `scripts/lib/lib-manifest.mjs`，
+//   与 `rpc-manifest` 同口径枚举 `lib/` 下非生成 `.cjs`），**逐个**断言「经入口注册的 handler
+//   不得返回 `UNKNOWN_METHOD`/404」⇒ **新增第 5 个域时自动纳入**，无需改本用例。
+//
+// ⚠ 隔离（承 F-3）：`lib/rpc-config.cjs` 的 `CONFIG_FILE` **在模块加载期求值**（读 `DSH_HOME`），
+//   故本用例改为**子进程**驱动 —— 子进程启动时即带 `DSH_HOME=<临时目录>`，`require('lib/index.cjs')`
+//   才发生在环境就位**之后**，隔离**真实成立**（父进程内 require 已在文件顶部发生，改 env 无效）。
+//
+// ⚠ 本判据**不覆盖什么**（如实声明）：
+//   · **不判 handler 的业务正确性**（`voice/status` 在无 speech 服务时合法返回 `ok:false`；
+//     若断言 `ok:true` 会造成**环境相关假红**）—— 只判「**是否被接线**」（非 404/UNKNOWN_METHOD）；
+//   · **不判真实语音链路**（需真引擎/官方服务）；
+//   · 不判 `plugin-host.js` 侧（bundled）的 11 条 ── 它们由 RPC-02 / rpc-manifest 的注册面派生锁覆盖；
+//   · 不判各域 handler 在**异常输入**下的行为（那是各域自己的单测面）。
+test('RPCG-06 入口装载链 L3 冒烟：apply() 真实注册 + 派生的全部原生方法均被接线（非 404）', () => {
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
-  // 隔离：DSH_HOME 指向临时目录（config/get 读该目录下的配置文件，绝不触碰真实环境）
+  const { spawnSync } = require('node:child_process');
+  const ROOT = path.join(__dirname, '..');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'rpcg06-'));
-  const prevHome = process.env.DSH_HOME;
-  process.env.DSH_HOME = home;
+
+  // 子进程驱动：DSH_HOME 在**require 之前**就位 ⇒ CONFIG_FILE 求值即指向临时目录（真隔离）
+  const DRIVER = `
+    (async () => {
+      const fs = require('node:fs'); const path = require('node:path');
+      const { EventEmitter } = require('node:events');
+      const ROOT = process.cwd();
+      // 同一事实源派生「应被接线的原生方法集」（与 rpc-manifest 同口径）
+      const lm = await import(path.join(ROOT, 'scripts', 'lib', 'lib-manifest.mjs'));
+      const targets = lm.libHandwrittenTargets();
+      const methods = [];
+      for (const f of targets) {
+        const t = fs.readFileSync(path.join(ROOT, f), 'utf8');
+        for (const m of t.matchAll(/harness\\.handle\\(\\s*'([^']+)'/g)) methods.push(m[1]);
+      }
+      const indexMod = require(path.join(ROOT, 'lib', 'index.cjs'));
+      let captured = null;
+      const webServer = { register: (r) => { captured = r; } };
+      const hostCtx = { effect: (fn) => { if (typeof fn === 'function') fn(); }, get: (k) => (k === 'webServer' ? webServer : undefined) };
+      const fakeCtx = { inject: (d, cb) => { cb(hostCtx); }, effect: () => {}, get: () => undefined };
+      indexMod.apply(fakeCtx);
+      const out = { path: captured && captured.path, hasHandler: !!(captured && typeof captured.handler === 'function'), methods: [...new Set(methods)].sort(), results: {} };
+      if (!out.hasHandler) { console.log(JSON.stringify(out)); return; }
+      const mkRes = () => ({ code: 0, body: '', writeHead(c) { this.code = c; }, end(b) { this.body = String(b); } });
+      const mkReq = (body) => { const r = new EventEmitter(); r.method = 'POST'; r.headers = { host: '127.0.0.1:3080' }; r.destroy = () => {}; process.nextTick(() => { r.emit('data', Buffer.from(body)); r.emit('end'); }); return r; };
+      for (const m of out.methods) {
+        const res = mkRes();
+        await captured.handler(mkReq(JSON.stringify({ method: m })), res);
+        out.results[m] = { code: res.code, body: res.body.slice(0, 200) };
+      }
+      // 反向：未注册方法必须 404（证明走的是真实注册表，不是兜底放行）
+      const nres = mkRes();
+      await captured.handler(mkReq(JSON.stringify({ method: 'no/such-method' })), nres);
+      out.unknownCode = nres.code;
+      console.log(JSON.stringify(out));
+    })().catch((e) => { console.log(JSON.stringify({ error: String(e && e.message || e) })); });
+  `;
+  let out;
   try {
-    let captured = null;
-    const webServer = { register: (route) => { captured = route; } };
-    // 真实宿主形态：cordis 先 inject(['webServer'])，再在回调里用 hostCtx.effect 挂载
-    // 假 ctx 须**贴近真实宿主形状**：cordis 上 `effect` 是 ctx 自身的能力（插件在 apply 里
-    // 也会调 `ctx.effect`），故 fakeCtx 与 hostCtx 都要有；`inject(deps, cb)` 同步回调 inject 面的 ctx。
-    const hostCtx = { effect: (fn) => { if (typeof fn === 'function') fn(); }, get: (k) => (k === 'webServer' ? webServer : undefined) };
-    const fakeCtx = {
-      inject: (deps, cb) => { cb(hostCtx); },
-      effect: () => {},
-      get: () => undefined,
-    };
-
-    // ① apply() 必须真的把路由注册上（且 path = RPC_PATH）
-    indexMod.apply(fakeCtx);
-    assert.ok(captured && typeof captured.handler === 'function', 'apply() 未注册路由（域模块未接线 / require 路径写错？）');
-    assert.equal(captured.path, '/dsh-prompt-enhancer/rpc', '注册 path 必须是 RPC_PATH');
-
-    // ② 经**该注册 handler**走一次真实 RPC 往返（config/get）—— 证明域 handler 在入口下可取
-    const mkRes = () => ({ code: 0, body: '', writeHead(c) { this.code = c; }, end(b) { this.body = String(b); } });
-    const mkReq = (headers, body) => {
-      const r = new EventEmitter();
-      r.method = 'POST'; r.headers = headers; r.destroy = () => {};
-      process.nextTick(() => { r.emit('data', Buffer.from(body)); r.emit('end'); });
-      return r;
-    };
-    const res = mkRes();
-    await captured.handler(mkReq({ host: '127.0.0.1:3080' }, JSON.stringify({ method: 'config/get' })), res);
-    assert.equal(res.code, 200, 'config/get 必须 200（实际 ' + res.code + '：' + res.body + '）');
-    const parsed = JSON.parse(res.body);
-    assert.equal(parsed.ok, true, 'config/get 返回 ok:true');
-    assert.ok('config' in parsed, 'config/get 返回体必须含 config 字段（域 handler 确实被调用）');
-
-    // ③ 反向：**未注册的域方法不得被误报为存在**（证明走的是真实注册表而非兜底）
-    const res404 = mkRes();
-    await captured.handler(mkReq({ host: '127.0.0.1:3080' }, JSON.stringify({ method: 'no/such-method' })), res404);
-    assert.equal(res404.code, 404, '未注册方法必须 404（注册表真实生效）');
+    const r = spawnSync(process.execPath, ['-e', DRIVER], {
+      cwd: ROOT, encoding: 'utf8',
+      env: { ...process.env, DSH_HOME: home },   // ⚠ 真隔离：子进程 require 前 env 已就位
+    });
+    const line = String(r.stdout || '').trim().split('\n').filter(Boolean).pop();
+    assert.ok(line, '子进程无输出（stderr: ' + String(r.stderr || '').slice(0, 300) + '）');
+    out = JSON.parse(line);
   } finally {
-    if (prevHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prevHome;
     fs.rmSync(home, { recursive: true, force: true });
   }
+  assert.ok(!out.error, '子进程抛错: ' + out.error);
+
+  // ① apply() 真的把路由注册上（且 path = RPC_PATH）
+  assert.ok(out.hasHandler, 'apply() 未注册路由（域模块未接线 / require 路径写错？）');
+  assert.equal(out.path, '/dsh-prompt-enhancer/rpc', '注册 path 必须是 RPC_PATH');
+
+  // ② 派生的方法集非空（防「派生面归零 ⇒ 循环体不执行 ⇒ 恒绿」）
+  assert.ok(out.methods.length >= 4, '派生的原生方法集不应为空（实测 ' + out.methods.length + ' 条）');
+
+  // ③ **每个**派生方法都必须被接线（不得 404/UNKNOWN_METHOD）—— 覆盖全部域，自动跟上新增域
+  const unwired = out.methods.filter((m) => {
+    const r = out.results[m];
+    return !r || r.code === 404 || /UNKNOWN_METHOD/.test(r.body || '');
+  });
+  assert.equal(unwired.length, 0,
+    '以下已注册的原生方法在实际入口下取不到（域模块未接线）: ' + unwired.map((m) => m + '→' + ((out.results[m] || {}).code)).join(', '));
+
+  // ④ 反向：未注册方法必须 404（证明走真实注册表，而非兜底放行）
+  assert.equal(out.unknownCode, 404, '未注册方法必须 404（注册表真实生效）');
+
+  // ⑤ 一条**确定性**业务断言（保持原用例意图）：fresh DSH_HOME ⇒ config/get 必 200 且含 config 键
+  const cg = out.results['config/get'];
+  assert.ok(cg && cg.code === 200, 'config/get 必须 200（实际 ' + (cg && cg.code) + '）');
+  assert.ok(/"config"/.test(cg.body || ''), 'config/get 返回体必须含 config 字段（域 handler 确实被调用）');
 });

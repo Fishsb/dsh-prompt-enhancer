@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // 状态出口契约（P5）：本环的机读三态由**本环自己声明**，gate.mjs 只读结构不解释措辞。
 import { emitRingState, installCrashGuard } from './lib/ring-state.mjs';
+import * as libManifest from './lib/lib-manifest.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 installCrashGuard('dead-code');
 const ROOT = path.join(__dirname, '..');
@@ -39,15 +40,11 @@ const git = (a) => { const r = spawnSync('git', ['-c', 'safe.directory=*', '-C',
  *      本枚举把**扫描面**补齐到全 `lib/`，但**不**改变「R5 只判导出面」这一边界；
  *      文件内私有函数的死码**仍需**另立判据（F3 的处置见本批 T2：直接删除已知隐形死码）。
  */
-const GENERATED_LIB = new Set(['client.cjs']);   // 具名声明的构建产物（非手改面）
-function libTargets() {
-  const dir = path.join(ROOT, 'lib');
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir)
-    .filter((f) => f.endsWith('.cjs') && !GENERATED_LIB.has(f))
-    .sort()
-    .map((f) => 'lib/' + f);
-}
+// ⚠ P2 窄复核处置批（2026-10-13 · 处置 F-1）：排除集与枚举**收敛到单一事实源**
+//   `scripts/lib/lib-manifest.mjs`（此前四处副本，见该文件头部病历）。本处不再自持
+//   `GENERATED_LIB` 字面量 —— 排除集由构建脚本写盘点派生，且由 `ARCH-C1` 判据锁死。
+//   `libTargets()` 保留为**本文件的薄包装**（调同一事实源），R5/R6 行为不变。
+const libTargets = () => libManifest.libHandwrittenTargets();
 
 // ---- diff 新增行 ----
 const addedByFile = new Map();
