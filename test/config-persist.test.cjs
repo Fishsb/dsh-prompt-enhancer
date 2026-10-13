@@ -86,3 +86,59 @@ test('CFG-P09 config/set merge 行为：传单键保留其他键（模拟两写�
   assert.equal(merged.voice.asr.engine, 'cloud', 'voice 键未写入');
   rmSync(dir, { recursive: true, force: true });
 });
+
+// ---- 🔴 P0 修复（2026-10-13）：saveConfig 整份提交清空用户 fallback ----
+// 病灶：`saveConfig(patch)` 原实现提交 `{ config: configState.value }`（**整份**），
+//   而 config/set 是**顶层键级 merge** ⇒ 整份里的每个顶层键都覆盖磁盘，含页面内可能为默认值
+//   （`cloneDefaults().fallback = []`）⇒ 用户模型链被清空（实测：删最后一条模型 → 磁盘 fallback=[]）。
+// 修法：**只提交本次 patch**。本组用例断言该契约，并给变异自证（退回整份 ⇒ 必红）。
+function decodeStateChunk() {
+  const raw = readFileSync(join(__dirname, '..', 'src', 'client', 'state.js'), 'utf8');
+  const m = raw.match(/module\.exports = "([\s\S]*?)";?\s*$/);
+  assert.ok(m, 'src/client/state.js 须为单行 chunk 形态');
+  return JSON.parse('"' + m[1] + '"');
+}
+
+test('CFG-P10 P0：saveConfig 只提交本次 patch（不得整份提交 configState.value）', () => {
+  const src = decodeStateChunk();
+  const i = src.indexOf('function saveConfig(patch)');
+  assert.ok(i > 0, '未找到 saveConfig');
+  const seg = src.slice(i, i + 2600);
+  assert.ok(seg.includes('config/set'), 'saveConfig 须经 config/set 落盘');
+  // 正向：必须以 payload 提交
+  assert.ok(/config\/set',\s*\{\s*config:\s*payload\s*\}/.test(seg) || seg.includes('config: payload'),
+    'saveConfig 必须提交 patch（payload），而不是整份 configState.value');
+  // 反向：不得再出现「整份 configState.value 作为 config 提交」
+  assert.ok(!/config\/set',\s*\{\s*config:\s*configState\.value\s*\}/.test(seg),
+    'saveConfig 不得再整份提交 configState.value（会清空用户 fallback）');
+});
+
+test('CFG-P11 P0 行为：页面无模型链时写入 voice 配置 ⇒ 磁盘 fallback 不变（模拟 config/set 顶层键 merge）', () => {
+  // 复现真实链路：磁盘有 fallback；页面侧 configState.value.fallback 为默认 []（未同步/已删空）
+  // 旧实现提交整份 ⇒ fallback 被覆盖为 []；新实现只提交 patch ⇒ 磁盘 fallback 原样保留。
+  const disk = { version: 2, fallback: [{ provider: 'd1api', model: 'deepseek-v4-flash' }], memory: false };
+  const mergeTopLevel = (cur, patch) => { const m = { ...cur }; for (const k of Object.keys(patch)) m[k] = patch[k]; return m; };
+
+  // 旧写法（整份提交，页面 fallback 为空）——必须能复现损伤，否则本判据没牙
+  const pageState = { version: 2, fallback: [], memory: false, params: { timeoutMs: 30000 } };
+  const damaged = mergeTopLevel(disk, pageState);
+  assert.deepEqual(damaged.fallback, [], '前置：整份提交确实会清空 fallback（病灶可复现）');
+
+  // 新写法（只提交 patch）——fallback 必须不变
+  const patch = { params: { timeoutMs: 30000 } };
+  const kept = mergeTopLevel(disk, patch);
+  assert.deepEqual(kept.fallback, [{ provider: 'd1api', model: 'deepseek-v4-flash' }],
+    '只提交 patch ⇒ 磁盘 fallback 必须原样保留');
+  assert.equal(kept.version, 2, 'version 亦不得被清');
+});
+
+test('CFG-P12 P0 变异自证：把 saveConfig 退回「整份提交」⇒ CFG-P10 必红', () => {
+  const src = decodeStateChunk();
+  const anchor = 'config: payload';
+  assert.ok(src.includes(anchor), 'patch 提交锚点须存在');
+  const mutated = src.replace(anchor, 'config: configState.value');
+  const i = mutated.indexOf('function saveConfig(patch)');
+  const seg = mutated.slice(i, i + 2600);
+  const stillPatchOnly = /config\/set',\s*\{\s*config:\s*payload\s*\}/.test(seg);
+  assert.equal(stillPatchOnly, false, '退回整份提交后，CFG-P10 的正向断言必须失败（若仍通过 ⇒ 判据没牙）');
+});

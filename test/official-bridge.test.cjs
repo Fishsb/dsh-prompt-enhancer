@@ -812,6 +812,10 @@ test('OVB-W03 接线：设置页诊断区在位（不静默失效的可见面）
   assert.ok(vs.includes("t('voiceOfficialMissed')"), '缺「未观测到官方采集」文案引用');
   // D-1/D-2（FOLLOWUP §4）：三态可区分 + selfCapture 分支 + 派发点击失败可见
   assert.ok(vs.includes("t('voiceOfficialVerified')"), '缺「已观测到官方采集（N 次）」分支（D-1 修复：0 次须可区分）');
+  // F-11 修复（2026-10-13）：键内含占位符 ⇒ 渲染处**代入** `{n}`，不得再追加第二个计数
+  //   （旧实现：键内 %d 未替换 + 渲染处又追加括号计数 ⇒ 用户可见 `…（共 %d 次）（1）`）
+  assert.ok(vs.includes(".replace('{n}', String(snap.sessionsStarted))"),
+    'F-11 修复：须以 .replace(\'{n}\', …) 代入计数（不得再追加第二个计数）');
   assert.ok(vs.includes("t('voiceOfficialStartMissed')"), '缺「未能派发点击官方开始按钮」分支（不得静默失败）');
   assert.ok(vs.includes("t('voiceOfficialSelfCapture')"), '缺 selfCapture 分支（D-2 修复）');
   assert.ok(vs.includes('snap.sessionsStarted > 0'), 'D-1 修复须以官方会话计数分支（严格可判别）');
@@ -827,6 +831,35 @@ test('OVB-W03 接线：设置页诊断区在位（不静默失效的可见面）
   const ek = (en.match(/voiceOfficial[A-Za-z]+:/g) || []).sort();
   assert.deepEqual(zk, ek, 'voiceOfficial* ZH/EN 键集必须相等（S-7）');
   assert.equal(zk.length, 11, 'voiceOfficial* 键数锁定为 11（严格 ===：7 原有 + 4 本批新增）');
+});
+
+// F-11（2026-10-13）：用户可见面不得出现未替换的占位符，且计数只留一个
+test('OVB-W04 F-11：诊断区成功态原文不含未替换占位符，且计数只出现一次', () => {
+  const vs = decodeChunk('src/client/voice/voice-section.js');
+  const i18n = decodeChunk('src/client/i18n.js');
+  // 键：不得再含 printf 风格 %d（本项目约定为 {n}）
+  assert.ok(!/voiceOfficialVerified: '[^']*%d/.test(i18n), 'F-11：键内不得再用 %d（约定 {n}）');
+  assert.ok(/voiceOfficialVerified: '[^']*\{n\}[^']*'/.test(i18n), 'F-11：键内须含 {n} 占位符');
+  assert.ok(/voiceOfficialVerified: 'Official capture observed \(\{n\}[^']*'/.test(i18n), 'F-11：EN 键同样须含 {n}');
+  // 渲染处：只代入，不再追加计数（不得同时出现 replace 与第二个拼接）
+  const seg = vs.slice(vs.indexOf('voiceOfficialVerified'), vs.indexOf('voiceOfficialVerified') + 220);
+  assert.ok(seg.includes(".replace('{n}'"), 'F-11：渲染处须代入 {n}');
+  assert.ok(!/voiceOfficialVerified'\)\s*\+\s*'（'/.test(vs),
+    'F-11：渲染处不得再追加第二个计数（旧实现 t(...) + \'（\' + n + \'）\'）');
+  // 端到端字面值：代入后不得残留 {n} / %d
+  const t = (k) => { const m = new RegExp("  " + k + ": '([^']*)'"); const r = i18n.match(m); return r ? r[1] : ''; };
+  const zhText = t('voiceOfficialVerified').replace('{n}', '1');
+  assert.equal(/[{]n[}]|%d/.test(zhText), false, 'F-11：代入后不得残留占位符 —— ' + zhText);
+  assert.equal(zhText, '已观测到官方采集（共 1 次）', 'F-11：成功态原文须恰为一次计数');
+});
+
+test('OVB-W05 F-11 变异自证：把键退回 %d（且渲染处仍追加）⇒ OVB-W04 必红', () => {
+  const i18n = decodeChunk('src/client/i18n.js');
+  const anchor = "voiceOfficialVerified: '已观测到官方采集（共 {n} 次）'";
+  assert.ok(i18n.includes(anchor), 'F-11 修复锚点须存在');
+  const mutated = i18n.replace(anchor, "voiceOfficialVerified: '已观测到官方采集（共 %d 次）'");
+  assert.ok(!/voiceOfficialVerified: '[^']*%d/.test(i18n), '前置：修复后不得含 %d');
+  assert.ok(/voiceOfficialVerified: '[^']*%d/.test(mutated), '退回 %d 后必须能被 OVB-W04 检出（若检出不了 ⇒ 判据没牙）');
 });
 
 test('OVB-W04 边界：src/host 与 plugin-host.js 零改动（本批不许碰载体）', () => {
