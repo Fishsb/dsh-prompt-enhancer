@@ -516,6 +516,41 @@ const CLAIMS = [
         const m = read('lib/index.cjs').match(/RPC_PATH\s*=\s*'([^']+)'/);
         return assert(!!m && m[1] === '/dsh-prompt-enhancer/rpc', m ? m[1] : '未找到 RPC_PATH');
       }),
+      // ── A197-5 **净增**（P3-2b 2026-10-14 · `extractPure` 求值路径终结）──────────────────────
+      // **为什么必须净增（不是重复 A197-3）**：`A197-3` 的口径是 **`ASSEMBLY_EVAL`
+      //   = `/new Function\(\s*'harness'/g`（装配签名形态）**，它**故意**只认装配点 ⇒ 对
+      //   `lib/sys.cjs` 那处 `new Function(pureText + …)`（PURE 片段提取）**完全看不见**。
+      //   实证（P3-2b 报告 §③）：改前 `lib/sys.cjs` 的 `ASSEMBLY_EVAL` 命中 = **0**，
+      //   而「任意 `new Function(`」命中 = **1** ⇒ 旧判据下该求值路径**逃逸机检**，
+      //   正是「让失败不可观测」的形态（P2-1 `lib/**` 死码盲区同族）。
+      //   故本条把粒度收紧到「**任意 `new Function`**」，管住 `A197-3` 明确声明**不覆盖**的那一面。
+      // **语义**：`lib/` 下全部**手改** `.cjs` 中，`new Function` 求值点**恰好一处**，且该处
+      //   必须是**装配入口** `lib/index.cjs` 的装配签名 ⇒ 等价于「**lib 侧对 PURE 片段的
+      //   求值依赖归零，只留载体桥接**」。
+      //   ⚠ 口径与 `A197-3` 严格同源：`libManifest.libHandwrittenTargets()`（同一事实源）+
+      //     `codeOnly()`（剥注释，避免注释提及被计数 —— `A197-3` 的病历即此）。
+      //   ⚠ **本判据不覆盖什么**（如实声明）：① 不判 `.cjs` 之外的形态（如 ESM `.mjs` 内求值）；
+      //     ② 不判 `eval(` / `vm.runIn*` 等其它动态求值族；③ 不判 `plugin-host.js` 内部
+      //     （无模块系统，由 `A230-2` 的 `require(` == 0 管）；④ 不判求值点的**输入安全性**
+      //     （`BODY` 来源/是否被污染）—— 那是另一条轨迹，本条只判「求值点在哪、有几处」。
+      A('A197-5', '结构', 'lib/ 侧动态求值面收敛：手改 .cjs 内 `new Function` 恰好一处且仅在装配入口（PURE 求值路径已终结）', '任意 `new Function(` 总计 == 1 处，且全部位于 lib/index.cjs（装配签名）', () => {
+        const ENTRY = 'lib/index.cjs';
+        const targets = libManifest.libHandwrittenTargets();     // 同一事实源（与 A197-3 收敛）
+        const ANY = /new Function\s*\(/g;
+        const hits = [];
+        for (const rel of targets) {
+          const n = occurrences(codeOnly(read(rel)), ANY);
+          if (n > 0) hits.push({ file: rel, n });
+        }
+        const total = hits.reduce((a, h) => a + h.n, 0);
+        const elsewhere = hits.filter((h) => h.file !== ENTRY);
+        // 与 A197-3 交叉：入口那一处必须仍是**装配签名**（防「入口换成非装配求值」蒙混）
+        const entryAssembly = occurrences(codeOnly(read(ENTRY)), ASSEMBLY_EVAL);
+        const detail = `任意 new Function ${total} 处｜分布 [${hits.map((h) => h.file + '×' + h.n).join(', ') || '无'}]`
+          + `｜入口装配签名 ${entryAssembly} 处｜扫描面 ${targets.length} 件手改 .cjs`;
+        return assert(total === 1 && elsewhere.length === 0 && entryAssembly === 1,
+          detail + (elsewhere.length ? `｜⚠ 入口外出现 new Function: ${elsewhere.map((h) => h.file).join(',')}` : ''));
+      }),
     ],
     pending: [
       { id: 'A197-1', reason: 'ADR-230 修订该轨迹：改为按 9 域分批（首批 D8），且换装载形态是拆分收益的前置项' },

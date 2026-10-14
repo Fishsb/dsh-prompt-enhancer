@@ -21,7 +21,7 @@
 //    探测执行在 lib/index.cjs（probeEnv），本侧合并 ENV_PROBE_KEYS 等级元数据（block/warn/info）。（P3-2a 2026-10-14：ENV_PROBE_KEYS 已退役，此行仅为历史记录）
 // ③ PURE 新增：ENV_PROBE_KEYS / buildInstallArgs / buildRestartChain / mergeEnvPath
 //   ⚠ P3-2a（2026-10-14）：ENV_PROBE_KEYS / buildInstallArgs / buildRestartChain 已退役（零生产消费者）；仅 mergeEnvPath 保留（P3-2b 迁移）。
-//    （lib/index.cjs 切片 PURE 区段复用 mergeEnvPath 做用户 PATH 注入）。
+//    ⚠ P3-2b（2026-10-14）：mergeEnvPath 已改为 lib/sys.cjs 原生实现，本区段不再被切片取用；全 lib/ 对 PURE 片段的 new Function 依赖归零（仅保留装配入口一处）。
 // ④ 单测 U42-U45（命令构造/重启链/PATH 合并/探测计划）。
 // v2.4.8（发布断链修复）：v2.4.5 曾无记录把 sidebar.footer.action 占位 id 从
 // cordis-panel-enh 回退为 cordis-panel（与基座同槽位同 id 冲突，update/重挂时
@@ -2383,23 +2383,8 @@ function estimateLiteModeSeconds(ttftMs, tokensPerSecond, inputChars) {
 
 // ================= v2.5.0 一键更新并重启 · 纯函数族 =================
 // 方案「一键更新并重启方案.md」：命令构造与探测计划保持 PURE（可单测、单一事实源）。
-// lib/index.cjs 会切片本区段复用 mergeEnvPath（注入用户 PATH 用），勿在此引入
+// ⚠ P3-2b（2026-10-14）：mergeEnvPath 已改为 lib/sys.cjs 原生实现（单一事实源），本区段已不被切片取用；勿在此重建同名副本（会形成双实现漂移）。
 // ctx/harness/module 状态。
-
-// PATH 合并（系统 PATH + 用户 PATH，大小写不敏感去重，保留顺序）；空段忽略
-function mergeEnvPath(sysPath, userPath) {
-  const seen = new Set();
-  const out = [];
-  for (const seg of String(sysPath + ';' + userPath).split(';')) {
-    if (seg === '') continue;
-    const key = seg.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(seg);
-  }
-  return out.join(';');
-}
-
 
 // ================= v3.0 模式重构 · 会话轮次窗口与关联判定 =================
 

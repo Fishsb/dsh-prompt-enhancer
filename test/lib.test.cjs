@@ -34,8 +34,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     TEMPLATE_CUSTOM_MAX, TEMPLATE_TEXT_MAX, TEMPLATE_NAME_MAX,
     MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE, RETRIEVE_TABLE,
     MODE_BUDGET_OPTIONS, MODE_BUDGET_DEFAULT, BUDGET_RETRIEVE_TABLE, resolveRetrieveBudget,
-    STAGE_SEQUENCE, STAGE_LABELS,
-    mergeEnvPath };
+    STAGE_SEQUENCE, STAGE_LABELS };
 `);
 const {
   wrapUserText,
@@ -100,7 +99,6 @@ const {
   resolveRetrieveBudget,
   STAGE_SEQUENCE,
   STAGE_LABELS,
-  mergeEnvPath,
   stripScenarioEcho } = pureFn();
 
 test('wrapUserText 包装用户输入', () => {
@@ -1154,12 +1152,19 @@ test('U57 resolveTemplateSystem 模板选中解析（default/increment/custom/le
 
 
 // v2.5.0：PATH 合并契约（系统 PATH + 用户 PATH）。
-test('U44 mergeEnvPath PATH 合并去重（v2.5.0）', () => {
-  assert.equal(mergeEnvPath('C:\\A;C:\\B', 'C:\\B;D:\\C'), 'C:\\A;C:\\B;D:\\C', '大小写不敏感去重且保留顺序');
-  assert.equal(mergeEnvPath('C:\\A', 'C:\\a;D:\\x'), 'C:\\A;D:\\x', '重复段忽略（含大小写差异）');
-  assert.equal(mergeEnvPath('C:\\A', ''), 'C:\\A', '空用户 PATH 原样返回');
-  assert.equal(mergeEnvPath('', 'D:\\x'), 'D:\\x', '空系统 PATH 仅用户 PATH');
-  assert.equal(mergeEnvPath('C:\\A;;D:\\B', ''), 'C:\\A;D:\\B', '空段忽略');
+// P3-2b（2026-10-14）：改打 **lib/sys.cjs 原生实现**（原经 extractPure 从 PURE 区切片求值）。
+//   门槛**不降**：原 5 条语义断言逐条保留；另新增 2 条锁「原生导出面 + 无 new Function 依赖」。
+test('U44 mergeEnvPath PATH 合并去重（v2.5.0 · P3-2b 改打原生实现）', () => {
+  const native = require('../lib/sys.cjs').mergeEnvPath;
+  assert.equal(typeof native, 'function', '原生 mergeEnvPath 已导出（承 PURE 版之位）');
+  assert.equal(native('C:\\A;C:\\B', 'C:\\B;D:\\C'), 'C:\\A;C:\\B;D:\\C', '大小写不敏感去重且保留顺序');
+  assert.equal(native('C:\\A', 'C:\\a;D:\\x'), 'C:\\A;D:\\x', '重复段忽略（含大小写差异）');
+  assert.equal(native('C:\\A', ''), 'C:\\A', '空用户 PATH 原样返回');
+  assert.equal(native('', 'D:\\x'), 'D:\\x', '空系统 PATH 仅用户 PATH');
+  assert.equal(native('C:\\A;;D:\\B', ''), 'C:\\A;D:\\B', '空段忽略');
+  // 单一事实源：PURE 区不得再持有同名副本（双实现漂移即红）
+  const pureSrc = readFileSync(join(__dirname, '..', 'src', 'host', 'pure.js'), 'utf8');
+  assert.ok(!pureSrc.includes('function mergeEnvPath'), 'PURE 区不得重建 mergeEnvPath 副本');
 });
 
 // v3.0（模式重构）：会话轮次窗口切分契约——轮 = user 消息锚点及其后的 assistant 回复。

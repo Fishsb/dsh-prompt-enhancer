@@ -55,30 +55,27 @@ test('SYS-04 isEnvcheckBlocked 识别 block 失败项', () => {
   assert.equal(sys.isEnvcheckBlocked(warnOnly), false, '仅 warn 失败应 false');
 });
 
-// P3-2a（2026-10-14）：本用例的覆盖对象已随退役面收窄——
-//   原断言 `buildTarballUrl` / `buildLocalInstallArgs` / `buildRestartPlan` / `buildInstallArgs`
-//   四个符号「被 extractPure 暴露」，而该四符号已因**零生产消费者**整体退役
-//   （唯一消费者 update/* RPC 随 P1-c 执行器退役）⇒ 断言对象消失，**不是**把判据改浅。
-//   现**改写到保留面**并**加牙**：① 仍锁 extractPure 的切片+求值可用；
-//   ② 仍锁唯一保留符号 `mergeEnvPath` 被暴露；③ **新增**「返回面恰好等于 { mergeEnvPath }」——
-//   门槛由「这 4 个必须在」变为「**除 mergeEnvPath 外一个都不许在**」（多一个即红），
-//   方向与既有 `A197-3`「恰好一处」同族：**失败从"记账"变为"阻断"**。
-test('SYS-05 extractPure 返回面（P3-2a 收窄：仅 mergeEnvPath）', () => {
-  const body = `
-// ==PURE-BEGIN==
-function mergeEnvPath(a, b) { return a + ';' + b; }
-// ==PURE-END==
-`;
-  const pure = sys.extractPure(body);
-  assert.equal(typeof pure.mergeEnvPath, 'function', '唯一保留符号 mergeEnvPath 被暴露');
-  assert.equal(pure.mergeEnvPath('C:\\A', 'D:\\B'), 'C:\\A;D:\\B', '切片求值后行为可用');
-  // 返回面「恰好」= { mergeEnvPath }：多一个符号即红（防退役面被悄悄加回 / 防返回面漂移）
-  assert.deepEqual(Object.keys(pure).sort(), ['mergeEnvPath'],
-    'extractPure 返回面恰好 = ["mergeEnvPath"]（P3-2a 收窄后；多一个即红）');
-  // 负控：4 个已退役符号**不得**再出现在返回面上
-  for (const gone of ['buildTarballUrl', 'buildLocalInstallArgs', 'buildRestartPlan', 'buildInstallArgs']) {
-    assert.equal(pure[gone], undefined, `${gone} 已退役，不得出现在 extractPure 返回面`);
-  }
+// P3-2b（2026-10-14）：`extractPure` **整体退役** ⇒ 本用例的判据对象**整体消失**。
+//   处置（依「判据退役的唯一合法理由是判据对象整体消失」）：把「求值路径**已终结**」这一
+//   新事实**固化**为断言，并把原先只由 extractPure 覆盖的 `mergeEnvPath` **行为面**迁到
+//   原生实现上（下方 U44 已打原生实现；此处只锁「已终结」+「原生导出在位」）。
+//   ⚠ 这不是改浅：原断言管「切片求值能取出 mergeEnvPath」，现断言管
+//     「**该求值路径整体不存在** + 原生实现承其位」——方向由「可用」转为「**必须不存在**」。
+test('SYS-05 extractPure 求值路径已终结（P3-2b · 判据对象整体消失）', () => {
+  // ① extractPure 不再存在于 sys 导出面（防复活）
+  assert.equal(sys.extractPure, undefined, 'extractPure 已退役，不得再出现在 lib/sys.cjs 导出面');
+  // ② 原生 mergeEnvPath 承其位（导出面在位 + 行为可用）
+  assert.equal(typeof sys.mergeEnvPath, 'function', '原生 mergeEnvPath 已纳入导出面');
+  assert.equal(sys.mergeEnvPath('C:\\A', 'D:\\B'), 'C:\\A;D:\\B', '原生实现行为可用');
+  // ③ lib/sys.cjs 源码内不再出现 new Function（该求值路径终结的**机械**判据）
+  const REPO = path.join(__dirname, '..');
+  const src = fs.readFileSync(path.join(REPO, 'lib', 'sys.cjs'), 'utf8');
+  assert.equal((src.match(/new Function\(/g) || []).length, 0,
+    'lib/sys.cjs 内 new Function 计数必须为 0（P3-2b 后）');
+  // ④ PURE 区侧副本不得复活（单一事实源纪律；原 PURE 版本已随本批移除）
+  const pureSrc = fs.readFileSync(path.join(REPO, 'src', 'host', 'pure.js'), 'utf8');
+  assert.ok(!pureSrc.includes('function mergeEnvPath'),
+    'PURE 区不得重建 mergeEnvPath 副本（会形成双实现漂移）');
 });
 
 /* ================= 批次C（P1-4）：probeEnv 异步化 + net 熔断 ================= */
