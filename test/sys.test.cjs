@@ -61,12 +61,14 @@ test('SYS-04 isEnvcheckBlocked 识别 block 失败项', () => {
 //   原生实现上（下方 U44 已打原生实现；此处只锁「已终结」+「原生导出在位」）。
 //   ⚠ 这不是改浅：原断言管「切片求值能取出 mergeEnvPath」，现断言管
 //     「**该求值路径整体不存在** + 原生实现承其位」——方向由「可用」转为「**必须不存在**」。
-test('SYS-05 extractPure 求值路径已终结（P3-2b · 判据对象整体消失）', () => {
+test('SYS-05 求值路径已终结 + env 合并肢体退役（P3-2b/P3-2c · 判据对象整体消失）', () => {
   // ① extractPure 不再存在于 sys 导出面（防复活）
   assert.equal(sys.extractPure, undefined, 'extractPure 已退役，不得再出现在 lib/sys.cjs 导出面');
-  // ② 原生 mergeEnvPath 承其位（导出面在位 + 行为可用）
-  assert.equal(typeof sys.mergeEnvPath, 'function', '原生 mergeEnvPath 已纳入导出面');
-  assert.equal(sys.mergeEnvPath('C:\\A', 'D:\\B'), 'C:\\A;D:\\B', '原生实现行为可用');
+  // ② P3-2c（2026-10-14）：`mergeEnvPath` / `mergedEnv`（env 合并肢体）已随本批退役。
+  //    其唯一上游是零调用者的 `harness.probeEnv` facade ⇒ 判据（生产面零消费者）成立。
+  //    ⚠ 原断言「原生实现承其位」的对象**已不存在** ⇒ 改为**反向守卫**（不得复活），门槛不降。
+  assert.equal(sys.mergeEnvPath, undefined, 'mergeEnvPath 已随 env 合并肢体退役（P3-2c）');
+  assert.equal(sys.mergedEnv, undefined, 'mergedEnv 已随 env 合并肢体退役（P3-2c）');
   // ③ lib/sys.cjs 源码内不再出现 new Function（该求值路径终结的**机械**判据）
   const REPO = path.join(__dirname, '..');
   const src = fs.readFileSync(path.join(REPO, 'lib', 'sys.cjs'), 'utf8');

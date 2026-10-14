@@ -1152,16 +1152,15 @@ test('U57 resolveTemplateSystem 模板选中解析（default/increment/custom/le
 
 
 // v2.5.0：PATH 合并契约（系统 PATH + 用户 PATH）。
-// P3-2b（2026-10-14）：改打 **lib/sys.cjs 原生实现**（原经 extractPure 从 PURE 区切片求值）。
-//   门槛**不降**：原 5 条语义断言逐条保留；另新增 2 条锁「原生导出面 + 无 new Function 依赖」。
-test('U44 mergeEnvPath PATH 合并去重（v2.5.0 · P3-2b 改打原生实现）', () => {
-  const native = require('../lib/sys.cjs').mergeEnvPath;
-  assert.equal(typeof native, 'function', '原生 mergeEnvPath 已导出（承 PURE 版之位）');
-  assert.equal(native('C:\\A;C:\\B', 'C:\\B;D:\\C'), 'C:\\A;C:\\B;D:\\C', '大小写不敏感去重且保留顺序');
-  assert.equal(native('C:\\A', 'C:\\a;D:\\x'), 'C:\\A;D:\\x', '重复段忽略（含大小写差异）');
-  assert.equal(native('C:\\A', ''), 'C:\\A', '空用户 PATH 原样返回');
-  assert.equal(native('', 'D:\\x'), 'D:\\x', '空系统 PATH 仅用户 PATH');
-  assert.equal(native('C:\\A;;D:\\B', ''), 'C:\\A;D:\\B', '空段忽略');
+// P3-2c（2026-10-14）退役：原 U44「mergeEnvPath PATH 合并去重（v2.5.0）」。
+//   被测对象 `mergeEnvPath` 已随 probeEnv 链退役（其唯一消费者 `mergedEnv` 消失，
+//   而 `mergedEnv` 的唯一消费者又是零调用者的 `harness.probeEnv` facade ⇒ 生产面零消费者）。
+//   ⚠ 非改浅：对象消失是唯一合法退役理由（`CHG-025`）。原 5 条语义断言随之退役 ——
+//   本批**不**保留「找不到就算过」的软断言；改为**反向守卫**：该符号**必须不在**导出面。
+test('U44 mergeEnvPath 已随 probeEnv 链退役（P3-2c · 判据对象整体消失 · 反向守卫）', () => {
+  const sys = require('../lib/sys.cjs');
+  assert.equal(sys.mergeEnvPath, undefined, 'mergeEnvPath 必须已从 lib/sys.cjs 导出面退役');
+  assert.equal(sys.mergedEnv, undefined, 'mergedEnv 必须已退役（它是 mergeEnvPath 的唯一消费者）');
   // 单一事实源：PURE 区不得再持有同名副本（双实现漂移即红）
   const pureSrc = readFileSync(join(__dirname, '..', 'src', 'host', 'pure.js'), 'utf8');
   assert.ok(!pureSrc.includes('function mergeEnvPath'), 'PURE 区不得重建 mergeEnvPath 副本');
