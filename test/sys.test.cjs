@@ -41,18 +41,13 @@ test('SYS-03 isLocalTarballInstallArgs 只允许 staging 内 tarball', () => {
   assert.equal(badArgs, false, '非 add 命令应拒绝');
 });
 
-test('SYS-04 isEnvcheckBlocked 识别 block 失败项', () => {
-  const blocked = [
-    { key: 'service', level: 'block', ok: false },
-    { key: 'net', level: 'warn', ok: false },
-  ];
-  assert.equal(sys.isEnvcheckBlocked(blocked), true, '存在 block 失败应 true');
-
-  const warnOnly = [
-    { key: 'service', level: 'block', ok: true },
-    { key: 'net', level: 'warn', ok: false },
-  ];
-  assert.equal(sys.isEnvcheckBlocked(warnOnly), false, '仅 warn 失败应 false');
+// P3-2d（2026-10-14）：`isEnvcheckBlocked` 已随探针肢体收口退役（生产面零消费者；
+//   其承载的 envcheck RPC 面早随 P1-c 消失）⇒ 判据对象**整体消失**。
+//   ⚠ 非改浅：对象消失是唯一合法退役理由（`CHG-025`）。原 2 条语义断言随之退役 ——
+//   本批**不**保留「找不到就算过」的软断言；改为**反向守卫**：该符号**必须不在**导出面。
+test('SYS-04 isEnvcheckBlocked 已退役（P3-2d · 判据对象整体消失 · 反向守卫）', () => {
+  assert.equal(sys.isEnvcheckBlocked, undefined,
+    'isEnvcheckBlocked 必须已从 lib/sys.cjs 导出面退役（生产面零消费者）');
 });
 
 // P3-2b（2026-10-14）：`extractPure` **整体退役** ⇒ 本用例的判据对象**整体消失**。
@@ -210,32 +205,16 @@ function withPortHolderStub(body) {
   };
 }
 
-test('SYS-06 runProbe 同步契约回归：白名单拒绝/真实快速探测，且不返回 Promise', () => {
-  const r1 = sys.runProbe('not-allowed-cmd', [], undefined);
-  assert.equal(r1.ok, false);
-  assert.equal(r1.code, 'BAD_PROBE_CMD');
-  assert.ok(!(r1 instanceof Promise), 'runProbe 必须保持同步形态（重启阶梯链 svcStateRaw 等依赖）');
-
-  const r2 = sys.runProbe('sc', ['query\x01bad'], undefined);
-  assert.equal(r2.code, 'BAD_PROBE_ARG');
-
-  if (process.platform === 'win32') {
-    const r3 = sys.runProbe('where', ['sc.exe'], undefined);
-    assert.equal(r3.ok, true, 'where sc.exe 应成功');
-  } else {
-    // POSIX：where 是 Windows 专有解析器——真实探测的期望语义就是「不可达」（ENOENT，而非抛异常）；
-    // 正向成功路径改用自建工具（PATH 前置）走同一条真实 spawnSync 通道，不依赖发行版自带工具。
-    const rw = sys.runProbe('where', ['sc.exe'], undefined);
-    assert.equal(rw.ok, false, 'Linux/macOS 上 where 不可达（Windows 专有解析器）');
-    assert.equal(rw.code, 'ENOENT', '不可达须映射为 ENOENT 而不是抛异常');
-    const stub = makeProbeStub('where', 'echo /stub/sc.exe\n');
-    try {
-      const r3 = sys.runProbe('where', ['sc.exe'], stub.env);
-      assert.equal(r3.ok, true, 'POSIX 真实 spawnSync 成功路径（自建工具经 PATH 解析）');
-      assert.equal(r3.code, 0, '成功须映射为退出码 0');
-      assert.equal(String(r3.stdout).trim(), '/stub/sc.exe', '真实 stdout 须原样回传');
-    } finally { stub.cleanup(); }
-  }
+// P3-2d（2026-10-14）：同步 `runProbe` 已随探针肢体收口退役（生产面零消费者）⇒ 判据对象**整体消失**。
+//   ⚠ 非改浅：对象消失是唯一合法退役理由（`CHG-025`）。本批**不**保留「找不到就算过」的软断言；
+//     改为**反向守卫**：该符号**必须不在**导出面。
+//   ⚠ 同时结清 **D-19**：原 SYS-06 断言信息称「重启阶梯链 svcStateRaw 等依赖」——
+//     与该函数失效注释同源；`svcStateRaw` / `degradeNssmService` / `index.cjs restartPort` 三名
+//     经 P3-2c 实测**全仓只存于注释**。此处不再复述该不存在的消费方。
+//   ⚠ 仍存活且**未受影响**：`runProbeAsync`（探针肢体保留）与其形态契约由 SYS-07 继续覆盖；
+//     `validateProbe` / `PROBE_TIMEOUT_MS` 亦保留（前者为 `runProbeAsync` 的白名单单一事实源）。
+test('SYS-06 runProbe 已退役（P3-2d · 判据对象整体消失 · 反向守卫）', () => {
+  assert.equal(sys.runProbe, undefined, 'runProbe 必须已从 lib/sys.cjs 导出面退役（生产面零消费者）');
 });
 
 test('SYS-07 runProbeAsync：Promise 形状/白名单/非 0 退出映射对齐 spawnSync status 语义', async () => {
@@ -457,7 +436,7 @@ test('SYS-11 net 熔断状态机：3 连败入冷却→窗内零实测回缓存+
   } finally { teardownProbeMocks(); }
 }, { timeout: 30000 });
 
-test('SYS-12 形状防御断言（C-2 兜底）：probeEnv 返回 Promise、runProbe/runProbeAsync 双形态锁定', async () => {
+test('SYS-12 形状防御断言（C-2 兜底）：probeEnv 返回 Promise、runProbeAsync Promise 化 + runProbe 反向守卫', async () => {
   sys.__setProbeExecutor(makeExecMock({
     'where sc.exe': WHERE_OK,
     'netstat -ano': { stdout: NETSTAT_NONE },
@@ -471,10 +450,11 @@ test('SYS-12 形状防御断言（C-2 兜底）：probeEnv 返回 Promise、runP
     const items = await p;
     assert.ok(Array.isArray(items));
 
-    const syncR = sys.runProbe('nope', [], undefined);
-    assert.ok(!(syncR instanceof Promise) && typeof syncR === 'object', 'runProbe 保持普通对象返回');
+    // P3-2d（2026-10-14）：同步 `runProbe` 已退役 ⇒ 其形态断言随之消失（对象不存在）。
+    //   ⚠ 反向守卫（不得复活）；`runProbeAsync` 仍存活 ⇒ 其 Promise 形态断言**保留**（门槛不降）。
+    assert.equal(sys.runProbe, undefined, 'runProbe 已退役（P3-2d），不得复活');
     const asyncR = sys.runProbeAsync('nope', [], undefined);
-    assert.ok(asyncR instanceof Promise, 'runProbeAsync 必须 Promise 化');
+    assert.ok(asyncR instanceof Promise, 'runProbeAsync 必须 Promise 化（该肢体本批保留）');
     await asyncR;
 
     // B1 扩展原语发射闭合：解析原语随 PORT_PRIMS 全量发射（生成脚本自包含纪律）
