@@ -1736,11 +1736,30 @@ test('OVB-SW06 诊断可见：开关态进快照且分支可区分「已关闭�
   assert.ok(vs.includes('snap.vadEnabled === false'), '该分支须以**开关真值**为判据（严格 ===）');
   // 与「已开启但未触发」可区分：后者不得命中「已关闭」分支
   assert.ok(vs.includes("t('voiceOfficialArmed')"), '「已开启但未触发」分支须仍在（armed）');
-  // 位置：必须在 abandonReason **之后**（降级优先，不得被开关态盖掉）
-  const iAbandon = vs.indexOf("t('voiceOfficialAbandon')");
+  // ⚠ 位置纪律（本席自查修正）：开关态必须排在**所有失效/异常分支之后** ——
+  //   否则用户一旦关掉开关，`abandonReason`/`startMissed`/`endedInFeedback`/`sessionsMissed`
+  //   这些**真实故障会被永久掩蔽**（实测命中：关掉开关后「热键启动失败」也显示成「静音监测已关闭」，
+  //   用户会误以为是自己设置导致，实则热键坏了）= 正是本批要消灭的「让失败不可观测」类。
   const iSilenceOff = vs.indexOf("t('voiceSilenceOff')");
-  assert.ok(iAbandon > 0 && iSilenceOff > iAbandon,
-    '「已关闭」分支须排在 abandonReason **之后**（降级是不得静默失效面，优先于开关态）');
+  for (const [k, ind] of [
+    ['voiceOfficialAbandon', "t('voiceOfficialAbandon')"],
+    ['voiceOfficialStartMissed', "t('voiceOfficialStartMissed')"],
+    ['voiceOfficialFeedback', "t('voiceOfficialFeedback')"],
+    ['voiceOfficialMissed', "t('voiceOfficialMissed')"],
+  ]) {
+    const idx = vs.indexOf(ind);
+    assert.ok(idx > 0 && iSilenceOff > idx,
+      '「已关闭」分支须排在失效分支 ' + k + ' **之后**（否则该故障会被开关态掩蔽）');
+  }
+  // 但必须排在**正常/瞬态**分支之前（「开关关没关」是用户此刻的疑问 ⇒ 优先作答）
+  for (const [k, ind] of [
+    ['voiceOfficialActive', "t('voiceOfficialActive')"],
+    ['voiceOfficialArmed', "t('voiceOfficialArmed')"],
+  ]) {
+    const idx = vs.indexOf(ind);
+    assert.ok(idx > 0 && iSilenceOff < idx,
+      '「已关闭」分支须排在正常分支 ' + k + ' **之前**（否则关了开关仍显示「已就绪/采集进行中」）');
+  }
   // title 暴露开关真值与「未启动」计数（可判别）
   assert.ok(vs.includes("'vadOn='"), '诊断 title 缺开关真值');
   assert.ok(vs.includes("'vadSkipped='"), '诊断 title 缺「因开关未启动 VAD」的计数');
