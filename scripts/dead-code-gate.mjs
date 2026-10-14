@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 // 状态出口契约（P5）：本环的机读三态由**本环自己声明**，gate.mjs 只读结构不解释措辞。
 import { emitRingState, installCrashGuard } from './lib/ring-state.mjs';
 import * as libManifest from './lib/lib-manifest.mjs';
+// D-10 修正批（2026-10-14）：剥注释器收敛到单一事实源（原内联「先块后行」会吞真实代码）。
+import { codeOnly } from './lib/code-only.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 installCrashGuard('dead-code');
 const ROOT = path.join(__dirname, '..');
@@ -104,9 +106,10 @@ for (const line of git(diffArgs).split('\n')) {
   const B = String.fromCharCode(92);
   const KW = new Set('return,function,const,let,var,class,if,else,for,while,do,switch,case,default,break,continue,new,typeof,instanceof,in,of,delete,void,this,super,extends,import,export,from,as,try,catch,finally,throw,yield,async,await,static,get,set,null,true,false,undefined,module,exports,require,arguments,NaN'.split(','));
   const GLB = new Set(('React,Fragment,window,document,localStorage,sessionStorage,console,JSON,Math,Promise,setTimeout,setInterval,clearTimeout,clearInterval,Object,Array,String,Number,Boolean,RegExp,Date,Error,Symbol,Map,Set,isNaN,parseInt,parseFloat,host,configState,timerSvc,saveConfig,ZH,MEMORY_ROUNDS_MAX,SEEN_KEY_PREFIX,subscribeConfig,modeShortLabel,prettifyModel,dshEnhIdSeq,dshEnhId,makeT,sessionStores,postMessage,self,onmessage,requestAnimationFrame,cancelAnimationFrame,AudioContext,styles,Uint8Array,Int8Array,Uint16Array,Uint32Array,Float32Array,Float64Array,ArrayBuffer,DataView,ResizeObserver,MutationObserver,IntersectionObserver,CustomEvent,TextEncoder,TextDecoder,importScripts,RecordRTC,listening,ready,retry,stopping,settling,tagsText,releaseText,stopping,settling,not,FileReader,MediaStream,webkitAudioContext,location,navigator,fetch,AbortController,Blob,URL').split(','));
-  const strip = (src) => src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+  // D-10 修正批（2026-10-14）：前两步（剥块注释 / 剥行注释）收敛到单一事实源 `codeOnly`
+  //   —— 原内联顺序「先块后行」会因 `//` 注释里的 `/*` 吞掉其后真实代码。
+  //   ⚠ **后四步（字符串 / 模板串 / 正则字面量置空）逐字未动** —— 本次只改「怎么剥注释」。
+  const strip = (src) => codeOnly(src)
     .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
     .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
     .replace(new RegExp(B + '`[^' + B + '`]*', 'g'), '``')
@@ -329,7 +332,8 @@ for (const line of git(diffArgs).split('\n')) {
     let txt = '';
     try { txt = fs.readFileSync(file, 'utf8'); } catch { return false; }
     // 剥注释：// 行注释与 /* */ 块注释（防"已删清单"式注释计入引用）
-    txt = txt.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+    // D-10 修正批（2026-10-14）：收敛到单一事实源 `codeOnly`（原「先块后行」会吞真实代码）。
+    txt = codeOnly(txt);
     return refPattern(name).test(txt);
   };
   let r5bad = 0; let r5checked = 0; let r5covered = 0;

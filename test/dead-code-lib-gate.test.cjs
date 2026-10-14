@@ -329,3 +329,76 @@ test('S-9 负控：不动任何东西 ⇒ S-9 PASS 且 R5/R6 覆盖面为基线�
     assert.match(g.out, /R6 \| 12 个系统面文件/, 'R6 覆盖面须为基线 12 文件');
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// D-10 修正批（2026-10-14）：剥注释器不得吞掉真实代码
+//
+// 病历：`arch-claims.mjs` 与 `dead-code-gate.mjs` 曾各自内联同一行「先剥块注释、再剥行注释」的
+//   朴素剥离器。任何「块注释起点符号」都被当作块注释起点 ⇒ **行注释里出现的该符号**
+//   （`update/*` / `src/host/**` / `lib/*.cjs` 等极常见形态）会被误当块注释**开头**，
+//   于是从该处起、直到后面某个「块注释结束符」为止的整段（**含真实代码**）被整体剥掉。
+//   实测：`lib/sys.cjs` 一条注释曾吞掉 **453 字符**，其中含 `return new Function(pureText + …)`
+//   这一**真实代码行** ⇒ `A197-3` / `R5` / `R6` 对该区段**失明**（「让失败不可观测」类缺陷）。
+//   ⚠ 上文刻意**不写出**那两个字面符号 —— 否则本注释自身会被同一缺陷吃掉（自指陷阱）。
+//
+// 本组用例锁「修好之后不再吞」以及「修的是实现、不是判据」。
+// ══════════════════════════════════════════════════════════════════════════════
+
+test('D-10(a)：行注释里的块注释起点符号不得吞掉其后真实代码（三处消费者同源）', async () => {
+  const { codeOnly } = await import(path.join(ROOT, 'scripts', 'lib', 'code-only.mjs'));
+  // ⚠ 夹具的**判别力**来自「其后存在一个真的块注释结束符」——
+  //   旧实现会把「行注释里的起点符号」当作块注释开头，一路吞到那个结束符（含中间真实代码）；
+  //   若夹具里没有结束符，旧实现同样不吞 ⇒ 用例无牙（本批首版即此坑，见报告 §④）。
+  const S = String.fromCharCode(47);       // '/'
+  const STAR = '*';
+  const src = [
+    '// 见 update' + S + STAR + ' RPC 说明',
+    'const REAL_BETWEEN = 1;',
+    'function alsoReal() { return REAL_BETWEEN; }',
+    '/* 后续真块注释 */',
+    'const AFTER_BLOCK = 2;',
+  ].join('\n');
+  const out = codeOnly(src);
+  assert.ok(out.includes('const REAL_BETWEEN = 1;'),
+    'D-10 本体：行注释含起点符号时，其后（直到下一个块结束符为止）的真实代码必须仍被计入');
+  assert.ok(out.includes('function alsoReal()'),
+    'D-10 本体：被误吞区间内的后续真实代码同样必须保留');
+  assert.ok(out.includes('const AFTER_BLOCK = 2;'),
+    '块注释之后的真实代码不受影响');
+  assert.ok(!out.includes('update'),
+    '该行注释本身仍应被剥掉（不是「整行保留」蒙混）');
+  assert.ok(!out.includes('后续真块注释'),
+    '那个真块注释仍应被剥掉');
+});
+
+test('D-10(b)：真正的跨行 /* … */ 块注释仍须被剥离（防修 (a) 时漏剥块注释）', async () => {
+  const { codeOnly } = await import(path.join(ROOT, 'scripts', 'lib', 'code-only.mjs'));
+  const src = [
+    '/*',
+    ' 多行块注释',
+    ' const FAKE = 1;',
+    ' */',
+    'const REAL = 2;',
+  ].join('\n');
+  const out = codeOnly(src);
+  assert.ok(!out.includes('FAKE'), '跨行块注释内容必须被剥（含其中的代码样文本）');
+  assert.ok(out.includes('const REAL = 2;'), '块注释之后的真实代码必须保留');
+});
+
+test('D-10 回归锁：被吞形态若复现，判据读数会立刻变化（端到端有牙）', () => {
+  // 端到端：在整仓副本的 lib/sys.cjs 注入「行注释含起点符号 + 其后真实代码 + 一个真块注释」，
+  // 断言 A197-5 能**如实**数到该真实代码（旧剥离器会因吞噬而漏计 ⇒ 读数不可信）。
+  withFixture((dir) => {
+    const p = path.join(dir, 'lib', 'sys.cjs');
+    const S = String.fromCharCode(47);
+    const marker = '\n// D-10 注入：见 update' + S + '*' + ' RPC\n'
+      + 'const __d10_probe = new Function("return 1");\n'
+      + '/* 尾部真块注释（提供块结束符，使旧实现真的吞掉上面那行） */\n';
+    fs.appendFileSync(p, marker, 'utf8');
+  }, (dir) => {
+    const r = runArch(dir);
+    assert.equal(r.code, 1, '注入入口外第二处 new Function 必须 exit 1');
+    assert.match(r.out, /A197-5/, 'FAIL 必须点名 A197-5');
+    assert.match(r.out, /lib\/sys\.cjs/, 'A197-5 必须数到 lib/sys.cjs 那一处（旧剥离器会吞掉它）');
+  });
+});

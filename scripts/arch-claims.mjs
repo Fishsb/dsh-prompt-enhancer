@@ -42,6 +42,8 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 // 状态出口契约（P5）：本环的 SKIP/冲突/漂移 → 三态映射只在**下面 --check 出口一处**作出。
 import { emitRingState, installCrashGuard } from './lib/ring-state.mjs';
+// D-10 修正批（2026-10-14）：剥注释器收敛到单一事实源（原为内联「先块后行」实现，会吞代码）。
+import { codeOnly as importedCodeOnly } from './lib/code-only.mjs';
 import * as libManifest from './lib/lib-manifest.mjs';
 import { resolveGovRoot } from './lib/gov-root.mjs';
 
@@ -74,8 +76,12 @@ const occurrences = (s, re) => (s.match(re) || []).length;
  *   报告/文档写 1）。⇒ 判据读数被"说明文字"污染，与判据意图（**真装配点** = 0）不符。
  * 现改为剥注释后计数（与 `dead-code-gate.mjs` 的 R5 引用判定**同一口径**），读数 = 1（真装配点）；
  * **判定式不变**（仍严格 `=== 0`），仍属「在册未达」。
+ *
+ * ⚠ D-10 修正批（2026-10-14）：**实现已收敛到单一事实源 `scripts/lib/code-only.mjs`**
+ *   —— 原内联实现「先块后行」会因 `//` 注释里的 `/*` 而吞掉其后真实代码（D-10 病历）。
+ *   本处只换实现、**判定式与扫描面一字未动**。
  */
-const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+const codeOnly = importedCodeOnly;
 
 /**
  * **装配用** `new Function` 求值点的形态（P2 载体决策 A 批 2026-10-13 · A197-3 改判）。
