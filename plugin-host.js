@@ -18,8 +18,9 @@
 //    判空 → UNSUPPORTED）；防重入 APPLY_BUSY。
 // ② 新 RPC update/envcheck：只读探测 7 项（net 连通性 curl 实测 / service 存在 / account
 //    LocalSystem / restart KillProcessTree / port 占用者 / mode 形态 / pnpmInfo 注入机制），
-//    探测执行在 lib/index.cjs（probeEnv），本侧合并 ENV_PROBE_KEYS 等级元数据（block/warn/info）。
+//    探测执行在 lib/index.cjs（probeEnv），本侧合并 ENV_PROBE_KEYS 等级元数据（block/warn/info）。（P3-2a 2026-10-14：ENV_PROBE_KEYS 已退役，此行仅为历史记录）
 // ③ PURE 新增：ENV_PROBE_KEYS / buildInstallArgs / buildRestartChain / mergeEnvPath
+//   ⚠ P3-2a（2026-10-14）：ENV_PROBE_KEYS / buildInstallArgs / buildRestartChain 已退役（零生产消费者）；仅 mergeEnvPath 保留（P3-2b 迁移）。
 //    （lib/index.cjs 切片 PURE 区段复用 mergeEnvPath 做用户 PATH 注入）。
 // ④ 单测 U42-U45（命令构造/重启链/PATH 合并/探测计划）。
 // v2.4.8（发布断链修复）：v2.4.5 曾无记录把 sidebar.footer.action 占位 id 从
@@ -2384,49 +2385,6 @@ function estimateLiteModeSeconds(ttftMs, tokensPerSecond, inputChars) {
 // 方案「一键更新并重启方案.md」：命令构造与探测计划保持 PURE（可单测、单一事实源）。
 // lib/index.cjs 会切片本区段复用 mergeEnvPath（注入用户 PATH 用），勿在此引入
 // ctx/harness/module 状态。
-
-// 环境探测计划（key 与 lib/index.cjs probeEnv 返回的 key 一一对应；
-// level 供 client 渲染与一键更新前置校验：block=硬阻断 / warn=风险提示。
-// v2.5.2 收敛：移除安装链与形态类检查（net/mode/pnpmInfo）。
-// v2.7.0 收敛：仅保留执行器重启阶段真实依赖——account（与 sc start 无关）、
-// restart（KillProcessTree 不影响独立执行器）与 port 占用（标准场景不可达，
-// no-port 并入 exec-port）已删；新增 tools（重启命令工具）与 svc-bin 降级链。）
-const ENV_PROBE_KEYS = [
-  // v3.2.1-v（用户审核·去重收敛）：service/svc-type/svc-bin 三项信息已被 port-mode 状态机覆盖——
-  //   service↔监听者会话0、svc-type↔是否在跑、svc-bin↔能否接管——全部由 port-mode 的
-  //   service/service-stopped/default/no-listener 四态表达，删除三项避免重复检测。
-  { key: 'tools', level: 'block' },    // 重启链系统工具可用（sc/netstat/reg）
-  { key: 'net', level: 'warn' },       // GitHub 可达性（安装依赖，v2.7.1 恢复）
-  { key: 'port-mode', level: 'warn' }, // v3.2.1-o：端口托管模式（nssm 服务会话0/前台默认/无监听）
-  { key: 'port-pid', level: 'warn' },  // v3.2.1-o：3080 实际监听者 PID
-];
-
-// 安装命令构造：node <dshBin> plugin --profile <profile> add github:Fishsb/dsh-prompt-enhancer#<tag>
-// dshBin 由 lib/index.cjs 从 process.argv[1] 注入（host 沙箱无 process）；
-// 参数级白名单校验在 lib 层 isInstallArgs 二次把关。
-function buildInstallArgs(dshBin, tag, profile) {
-  return [dshBin, 'plugin', '--profile', profile, 'add', 'github:Fishsb/dsh-prompt-enhancer#' + tag];
-}
-
-// GitHub Release 资产下载地址（npm pack 产物，staging 阶段在线拉取，服务不中断）。
-// 注意：不能用 codeload 源码 tar.gz——pnpm add 本地包需要 npm pack 格式（顶层 package/）。
-function buildTarballUrl(repo, tag) {
-  const ver = String(tag).replace(/^v/i, '');
-  return 'https://github.com/' + repo + '/releases/download/' + tag + '/dsh-prompt-enhancer-' + ver + '.tgz';
-}
-
-// 本地 staging tarball 安装命令：node <dshBin> plugin --profile <profile> add <local.tgz>
-// lib 层 isLocalTarballInstallArgs 会二次校验 tarball 必须在 staging 目录内。
-function buildLocalInstallArgs(dshBin, profile, tarball) {
-  return [dshBin, 'plugin', '--profile', profile, 'add', tarball];
-}
-
-// 重启计划构造（v2.6.0：独立执行器使用——不再拼接 cmd 链，改参数对象；
-// 执行器内以 node setTimeout 可靠等待 + 端口健康检查 + 自动重试。
-// v2.5.4 教训：cmd 链的 timeout 在非交互环境（stdio ignore）立即返回，缓冲从未生效。）
-function buildRestartPlan(serviceName, port, maxAttempts) {
-  return { serviceName, port, maxAttempts };
-}
 
 // PATH 合并（系统 PATH + 用户 PATH，大小写不敏感去重，保留顺序）；空段忽略
 function mergeEnvPath(sysPath, userPath) {

@@ -55,20 +55,30 @@ test('SYS-04 isEnvcheckBlocked 识别 block 失败项', () => {
   assert.equal(sys.isEnvcheckBlocked(warnOnly), false, '仅 warn 失败应 false');
 });
 
-test('SYS-05 extractPure 暴露新 PURE 函数', () => {
+// P3-2a（2026-10-14）：本用例的覆盖对象已随退役面收窄——
+//   原断言 `buildTarballUrl` / `buildLocalInstallArgs` / `buildRestartPlan` / `buildInstallArgs`
+//   四个符号「被 extractPure 暴露」，而该四符号已因**零生产消费者**整体退役
+//   （唯一消费者 update/* RPC 随 P1-c 执行器退役）⇒ 断言对象消失，**不是**把判据改浅。
+//   现**改写到保留面**并**加牙**：① 仍锁 extractPure 的切片+求值可用；
+//   ② 仍锁唯一保留符号 `mergeEnvPath` 被暴露；③ **新增**「返回面恰好等于 { mergeEnvPath }」——
+//   门槛由「这 4 个必须在」变为「**除 mergeEnvPath 外一个都不许在**」（多一个即红），
+//   方向与既有 `A197-3`「恰好一处」同族：**失败从"记账"变为"阻断"**。
+test('SYS-05 extractPure 返回面（P3-2a 收窄：仅 mergeEnvPath）', () => {
   const body = `
 // ==PURE-BEGIN==
-function buildTarballUrl(repo, tag) { return 'https://github.com/' + repo + '/releases/download/' + tag; }
-function buildLocalInstallArgs(a, b, c) { return [a, b, c]; }
 function mergeEnvPath(a, b) { return a + ';' + b; }
-function buildRestartPlan() { return {}; }
-function buildInstallArgs() { return []; }
 // ==PURE-END==
 `;
   const pure = sys.extractPure(body);
-  assert.equal(typeof pure.buildTarballUrl, 'function');
-  assert.equal(typeof pure.buildLocalInstallArgs, 'function');
-  assert.equal(typeof pure.mergeEnvPath, 'function');
+  assert.equal(typeof pure.mergeEnvPath, 'function', '唯一保留符号 mergeEnvPath 被暴露');
+  assert.equal(pure.mergeEnvPath('C:\\A', 'D:\\B'), 'C:\\A;D:\\B', '切片求值后行为可用');
+  // 返回面「恰好」= { mergeEnvPath }：多一个符号即红（防退役面被悄悄加回 / 防返回面漂移）
+  assert.deepEqual(Object.keys(pure).sort(), ['mergeEnvPath'],
+    'extractPure 返回面恰好 = ["mergeEnvPath"]（P3-2a 收窄后；多一个即红）');
+  // 负控：4 个已退役符号**不得**再出现在返回面上
+  for (const gone of ['buildTarballUrl', 'buildLocalInstallArgs', 'buildRestartPlan', 'buildInstallArgs']) {
+    assert.equal(pure[gone], undefined, `${gone} 已退役，不得出现在 extractPure 返回面`);
+  }
 });
 
 /* ================= 批次C（P1-4）：probeEnv 异步化 + net 熔断 ================= */

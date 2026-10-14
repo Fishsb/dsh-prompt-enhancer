@@ -35,7 +35,7 @@ const pureFn = new Function(defaultsBlock + '\n' + pureText + `
     MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE, RETRIEVE_TABLE,
     MODE_BUDGET_OPTIONS, MODE_BUDGET_DEFAULT, BUDGET_RETRIEVE_TABLE, resolveRetrieveBudget,
     STAGE_SEQUENCE, STAGE_LABELS,
-    ENV_PROBE_KEYS, buildInstallArgs, buildRestartPlan, mergeEnvPath, buildTarballUrl, buildLocalInstallArgs };
+    mergeEnvPath };
 `);
 const {
   wrapUserText,
@@ -100,12 +100,7 @@ const {
   resolveRetrieveBudget,
   STAGE_SEQUENCE,
   STAGE_LABELS,
-  ENV_PROBE_KEYS,
-  buildInstallArgs,
-  buildRestartPlan,
   mergeEnvPath,
-  buildTarballUrl,
-  buildLocalInstallArgs,
   stripScenarioEcho } = pureFn();
 
 test('wrapUserText 包装用户输入', () => {
@@ -1157,54 +1152,6 @@ test('U57 resolveTemplateSystem 模板选中解析（default/increment/custom/le
   assert.equal(TEMPLATE_NAME_MAX, 40);
 });
 
-// v2.5.0（一键更新并重启）：安装命令构造契约。
-test('U42 buildInstallArgs 命令构造（v2.5.0）', () => {
-  const args = buildInstallArgs('D:\\dsh\\bin.js', 'v2.5.0', 'web');
-  assert.deepEqual(args, [
-    'D:\\dsh\\bin.js', 'plugin', '--profile', 'web', 'add', 'github:Fishsb/dsh-prompt-enhancer#v2.5.0',
-  ], '命令数组形态：node <dshBin> plugin --profile <p> add github:Fishsb/dsh-prompt-enhancer#<tag>');
-  // tag 形态透传（含无 v 前缀；lib 层 isInstallArgs 另有正则把关，此处仅契约构造）
-  const noV = buildInstallArgs('bin', '2.4.8', 'web');
-  assert.equal(noV[5], 'github:Fishsb/dsh-prompt-enhancer#2.4.8', '无 v 前缀 tag 原样拼接');
-  // profile 透传
-  const p = buildInstallArgs('bin', 'v1.0.0', 'custom-profile');
-  assert.equal(p[3], 'custom-profile', 'profile 透传');
-  // 固定 repo：任何 tag 都只能拼到 Fishsb/dsh-prompt-enhancer
-  assert.match(args[5], /^github:Fishsb\/dsh-prompt-enhancer#/, 'repo 固定');
-});
-
-// v2.9.0（执行器外挂 + staging 预拉取）：tarball 下载地址与本地安装命令契约。
-test('U57 buildTarballUrl 构造 Release 资产下载地址', () => {
-  assert.equal(
-    buildTarballUrl('Fishsb/dsh-prompt-enhancer', 'v2.8.3'),
-    'https://github.com/Fishsb/dsh-prompt-enhancer/releases/download/v2.8.3/dsh-prompt-enhancer-2.8.3.tgz',
-    'tag 拼入 releases/download，资产名去掉 v 前缀'
-  );
-  assert.equal(
-    buildTarballUrl('Fishsb/dsh-prompt-enhancer', '2.8.3'),
-    'https://github.com/Fishsb/dsh-prompt-enhancer/releases/download/2.8.3/dsh-prompt-enhancer-2.8.3.tgz',
-    '无 v 前缀 tag 资产名一致'
-  );
-});
-
-test('U58 buildLocalInstallArgs 本地 staging 安装命令构造', () => {
-  const args = buildLocalInstallArgs('D:\\dsh\\bin.js', 'web', 'C:\\staging\\dsh-prompt-enhancer-2.8.3.tgz');
-  assert.deepEqual(args, [
-    'D:\\dsh\\bin.js', 'plugin', '--profile', 'web', 'add', 'C:\\staging\\dsh-prompt-enhancer-2.8.3.tgz',
-  ], '本地 tarball 安装命令数组形态');
-  assert.equal(args[5], 'C:\\staging\\dsh-prompt-enhancer-2.8.3.tgz', 'tarball 路径透传');
-});
-
-// v2.6.0：重启计划契约（独立执行器使用——参数对象，不再拼接 cmd 链；
-// timeout 在非交互环境立即返回的教训：缓冲由执行器 node setTimeout 保证）。
-test('U43 buildRestartPlan 重启计划（v2.6.0）', () => {
-  const plan = buildRestartPlan('dsh-web', 3080, 5);
-  assert.deepEqual(plan, { serviceName: 'dsh-web', port: 3080, maxAttempts: 5 }, '参数对象：svc/port/attempts');
-  const p2 = buildRestartPlan('dsh-web-alt', 3090, 3);
-  assert.equal(p2.serviceName, 'dsh-web-alt', 'serviceName 透传');
-  assert.equal(p2.port, 3090, 'port 透传');
-  assert.equal(p2.maxAttempts, 3, 'maxAttempts 透传');
-});
 
 // v2.5.0：PATH 合并契约（系统 PATH + 用户 PATH）。
 test('U44 mergeEnvPath PATH 合并去重（v2.5.0）', () => {
@@ -1213,34 +1160,6 @@ test('U44 mergeEnvPath PATH 合并去重（v2.5.0）', () => {
   assert.equal(mergeEnvPath('C:\\A', ''), 'C:\\A', '空用户 PATH 原样返回');
   assert.equal(mergeEnvPath('', 'D:\\x'), 'D:\\x', '空系统 PATH 仅用户 PATH');
   assert.equal(mergeEnvPath('C:\\A;;D:\\B', ''), 'C:\\A;D:\\B', '空段忽略');
-});
-
-// v2.5.0：环境探测计划契约（与 host 侧 probeEnv facade 返回的 key 一一对应；
-// P2-3（2026-10-13 拆分批）起该 facade 位于 lib/harness.cjs，原 lib/index.cjs 内联定义已随域拆分移出）。
-// v2.7.0：收敛为重启阶段真实依赖 5 项；v2.7.1：恢复 net 网络预检 → 6 项。
-// v3.2.1-o：exec-port（更新端口独立）删除——readServicePort 对默认端口必然解析失败、
-// v3.2 执行器动态端口 fallback 后已无意义；替换为 port-mode（3080 托管模式）+ port-pid（当前 PID）→ 7 项。
-test('U45 ENV_PROBE_KEYS 探测计划（v3.2.1-v 去重收敛）', () => {
-  assert.ok(Array.isArray(ENV_PROBE_KEYS) && ENV_PROBE_KEYS.length === 4, '探测项 4 个（tools + net + port-mode + port-pid）');
-  const keys = ENV_PROBE_KEYS.map((e) => e.key);
-  assert.equal(new Set(keys).size, 4, 'key 唯一');
-  for (const e of ENV_PROBE_KEYS) {
-    assert.ok(['block', 'warn'].includes(e.level), 'level 合法: ' + e.key);
-  }
-  assert.ok(keys.includes('tools') && keys.includes('net')
-    && keys.includes('port-mode') && keys.includes('port-pid'),
-    '4 项 key 与 probeEnv 一致');
-  assert.equal(keys.includes('service'), false, 'service 已清理（v3.2.1-v：信息被 port-mode 状态机覆盖——监听者会话0=服务存在且在跑）');
-  assert.equal(keys.includes('svc-type'), false, 'svc-type 已清理（是否在跑 = port-mode 四态之一）');
-  assert.equal(keys.includes('svc-bin'), false, 'svc-bin 已清理（能否接管 = port-mode service/service-stopped）');
-  assert.equal(keys.includes('exec-port'), false, 'exec-port 已清理（v3.2.1-o：默认端口无法解析 + 执行器动态端口 fallback 后无意义）');
-  assert.equal(keys.includes('account'), false, 'account 已清理（启动账号与 sc start 无关）');
-  assert.equal(keys.includes('restart'), false, 'restart 已清理（KillProcessTree 不影响独立执行器）');
-  assert.equal(keys.includes('port'), false, 'port 已清理（标准场景不可达，no-port 并入 exec-port 后随 exec-port 一并删除）');
-  assert.ok(ENV_PROBE_KEYS.find((e) => e.key === 'tools').level === 'block', 'tools 为 block（重启命令缺失必失败）');
-  assert.ok(ENV_PROBE_KEYS.find((e) => e.key === 'net').level === 'warn', 'net 为 warn（网络受限不阻断，仅提示）');
-  const json = JSON.stringify(ENV_PROBE_KEYS);
-  assert.ok(!/proxy|password|token|secret/i.test(json), '计划不含敏感字段');
 });
 
 // v3.0（模式重构）：会话轮次窗口切分契约——轮 = user 消息锚点及其后的 assistant 回复。
