@@ -92,8 +92,11 @@ function makeFakeEnv(opts) {
     }
   }
   let closed = false;
+  // SW-1（2026-10-15 接线批）：计数 AudioContext 构造 —— 「VAD 是否被启动」的**直接**判据
+  //   （开关关闭 ⇒ 不得建 AC ⇒ 不观测）。原 `closed` 变量与既有断言语义不变，仅新增计数。
+  let acCreated = 0;
   class FakeAudioContext {
-    constructor() { this.state = 'running'; }
+    constructor() { acCreated++; this.state = 'running'; }
     createMediaStreamSource() { return { connect() {} }; }
     createAnalyser() { return new FakeAnalyser(); }
     close() { closed = true; this.state = 'closed'; return Promise.resolve(); }
@@ -180,13 +183,18 @@ function makeFakeEnv(opts) {
     navigator: { mediaDevices }, timers, timerSvc, observerInstances,
     mediaDevices, originalGum, recorderInstances, stopButton, startButton, feedbackNode, frames,
     driveTicks: (n) => { let i = 0; for (const r of timers) { /* noop */ } return i; },
+    // SW-1（2026-10-15）：AudioContext 构造计数 —— 「VAD 是否被启动」的直接读数
+    acCreated: () => acCreated,
   };
 }
 
 // 求值 chunk：注入假全局，返回桥对象 + 观察句柄
-function loadBridge(env) {
+function loadBridge(env, cfg) {
   const src = decodeChunk(CHUNK);
   const S = loadStateForBridge(env);
+  // SW-1（2026-10-15 接线批）：允许用例注入指定配置（默认不注入 ⇒ 走真实 state.js 的默认值，
+  //   既有用例行为逐字不变）。注入的是**真实** voiceCfgState 对象，故桥读到的是真实配置形态。
+  if (cfg !== undefined) S.voiceCfgState.value = cfg;
   const factory = new Function(
     'window', 'document', 'navigator', 'localStorage', 'setInterval', 'clearInterval', 'MutationObserver', 'MouseEvent',
     'vadSilenceMsOf', 'vadRequiredQuiet', 'voiceCfgState',
@@ -1569,4 +1577,221 @@ test('OVB-VAD-V03 变异自证·正例必红：退回「不清平滑」⇒ N1 �
   const r = await driveVad(env, bridge);
   const wouldPass = (r.clicks === 0);
   assert.equal(wouldPass, false, '退回不清平滑后 N1（校准含噪但未说话）必须**误停** ⇒ 证明该判据有牙');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SW-1（2026-10-15 接线批）：`vad.enabled` 开关必须**真的约束运行期行为**
+// ═══════════════════════════════════════════════════════════════════════════════
+// 病（上批报出）：`voice-section.js` 写 `vad.enabled` **8 处**，`official-bridge.js` **引用 0 处**
+//   ⇒ 用户关掉「静音监测」，VAD **照跑**、仍会派发点击官方停止 = **用户可见的开关说了假话**
+//   （属「让失败不可观测」类，CHG-065 同族）⇒ 必须修。
+// 本组判据（逐条有牙）：
+//   SW-01 关 ⇒ **不启动 VAD**（不建 AudioContext、不挂 interval、不自动停）+ 读数可判
+//   SW-02 开 ⇒ 行为与改前一致（**负控**：静音达标照常派发点击官方停止）
+//   SW-03 关「静音监测」**不得**连带关「自动增强」（两者语义独立）
+//   SW-04 缺 `vad` / 缺 `enabled` ⇒ 视为**开**（不改动未配置用户语义）
+//   SW-05 会话**中途**关掉 ⇒ 当帧起不再派发（开关对整场为真，不只启动那一刻）
+//   SW-06 诊断可见：`vadEnabled`/`vadSkipped` 进快照，分支能区分「已关闭」与「已开启未触发」
+//   SW-V01/V02 变异自证（退回接线 ⇒ SW-01 必红；同变异下 SW-02 负控必绿）
+test('OVB-SW01 开关关（vad.enabled:false）⇒ 不启动 VAD、不自动停，且读数可判', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env, { vad: { enabled: false, silenceMs: 2000 }, autoEnhance: true, hotkey: {}, refine: {} });
+  bridge.install();
+  await env.navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false });
+  await flush();
+  env.document._attr = 'recording';
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  mo.cb();
+  // 夹具默认脚本：校准 5 帧 + 1 帧语音 + 20 帧静音 ⇒ 开着时**必然**达标自动停
+  runVad(env);
+  const snap = bridge.snapshot();
+  assert.equal(env.acCreated(), 0, '开关关闭 ⇒ **不得**创建 AudioContext（不观测）');
+  assert.equal(env.timers.length, 0, '开关关闭 ⇒ **不得**挂 VAD 轮询');
+  assert.equal(env.stopButton.clicks, 0, '开关关闭 ⇒ **不得**自动停（不得派发点击官方停止）');
+  assert.equal(snap.vadEnabled, false, '快照须如实报「开关关」（不得静默）');
+  assert.equal(snap.vadSkipped, 1, '须留下「因开关关闭而未启动 VAD」的计数（开关真的约束了行为的证据）');
+  assert.equal(snap.abandonReason, '', '按意图关闭**不是**降级 ⇒ 不得写 abandonReason');
+});
+
+test('OVB-SW02 负控：开关开（默认）⇒ 行为与改前逐字一致（静音达标照常自动停）', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env, { vad: { enabled: true, silenceMs: 2000 }, autoEnhance: false, hotkey: {}, refine: {} });
+  bridge.install();
+  await env.navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false });
+  await flush();
+  env.document._attr = 'recording';
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  mo.cb();
+  runVad(env);
+  const snap = bridge.snapshot();
+  assert.equal(env.acCreated(), 1, '开关开 ⇒ 正常启动 VAD（负控：接线不得把开着的也挡掉）');
+  assert.equal(env.stopButton.clicks, 1, '开关开 ⇒ 静音达标须照常派发点击官方停止（恰好 1 次）');
+  assert.equal(snap.vadSkipped, 0, '开关开 ⇒ 不得计「未启动」');
+  assert.equal(snap.vadEnabled, true, '快照须如实报「开关开」');
+});
+
+test('OVB-SW03 独立性：关「静音监测」**不得**连带关「自动增强」', () => {
+  // 静态证明（两条配置各读各的路径，无耦合）：
+  const br = decodeChunk(CHUNK);
+  // 「静音监测」只在桥内被读，且只用于 VAD 启动/守卫
+  assert.ok(/ovbVadEnabled\(\)/.test(br), '桥须读 vad.enabled 决定是否启动 VAD');
+  // 「自动增强」的读取点仍在 hotkey.js（本批**未触碰**）——不得被 vad.enabled 影响
+  const hk = decodeChunk('src/client/voice/hotkey.js');
+  assert.ok(hk.includes('voiceCfgState.value.autoEnhance === true'),
+    'autoEnhance 的读取点须仍在 hotkey.js（关静音监测 ≠ 关自动增强）');
+  // ⚠ 只看**活代码**：桥内注释会提到 `autoEnhance`（说明「两者无关」这一契约本身），
+  //   注释不是判定 ⇒ 判据须落在活代码上（与既有用例的 hkLive 做法同款）。
+  const brLive = br.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.equal(/autoEnhance/.test(brLive), false,
+    '桥的**活代码**内不得出现 autoEnhance 判定（否则两开关被耦合 —— 本批只接 vad.enabled）');
+});
+
+// ⚠ SW03b：SW03 是**静态**证明（读取点不耦合）。本条补**行为**证明：
+//   「静音监测关」与「自动增强开」同时成立时，自动增强**仍须照常触发** ——
+//   否则用户关掉一个开关会静默丢掉另一个功能（连带关闭 = 开关说假话的另一种形态）。
+test('OVB-SW03b 行为独立性：静音监测关 + 自动增强开 ⇒ 自动增强仍须触发（不得连带关闭）', () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  // 桥读到「静音监测关」；热键组件的 config 桩保持 autoEnhance = true
+  const bridge = loadBridge(env, { vad: { enabled: false, silenceMs: 2000 }, autoEnhance: true, hotkey: {}, refine: {} });
+  bridge.install();
+  const host = buildHotkeyHost(env, bridge, { autoEnhance: true, sessionId: 'sess-sw03b' });
+  host.render('');
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();      // 官方会话开始（桥不启 VAD，但照记相位）
+  env.document._attr = null; mo.cb();             // 会话结束 ⇒ 自动增强装臂
+  host.render('官方识别出来的文字');               // 写回落地
+  for (const r of host.timerRegs) { if (!r.cleared) r.fn(); }
+  assert.equal(host.enhanceCalls.length, 1,
+    '静音监测关**不得**连带关自动增强 —— 写回落地后仍须恰好触发 1 次增强');
+  assert.equal(bridge.snapshot().vadEnabled, false, '前置：静音监测确为关');
+});
+
+// ⚠ SW01b：「按意图关闭」**不得**被误报成「未观测到官方采集（自动停未生效）」。
+//   桥的包装器调用计数（callCount）与开关**无关**，且是 missed 判据的基元 ⇒
+//   必须在跳过 VAD 的同时**照记**计数，否则用户关掉开关后会看到一句错误的失效告警。
+test('OVB-SW01b 关闭态不得误报 missed：跳过 VAD 但包装计数照记 ⇒ sessionsMissed 保持 0', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env, { vad: { enabled: false, silenceMs: 2000 }, autoEnhance: false, hotkey: {}, refine: {} });
+  bridge.install();
+  await env.navigator.mediaDevices.getUserMedia({ audio: {}, video: false });
+  await flush();
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();     // 会话开始
+  env.document._attr = null; mo.cb();            // 会话收口（missed 判定点）
+  const snap = bridge.snapshot();
+  assert.equal(snap.sessionsStarted, 1, '官方会话须照常被观测到（开关只管 VAD）');
+  assert.equal(snap.sessionsMissed, 0, '⚠ 包装器确被调用过 ⇒ 不得计 missed（否则关闭态会显示错误的失效告警）');
+  assert.equal(snap.vadSkipped, 1, '须留下「因开关未启动 VAD」的计数');
+  assert.equal(snap.abandonReason, '', '关闭不是降级 ⇒ 不得写 abandonReason');
+});
+
+test('OVB-SW04 缺配置 ⇒ 视为开（不改动未配置用户语义）', async () => {
+  for (const cfg of [
+    { autoEnhance: false },                                  // 缺 vad 段
+    { vad: { silenceMs: 2000 }, autoEnhance: false },        // 缺 enabled 字段
+    { vad: {}, autoEnhance: false },                         // vad 空对象
+  ]) {
+    const env = makeFakeEnv({ recordingPhase: true });
+    const bridge = loadBridge(env, cfg);
+    bridge.install();
+    await env.navigator.mediaDevices.getUserMedia({ audio: {}, video: false });
+    await flush();
+    env.document._attr = 'recording';
+    const mo = env.observerInstances[env.observerInstances.length - 1];
+    mo.cb();
+    runVad(env);
+    assert.equal(bridge.snapshot().vadEnabled, true,
+      '缺配置必须视为**开**（配置形态 ' + JSON.stringify(cfg) + '）—— 不得把未配置用户静默关掉');
+    assert.equal(env.stopButton.clicks, 1, '缺配置 ⇒ 与改前一致地自动停');
+  }
+});
+
+test('OVB-SW05 中途关开关：会话进行中改配置 ⇒ 当帧起不再派发（开关对整场为真）', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  const cfg = { vad: { enabled: true, silenceMs: 2000 }, autoEnhance: false, hotkey: {}, refine: {} };
+  const bridge = loadBridge(env, cfg);
+  bridge.install();
+  await env.navigator.mediaDevices.getUserMedia({ audio: {}, video: false });
+  await flush();
+  env.document._attr = 'recording';
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  mo.cb();
+  // ⚠ 有界驱动（与 runVad 同款上限）：VAD 的 interval **不会**因停止而 cleared
+  //   （`stopped=true` 后 tick 直接 return）⇒ 无界 while 会永久空转（本席首版即栽在此处）。
+  const pump = (n) => { let t = 0; for (const rec of env.timers) { if (rec.cleared) continue; while (!rec.cleared && t < n) { rec.fn(); t++; } } return t; };
+  pump(3);                                     // 先跑少量帧（未达静音阈值）
+  cfg.vad.enabled = false;                     // 用户**中途**关掉开关
+  pump(200);                                   // 再跑满：若守卫失效，静音必然达标 ⇒ stopClicks 会 >0
+  pump(200);                                   // 再多跑一轮，确保「达标」有充分机会发生
+  assert.equal(env.stopButton.clicks, 0,
+    '会话中途关掉开关 ⇒ 此后不得再派发自动停（否则开关只说半场真话）');
+});
+
+test('OVB-SW06 诊断可见：开关态进快照且分支可区分「已关闭」与「已开启未触发」', () => {
+  const vs = decodeChunk('src/client/voice/voice-section.js');
+  const i18n = decodeChunk('src/client/i18n.js');
+  // 独立 i18n 键（前缀刻意避开被既有判据锁数的 voiceOfficial*/voiceVad*）
+  assert.ok(i18n.includes("voiceSilenceOff:"), 'i18n 缺「静音监测已关闭」键');
+  assert.ok(vs.includes("t('voiceSilenceOff')"), '诊断分支缺「已关闭」分支引用');
+  assert.ok(vs.includes('snap.vadEnabled === false'), '该分支须以**开关真值**为判据（严格 ===）');
+  // 与「已开启但未触发」可区分：后者不得命中「已关闭」分支
+  assert.ok(vs.includes("t('voiceOfficialArmed')"), '「已开启但未触发」分支须仍在（armed）');
+  // 位置：必须在 abandonReason **之后**（降级优先，不得被开关态盖掉）
+  const iAbandon = vs.indexOf("t('voiceOfficialAbandon')");
+  const iSilenceOff = vs.indexOf("t('voiceSilenceOff')");
+  assert.ok(iAbandon > 0 && iSilenceOff > iAbandon,
+    '「已关闭」分支须排在 abandonReason **之后**（降级是不得静默失效面，优先于开关态）');
+  // title 暴露开关真值与「未启动」计数（可判别）
+  assert.ok(vs.includes("'vadOn='"), '诊断 title 缺开关真值');
+  assert.ok(vs.includes("'vadSkipped='"), '诊断 title 缺「因开关未启动 VAD」的计数');
+  const br = decodeChunk(CHUNK);
+  assert.ok(br.includes('vadEnabled: ovbVadEnabled()'), '快照须暴露开关当前真值');
+  assert.ok(br.includes('b.vadSkipped = (b.vadSkipped || 0) + 1'), '快照须暴露「未启动」计数');
+});
+
+// ── 变异自证：把接线退回（仅内存副本）⇒ SW-01 必红，SW-02 负控必绿 ──────────────
+// 变异名运行时拼接（不在源码里形成字面量）。
+function mutateUnwire(src) {
+  const anchor = 'if (!ovb' + 'VadEnabled()) {';
+  assert.ok(src.includes(anchor), '变异锚点须存在（接线分支）');
+  return src.replace(anchor, 'if (false) {');
+}
+
+async function runSwitchScenario(cfg, mutate) {
+  const env = makeFakeEnv({ recordingPhase: true });
+  const src = mutate ? mutate(decodeChunk(CHUNK)) : decodeChunk(CHUNK);
+  const S = loadStateForBridge(env);
+  S.voiceCfgState.value = cfg;
+  const factory = new Function(
+    'window', 'document', 'navigator', 'localStorage', 'setInterval', 'clearInterval', 'MutationObserver', 'MouseEvent',
+    'vadSilenceMsOf', 'vadRequiredQuiet', 'voiceCfgState', src + '\n;return officialVoiceBridge;');
+  let seq = 0;
+  const bridge = factory(env.window, env.document, env.navigator, env.localStorage,
+    (fn, ms) => { const rec = { fn, ms, cleared: false, id: ++seq }; env.timers.push(rec); return rec.id; },
+    (id) => { const rec = env.timers.find((r) => r.id === id); if (rec) rec.cleared = true; },
+    class FakeMO { constructor(cb) { this.cb = cb; env.observerInstances.push(this); } observe() {} disconnect() {} },
+    function MouseEvent(type, init) { return { type, init }; },
+    S.vadSilenceMsOf, S.vadRequiredQuiet, S.voiceCfgState);
+  bridge.setTimer(env.timerSvc);
+  bridge.install();
+  await env.navigator.mediaDevices.getUserMedia({ audio: {}, video: false });
+  await flush();
+  env.document._attr = 'recording';
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  mo.cb();
+  runVad(env);
+  return { env, snap: bridge.snapshot() };
+}
+
+test('OVB-SW-V01 变异自证·正例必红：退回接线 ⇒ SW-01 判据必须失败', async () => {
+  const r = await runSwitchScenario({ vad: { enabled: false, silenceMs: 2000 }, autoEnhance: false, hotkey: {}, refine: {} }, mutateUnwire);
+  const wouldPass = (r.env.acCreated() === 0 && r.env.stopButton.clicks === 0);
+  assert.equal(wouldPass, false,
+    '退回接线后「开关关 ⇒ 不启动 VAD」必须为红 —— 若仍绿说明判据没牙（这正是改前的缺陷形态）');
+});
+
+test('OVB-SW-V02 变异自证·负控必绿：同一变异下「开关开」路径仍须通过', async () => {
+  const r = await runSwitchScenario({ vad: { enabled: true, silenceMs: 2000 }, autoEnhance: false, hotkey: {}, refine: {} }, mutateUnwire);
+  assert.equal(r.env.stopButton.clicks, 1, '负控·开关开时自动停仍须发生（与接线是否在位无关）');
+  assert.equal(r.env.acCreated(), 1, '负控·开关开时 VAD 仍须启动');
 });
