@@ -380,6 +380,55 @@ test('D-10(a)：行注释里的块注释起点符号不得吞掉其后真实代�
     '那个真块注释仍应被剥掉');
 });
 
+test('R-1(d1)：单行内闭合的块注释（含其中含 //）不得吞掉其后真实代码', async () => {
+  const { codeOnly } = await import(path.join(ROOT, 'scripts', 'lib', 'code-only.mjs'));
+  // ⚠ 夹具的**判别力**来自 R-1 的失效机制，须同时具备四个要素（D-14 病历：缺一即假锁）：
+  //   ① 一个**单行内闭合**的块注释；② 其中含 `//`；③ 其后**紧跟真实代码**；
+  //   ④ 再后面**另有一个真块注释**（提供后续块结束符 —— 缺它则"先逐行后块"顺序同样不吞 ⇒ 用例无牙）。
+  const S = String.fromCharCode(47);  // '/'
+  const src = [
+    S + '*' + ' note ' + S + S + ' more *' + S + ' const REAL_SAME_LINE = 1;',
+    'const ALSO_REAL = 2;',
+    S + '*' + ' 后续真块注释 *' + S,
+    'const AFTER_BLOCK = 3;',
+  ].join('\n');
+  const out = codeOnly(src);
+  assert.ok(out.includes('const REAL_SAME_LINE = 1;'),
+    'R-1 本体：单行闭合块注释（内含行注释符）之后的**同行**真实代码必须保留');
+  assert.ok(out.includes('const ALSO_REAL = 2;'),
+    'R-1 本体：其后**下一行**的真实代码必须保留（现行顺序会从残留的未闭合起点一路吞到这里）');
+  assert.ok(out.includes('const AFTER_BLOCK = 3;'),
+    '真块注释之后的真实代码不受影响');
+  assert.ok(!out.includes('note'),
+    '该块注释本身仍应被剥掉（不是「整块保留」蒙混）');
+  assert.ok(!out.includes('后续真块注释'),
+    '那个真块注释仍应被剥掉');
+});
+
+test('R-1(b2)：跨行块注释的“行注释符与闭合符同行”不得吞掉其后真实代码', async () => {
+  const { codeOnly } = await import(path.join(ROOT, 'scripts', 'lib', 'code-only.mjs'));
+  // ⚠ 本形态是选用「单趟扫描」而非「先同行块 → 再行注释 → 再跨行块」三步顺序的**依据**：
+  //   三步顺序在第一步「同行闭合块」匹配不到本形态（块**跨行**），随后第二步把 `// */ const REAL`
+  //   连同**闭合符**一起剥掉 ⇒ 留下未闭合 `/*` ⇒ 第三步一路吞到下一个结束符。
+  //   ⇒ 本用例把「单趟扫描严格优于建议的三步顺序」钉成机检（否则该优势只存在于实现者的偏好里）。
+  const S = String.fromCharCode(47);  // '/'
+  const src = [
+    S + '*' + ' start',
+    ' ' + S + S + ' *' + S + ' const REAL_AFTER_INLINE_CLOSE = 1;',
+    'const NEXT_LINE_REAL = 2;',
+    S + '*' + ' 尾部真块 *' + S,
+    'const TAIL = 3;',
+  ].join('\n');
+  const out = codeOnly(src);
+  assert.ok(out.includes('const REAL_AFTER_INLINE_CLOSE = 1;'),
+    '跨行块注释的闭合符与行注释符同行时，闭合符**之后**的真实代码必须保留');
+  assert.ok(out.includes('const NEXT_LINE_REAL = 2;'),
+    '其后下一行的真实代码必须保留');
+  assert.ok(out.includes('const TAIL = 3;'),
+    '尾部真块注释之后的真实代码不受影响');
+  assert.ok(!out.includes('start'), '该跨行块注释本身仍应被剥掉');
+});
+
 test('D-10(b)：真正的跨行 /* … */ 块注释仍须被剥离（防修 (a) 时漏剥块注释）', async () => {
   const { codeOnly } = await import(path.join(ROOT, 'scripts', 'lib', 'code-only.mjs'));
   const src = [
