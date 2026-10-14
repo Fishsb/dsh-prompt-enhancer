@@ -72,9 +72,12 @@ function makeFakeEnv(opts) {
     dispatchEvent() { this.clicks++; return true; },
     click() { this.clicks++; },
   };
-  // 官方失败出口（相位 feedback + .activityMessage 文案节点，官方自带、插件只读）
+  // 官方失败出口（相位 feedback + 文案节点，官方自带、插件只读）
+  // ⚠ B-1（2026-10-14 定位批 · CDP 实读官方 DOM）：官方该节点是 **CSS-module 哈希类**
+  //   （实测 `ddpbLW_activityMessage`）⇒ 裸 `.activityMessage` 选择器在真实 DOM 里**永不命中**。
+  //   本假件**照实模拟**该点（realClassName 默认 true）：裸类名选择器返回 null，子串选择器才命中。
   const feedbackNode = {};
-  const messageNode = { textContent: o.feedbackText || '未识别到语音' };
+  const messageNode = { textContent: o.feedbackText || '未识别到语音', className: 'ddpbLW_activityMessage' };
   const activityRegion = { };
   const activityNodes = o.recordingPhase ? [{}, ] : [];
 
@@ -129,7 +132,16 @@ function makeFakeEnv(opts) {
       if (sel === '[data-voice-activity]') return documentStub._attr ? activityNodes[0] : null;
       if (sel === '[data-voice-activity="recording"]') return documentStub._attr === 'recording' ? activityNodes[0] : null;
       if (sel === '[data-voice-activity="feedback"]') return documentStub._attr === 'feedback' ? feedbackNode : null;
-      if (sel === '[data-voice-activity="feedback"] .activityMessage') return documentStub._attr === 'feedback' ? messageNode : null;
+      // ⚠ 真实 DOM 里该类名被 CSS-module 哈希化（CDP 实测 `ddpbLW_activityMessage`）。
+      //   o.realClassName !== false ⇒ 裸类名**不命中**（正是本批定位到的缺陷形态）；
+      //   子串选择器（[class*="activityMessage"]）仍命中。
+      if (sel === '[data-voice-activity="feedback"] .activityMessage') {
+        if (o.realClassName === false) return documentStub._attr === 'feedback' ? messageNode : null;
+        return null;
+      }
+      if (sel === '[data-voice-activity="feedback"] [class*="activityMessage"]') {
+        return documentStub._attr === 'feedback' ? messageNode : null;
+      }
       return null;
     },
     querySelectorAll(sel) {
@@ -454,20 +466,62 @@ test('OVB-S04 互斥：官方采集中再按热键 ⇒ 拒绝重复启动（不�
   assert.equal(env.startButton.clicks, 0, '不得再派发点击开始按钮');
 });
 
-// ───────────────── 官方失败出口（feedback）· TASK §3.3 缺口修复 ─────────────────
-test('OVB-F01 失败出口：相位 feedback ⇒ 记为失败收尾，且**不**被当作「已结束等写回」', () => {
+// ───────────────── 官方 feedback 相位 · 语义订正批（2026-10-14 定位批）─────────────────
+// ⚠ 语义订正的依据（静态证明 + CDP 实读，非推测）：
+//   官方 `dsh-experimental-client-ui-voice-input/lib/client.js:4990-5026` 实读 —— `feedback(text)`
+//   **只在转写已经完成之后**被调用，四个调用点是 `tooLarge` / `transcribe` 返回 !ok / `text === ""`
+//   （未识别到语音）/ **`insertText` 返回 false（草稿冲突）**。最后一种**转写是成功的**。
+//   ⇒ `feedback` **不是**「识别失败」专用出口；把它一律当失败并直接 return 会**跳过会话收口**
+//   （`settleMiss` 不计、`lastEndedAt` 永不更新）⇒ 自动增强永不触发（本批 E1 夹具实测）。
+//   故本组判据改为：feedback **照记读数**（endedInFeedback 保留给"不空等写回"），
+//   且**必须完成会话收口**（lastEndedAt 更新 + missed 结算 + active 语义）。
+test('OVB-F01 反馈相位：照记读数，且**必须完成会话收口**（订正：feedback ≠ 仅失败出口）', () => {
   const env = makeFakeEnv({ recordingPhase: true, feedbackText: '未识别到语音' });
   const bridge = loadBridge(env);
   bridge.install();
   const mo = env.observerInstances[env.observerInstances.length - 1];
   env.document._attr = 'recording'; mo.cb();       // 进入采集
-  env.document._attr = 'feedback'; mo.cb();        // 官方失败出口
+  env.document._attr = 'feedback'; mo.cb();        // 官方 feedback 相位
   const snap = bridge.snapshot();
-  assert.equal(snap.feedbackSeen, 1, '必须识别出官方自带的失败出口（恰好 1 次）');
-  assert.equal(snap.endedInFeedback, true, '失败收尾标记须置位（订阅方据此不进入等写回）');
-  assert.equal(snap.feedbackMessage, '未识别到语音', '失败文案（.activityMessage）须进诊断读数');
-  assert.equal(snap.lastEndedAt, 0, '失败出口节点不消失 ⇒ 不得伪装成「已结束」（旧缺口正是按已结束等写回）');
-  assert.equal(bridge.officialCapturing(), true, '失败出口仍处采集态（须等用户关闭/重试）');
+  assert.equal(snap.feedbackSeen, 1, '必须识别出官方自带的 feedback 相位（恰好 1 次）');
+  assert.equal(snap.endedInFeedback, true, '读数须置位（订阅方据此不进入「空等写回」）');
+  assert.equal(snap.feedbackMessage, '未识别到语音', '文案须进诊断读数（经**子串**选择器命中哈希类）');
+  // ⚠ 本批订正的核心：收口**必须**发生（旧实现此处为 lastEndedAt===0，直接跳过收口）
+  assert.ok(snap.lastEndedAt > 0, 'feedback 即一次会话收口 ⇒ 必须记结束时刻（否则自动增强永不触发）');
+  assert.equal(bridge.officialCapturing(), true, '收藏态语义不变：官方仍占用语音入口（等用户关闭/重试）');
+});
+
+test('OVB-F01b 订正回归锁：feedback 的收口**恰好一次**（节点随后消失不得再计一次 missed）', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  await env.navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();
+  env.document._attr = 'feedback'; mo.cb();
+  const afterFb = bridge.snapshot();
+  assert.equal(afterFb.sessionsMissed, 0, '本会话包装器已被调用 ⇒ 收口不得计 missed');
+  const endedAtFb = afterFb.lastEndedAt;
+  env.document._attr = null; mo.cb();              // 用户点 X：节点消失
+  const afterGone = bridge.snapshot();
+  assert.equal(afterGone.sessionsMissed, 0, '⚠ 同一会话不得**二次**收口（否则 missed 被计两次）');
+  assert.equal(afterGone.lastEndedAt, endedAtFb, '⚠ 不得覆盖首次收口时刻（否则订阅方重复装臂）');
+  assert.equal(afterGone.endedInFeedback, false, '收口后标志必须复位');
+});
+
+test('OVB-F01c 订正回归锁：从 feedback 重试（相位回 recording）⇒ 不得残留「失败收场」读数', () => {
+  const env = makeFakeEnv({ recordingPhase: true, feedbackText: '未识别到语音' });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();
+  env.document._attr = 'feedback'; mo.cb();
+  assert.equal(bridge.snapshot().endedInFeedback, true, '前置：已进 feedback');
+  env.document._attr = 'recording'; mo.cb();       // 官方「重新录音」⇒ 相位回到 recording
+  const snap = bridge.snapshot();
+  assert.equal(snap.lastPhase, 'recording', '前置：相位确已回到 recording');
+  assert.equal(snap.endedInFeedback, false,
+    '⚠ 实测病：标志残留在真 ⇒ 诊断区报「上次官方会话以失败收场」而实际**正在录音**（读数说反话）');
 });
 
 test('OVB-F02 失败出口：未出现 feedback 时不得误报（负控）', () => {
@@ -1303,4 +1357,216 @@ test('OVB-R04 F-18 变异自证：退回「只写标记、无消费」⇒ OVB-R0
   for (let i = 0; i < 40; i++) { for (const r of timerRegs) { if (!r.cleared && r.kind === 'timeout') { r.cleared = true; r.fn(); } } }
   const snap = bridge.snapshot();
   assert.equal(snap.stopClicks, 0, '变异（只写标记、无消费）下补停**不会**发生 ⇒ OVB-R01 的 stopClicks===1 判据有牙');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VAD-1/VAD-2 订正批（2026-10-14 定位批）：**校准窗不可信** 的机制回归锁
+// ═══════════════════════════════════════════════════════════════════════════════
+// 背景（用户现场读数）：手动点官方 🎤 后「一直在录，不说话也不停 / 说完停顿也不停」。
+// 机制（本批已定位）：`ovbStartVad` 拿**前 5 帧（≈500ms）中位数 ×2.5** 当阈值。
+//   真人「按下按钮即开口」⇒ **校准样本含语音** ⇒ 底噪被抬到语音电平 ⇒ 阈值 = 底噪×2.5
+//   **结构上高于同一段语音** ⇒ `heardSpeech` 永不为真 ⇒ 静音计数永不启动 ⇒ 一直录。
+//   这也解释了为何既有 CDP 取证（假设备 + 素材，校准期恰落在素材**前置静音**里）会「通过」——
+//   假件对「起始即说话」这一形态**有盲区**。
+//
+// 本组夹具用**生成器**驱帧（永不耗尽）：旧实现用有限数组时，帧取尽会被折叠成常量，
+// 那会**伪造**出自愈行为（本席第一版夹具即栽在此处，已在报告中记录）。
+function makeGenEnv(gen) {
+  const env = makeFakeEnv({ recordingPhase: true });
+  // 替换假件的取帧方式：改为按 tick 调用生成器（不再是有限数组 shift）
+  const frames = [];
+  env.frames = frames;
+  const origMake = null; void origMake;
+  return { env, gen };
+}
+
+// 用生成器驱动：重建假件的 analyser 取帧源
+function installGenFrames(env, gen) {
+  const FakeAnalyser = function () { this.fftSize = 1024; };
+  FakeAnalyser.prototype.getByteTimeDomainData = function (buf) {
+    const v = Math.max(0, Math.min(1, gen()));
+    const byte = Math.max(0, Math.min(255, Math.round(128 + v * 128)));
+    for (let i = 0; i < buf.length; i++) buf[i] = byte;
+  };
+  env.window.AudioContext = class {
+    constructor() { this.state = 'running'; }
+    createMediaStreamSource() { return { connect() {} }; }
+    createAnalyser() { return new FakeAnalyser(); }
+    close() { this.state = 'closed'; return Promise.resolve(); }
+  };
+}
+
+// 夹具语法：stages = [{frames, rms}]，超出末段后沿用末段
+function stageGen(stages) {
+  let i = 0; let k = 0;
+  return () => {
+    while (i < stages.length - 1 && k >= stages[i].frames) { k -= stages[i].frames; i++; }
+    k++;
+    return stages[i].rms;
+  };
+}
+
+// 驱动到静音达标/上限，返回读数（stopClicks 等）
+async function driveVad(env, bridge, cap) {
+  await env.navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false });
+  await flush();
+  env.document._attr = 'recording';
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  mo.cb();
+  let ticks = 0;
+  for (const rec of env.timers) { while (!rec.cleared && ticks < (cap || 600)) { rec.fn(); ticks++; } }
+  return { ticks, snap: bridge.snapshot(), clicks: env.stopButton.clicks };
+}
+
+test('OVB-VAD-01 F2 首要假设：校准窗含语音（起始即说话）⇒ 修复后**必须**自动停', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  installGenFrames(env, stageGen([
+    { frames: 5, rms: 0.05 },     // 校准窗：用户按下即开口 ⇒ 样本含语音
+    { frames: 100, rms: 0.05 },   // 持续说话（与校准同电平）
+    { frames: 300, rms: 0.001 },  // 说完停顿
+  ]));
+  const bridge = loadBridge(env);
+  bridge.install();
+  const r = await driveVad(env, bridge);
+  assert.equal(r.clicks, 1, '起始即说话（校准含语音）⇒ 修复后必须派发点击官方停止恰好 1 次');
+  assert.equal(r.snap.stopMissed, 0, '不得计 missed');
+  assert.equal(r.snap.abandonReason, '', '不得留下降级原因');
+});
+
+test('OVB-VAD-02 F2\' 真实形态：校准含语音 + 语音有起伏（词间回落）⇒ 必须自动停', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  installGenFrames(env, stageGen([
+    { frames: 5, rms: 0.05 },
+    { frames: 100, rms: 0.08 },
+    { frames: 300, rms: 0.001 },
+  ]));
+  const bridge = loadBridge(env);
+  bridge.install();
+  const r = await driveVad(env, bridge);
+  assert.equal(r.clicks, 1, '有起伏的真实语音同样必须能自动停（阈值须已自愈回落）');
+});
+
+test('OVB-VAD-03 F1 低电平边界（语音低于绝对下限 0.025）⇒ **不得**误停（负控）', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  installGenFrames(env, stageGen([
+    { frames: 5, rms: 0.001 },
+    { frames: 100, rms: 0.02 },   // 音量低于绝对阈值下限
+    { frames: 300, rms: 0.001 },
+  ]));
+  const bridge = loadBridge(env);
+  bridge.install();
+  const r = await driveVad(env, bridge);
+  assert.equal(r.clicks, 0, '语音电平低于绝对阈值下限时不得误判为说话（防误停取向保持）');
+});
+
+test('OVB-VAD-04 N1 关键负控：校准窗含语音/噪声但**此后从未说话** ⇒ 绝不得误停', async () => {
+  // ⚠ 本判据是修复的**反向锁**：自愈会让阈值快速回落，若不同步清掉平滑残留，
+  //   校准窗的电平会被残留的 smoothRms 当作「听到过语音」⇒ 误计静音帧 ⇒ 误停。
+  //   （本席第一版修复即命中该形态，被本夹具抓到后加了 VAD-2「校准结束清平滑」。）
+  const env = makeFakeEnv({ recordingPhase: true });
+  installGenFrames(env, stageGen([
+    { frames: 5, rms: 0.05 },     // 校准含噪（用户按按钮时有环境声/呼吸）
+    { frames: 400, rms: 0.002 },  // 此后一片安静：用户**从未说话**
+  ]));
+  const bridge = loadBridge(env);
+  bridge.install();
+  const r = await driveVad(env, bridge);
+  assert.equal(r.clicks, 0, '⚠ 校准含噪但此后从未说话 ⇒ **不得**误停（否则等于凭空结束录音）');
+});
+
+test('OVB-VAD-05 F3 高底噪（持续噪声不下降）⇒ 语音未过抬高后的阈 ⇒ 不得误停（负控）', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  installGenFrames(env, stageGen([
+    { frames: 5, rms: 0.06 },     // 高底噪：阈 = 0.06×2.5 = 0.15
+    { frames: 100, rms: 0.1 },    // 说话 0.1 < 0.15 ⇒ 未过门
+    { frames: 300, rms: 0.06 },
+  ]));
+  const bridge = loadBridge(env);
+  bridge.install();
+  const r = await driveVad(env, bridge);
+  assert.equal(r.clicks, 0, '持续高底噪下语音未过门 ⇒ 不得计静音（与旧实现同取向；本判据锁住"未过门就不停"）');
+});
+
+test('OVB-VAD-06 读数不静默：VAD 内部状态必须进诊断快照（门是否开过可判）', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  installGenFrames(env, stageGen([{ frames: 400, rms: 0.001 }]));
+  const bridge = loadBridge(env);
+  bridge.install();
+  await driveVad(env, bridge);
+  const snap = bridge.snapshot();
+  for (const k of ['vadHeardSpeech', 'vadQuietFrames', 'vadThreshold', 'vadNoiseFloor']) {
+    assert.ok(Object.prototype.hasOwnProperty.call(snap, k), '诊断快照缺读数 ' + k + '（门从未开过这一形态此前**无法判别**）');
+  }
+  assert.equal(snap.vadHeardSpeech, false, '全程静音 ⇒ 门未开过（这正是用户现场"一直录"的那一格）');
+});
+
+// ── 变异自证：把修复退回（仅降不升的自愈 + 校准清平滑）⇒ 判据必须转红 ──────────
+// ⚠ 只在**内存副本**内变异（不动仓库文件）。
+function loadMutantBridge(env, mutate) {
+  const src = mutate(decodeChunk(CHUNK));
+  const S = loadStateForBridge(env);
+  const factory = new Function(
+    'window', 'document', 'navigator', 'localStorage', 'setInterval', 'clearInterval', 'MutationObserver', 'MouseEvent',
+    'vadSilenceMsOf', 'vadRequiredQuiet', 'voiceCfgState',
+    src + '\n;return officialVoiceBridge;'
+  );
+  let seq = 0;
+  const bridge = factory(
+    env.window, env.document, env.navigator, env.localStorage,
+    (fn, ms) => { const rec = { fn, ms, cleared: false, id: ++seq }; env.timers.push(rec); return rec.id; },
+    (id) => { const rec = env.timers.find((r) => r.id === id); if (rec) rec.cleared = true; },
+    class FakeMO { constructor(cb) { this.cb = cb; env.observerInstances.push(this); } observe() {} disconnect() {} },
+    function MouseEvent(type, init) { return { type, init }; },
+    S.vadSilenceMsOf, S.vadRequiredQuiet, S.voiceCfgState
+  );
+  bridge.setTimer(env.timerSvc);
+  return bridge;
+}
+
+// 变异①：把「运行期自愈（只降不升）」整段退回 ⇒ 校准被语音污染后阈值不再回落
+function mutateNoSelfHeal(src) {
+  const anchor = 'if (rms < noiseFloor) {';
+  assert.ok(src.includes(anchor), '变异锚点须存在（自愈分支）');
+  return src.replace(anchor, 'if (false) {');
+}
+// 变异②：把「校准结束清平滑残留」退回 ⇒ N1 形态被误判为「听到过语音」⇒ 误停
+function mutateKeepSmooth(src) {
+  const anchor = '            smoothRms = 0;\n';
+  assert.ok(src.includes(anchor), '变异锚点须存在（校准清平滑）');
+  return src.replace(anchor, '');
+}
+
+test('OVB-VAD-V01 变异自证·正例必红：退回「无自愈」⇒ F2 判据必须失败', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  installGenFrames(env, stageGen([
+    { frames: 5, rms: 0.05 }, { frames: 100, rms: 0.05 }, { frames: 300, rms: 0.001 },
+  ]));
+  const bridge = loadMutantBridge(env, mutateNoSelfHeal);
+  bridge.install();
+  const r = await driveVad(env, bridge);
+  const wouldPass = (r.clicks === 1);
+  assert.equal(wouldPass, false, '退回无自愈后 F2（校准含语音）判据必须为红 —— 若仍绿说明判据没牙');
+});
+
+test('OVB-VAD-V02 变异自证·负控必绿：同一变异下 F1 低电平判据仍须通过', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  installGenFrames(env, stageGen([
+    { frames: 5, rms: 0.001 }, { frames: 100, rms: 0.02 }, { frames: 300, rms: 0.001 },
+  ]));
+  const bridge = loadMutantBridge(env, mutateNoSelfHeal);
+  bridge.install();
+  const r = await driveVad(env, bridge);
+  assert.equal(r.clicks, 0, '负控·低电平不得误停（与自愈无关，必须仍绿）');
+});
+
+test('OVB-VAD-V03 变异自证·正例必红：退回「不清平滑」⇒ N1 误停判据必须失败', async () => {
+  const env = makeFakeEnv({ recordingPhase: true });
+  installGenFrames(env, stageGen([
+    { frames: 5, rms: 0.05 }, { frames: 400, rms: 0.002 },
+  ]));
+  const bridge = loadMutantBridge(env, mutateKeepSmooth);
+  bridge.install();
+  const r = await driveVad(env, bridge);
+  const wouldPass = (r.clicks === 0);
+  assert.equal(wouldPass, false, '退回不清平滑后 N1（校准含噪但未说话）必须**误停** ⇒ 证明该判据有牙');
 });
