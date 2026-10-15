@@ -406,3 +406,143 @@ test('VOICE-G5-V02 变异自证·负控必绿：同一变异下，**显式**调�
   assert.equal(M.api.voiceCfgState.value.hotkey.enabled, true, '负控：显式 syncVoiceFromHost() 仍须同步成功（设置页路径未变）');
   assert.equal(M.api.voiceCfgState.synced, true, '负控：显式调用后 synced 置真');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHG-104（2026-10-15 · `G-6` 修复）：语音配置同步的**有界重试**
+// ═══════════════════════════════════════════════════════════════════════════════
+// 由来：`G-5` 建的模块级同步**无重试** ⇒ 若页面加载早于宿主就绪，首次同步失败后
+//   配置整页保持默认 ⇒ 热键静默失效，**表象与 `G-5` 完全相同**（现场验收假阴性）。
+// 对齐：增强模块 `syncConfigFromHost()`（`src/client/state.js:307-308/313-353`）自带
+//   有界重试 —— `HOST_SYNC_MAX_ATTEMPTS = 10` / `HOST_SYNC_RETRY_MS = 2000`，
+//   三条失败路径（host 不可用 `:326` / `!r.ok` `:329` / `.catch` `:352`）**均**进重试，
+//   计数达上限（`:316`）则**终止**。本组断言语音侧**同款**行为。
+// 判据：
+//   G6-01 首次失败 → 重试成功 ⇒ **终态** synced=true 且目标字段生效（断言终态，不只看次数）
+//   G6-02 重试**耗尽** ⇒ 有界终止：不再发起新请求，且 synced 置真（不得静默永远悬着）
+//   G6-03 首次即成功 ⇒ **不得**多余请求（断言请求次数 === 1）
+//   G6-V01 变异（重试退回只试一次）⇒ G6-01 **必红**
+//   G6-V02 负控：同一变异下「首次即成功」路径行为不变
+//
+// ⚠ 判别力说明（D-14 假锁病历）：**必须能区分「重试起作用」与「本来就会成功」**。
+//   若 host 从未失败，重试代码根本不执行 ⇒ 该组对重试的存在与否**无判别力**。
+//   故 G6-01 让 host **真实失败若干次**（返回 !ok），再在后续尝试成功 ⇒
+//   只有「确实重试了」才能得到 synced=true；变异版（只试一次）必然停在未同步。
+//   计时器用**伪 timerSvc** 确定性驱动（不真等 2s）。
+
+// 可注入 timerSvc 的沙箱（用于确定性驱动重试），host 按给定脚本逐次响应
+function evalStateWithRetry(script, opts) {
+  const o = opts || {};
+  let src = require('../src/client/voice/state.js');
+  if (o.dropRetry) {
+    // 变异：把重试计数上限压成 1 ⇒ 等价于「只试一次」（不改判定逻辑，只改上限）
+    src = src.replace('const VOICE_HOST_SYNC_MAX_ATTEMPTS = 10;', 'const VOICE_HOST_SYNC_MAX_ATTEMPTS = 1;');
+  }
+  const lsBacking = new Map();
+  const localStorage = {
+    getItem: (k) => (lsBacking.has(k) ? lsBacking.get(k) : null),
+    setItem: (k, v) => lsBacking.set(k, String(v)),
+    removeItem: (k) => lsBacking.delete(k),
+  };
+  const out = { calls: 0, pending: [], fired: 0 };
+  const host = {
+    call: () => {
+      out.calls += 1;
+      const step = script[Math.min(out.calls - 1, script.length - 1)];
+      if (step === 'throw') return Promise.reject(new Error('boom'));
+      if (step === 'ok') return Promise.resolve({ ok: true, config: { version: 2, voice: { hotkey: { enabled: true, combo: 'Alt+Backquote' }, vad: { enabled: true }, autoEnhance: false, refine: { enabled: false } } } });
+      return Promise.resolve({ ok: false });   // 'fail'
+    },
+  };
+  // 伪 timerSvc：收集，由用例显式驱动（确定性，不真等）
+  const timerSvc = {
+    timeout: (fn) => { out.pending.push(fn); return out.pending.length; },
+    interval: (fn) => { out.pending.push(fn); return out.pending.length; },
+  };
+  const fn = new Function('localStorage', 'host', 'timerSvc',
+    src + '\nreturn { voiceCfgState, syncVoiceFromHost };');
+  const api = fn(localStorage, host, timerSvc);
+  return { api, out, lsBacking };
+}
+
+const settle3 = () => new Promise((r) => setImmediate(r)).then(() => new Promise((r) => setImmediate(r))).then(() => new Promise((r) => setImmediate(r)));
+
+test('VOICE-G6-01 首次失败 → 重试成功 ⇒ 配置**最终生效**（断言终态）', async () => {
+  // 判别力：host 前 2 次返回 !ok（真实失败），第 3 次成功。
+  //   只有「确实重试了」才能到 ok ⇒ 终态 synced=true 且 hotkey 生效。
+  const S = evalStateWithRetry(['fail', 'fail', 'ok']);
+  await settle3();
+  assert.equal(S.out.calls, 1, '首次只发 1 次请求（随后应安排重试）');
+  assert.equal(S.api.voiceCfgState.synced, false, '前置：首次失败 ⇒ 尚未同步');
+  assert.equal(S.out.pending.length, 1, '首次失败 ⇒ 必须**安排**一次重试（旧实现此处为 0）');
+  // 驱动重试（每次重试间隔由伪 timerSvc 收集，逐次触发）
+  S.out.pending.shift()(); await settle3();
+  assert.equal(S.out.calls, 2, '第 2 次尝试已发起');
+  assert.equal(S.api.voiceCfgState.value.hotkey.enabled, false, '第 2 次仍失败 ⇒ 仍未生效');
+  S.out.pending.shift()(); await settle3();
+  assert.equal(S.out.calls, 3, '第 3 次尝试已发起（重试确实在起作用）');
+  // ⭐ 终态断言
+  assert.equal(S.api.voiceCfgState.synced, true, '重试成功后 synced 必须为真（终态）');
+  assert.equal(S.api.voiceCfgState.value.hotkey.enabled, true, '⚠ 终态：配置必须**最终生效**（hotkey 已启用）');
+  assert.equal(S.out.pending.length, 0, '成功后不得再安排重试');
+});
+
+test('VOICE-G6-02 重试**耗尽** ⇒ 有界终止（不再发新请求，且不得静默永远悬着）', async () => {
+  const S = evalStateWithRetry(['fail'], { });   // 永远失败
+  await settle3();
+  let guard = 0;
+  while (S.out.pending.length > 0 && guard < 50) { S.out.pending.shift()(); await settle3(); guard += 1; }
+  assert.ok(guard < 50, '⚠ 必须在有限步内终止（不得无限重试）');
+  // 语音侧上限 = 增强模块同款 10
+  assert.equal(S.out.calls, 10, '⚠ 请求次数须恰好等于既有实现的 HOST_SYNC_MAX_ATTEMPTS(=10)，不得自设阈值');
+  assert.equal(S.out.pending.length, 0, '耗尽后不得再安排任何重试');
+  assert.equal(S.api.voiceCfgState.synced, true, '⚠ 终止态必须可见（synced 置真）—— 不得静默永远悬着');
+  // 再等也给不出新请求
+  await settle3();
+  assert.equal(S.out.calls, 10, '终止后不得再发起新请求');
+});
+
+test('VOICE-G6-03 首次即成功 ⇒ **不得**产生多余请求（断言请求次数）', async () => {
+  const S = evalStateWithRetry(['ok']);
+  await settle3();
+  assert.equal(S.out.calls, 1, '⚠ 首次成功 ⇒ 恰好 1 次请求（多 1 次即属多余的重复同步）');
+  assert.equal(S.out.pending.length, 0, '首次成功 ⇒ 不得安排任何重试定时器');
+  assert.equal(S.api.voiceCfgState.synced, true, '首次成功 ⇒ 立即 synced');
+  assert.equal(S.api.voiceCfgState.value.hotkey.enabled, true, '首次成功 ⇒ 配置立即生效');
+});
+
+test('VOICE-G6-V01 变异自证·正例必红：重试上限退回 1（只试一次）⇒ G6-01 判据必须失败', async () => {
+  const S = evalStateWithRetry(['fail', 'fail', 'ok'], { dropRetry: true });
+  await settle3();
+  let guard = 0;
+  while (S.out.pending.length > 0 && guard < 50) { S.out.pending.shift()(); await settle3(); guard += 1; }
+  // 变异后：不重试 ⇒ 永远停在未同步 ⇒ G6-01 的终态断言必红
+  assert.equal(S.api.voiceCfgState.value.hotkey.enabled, false,
+    '⚠ 变异后必须停在"未同步"（若此处为 true ⇒ G6-01 没有判别力）');
+  assert.equal(S.out.calls, 1, '变异后只应发 1 次请求（= 只试一次）');
+});
+
+test('VOICE-G6-V02 变异自证·负控必绿：同一变异下「首次即成功」路径**行为不得改变**', async () => {
+  const S = evalStateWithRetry(['ok'], { dropRetry: true });
+  await settle3();
+  assert.equal(S.out.calls, 1, '负控：首次成功仍恰好 1 次请求');
+  assert.equal(S.api.voiceCfgState.synced, true, '负控：首次成功仍 synced');
+  assert.equal(S.api.voiceCfgState.value.hotkey.enabled, true, '负控：首次成功仍生效（与重试无关）');
+  assert.equal(S.out.pending.length, 0, '负控：首次成功不得安排重试');
+});
+
+test('VOICE-G6-V03 负控：已关的开关在重试路径下**仍不得生效**（未改任何开关语义）', async () => {
+  // 磁盘明确 hotkey.enabled=false；首次失败、重试成功 ⇒ 终态仍须为 false
+  const lsBacking = new Map();
+  const localStorage = { getItem: (k) => (lsBacking.has(k) ? lsBacking.get(k) : null), setItem: (k, v) => lsBacking.set(k, String(v)), removeItem: (k) => lsBacking.delete(k) };
+  const pending = []; let calls = 0;
+  const host = { call: () => { calls += 1; return calls === 1 ? Promise.resolve({ ok: false })
+    : Promise.resolve({ ok: true, config: { version: 2, voice: { hotkey: { enabled: false, combo: '' }, vad: { enabled: true }, autoEnhance: false, refine: { enabled: false } } } }); } };
+  const timerSvc = { timeout: (fn) => { pending.push(fn); return 1; }, interval: (fn) => { pending.push(fn); return 1; } };
+  const src = require('../src/client/voice/state.js');
+  const api = new Function('localStorage', 'host', 'timerSvc', src + '\nreturn { voiceCfgState };')(localStorage, host, timerSvc);
+  await settle3();
+  pending.shift()(); await settle3();
+  assert.equal(calls, 2, '前置：确实重试了一次');
+  assert.equal(api.voiceCfgState.synced, true, '前置：重试已成功');
+  assert.equal(api.voiceCfgState.value.hotkey.enabled, false, '负控：已关的开关 ⇒ 重试成功也仍须为 false');
+});
