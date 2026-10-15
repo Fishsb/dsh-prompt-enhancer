@@ -2412,3 +2412,149 @@ test('OVB-UN-V06 变异自证·负控必绿：同一变异下「点 X 不得虚�
   assert.equal(bridge.snapshot().sessionsStarted, sessions,
     '负控必绿：无论是否重开会话，点 X 都不得虚增会话计数');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHG-098（2026-10-15 点按语义修复批）：点按 = **模拟点击官方按钮一次**
+// ═══════════════════════════════════════════════════════════════════════════════
+// 用户钉死的语义（逐字）：「点按的逻辑应该是模拟官方语音按钮的点按啊」
+//   ⇒ **一次点按 = 一次官方按钮点击**：官方未在录时点按 ⇒ 只派发「开始」，**不得**因松手而停；
+//     官方已在录时点按 ⇒ 派发「停止」（= 设计里的「再按结束」）。
+//   ⇒ **长按（≥500ms）保持原样**：按住说话、松开停止（用户明说「长按可以正常识别」）。
+// 病（取证批 CHG-097 双证坐实，`hotkey.js:290` 旧写法）：
+//   `keydown` 置位 → `keyup` 立即消费 ⇒ 一次点按派发「开始+停止」⇒ 录音 <100ms
+//   ⇒ 官方 `client.js:4759` `decodeAudioData` 抛 `EncodingError`（真机 blob 110B）
+//   ⇒ 用户看到「语音识别失败：Unable to decode audio data」。
+// 本组判据（逐条有牙）：
+//   POINT-01 <100ms 档：官方未在录 ⇒ **只**派发开始（不得派发停止）
+//   POINT-02 100–500ms 档：同上（与时长无关，仍是"点按"）
+//   POINT-03 >500ms 档（长按）：1 开始 + 1 停止（**负控：不得改变**）
+//   POINT-04 「再按结束」：第 1 次点按开着 ⇒ 第 2 次点按 ⇒ 派发停止（恰好 1 次）
+//   POINT-05 判别力：**同一时序**下，「竞态侥幸」不得蒙混（见下注 D-14）
+//   POINT-V01/V02 变异自证（退回 `statusRef` 旧判据 ⇒ POINT-01 必红；长按负控必绿）
+//
+// ⚠ **判别力说明（D-14 假锁病历）**：本组**不**只在「相位尚未落地」的时序下测 —— 那正是取证批
+//   实测到的「**竞态侥幸**」形态（甲档：`stopClicks=0` 只因停止按钮还没挂载，**不是**因为实现守语义）。
+//   故 POINT-01 的关键在于：**先让官方进入 recording（相位真值可见），再松开** ——
+//   此时旧实现**必然**派发停止（乙档已实测 `stopClicks=1`），新实现**必须**为 0。
+//   若夹具只在"相位未落地"下测，新旧两版**都是 0** ⇒ 判据**没有判别力**（假锁）。
+
+// 三档通用驱动：按下 → （可选：让官方相位生效）→ 松开
+async function runPointScenario(gapMs, opts) {
+  const o = opts || {};
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const host = buildHotkeyHost(env, bridge, { autoEnhance: false, hotkey: true, sessionId: o.sessionId || 'sess-pt' });
+  host.render('');
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  // 按下前是否让官方**已在录**：模拟「第二次点按」或「竞态命中（官方已进 recording）」
+  if (o.recordingBeforePress) { env.document._attr = 'recording'; mo.cb(); }
+  host.keydown();
+  if (o.recordingAfterPress) { env.document._attr = 'recording'; mo.cb(); }
+  await new Promise((r) => setTimeout(r, gapMs));
+  host.keyup();
+  // 长按分支的补停：驱动其有界轮询
+  for (let i = 0; i < 20; i++) host.runTimeouts(1);
+  return { env, bridge, host, snap: bridge.snapshot() };
+}
+
+test('OVB-POINT01 点按<100ms：官方未在录 ⇒ **只**派发开始，不得派发停止（录音不得被掐断）', async () => {
+  // ⚠ 判别力关键：here 让官方在**松开之前**已进 recording（= 取证批乙档形态）。
+  //   旧实现此时必然 stopClicks=1（录音被掐断）；新实现必须为 0。
+  const r = await runPointScenario(60, { recordingAfterPress: true, sessionId: 'sess-pt1' });
+  assert.equal(r.snap.startClicks, 1, '点按须派发一次官方「开始」');
+  assert.equal(r.snap.stopClicks, 0,
+    '⚠ 点按**不得**派发停止（旧实现此处为 1 = 录音 <100ms 被掐断 ⇒ 官方 decodeAudioData 抛错）');
+  assert.equal(r.snap.stopMissed, 0, '点按分支不得计 missed');
+  assert.equal(r.host.store.error, null, '正常点按不得留下 VOICE_BUSY 一类错误（不得静默失败的另一面）');
+});
+
+test('OVB-POINT02 点按 100–500ms：语义与 <100ms 档**一致**（仍是"点按"，不得因时长而变）', async () => {
+  const r = await runPointScenario(250, { recordingAfterPress: true, sessionId: 'sess-pt2' });
+  assert.equal(r.snap.startClicks, 1, '点按须派发一次官方「开始」');
+  assert.equal(r.snap.stopClicks, 0, '⚠ 100–500ms 仍属"点按" ⇒ **不得**派发停止（与 <100ms 同语义）');
+});
+
+test('OVB-POINT03 负控·长按>500ms：按住说话、松开停止 ⇒ 1 开始 + 1 停止（**行为不得改变**）', async () => {
+  const r = await runPointScenario(650, { recordingAfterPress: true, sessionId: 'sess-pt3' });
+  assert.equal(r.snap.startClicks, 1, '长按须派发一次官方「开始」');
+  assert.equal(r.snap.stopClicks, 1, '⚠ 长按=松开即停（用户明说长按正常）⇒ 必须恰好 1 次停止（负控：本批不得改变它）');
+  assert.equal(r.snap.stopMissed, 0, '长按补停成功 ⇒ 不得计 missed');
+});
+
+test('OVB-POINT04 「再按结束」：官方已在录时点按 ⇒ 派发停止（恰好 1 次）', async () => {
+  const r = await runPointScenario(60, { recordingBeforePress: true, sessionId: 'sess-pt4' });
+  assert.equal(r.snap.stopClicks, 1, '⚠ 官方已在录 ⇒ 这一次点按 = 点一下官方「停止」⇒ 恰好 1 次');
+  assert.equal(r.snap.startClicks, 0, '已在录 ⇒ 不得再派发「开始」（否则走 already-capturing、写 VOICE_BUSY 掩盖意图）');
+  assert.equal(r.host.store.error, null, '「再按结束」不得产生 VOICE_BUSY');
+});
+
+test('OVB-POINT05 判别力自证：同一时序下，旧判据（statusRef）**必然**派发停止 ⇒ 判据有牙', async () => {
+  // 用**纯静态**判据补充行为读数：确认新判据源**不是** statusRef（否则与旧实现同形 = 假锁）。
+  const hk = decodeChunk('src/client/voice/hotkey.js');
+  assert.ok(hk.includes("pressWasRecordingRef.current === true"),
+    '点按分支须以「按下前的相位真值快照」为判据（本批修复点）');
+  assert.equal(/if \(statusRef\.current === 'recording'\) stopAndTranscribe\(0\);/.test(hk), false,
+    '⚠ 旧的 statusRef 判据必须已消失（同一次按键刚置真 ⇒ 恒真 ⇒ 必停 = 假锁根源）');
+  // 相位真值读取面存在（本次按下的分流依据）
+  assert.ok(hk.includes('function officialRecordingNow()'), '须有官方相位真值读取器');
+  assert.ok(hk.includes("s.recording === true"), '须优先以桥快照的 recording 为相位真值');
+});
+
+// ── 变异自证：把点按判据退回 statusRef（纯内存副本）⇒ POINT01/POINT04 必红 ──────────
+// 变异名运行时拼接（不在源码里形成字面量，与既有变异用例同款做法）。
+function mutatePointPress(src) {
+  const anchor = 'if (pressWasRecording' + 'Ref.current === true) stopAndTranscribe(0);';
+  assert.ok(src.includes(anchor), '变异锚点须存在（新点按判据）');
+  return src.replace(anchor, "if (statusRef.current === 'recording') stopAndTranscribe(0);");
+}
+
+test('OVB-POINT-V01 变异自证·正例必红：退回 statusRef 判据 ⇒ 点按必派发停止', async () => {
+  // 在**纯内存副本**上求值变异版 hotkey，驱动同一时序，确认其 stopClicks===1（= 判据有牙）
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const src = mutatePointPress(decodeChunk('src/client/voice/hotkey.js'));
+  const mini = makeMiniReact();
+  const timerRegs = [];
+  const timerSvcLocal = {
+    interval: (fn, ms) => { const r = { fn, ms, kind: 'interval', cleared: false }; timerRegs.push(r); return () => { r.cleared = true; }; },
+    timeout: (fn, ms) => { const r = { fn, ms, kind: 'timeout', cleared: false }; timerRegs.push(r); return () => { r.cleared = true; }; },
+  };
+  bridge.setTimer(timerSvcLocal);
+  const voiceCfgState = { value: { autoEnhance: false, vad: { enabled: true }, hotkey: { enabled: true, combo: 'Alt+Backquote' }, refine: {} }, listeners: new Set(), synced: true };
+  const storeStub = { phase: 'idle', error: null };
+  const factory = new Function(
+    'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'voiceHotkeyDisplay', 'parseVoiceHotkey',
+    'matchVoiceHotkey', 'isEnhancing', 'subscribe', 'storeFor', 'startVoiceRecording', 'stopVoiceRecording',
+    'isVoiceRecording', 'insertVoiceText', 'notify', 'enhance', 'timerSvc', 'officialVoiceBridge', 'makeT', 'ZH',
+    'MarqueeSelect', 'CollapsibleSection', 'setInterval', 'clearInterval', 'setTimeout', 'navigator', 'window',
+    src + '\n;return { VoiceHotkeyHost };'
+  );
+  const api = factory(
+    mini.React, { call: () => Promise.resolve({ ok: true }) },
+    voiceCfgState, () => () => {}, (c) => c, () => null, () => false, () => false,
+    () => () => {}, () => storeStub,
+    async () => { throw new Error('should not record'); }, async () => null, () => false,
+    () => Promise.resolve({ filled: true }), () => {},
+    (...a) => {}, timerSvcLocal, bridge, (p) => (k) => k, {}, null, null,
+    setInterval, clearInterval, setTimeout, env.navigator, env.window
+  );
+  const props = { sessionId: 'sess-mut', inputActions: { setDraft() {} }, input: { draft: '' } };
+  mini.begin(); api.VoiceHotkeyHost(props); mini.runEffects();
+  const KEY = () => ({ code: 'Backquote', key: '`', ctrlKey: false, altKey: true, shiftKey: false, metaKey: false, repeat: false, preventDefault() {}, stopPropagation() {} });
+  env.window._fire('keydown', KEY());
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  env.document._attr = 'recording'; mo.cb();            // 官方已进 recording（竞态命中）
+  await new Promise((r) => setTimeout(r, 60));
+  env.window._fire('keyup', KEY());
+  for (let i = 0; i < 20; i++) { for (const rec of timerRegs) { if (!rec.cleared && rec.kind === 'timeout') { rec.cleared = true; rec.fn(); } } }
+  assert.equal(bridge.snapshot().stopClicks, 1,
+    '⚠ 退回 statusRef 判据后，点按**必然**派发停止（= 录音被掐断）—— 若此处不为 1，说明本组判据没有判别力');
+});
+
+test('OVB-POINT-V02 变异自证·负控必绿：同一变异下长按仍须 1 开始 + 1 停止（行为不变）', async () => {
+  const r = await runPointScenario(650, { recordingAfterPress: true, sessionId: 'sess-ptv2' });
+  assert.equal(r.snap.stopClicks, 1, '负控：长按松开即停与点按修复无关 ⇒ 必须仍为 1 次停止');
+  assert.equal(r.snap.startClicks, 1, '负控：长按仍须 1 次开始');
+});
