@@ -2498,7 +2498,19 @@ test('OVB-POINT05 判别力自证：同一时序下，旧判据（statusRef）**
     '⚠ 旧的 statusRef 判据必须已消失（同一次按键刚置真 ⇒ 恒真 ⇒ 必停 = 假锁根源）');
   // 相位真值读取面存在（本次按下的分流依据）
   assert.ok(hk.includes('function officialRecordingNow()'), '须有官方相位真值读取器');
-  assert.ok(hk.includes("s.recording === true"), '须优先以桥快照的 recording 为相位真值');
+  // ⚠ CHG-105（2026-10-16 · 线二现场失效修复）**订正**本行断言：
+  //   原断言写的是 `s.recording === true`（= 以桥快照 `snapshot().recording` 为相位真值）——
+  //   而该字段 = `!!b.active`（官方是否仍**占用语音入口**），**不是**「是否确在采集」；
+  //   官方「未识别」(feedback) 时它**仍为 true** ⇒ 会把未识别态**误判为「正在录」**
+  //   ⇒ `pressStart` 不调 `startRec()`、`pressEnd` 反而派发**停止** = 现场「不能继续识别」。
+  //   ⇒ 该断言其实**把缺陷固化成了预期**（与 `F-2` 同一类错误）。现订正为桥的**同语义相位面**
+  //   `officialCapturing()`（= 官方渲染的相位真值）。
+  //   ⚠ 判别力不变：本用例的核心仍是「点按判据源**不得**是 `statusRef`」（上一行断言），
+  //     这里只是把**正向**的相位真值源订正为正确的那一个。
+  assert.ok(hk.includes('officialVoiceBridge.officialCapturing() === true'),
+    '须以桥导出的相位真值 officialCapturing() 为判据（不得用 snapshot().recording = !!active）');
+  assert.equal(/officialVoiceBridge\.snapshot\(\)\.recording === true/.test(hk), false,
+    '⚠ CHG-105：不得再以 snapshot().recording（= !!b.active，语义不同）作相位真值');
 });
 
 // ── 变异自证：把点按判据退回 statusRef（纯内存副本）⇒ POINT01/POINT04 必红 ──────────
@@ -2557,4 +2569,188 @@ test('OVB-POINT-V02 变异自证·负控必绿：同一变异下长按仍须 1 �
   const r = await runPointScenario(650, { recordingAfterPress: true, sessionId: 'sess-ptv2' });
   assert.equal(r.snap.stopClicks, 1, '负控：长按松开即停与点按修复无关 ⇒ 必须仍为 1 次停止');
   assert.equal(r.snap.startClicks, 1, '负控：长按仍须 1 次开始');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHG-105（2026-10-16 · 线二**现场失效**修复）：未识别态再按热键 ⇒ 必须能重开
+// ═══════════════════════════════════════════════════════════════════════════════
+// 现场读数（用户逐字）：「是这个不行，未识别状态使用热键不能继续识别」
+// ⇒ **线二（2463390 + 6b5180a）判据全绿、到位取证也过、且已生效，但现场第 4 块不通过。**
+// 病根（本批实测复现，**桥没问题、热键侧门禁吞了调用**）：
+//   `statusRef` 的语义 = 「已向官方派发过开始」，只在三处复位（派发失败 ×2 / 我们自己派发停止）。
+//   而**会话以 `feedback`（未识别）收场时无人复位**（官方自己结束、我们从未派发停止）
+//   ⇒ `statusRef` 永卡 `'recording'` ⇒ `pressStart` 入口守卫
+//   （`if (!wasRecordingAtPress && statusRef.current !== 'idle') return;`）把第二次按下**整个吞掉**
+//   ⇒ 根本没走到 `startRec()` ⇒ 桥侧线二的 retry 锚（`OVB_RETRY_LABELS`）**永远没机会被调到**。
+// ⚠ 为什么既有线二判据抓不到：线二用例**直调 `bridge.startOfficial()`**（桥层），
+//   **从不经过热键按键路径** ⇒ 夹具与现场分层，属「夹具不等于现场」的又一实例。
+// 判据：
+//   UNF-01 正例：热键开启 → 未识别收场 → 再按热键 ⇒ **必须派发 retry 锚恰好 1 次**（终态断言）
+//   UNF-02 判别力锚点：同一路径断言 `statusRef` 已被会话结束复位（`startMissed===0` + `lastStartVia` 为 retry）
+//   UNF-03 负控：真「采集中」再按热键 ⇒ 仍须拒绝重复启动（互斥保护不得破坏）
+//   UNF-V01 变异自证·正例必红：退回（删掉会话结束复位）⇒ UNF-01 必红
+//   UNF-V02 变异自证·负控必绿：同一变异下「点按开始 / 长按松开即停」路径行为不变
+
+// 驱动：真实 hotkey + 真实 bridge，走**真实按键路径**（不是直调桥）
+function buildFieldHost(opts) {
+  const o = opts || {};
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const host = buildHotkeyHost(env, bridge, { autoEnhance: false, hotkey: true, sessionId: o.sessionId || 'sess-unf' });
+  host.render('');
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  return { env, bridge, host, mo };
+}
+
+test('OVB-UNF01 ⭐线二现场失效修复：未识别态下再按热键 ⇒ 必须能重新开始（派发 retry 锚恰好 1 次）', () => {
+  const r = buildFieldHost({ sessionId: 'sess-unf1' });
+  const { env, bridge, host, mo } = r;
+  // 第 1 步：热键点按 ⇒ 开始
+  host.keydown();
+  env.document._attr = 'recording'; mo.cb();
+  host.keyup();
+  assert.equal(bridge.snapshot().startClicks, 1, '前置：首次热键已派发开始');
+  // 第 2 步：官方走到「未识别」（feedback）—— 不出声
+  env.document._attr = 'feedback'; mo.cb();
+  assert.equal(bridge.snapshot().lastPhase, 'feedback', '前置：确在未识别态');
+  assert.equal(bridge.officialCapturing(), false, '前置：feedback 不算「采集中」');
+  // 第 3 步：⭐ 再按热键 ⇒ 必须重新开始
+  const beforeRetry = bridge.snapshot().retryClicks;
+  host.keydown();
+  env.document._attr = 'recording'; mo.cb();
+  host.keyup();
+  const snap = bridge.snapshot();
+  assert.equal(snap.retryClicks, beforeRetry + 1,
+    '⚠ 核心：未识别态再按热键**必须**派发 retry 锚（旧实现 0 增长 = 现场「按了没反应」）');
+  assert.equal(snap.lastStartVia, 'official-retry-button', '⚠ 必须走未识别窗口的真实锚（重新录音）');
+  assert.equal(snap.startMissed, 0, '不得退化成「找不到按钮」');
+});
+
+test('OVB-UNF02 判别力锚点：会话以未识别收场 ⇒ statusRef 必须已复位（否则第二次按下被吞）', () => {
+  const r = buildFieldHost({ sessionId: 'sess-unf2' });
+  const { env, bridge, host, mo } = r;
+  host.keydown(); env.document._attr = 'recording'; mo.cb(); host.keyup();
+  env.document._attr = 'feedback'; mo.cb();
+  // 复位判据：再按一次必须**真的派发**（若 statusRef 未复位，守卫会 early-return ⇒ 0 派发）
+  const before = bridge.snapshot().retryClicks + bridge.snapshot().startClicks;
+  host.keydown(); host.keyup();
+  const after = bridge.snapshot().retryClicks + bridge.snapshot().startClicks;
+  assert.equal(after, before + 1, '⚠ 判别力锚点：未识别收场后 statusRef 必须已复位 ⇒ 下次按下必须产生 1 次派发');
+});
+
+test('OVB-UNF03 负控：真「采集中」再按热键 ⇒ 仍须拒绝重复启动（互斥保护不得破坏）', () => {
+  const r = buildFieldHost({ sessionId: 'sess-unf3' });
+  const { env, bridge, host, mo } = r;
+  host.keydown(); env.document._attr = 'recording'; mo.cb(); host.keyup();
+  const snap0 = bridge.snapshot();
+  // 官方**确在采集中**（recording 相位仍在）⇒ 第二次按下应走「停止」（点按=再按结束），**不得**再开一轮
+  host.keydown(); host.keyup();
+  const snap = bridge.snapshot();
+  assert.equal(snap.startClicks, snap0.startClicks, '负控：采集中再按不得再派发「开始」（互斥保护）');
+  assert.equal(snap.retryClicks, snap0.retryClicks, '负控：采集中不得派发 retry 锚');
+});
+
+// ── 变异自证（CHG-105）：两处修复各自退回 ⇒ UNF01 必红 ─────────────────────────
+// ⚠ 本缺陷**两处独立成因**，故变异亦分两路：
+//   D1（会话结束未复位 statusRef）· D2（相位真值读错源：snapshot().recording ≠ 相位真值）
+//   必须在**纯内存副本**上分别退回，证明每一条判据都真的盯着自己的成因。
+//   变异名运行时拼接（不在源码里形成字面量，与既有变异用例同款）。
+
+const mutateHotkey = (src, kind) => {
+  if (kind === 'no-reset') {
+    const anchor = "      if (statusRef.current !== 'idle') statusRef.current = 'idle';\n";
+    assert.ok(src.includes(anchor), '变异锚点须存在（D1 会话结束复位）');
+    return src.replace(anchor, '');
+  }
+  if (kind === 'wrong-phase-source') {
+    const anchor = 'return officialVoiceBridge.officialCapturing() === true;';
+    assert.ok(src.includes(anchor), '变异锚点须存在（D2 相位真值源）');
+    return src.replace(anchor, 'return officialVoiceBridge.snapshot().recording === true;');
+  }
+  throw new Error('unknown mutation kind: ' + kind);
+};
+
+// 用变异版 hotkey 驱动同一条现场路径
+function buildMutatedHost(mutation, opts) {
+  const o = opts || {};
+  const env = makeFakeEnv({ recordingPhase: true });
+  const bridge = loadBridge(env);
+  bridge.install();
+  const mini = makeMiniReact();
+  const timerRegs = [];
+  const timerSvcLocal = {
+    interval: (fn, ms) => { const r = { fn, ms, kind: 'interval', cleared: false }; timerRegs.push(r); return () => { r.cleared = true; }; },
+    timeout: (fn, ms) => { const r = { fn, ms, kind: 'timeout', cleared: false }; timerRegs.push(r); return () => { r.cleared = true; }; },
+  };
+  bridge.setTimer(timerSvcLocal);
+  // ⚠ combo 必须与下面的 KEY 桩**严格一致**（KEY 的 altKey=false ⇒ combo 不得含 Alt；
+  //   matchVoiceHotkey 用严格比较，不一致 ⇒ 处理器根本不触发 ⇒ 全部读数恒 0
+  //   ⇒ 变异用例会**平凡通过**（0===0）＝假绿，正是 D-14 病历。实测踩到过。）
+  const voiceCfgState = { value: { autoEnhance: false, vad: { enabled: true }, hotkey: { enabled: true, combo: 'Backquote' }, refine: {} }, listeners: new Set(), synced: true };
+  const storeStub = { phase: 'idle', error: null };
+  const src = mutateHotkey(decodeChunk('src/client/voice/hotkey.js'), mutation);
+  const factory = new Function(
+    'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'voiceHotkeyDisplay', 'parseVoiceHotkey',
+    'matchVoiceHotkey', 'isEnhancing', 'subscribe', 'storeFor', 'startVoiceRecording', 'stopVoiceRecording',
+    'isVoiceRecording', 'insertVoiceText', 'notify', 'enhance', 'timerSvc', 'officialVoiceBridge', 'makeT', 'ZH',
+    'MarqueeSelect', 'CollapsibleSection', 'setInterval', 'clearInterval', 'setTimeout', 'navigator', 'window',
+    src + '\n;return { VoiceHotkeyHost };'
+  );
+  const api = factory(
+    mini.React, { call: () => Promise.resolve({ ok: true }) },
+    voiceCfgState, () => () => {}, (c) => c, () => null, () => false, () => false,
+    () => () => {}, () => storeStub,
+    async () => { throw new Error('should not record'); }, async () => null, () => false,
+    () => Promise.resolve({ filled: true }), () => {},
+    (...a) => {}, timerSvcLocal, bridge, (p) => (k) => k, {}, null, null,
+    setInterval, clearInterval, setTimeout, env.navigator, env.window
+  );
+  // ⚠ 顺序与 buildHotkeyHost 完全一致：render() = begin() → 组件调用 → runEffects()
+  //   （顺序错/缺 begin ⇒ effect 不注册 ⇒ 事件处理器缺席，实测踩到）
+  const props = { sessionId: o.sessionId || 'sess-mut-unf', inputActions: { setDraft() {} }, input: { draft: '' } };
+  mini.begin();
+  api.VoiceHotkeyHost(props);
+  mini.runEffects();
+  const KEY = () => ({ code: 'Backquote', key: '`', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, repeat: false, preventDefault() {}, stopPropagation() {} });
+  const mo = env.observerInstances[env.observerInstances.length - 1];
+  return {
+    env, bridge, mo, storeStub,
+    keydown: () => env.window._fire('keydown', KEY()),
+    keyup: () => env.window._fire('keyup', KEY()),
+  };
+}
+
+test('OVB-UNF-V01 变异自证·D1 必红：删掉「会话结束复位 statusRef」⇒ UNF01 判据必须失败', () => {
+  const h = buildMutatedHost('no-reset', { sessionId: 'sess-unf-m1' });
+  h.keydown(); h.env.document._attr = 'recording'; h.mo.cb(); h.keyup();
+  h.env.document._attr = 'feedback'; h.mo.cb();
+  const before = h.bridge.snapshot().retryClicks + h.bridge.snapshot().startClicks;
+  h.keydown(); h.keyup();
+  const after = h.bridge.snapshot().retryClicks + h.bridge.snapshot().startClicks;
+  assert.equal(after, before,
+    '⚠ D1 退回后：未识别态再按热键**必然 0 派发**（= 现场「按了没反应」）。若此处有增长，说明 UNF01 没有判别力');
+});
+
+test('OVB-UNF-V02 变异自证·D2 必红：相位真值退回 snapshot().recording ⇒ UNF01 判据必须失败', () => {
+  const h = buildMutatedHost('wrong-phase-source', { sessionId: 'sess-unf-m2' });
+  h.keydown(); h.env.document._attr = 'recording'; h.mo.cb(); h.keyup();
+  h.env.document._attr = 'feedback'; h.mo.cb();
+  const snap0 = h.bridge.snapshot();
+  h.keydown(); h.keyup();
+  const snap = h.bridge.snapshot();
+  // D2 退回后：未识别态被误判为「正在录」⇒ 点按分支反而派发**停止**（retry 仍为 0）
+  assert.equal(snap.retryClicks, snap0.retryClicks,
+    '⚠ D2 退回后：retry 锚**不得**被派发（相位真值读错源 ⇒ 走不到 startRec）');
+  assert.equal(snap.stopClicks, snap0.stopClicks + 1,
+    '⚠ D2 退回的**特征读数**：未识别态被误判为「正在录」⇒ 反而派发 1 次**停止**（正是现场「不能继续识别」）');
+});
+
+test('OVB-UNF-V03 变异自证·负控必绿：两处变异下，正常「点按开始 / 长按松开即停」行为不变', () => {
+  for (const kind of ['no-reset', 'wrong-phase-source']) {
+    const h = buildMutatedHost(kind, { sessionId: 'sess-unf-v3' + kind });
+    // 正常点按（idle）⇒ 必须仍派发 1 次开始
+    h.keydown(); h.env.document._attr = 'recording'; h.mo.cb(); h.keyup();
+    assert.equal(h.bridge.snapshot().startClicks, 1, '负控(' + kind + ')：正常点按仍须派发 1 次开始');
+  }
 });
