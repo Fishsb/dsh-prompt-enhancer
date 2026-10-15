@@ -141,10 +141,10 @@ const PE_F01_LIB_MANIFEST = {
   'harness.cjs': 'D1 harness facade（BODY 求值入参）',
   'rpc-http.cjs': 'D2 RPC 网关与 HTTP 栅栏（来源校验 / 1MiB 上限 / 路由注册）',
   'rpc-config.cjs': 'D3 配置持久化（config/get · config/set）',
-  'rpc-voice.cjs': 'D4 语音 RPC（voice/status · voice/transcribe）',
+  'rpc-voice.cjs': 'D4 语音 RPC（voice/status）',
   // —— 拆分前既有的 lib 模块（本批未拆分，登记以维持等值集语义）——
   'sys.cjs': '既有：环境 / 路径 / probe',
-  'asr.cjs': '既有：ASR refine / sanitize / 出网',
+  'asr.cjs': '既有：voice 配置净化 / status（CHG-117 起：清口水词已移至 client 半部）',
   'net-proxy.cjs': '既有：出网代理',
   'platform-service.cjs': '既有：跨平台服务',
   'integrity.cjs': '既有：sha256',
@@ -605,10 +605,12 @@ const CLAIMS = [
       //   `speechToText`）⇒ 事实变为 26（原生 8 + bundle 18）。**判据强度不变**：
       //   仍是「注册面必须等于实测条数」（`assert(all.size === 26)` 与旧式的严格等号同形，
       //   未改成区间/大于等于，也未跳过任何一条注册面）。
-      A('A201-1', '结构', '线上注册面条数（与 test/rpc-contract.test.cjs 的数字锁交叉核）', '15 条', () => {
+      // CHG-117（2026-10-16 · 规整改造批）：数字锁 15 → **14**（删 `voice/transcribe`；自建链退役后已无调用方）。
+      //   ⚠ 判据强度不变：仍是「注册面必须等于实测条数」（`all.size === 14` 严格等号，未改区间/未跳过）。
+      A('A201-1', '结构', '线上注册面条数（与 test/rpc-contract.test.cjs 的数字锁交叉核）', '14 条', () => {
         const { native, bundled } = liveMethods();
         const all = new Set([...native, ...bundled]);
-        return assert(all.size === 15, `${all.size} 条（原生 ${native.length} + bundle ${bundled.length}）`);
+        return assert(all.size === 14, `${all.size} 条（原生 ${native.length} + bundle ${bundled.length}）`);
       }),
       // A201-2（判「删 portRestart/makeShortcut + 新增 update/install」）**随 P1-c 退役**：
       //   P1-c 把 `update/install` 也删了（更新执行器整体交回官方 plugin manager，Q3 拍板）

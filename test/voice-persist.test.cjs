@@ -1,9 +1,9 @@
 // voice 语音识别模块契约测试（v3.2.5 · P1）
 // 覆盖：① voice/* RPC schema 校验行为（lib/rpc-schema.cjs）
 //       ② rpc-schema 单一事实源 = lib/rpc-schema.cjs（P1b 2026-09-19：死层副本已删，不得复活）
-//       ③ lib/index.cjs 注册 voice/status·voice/transcribe（防重构删除无感）
+//       ③ lib/rpc-voice.cjs 注册 voice/status（CHG-117：voice/transcribe 已退役，防回流）
 //       ④ lib/client.cjs 产物含 voice 逻辑（构建注入防漂移）+ vendor RecordRTC 注入
-//       ⑤ lib/asr.cjs sanitizeVoiceCfg 行为 + transcribe 空配置/错误路径
+//       ⑤ lib/asr.cjs sanitizeVoiceCfg 行为（CHG-117：filler 面；transcribe 已退役）
 //       ⑥ i18n ZH/EN voice 键平衡（31 键成对防漏）
 const { readFileSync, existsSync } = require('node:fs');
 const { join } = require('node:path');
@@ -18,29 +18,26 @@ test('VOICE-P01 voice/status 无参数通过', () => {
   assert.equal(libSchema.validateRpcArgs('voice/status', {}).ok, true);
 });
 
-test('VOICE-P02 voice/transcribe 合法 data URL 通过', () => {
-  assert.equal(libSchema.validateRpcArgs('voice/transcribe', { audioBase64: 'data:audio/wav;base64,AAAA' }).ok, true);
-  assert.equal(libSchema.validateRpcArgs('voice/transcribe', { audioBase64: 'data:audio/mp3;base64,AAAA', engine: 'cloud' }).ok, true);
-});
-
-test('VOICE-P03 voice/transcribe 非 data URL / 非法 engine 拒绝', () => {
-  assert.equal(libSchema.validateRpcArgs('voice/transcribe', { audioBase64: 'AAAA' }).ok, false);
-  assert.equal(libSchema.validateRpcArgs('voice/transcribe', { audioBase64: 'data:audio/mp4;base64,AAAA' }).ok, false);
-  assert.equal(libSchema.validateRpcArgs('voice/transcribe', { audioBase64: 'data:audio/wav;base64,AAAA', engine: 'x' }).ok, false);
-});
-
-test('VOICE-P04 voice/transcribe 缺 audioBase64 拒绝（MISSING_ARG）', () => {
-  const r = libSchema.validateRpcArgs('voice/transcribe', {});
-  assert.equal(r.ok, false);
-  assert.equal(r.code, 'MISSING_ARG');
+// CHG-117（2026-10-16 · 规整改造批）：原 VOICE-P02/P03/P04 三条 **随 RPC 退役删除**
+//   （判据对象 = `voice/transcribe` 的入参校验；该 RPC 自「自建采集链退役」后**已无调用方**，
+//    `CHG-115` `I-1`；且其调官方 `transcribe()` 漏传 `AbortSignal` 必失败 `I-3` ⇒ 整条死链）。
+//   ⚠ 取而代之是**更强**的锁：该 RPC **不得回流**（schema / 注册面 / 产物调用点 三面）。
+//   ⚠ 这**不是**改浅：判据从"旧物的行为正确"升级为"旧物不许复活"。
+test('VOICE-P02r voice/transcribe 已退役 ⇒ 三面均不得回流（CHG-117）', () => {
+  assert.equal(libSchema.schemas['voice/transcribe'], undefined, 'schema 不得回流');
+  const reg = readFileSync(join(__dirname, '..', 'lib', 'rpc-voice.cjs'), 'utf8');
+  assert.ok(!reg.includes("harness.handle('voice/transcribe'"), 'RPC 注册面不得回流');
+  const client = readFileSync(join(__dirname, '..', 'lib', 'client.cjs'), 'utf8');
+  assert.equal(client.includes("host.call('voice/transcribe'"), false, '产物不得出现该调用点');
 });
 
 // ---- 2. rpc-schema 单一事实源（P1b：双份同步已终结）----
 test('VOICE-P05 rpc-schema 单一事实源：lib 副本含 voice/*，死层副本不得复活', () => {
   const src = readFileSync(join(__dirname, '..', 'lib', 'rpc-schema.cjs'), 'utf8');
   assert.ok(src.includes("'voice/status'"), 'lib/rpc-schema.cjs 缺 voice/status');
-  assert.ok(src.includes("'voice/transcribe'"), 'lib/rpc-schema.cjs 缺 voice/transcribe');
-  assert.ok(src.includes('required: [\'audioBase64\']'), 'voice/transcribe 缺 required');
+  // CHG-117：原两条「voice/transcribe 须存在 + 缺 required」断言**随 RPC 退役删除**
+  //   （它们锁的是"旧物应存在"；现由 VOICE-P02r 的"不得回流"锁接替）。
+  assert.ok(!src.includes("'voice/transcribe'"), 'CHG-117：voice/transcribe 的 schema 不得回流');
   assert.equal(
     JSON.stringify(libSchema.schemas['voice/status']),
     JSON.stringify(require('../lib/rpc-schema.cjs').schemas['voice/status']),
@@ -54,10 +51,12 @@ test('VOICE-P05 rpc-schema 单一事实源：lib 副本含 voice/*，死层副�
 // P2-3（2026-10-13 拆分批）：源码锚**重锚**（voice 域实现移至 lib/rpc-voice.cjs；
 //   asr require 与 merge 语义分别落在 rpc-voice.cjs / rpc-config.cjs），**断言一条不减**
 //   —— 仍是 4 条（两条 harness.handle + asr require + merge 语义）；另加 1 条入口接线断言。
-test('VOICE-P06 voice/status·voice/transcribe RPC 注册（P2-3：域 = lib/rpc-voice.cjs，入口须接线）', () => {
+test('VOICE-P06 voice/status RPC 注册（CHG-117：voice/transcribe 已退役）+ 入口接线', () => {
   const src = readFileSync(join(__dirname, '..', 'lib', 'rpc-voice.cjs'), 'utf8');
   assert.ok(src.includes("harness.handle('voice/status'"), '未注册 voice/status');
-  assert.ok(src.includes("harness.handle('voice/transcribe'"), '未注册 voice/transcribe');
+  // CHG-117：原「须注册 voice/transcribe」断言**随 RPC 退役删除**（同样的"旧物应存在"类）；
+  //   判据强度由 VOICE-P02r 的"不得回流"锁承接，未削弱。
+  assert.ok(!src.includes("harness.handle('voice/transcribe'"), 'CHG-117：voice/transcribe 注册面不得回流');
   const cfg = readFileSync(join(__dirname, '..', 'lib', 'rpc-config.cjs'), 'utf8');
   // config/set merge 语义（多写入方）—— 随域移至 rpc-config.cjs
   assert.ok(cfg.includes('顶层键级 merge'), 'config/set 未升级 merge 语义');
@@ -80,6 +79,7 @@ test('VOICE-P07 lib/client.cjs 产物含语音逻辑（P2：热键派发点击�
   // 自建采集链退役（UD-0016）：产物不得再含自建录音入口与自行转写**调用**
   // （⚠ 看调用形态，不看裸串：hotkey.js 的退役说明注释里会提到该 RPC 名，那是允许的）
   assert.equal(client.includes('startVoiceRecording'), false, '产物不得再含自建录音入口');
+  // ⚠ CHG-117：该锁是"旧物不许复活"类（盘点 N-1）—— **必须保留**，不得因 RPC 删除而删。
   assert.equal(client.includes("host.call('voice/transcribe'"), false, '产物不得再含自行调 voice/transcribe 的调用点');
   assert.equal(client.includes('stopVoiceRecording'), false, '产物不得再含自建停止入口');
 });
@@ -97,20 +97,24 @@ test('VOICE-P08 client 产物含 voice 状态机与热键可见失败面', () =>
 // P1-a（2026-10-13 缩批）：asr.cloud / asr.local 面随「识别交官方」退役 ⇒ 本判据改判
 // **仍存的四项增值配置面**（refine/vad/hotkey/autoEnhance）的白名单净化，判据强度不变（仍逐项严格等号）。
 test('VOICE-P09 sanitizeVoiceCfg 白名单净化（四项增值配置面）', () => {
+  // CHG-117：`refine` 父键 → `filler`（只留 `enabled`；六子键全删）⇒ 本判据同步改名。
   const clean = asr.sanitizeVoiceCfg({
-    refine: { enabled: 'yes', maxTokens: 99999, mode: 'bogus', baseUrl: 'https://a.com/' },
+    filler: { enabled: false, mode: 'bogus', maxTokens: 99999 },   // 六子键应被丢弃
     vad: { enabled: 'x' },
     hotkey: { enabled: 'x', combo: 123 },
     autoEnhance: 'x',
   });
-  assert.equal(clean.refine.enabled, false);   // 非 boolean 回退
-  assert.equal(clean.refine.maxTokens, 300);   // 越界回退默认
-  assert.equal(clean.refine.mode, 'chain');    // 非法 mode 回退 chain
-  assert.equal(clean.refine.baseUrl, 'https://a.com'); // 去尾斜杠
+  assert.equal(clean.filler.enabled, false);   // 显式 false 保留
+  assert.equal(clean.filler.mode, undefined, 'CHG-117：mode 子键已删，不得回流');
+  assert.equal(clean.filler.maxTokens, undefined, 'CHG-117：maxTokens 子键已删，不得回流');
+  assert.equal(clean.filler.apiKey, undefined, 'CHG-117：apiKey 子键已删（不可逆，用户授权）');
+  assert.equal(clean.refine, undefined, 'CHG-117：旧父键 refine 不得回流');
   assert.equal(clean.vad.enabled, true);       // 非 false 即 true
   assert.equal(clean.hotkey.enabled, false);   // 非 true 即 false
   assert.equal(clean.hotkey.combo, '');        // 非字符串回退空串
   assert.equal(clean.autoEnhance, false);      // 非 true 即 false
+  // 缺省（未给 filler）⇒ 默认 **开**（用户裁定 4；与 client 侧 `mergeVoice` 同形）
+  assert.equal(asr.sanitizeVoiceCfg({}).filler.enabled, true, '缺省应为开');
   // P1-a：asr.cloud / asr.local 已退役 —— 净化结果不得再出现这两段
   assert.equal(clean.asr, undefined, 'asr.cloud/local 面应已退役');
 });
@@ -119,14 +123,16 @@ test('VOICE-P09 sanitizeVoiceCfg 白名单净化（四项增值配置面）', ()
 // 「委托面 + refine 就绪态」；判据强度不变（仍逐项严格等号 + 结构断言）。
 // ⚠ 测试环境未注入 speechToText ⇒ speech.available=false 且带 SPEECH_SERVICE_UNAVAILABLE
 //   （这正是「取不到服务时不 park、而是显式降级」的判据）。
-test('VOICE-P10 status 组装：委托官方 speechToText + refine configured 判定', async () => {
-  // refine 默认 chain 模式：已选基座模型（provider/model）→ configured=true（v3.2.8）
-  const s = await asr.status({ refine: { enabled: true, provider: 'ollama', model: 'qwen2.5:1.5b' } });
+test('VOICE-P10 status 组装：委托官方 speechToText + filler configured 判定', async () => {
+  // CHG-117：`filler` 无模型/凭据 ⇒ 「就绪」= **开关是否开**（语义收窄，仍逐项严格等号）
+  const s = await asr.status({ filler: { enabled: true } });
   assert.equal(s.ok, true);
-  assert.equal(s.refine.configured, true, 'chain 模式 + 已选模型 → 就绪');
-  // custom 模式：独立三项完整 → configured
-  const s2 = await asr.status({ refine: { enabled: true, mode: 'custom', baseUrl: 'r', apiKey: 'k', model: 'm' } });
-  assert.equal(s2.refine.configured, true, 'custom 模式独立三项 → 就绪');
+  assert.equal(s.filler.configured, true, '开关开 → 就绪');
+  const s2 = await asr.status({ filler: { enabled: false } });
+  assert.equal(s2.filler.configured, false, '开关关 → 未就绪');
+  assert.equal(s2.refine, undefined, 'CHG-117：旧父键 refine 不得回流');
+  // 缺省（未给 filler）⇒ 默认开 ⇒ 就绪
+  assert.equal((await asr.status({})).filler.configured, true, '缺省（默认开）→ 就绪');
   // 委托面结构（未注入服务 ⇒ available=false + 明确 error；注入后 providers/selection 来自官方 snapshot）
   assert.equal(typeof s.speech.available, 'boolean');
   assert.ok(Array.isArray(s.speech.providers), 'providers 须为数组');
@@ -134,7 +140,8 @@ test('VOICE-P10 status 组装：委托官方 speechToText + refine configured �
   assert.equal(s.speech.error, 'SPEECH_SERVICE_UNAVAILABLE', '须显式降级而非静默');
 });
 
-test('VOICE-P12 i18n voice 键 ZH/EN 平衡（37 键成对，v3.2.9 快捷键 +6）', () => {
+// CHG-117：`>= 37` 为**下界**锁；实测 87 键仍满足（refine→filler 改名 + 移除 3 键未触及下界）
+test('VOICE-P12 i18n voice 键 ZH/EN 平衡（>=37 键成对，v3.2.9 快捷键 +6）', () => {
   const i18n = readFileSync(join(__dirname, '..', 'src', 'client', 'i18n.js'), 'utf8');
   const m = i18n.match(/module\.exports = \"([\s\S]*)\"\s*;?\s*$/);
   const body = m ? m[1] : i18n;
@@ -155,42 +162,11 @@ test('VOICE-P14 sanitizeVoiceCfg vad 字段：默认开启，显式 false 关闭
 });
 
 // ---- 9. 多语言（2026-08-20 P3）：sanitize local.language 白名单 ----
-test('VOICE-P18 refine chain 模式：基座模型选择（provider/model）+ llm 调用 + 降级', async () => {
-  // sanitize：默认 chain；provider/model 保留；custom 保留
-  const d = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, refine: { enabled: true, provider: 'ollama', model: 'qwen2.5:1.5b' } });
-  assert.equal(d.refine.mode, 'chain', '默认 chain');
-  assert.equal(d.refine.provider, 'ollama', 'provider 保留（基座本地模型）');
-  assert.equal(d.refine.model, 'qwen2.5:1.5b', 'model 保留');
-  const c = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, refine: { enabled: true, mode: 'custom' } });
-  assert.equal(c.refine.mode, 'custom', 'custom 保留');
-  // chain 模式 mock llm
-  let called = null;
-  asr.setLlm({
-    stream: (args) => { called = args; return (async function* () { yield { text: '方案OK' }; })(); },
-  });
-  const voice = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, refine: { enabled: true, provider: 'ollama', model: 'qwen2.5:1.5b' } });
-  const r = await asr.refineText(voice, '嗯方案OK');
-  assert.equal(r.ok, true);
-  assert.equal(r.text, '方案OK');
-  assert.equal(called.provider, 'ollama', 'provider 透传（基座本地模型）');
-  assert.equal(called.model, 'qwen2.5:1.5b', 'model 透传');
-  assert.ok(called.system.includes('口水词'), '系统提示词为去口水词');
-  assert.ok(called.maxTokens > 0, 'maxTokens 有值');
-  // 未选模型跳过 / 无 llm 服务报错
-  const empty = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, refine: { enabled: true } });
-  assert.equal((await asr.refineText(empty, 'x')).skipped, true, '未选模型跳过');
-  asr.setLlm(null);
-  const voice2 = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' }, refine: { enabled: true, provider: 'a', model: 'b' } });
-  assert.equal((await asr.refineText(voice2, 'x')).code, 'REFINE_NO_LLM', '无 llm 服务报错');
-  // status：chain + provider/model → configured；未选 → false
-  asr.setLlm({ stream: () => (async function* () { yield { text: 'y' }; })() });
-  const s1 = await asr.status({ voice: { asr: { engine: 'cloud' }, refine: { enabled: true, provider: 'ollama', model: 'qwen2.5:1.5b' } } });
-  assert.equal(s1.refine.configured, true, 'chain+已选模型就绪');
-  const s2 = await asr.status({ voice: { asr: { engine: 'cloud' }, refine: { enabled: true } } });
-  assert.equal(s2.refine.configured, false, 'chain+未选模型未就绪');
-});
-
-// ---- 8. v3.2.9 快捷键唤醒（hotkey 白名单 + 产物含双触发逻辑）----
+// CHG-117（2026-10-16）：原 `VOICE-P18 refine chain 模式（基座模型 + llm 调用 + 降级）`
+//   **随 `refineText` 实现删除**一并删除 —— 判据对象（被删函数）已不存在。
+//   ⚠ 这不是"判据变松"：该能力**整体退役**（不调模型）；取而代之的判据在
+//     `test/filler.test.cjs`（清口水词的规则行为 + 误删防护 + 变异自证 + 负控）。
+//   ⚠ 若将来需要"清口水词"的等价强度判据，应在 filler 测试面补齐（不在本文件复活旧对象）。
 test('VOICE-P19 hotkey 配置白名单 + 产物含快捷键/双触发逻辑', () => {
   // sanitize：默认关闭且 combo 空（v3.2.33）；显式启用/自定义 combo
   const d = asr.sanitizeVoiceCfg({ asr: { engine: 'cloud' } });
@@ -335,11 +311,19 @@ function evalStateWithDisk(diskConfig, opts) {
     setItem: (k, v) => lsBacking.set(k, String(v)),
     removeItem: (k) => lsBacking.delete(k),
   };
-  let calls = 0;
-  const host = { call: () => { calls += 1; return Promise.resolve({ ok: true, config: diskConfig }); } };
+  // ⚠ CHG-117：`host.call` 现在会收到**两种**方法（`config/get` 同步 + `config/set` 旧键清理）
+  //   ⇒ 计数必须**按方法分开**，否则判据名说"config/get 次数"而实测把 set 也算进来（读数说反话）。
+  //   ⚠ 这是**加固**（方法级），不是放宽：原本的"总次数"语义被替换成更精确的同名判据。
+  let calls = 0;      // config/get 次数（判据名要求的那个）
+  let setCalls = 0;   // config/set 次数（旧键清理）
+  const host = { call: (m) => {
+    if (m === 'config/set') { setCalls += 1; return Promise.resolve({ ok: true }); }
+    calls += 1;
+    return Promise.resolve({ ok: true, config: diskConfig });
+  } };
   const fn = new Function('localStorage', 'host',
     src + '\nreturn { voiceCfgState, syncVoiceFromHost, mergeVoice };');
-  return { api: fn(localStorage, host), lsBacking, calls: () => calls };
+  return { api: fn(localStorage, host), lsBacking, calls: () => calls, setCalls: () => setCalls };
 }
 
 const settleAsync = () => new Promise((r) => setImmediate(r)).then(() => new Promise((r) => setImmediate(r)));
@@ -352,7 +336,7 @@ test('VOICE-G5-01 模块级启动同步：**未进设置页**，磁盘 hotkey.en
     '⚠ G-5：模块级求值（= 新 origin / 未进设置页）后磁盘 hotkey 必须已同步（旧实现此处为 false ⇒ 热键静默失效）');
   assert.equal(S.api.voiceCfgState.value.hotkey.combo, 'Alt+Backquote', '组合键同样须同步');
   assert.equal(S.api.voiceCfgState.synced, true, '同步须完成（synced 置真）');
-  assert.equal(S.calls(), 1, '模块级须恰好发起 1 次 config/get');
+  assert.equal(S.calls(), 1, '模块级须恰好发起 1 次 config/get（⚠ 按方法计：config/set 与旧键清理不计入）');
 });
 
 test('VOICE-G5-02 判别力·配置同步了但开关本身是关的 ⇒ 必须仍为 false（不得与"未同步"混淆）', async () => {
@@ -365,7 +349,7 @@ test('VOICE-G5-02 判别力·配置同步了但开关本身是关的 ⇒ 必须�
   await settleAsync();
   assert.equal(S.api.voiceCfgState.value.hotkey.enabled, false, '已关的开关 ⇒ 同步后仍须为 false（不得被默认值/同步动作打开）');
   assert.equal(S.api.voiceCfgState.synced, true, '⚠ 判别力锚点：需证明"同步确实发生过"（不同于"根本没同步"）');
-  assert.equal(S.calls(), 1, '⚠ 判别力锚点：须确实发过一次 config/get');
+  assert.equal(S.calls(), 1, '⚠ 判别力锚点：须确实发过一次 config/get（按方法计）');
 });
 
 test('VOICE-G5-03 并发去重（幂等）：模块级与设置页同时同步 ⇒ 只发 1 次 config/get，互不覆盖', async () => {
@@ -443,9 +427,11 @@ function evalStateWithRetry(script, opts) {
     setItem: (k, v) => lsBacking.set(k, String(v)),
     removeItem: (k) => lsBacking.delete(k),
   };
-  const out = { calls: 0, pending: [], fired: 0 };
+  // ⚠ CHG-117：同 evalStateWithDisk —— 按方法分离计数（get 计 retry 步进；set 计旧键清理）
+  const out = { calls: 0, setCalls: 0, pending: [], fired: 0 };
   const host = {
-    call: () => {
+    call: (m) => {
+      if (m === 'config/set') { out.setCalls += 1; return Promise.resolve({ ok: true }); }
       out.calls += 1;
       const step = script[Math.min(out.calls - 1, script.length - 1)];
       if (step === 'throw') return Promise.reject(new Error('boom'));
@@ -534,15 +520,21 @@ test('VOICE-G6-V03 负控：已关的开关在重试路径下**仍不得生效**
   // 磁盘明确 hotkey.enabled=false；首次失败、重试成功 ⇒ 终态仍须为 false
   const lsBacking = new Map();
   const localStorage = { getItem: (k) => (lsBacking.has(k) ? lsBacking.get(k) : null), setItem: (k, v) => lsBacking.set(k, String(v)), removeItem: (k) => lsBacking.delete(k) };
-  const pending = []; let calls = 0;
-  const host = { call: () => { calls += 1; return calls === 1 ? Promise.resolve({ ok: false })
-    : Promise.resolve({ ok: true, config: { version: 2, voice: { hotkey: { enabled: false, combo: '' }, vad: { enabled: true }, autoEnhance: false, refine: { enabled: false } } } }); } };
+  const pending = []; let calls = 0; let setCalls = 0;
+  // ⚠ CHG-117：按方法分离计数（`config/get` 走重试步进；`config/set` 是旧键清理，不计入重试步进）
+  const host = { call: (m) => {
+    if (m === 'config/set') { setCalls += 1; return Promise.resolve({ ok: true }); }
+    calls += 1;
+    return calls === 1 ? Promise.resolve({ ok: false })
+      : Promise.resolve({ ok: true, config: { version: 2, voice: { hotkey: { enabled: false, combo: '' }, vad: { enabled: true }, autoEnhance: false, refine: { enabled: false } } } });
+  } };
   const timerSvc = { timeout: (fn) => { pending.push(fn); return 1; }, interval: (fn) => { pending.push(fn); return 1; } };
   const src = require('../src/client/voice/state.js');
   const api = new Function('localStorage', 'host', 'timerSvc', src + '\nreturn { voiceCfgState };')(localStorage, host, timerSvc);
   await settle3();
   pending.shift()(); await settle3();
-  assert.equal(calls, 2, '前置：确实重试了一次');
+  assert.equal(calls, 2, '前置：确实重试了一次（config/get，按方法计）');
+  assert.equal(setCalls, 1, 'CHG-117：旧父键清理恰好写回 1 次 config/set（幂等：只清一次）');
   assert.equal(api.voiceCfgState.synced, true, '前置：重试已成功');
   assert.equal(api.voiceCfgState.value.hotkey.enabled, false, '负控：已关的开关 ⇒ 重试成功也仍须为 false');
 });

@@ -201,7 +201,10 @@ test('RPCG-06 入口装载链 L3 冒烟：apply() 真实注册 + 派生的全部
   assert.equal(out.path, '/dsh-prompt-enhancer/rpc', '注册 path 必须是 RPC_PATH');
 
   // ② 派生的方法集非空（防「派生面归零 ⇒ 循环体不执行 ⇒ 恒绿」）
-  assert.ok(out.methods.length >= 4, '派生的原生方法集不应为空（实测 ' + out.methods.length + ' 条）');
+  // CHG-117（2026-10-16 · 规整改造批）：原生注册面 4 → **3**（删 `voice/transcribe`；自建链退役后无调用方）。
+  //   ⚠ 本断言的**意图**是「防派生面归零 ⇒ 循环体不执行 ⇒ 恒绿」，故下界随实测派生数同步为 3；
+  //     仍是严格下界（归零或漏域即红），非放宽。
+  assert.ok(out.methods.length >= 3, '派生的原生方法集不应为空（实测 ' + out.methods.length + ' 条）');
 
   // ③ **每个**派生方法都必须被接线（不得 404/UNKNOWN_METHOD）—— 覆盖全部域，自动跟上新增域
   const unwired = out.methods.filter((m) => {

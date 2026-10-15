@@ -122,18 +122,24 @@ test('VADSIL-P09 mergeVoice 白名单：非法 silenceMs 被净化，合法值�
 });
 
 // ───────────── ④ 两个开关与其余三项增值不回归 ─────────────
-test('VADSIL-P10 不回归：vad.enabled / autoEnhance / hotkey / refine 四项仍在且语义不变', () => {
+// CHG-117（2026-10-16 · 规整改造批）：原第 [4] 项 `refine` 已改名为 `filler`（只留 `enabled`，
+//   默认 **开**）。本用例的**其余三项语义逐条未变**；改名处同步改名，**未删任何断言**。
+test('VADSIL-P10 不回归：vad.enabled / autoEnhance / hotkey / filler 四项仍在且语义不变', () => {
   const S = loadState();
   const d = S.VOICE_CFG_DEFAULTS;
   assert.equal(d.vad.enabled, true, '[1] 静音监测默认开');
   assert.equal(d.autoEnhance, false, '[2] 自动增强默认关');
   assert.equal(d.hotkey.enabled, false, '[3] 热键默认关（combo 空）');
-  assert.equal(d.refine.enabled, true, '[4] 规整默认开（mode chain）');
-  const m = S.mergeVoice({ autoEnhance: true, hotkey: { enabled: true, combo: 'Backquote' }, refine: { enabled: false } });
+  assert.equal(d.filler.enabled, true, '[4] 清口水词默认开（用户裁定 4）');
+  assert.equal(d.refine, undefined, 'CHG-117：旧父键 refine 不得回流');
+  const m = S.mergeVoice({ autoEnhance: true, hotkey: { enabled: true, combo: 'Backquote' }, filler: { enabled: false } });
   assert.equal(m.autoEnhance, true, 'autoEnhance true 保留');
   assert.equal(m.hotkey.enabled, true, 'hotkey true 保留');
   assert.equal(m.hotkey.combo, 'Backquote', 'combo 保留');
-  assert.equal(m.refine.enabled, false, 'refine false 保留');
+  assert.equal(m.filler.enabled, false, 'filler false 保留');
+  assert.equal(S.mergeVoice({ filler: { enabled: 'x' } }).filler.enabled, true, '非 false 一律视为开（与 host 同形）');
+  assert.equal(S.mergeVoice({}).filler.enabled, true, '缺省 ⇒ 开');
+  assert.equal(S.mergeVoice({ refine: { enabled: true } }).filler.enabled, true, '⚠ 旧键不得被读取（改名后无读旧名路径）');
 });
 
 test('VADSIL-P11 不回归：host 侧 sanitizeVoiceCfg 白名单与 client 同口径', () => {
