@@ -298,3 +298,111 @@ test('VOICE-P24 产物含 autoEnhance 触发链路 + i18n 键平衡（v3.2.17 +3
   assert.ok(z >= 44, 'ZH voice 键不足 44（实际 ' + z + '）');
   assert.equal(z, e, 'ZH/EN voice 键不平衡: ' + z + ' vs ' + e);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHG-103（2026-10-15 · `G-5` 修复）：语音配置**模块级启动同步**
+// ═══════════════════════════════════════════════════════════════════════════════
+// 病历：`syncVoiceFromHost()` 此前**只在设置页 VoiceSection 挂载时**被调用
+//   （`voice-section.js` 的 useEffect 是唯一调用点）⇒ **新 origin / 未进设置页**的会话里
+//   `voiceCfgState` 始终是默认值（`hotkey: { enabled: false }`）⇒ 而 `VoiceHotkeyHost` 挂在
+//   `conversation.input.right`（与设置页无关）按它决定装不装监听 ⇒ **热键静默失效**。
+// 对照：增强模块 `src/client/state.js:366` **有**模块级 `syncConfigFromHost();`（两模块不对称）。
+// 判据形态：
+//   G5-01 模块级求值（**未进设置页**）⇒ 磁盘 hotkey.enabled=true 必须已同步进 voiceCfgState
+//   G5-02 ⚠ **判别力**：磁盘 hotkey.enabled=**false** ⇒ 同步完成但值仍为 false
+//         （用来区分「**配置未同步**」与「**配置同步了但开关本身是关的**」—— 二者若不区分即假锁）
+//   G5-03 并发去重：模块级 + 设置页同时同步 ⇒ 只发 1 次 config/get（幂等·不互相覆盖）
+//   G5-04 变异自证：删掉模块级调用 ⇒ G5-01 必红
+//   G5-05 负控：设置页路径（显式调用）行为不变；已关的开关仍不得生效
+//
+// ⚠ 判别力说明（D-14 假锁病历）：只测 G5-01 是不够的 —— 若把「同步没发生」与
+//   「同步发生了但磁盘上开关本来就是关的」混为一谈，则**变异版也会绿**。
+//   故 G5-02 专门构造 enabled=false 的磁盘配置：修复版与变异版都必须得到 false，
+//   但**理由不同**（前者=同步了且为关；后者=根本没同步）⇒ 与 G5-01 并读才能定位。
+
+// 在沙箱里求值真实 state.js，host 返回给定的磁盘配置
+function evalStateWithDisk(diskConfig, opts) {
+  const o = opts || {};
+  let src = require('../src/client/voice/state.js');
+  if (o.dropModuleSync) {
+    const anchor = '\nsyncVoiceFromHost();\n';
+    if (!src.includes(anchor)) throw new Error('变异锚点须存在（模块级同步调用）');
+    src = src.replace(anchor, '\n');
+  }
+  const lsBacking = new Map();
+  const localStorage = {
+    getItem: (k) => (lsBacking.has(k) ? lsBacking.get(k) : null),
+    setItem: (k, v) => lsBacking.set(k, String(v)),
+    removeItem: (k) => lsBacking.delete(k),
+  };
+  let calls = 0;
+  const host = { call: () => { calls += 1; return Promise.resolve({ ok: true, config: diskConfig }); } };
+  const fn = new Function('localStorage', 'host',
+    src + '\nreturn { voiceCfgState, syncVoiceFromHost, mergeVoice };');
+  return { api: fn(localStorage, host), lsBacking, calls: () => calls };
+}
+
+const settleAsync = () => new Promise((r) => setImmediate(r)).then(() => new Promise((r) => setImmediate(r)));
+
+test('VOICE-G5-01 模块级启动同步：**未进设置页**，磁盘 hotkey.enabled=true 也必须已同步', async () => {
+  const disk = { version: 2, voice: { refine: { enabled: false }, vad: { enabled: true, silenceMs: 2000 }, hotkey: { enabled: true, combo: 'Alt+Backquote' }, autoEnhance: false } };
+  const S = evalStateWithDisk(disk);
+  await settleAsync();
+  assert.equal(S.api.voiceCfgState.value.hotkey.enabled, true,
+    '⚠ G-5：模块级求值（= 新 origin / 未进设置页）后磁盘 hotkey 必须已同步（旧实现此处为 false ⇒ 热键静默失效）');
+  assert.equal(S.api.voiceCfgState.value.hotkey.combo, 'Alt+Backquote', '组合键同样须同步');
+  assert.equal(S.api.voiceCfgState.synced, true, '同步须完成（synced 置真）');
+  assert.equal(S.calls(), 1, '模块级须恰好发起 1 次 config/get');
+});
+
+test('VOICE-G5-02 判别力·配置同步了但开关本身是关的 ⇒ 必须仍为 false（不得与"未同步"混淆）', async () => {
+  // ⚠ 该组是判别力的另一半：磁盘明确 hotkey.enabled=false。
+  //   修复版：同步**发生了**（synced=true、发过 config/get）但值仍 false；
+  //   变异版：同步**没发生**（synced 仍 false）值也是 false ⇒
+  //   故必须同时断言「同步确实发生过」，否则本条对变异无判别力。
+  const disk = { version: 2, voice: { refine: { enabled: false }, vad: { enabled: true, silenceMs: 2000 }, hotkey: { enabled: false, combo: '' }, autoEnhance: false } };
+  const S = evalStateWithDisk(disk);
+  await settleAsync();
+  assert.equal(S.api.voiceCfgState.value.hotkey.enabled, false, '已关的开关 ⇒ 同步后仍须为 false（不得被默认值/同步动作打开）');
+  assert.equal(S.api.voiceCfgState.synced, true, '⚠ 判别力锚点：需证明"同步确实发生过"（不同于"根本没同步"）');
+  assert.equal(S.calls(), 1, '⚠ 判别力锚点：须确实发过一次 config/get');
+});
+
+test('VOICE-G5-03 并发去重（幂等）：模块级与设置页同时同步 ⇒ 只发 1 次 config/get，互不覆盖', async () => {
+  const disk = { version: 2, voice: { refine: { enabled: false }, vad: { enabled: true, silenceMs: 2000 }, hotkey: { enabled: true, combo: 'Alt+Backquote' }, autoEnhance: false } };
+  const S = evalStateWithDisk(disk);
+  // 模块级已在途 ⇒ 再并发调 2 次（模拟设置页挂载）
+  const p1 = S.api.syncVoiceFromHost();
+  const p2 = S.api.syncVoiceFromHost();
+  assert.equal(S.calls(), 1, '⚠ 在途期间重复调用**不得**再发 config/get（否则双份配置源/竞态覆盖）');
+  assert.equal(p1, p2, '在途调用须复用同一个 promise');
+  await settleAsync();
+  assert.equal(S.api.voiceCfgState.value.hotkey.enabled, true, '并发后结果一致（未被覆盖回默认）');
+  // settle 之后：新调用应可再次同步（设置页兼容路径不被破坏）
+  const before = S.calls();
+  S.api.syncVoiceFromHost();
+  assert.equal(S.calls(), before + 1, 'settle 之后新调用须发新请求（不得永久锁死）');
+});
+
+test('VOICE-G5-V01 变异自证·正例必红：删掉模块级同步调用 ⇒ G5-01 判据必须失败', async () => {
+  const disk = { version: 2, voice: { refine: { enabled: false }, vad: { enabled: true, silenceMs: 2000 }, hotkey: { enabled: true, combo: 'Alt+Backquote' }, autoEnhance: false } };
+  const M = evalStateWithDisk(disk, { dropModuleSync: true });
+  await settleAsync();
+  // 变异后：模块级同步不存在 ⇒ 仍是默认 false ⇒ G5-01 的断言必红
+  assert.equal(M.api.voiceCfgState.value.hotkey.enabled, false,
+    '⚠ 变异后必须回到"未同步=默认 false"（若此处仍为 true，说明 G5-01 没有判别力）');
+  assert.equal(M.calls(), 0, '变异后模块级不得发起 config/get');
+  assert.equal(M.api.voiceCfgState.synced, false, '变异后 synced 仍为 false ⇒ 与"同步了但开关关"可区分');
+});
+
+test('VOICE-G5-V02 变异自证·负控必绿：同一变异下，**显式**调用仍能同步（设置页路径不受影响）', async () => {
+  const disk = { version: 2, voice: { refine: { enabled: false }, vad: { enabled: true, silenceMs: 2000 }, hotkey: { enabled: true, combo: 'Alt+Backquote' }, autoEnhance: false } };
+  const M = evalStateWithDisk(disk, { dropModuleSync: true });
+  await settleAsync();
+  assert.equal(M.api.voiceCfgState.value.hotkey.enabled, false, '前置：模块级已移除 ⇒ 尚未同步');
+  // 负控：设置页那种显式调用必须仍然有效（本批只加"时机"，不改既有能力）
+  await M.api.syncVoiceFromHost();
+  await settleAsync();
+  assert.equal(M.api.voiceCfgState.value.hotkey.enabled, true, '负控：显式 syncVoiceFromHost() 仍须同步成功（设置页路径未变）');
+  assert.equal(M.api.voiceCfgState.synced, true, '负控：显式调用后 synced 置真');
+});
