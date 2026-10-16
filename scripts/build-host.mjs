@@ -78,8 +78,16 @@ if (args.includes('--check')) {
     process.exit(0);
   }
   console.error('[build-host --check] 漂移检测失败：plugin-host.js 与源码重建结果不一致！');
-  console.error('  原因：① 改过 src/host/* 后未重建；② 产物被手工修改。');
-  console.error('  修复：node scripts/build-host.mjs（重建产物），或还原被手改的产物。');
+  // ⚠ 文案补齐（CHG-126 · 2026-10-16 文案面小批）：本检查的**比较对象**是 src/host（含 app.js 的
+  //   提示词生成区）↔ 产物，故「改过 prompts/** 且跑了 sync-prompts、却漏跑 build-host」也会落在
+  //   这一支 —— 旧文案只列 src/host 与手改两因，读者拿不到正确归因（会去查一个不存在的 src/host 改动）。
+  //   ⚠ 口径边界（本批实测，勿写成更宽的断言）：只改 prompts/** 而**完全没跑** sync-prompts 时，
+  //     app.js 生成区与产物**同为旧** ⇒ 本检查仍 exit 0（该形态由 gate 的 prompts 环 / 单测 U40 咬住，
+  //     不落此支）。故下面③的措辞严格写成「已跑 sync-prompts 但漏跑 build-host」。
+  //   ⚠ 本批**只改这两行文案**：判定逻辑 / 退出码 / 比较对象一字未动。
+  console.error('  原因：① 改过 src/host/* 后未重建；② 产物被手工修改；③ 改过 prompts/** 并已跑 sync-prompts、却漏跑 build-host（生成区已在 src/host/app.js 更新，产物仍是旧的）。');
+  console.error('  修复：若是 ③ ⇒ node scripts/build-host.mjs（sync-prompts 已跑过，重建产物即可）；若是 ①② ⇒ node scripts/build-host.mjs（重建产物），或还原被手改的产物。'
+    + '｜提示：提示词改动生效须**两步都跑**——node scripts/sync-prompts.mjs && node scripts/build-host.mjs（npm run build 不带前者）。');
   process.exit(1);
 }
 
