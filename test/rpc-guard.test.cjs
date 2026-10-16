@@ -222,3 +222,45 @@ test('RPCG-06 入口装载链 L3 冒烟：apply() 真实注册 + 派生的全部
   assert.ok(cg && cg.code === 200, 'config/get 必须 200（实际 ' + (cg && cg.code) + '）');
   assert.ok(/"config"/.test(cg.body || ''), 'config/get 返回体必须含 config 字段（域 handler 确实被调用）');
 });
+
+// CHG-117 补修（2026-10-16 · 重派轮次）：**apply() 必须在「llm 服务在位」时也不抛**。
+//   病历：CHG-117 删掉了 `lib/asr.cjs` 的 `setLlm`，却漏删 `lib/index.cjs` 里
+//   `asr.setLlm(ctx.get('llm'))` 这一行调用点 ⇒ 悬挂引用。本插件在 `plugin-host.js`
+//   声明 `inject: ['llm', 'timer']` ⇒ **生产上 `ctx.get('llm')` 恒为真** ⇒ 该行必抛
+//   `TypeError: asr.setLlm is not a function` ⇒ 插件整个加载失败（无 UI、无 RPC）。
+//   ⚠ 既有三个 apply 用例**都抓不到**：bundle-smoke / p0-stop-bleed 的 ctx 桩默认不返回
+//     llm（undefined ⇒ 短路），rpc-guard 自己的 fakeCtx 是 `get: () => undefined`。
+//   ⇒ 本用例专锁「llm 在位」这一生产形态（= 悬挂引用的**唯一**可达路径）。
+//   反向断言（不得留下读旧名的路径）：index.cjs 源码里不得再出现 `asr.setLlm`。
+test('RPCG-07 入口装载链：inject 面（llm 在位）下 apply() 不得抛 —— 防「对象已删、调用点还在」悬挂', () => {
+  const fs2 = require('node:fs');
+  const path2 = require('node:path');
+  const ROOT2 = path2.join(__dirname, '..');
+  const idx = require(path2.join(ROOT2, 'lib', 'index.cjs'));
+
+  const LLM_SVC = { stream() { return null; }, providerRetryPolicy() { return null; } };
+  const seen = [];
+  const webServer = { register() {} };
+  const hostCtx = { effect: (fn) => { if (typeof fn === 'function') fn(); }, get: (k) => (k === 'webServer' ? webServer : undefined) };
+  // 生产形态：plugin-host.js `inject: ['llm', 'timer']` ⇒ get('llm') 返回真实服务对象
+  const ctx = {
+    inject: (deps, cb) => { cb(hostCtx); },
+    effect: () => {},
+    get: (k) => { seen.push(k); return k === 'llm' ? LLM_SVC : undefined; },
+  };
+  assert.doesNotThrow(() => idx.apply(ctx), 'apply() 在 llm 在位时抛错 ⇒ 插件整个加载失败（生产可达）');
+  assert.ok(seen.includes('llm'), '前置：本用例必须真的走到 ctx.get(\'llm\')（否则判据无判别力）');
+
+  // 反向锁：入口源码不得再有指向已删对象的调用点（读旧名悬挂）
+  const src = fs2.readFileSync(path2.join(ROOT2, 'lib', 'index.cjs'), 'utf8');
+  const live = src.split('\n').filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
+  assert.equal(/asr\.setLlm\s*\(/.test(live), false,
+    'CHG-117：asr.setLlm 已随旧规整 LLM 链删除，入口不得再留调用点（悬挂引用 ⇒ apply 必抛）');
+
+  // 反向锁：asr.cjs 导出面不得再含 setLlm / transcribe / refineText（旧物不许复活）
+  const asr = require(path2.join(ROOT2, 'lib', 'asr.cjs'));
+  for (const gone of ['setLlm', 'transcribe', 'refineText']) {
+    assert.equal(Object.prototype.hasOwnProperty.call(asr, gone), false,
+      'CHG-117：asr.cjs 不得再导出 ' + gone);
+  }
+});
