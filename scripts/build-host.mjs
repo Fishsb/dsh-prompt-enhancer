@@ -6,8 +6,15 @@
 // ⚠ P2-0（2026-10-13）注释订正：本清单同步为实际 4 个 chunk（`plugins.js`/`update.js` 已于 P1-c 删除）。
 //
 // v3.2.1-t（架构调整·版本单一事实源 + 漂移检测）：
-//   ① __DASH_PLUGIN_VERSION__ 占位符从 package.json 注入——产物版本永远=package.json，
-//      源码不再硬编码版本（杜绝「发版忘 bump → 检测永远旧版」漂移）。
+//   ① 版本单一事实源 = `package.json`，由**运行时**取得：`lib/harness.cjs` 的
+//      `readPluginVersion()` 直读运行环境 `package.json`（读失败返回空串）。
+//      ⚠ 口径订正（门禁缺口批 2 · 2026-10-16 · F2，据实读定位）：下文第 56–58 行的
+//      `__DASH_PLUGIN_VERSION__` 占位符替换**当前为空转** —— 该占位符在 `src/host/**`
+//      与产物 `plugin-host.js` 中命中数均为 **0**（`PLUGIN_VERSION` 在产物内的 3 处
+//      全为历史注释），故**产物内不含版本字面量**，构建期**并未**注入版本。
+//      ⚠ 不得以「产物内能否 grep 到版本号」作版本判据；`--check` 的成功行**也不构成**
+//      「版本已注入」的证据（它只证明「源码 ↔ 产物逐字一致」）。
+//      保留该替换语句本身是为守住既有 --check 语义（不属本批权限，见报告 §F2）。
 //   ② --check 模式：重建到内存，与磁盘现有产物对比——漂移（源码改了没重建，
 //      或产物被手改）即报错退出 1。供 sync-runtime / release / pre-commit 使用。
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -53,7 +60,11 @@ function buildHost() {
   // after a git checkout with core.autocrlf; committed artifacts are LF.
   composed = composed.replace(/\r\n/g, '\n');
 
-  // v3.2.1-t（版本单一事实源）：占位符注入 package.json 版本（带引号字面量）。
+  // ⚠ 版本占位符替换（口径订正 · F2 · 2026-10-16）：本条**当前为空转**——`src/host/**`
+  //   无 `__DASH_PLUGIN_VERSION__` 引用点（实测命中 0），故没有任何字面量可替换，
+  //   产物内**不含版本**。**版本单一事实源实际由 `lib/harness.cjs` 的 `readPluginVersion()`
+  //   运行时直读 `package.json` 达成**（见文件头注①）。此处保留语句是为不改变既有构建
+  //   行为与 --check 判定（本批只订正文案，不改逻辑）。
   const pkgVersion = require('../package.json').version;
   composed = composed.split('__DASH_PLUGIN_VERSION__').join("'" + pkgVersion + "'");
 

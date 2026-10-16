@@ -1,6 +1,10 @@
 // sync-runtime.mjs — v3.2.1-t（架构调整·同步自动化）
-// 一条命令完成：build（host+client，含版本注入）→ --check 漂移校验 → 同步运行环境
+// 一条命令完成：build（host+client）→ --check 漂移校验 → 同步运行环境
 // → md5 校验 → 提示重启 DSH + 刷新页面。
+//
+// ⚠ 口径订正（门禁缺口批 2 · 2026-10-16 · F2）：旧头注写「build（含**版本注入**）」，
+//   与实况不符 —— 构建期不发生版本注入（`__DASH_PLUGIN_VERSION__` 在 `src/host/**` 命中 0）。
+//   版本一致性由运行环境 `package.json` 被同步 + `lib/harness.cjs` 运行时直读共同达成。
 //
 // 用法：
 //   node scripts/sync-runtime.mjs                 # 部署到**所有**安装了本插件的 profile
@@ -61,7 +65,7 @@ function stripBomIfPresent(p) {
 }
 const TEXT_DEPLOY_EXT = /\.(json|cjs|js|mjs|md|ya?ml|cmd)$/;
 
-// 1. 构建（含版本注入）
+// 1. 构建（版本不经产物：见头注订正 —— 运行时直读 package.json）
 console.log('== 1/4 构建 host + client ==');
 run('build-host.mjs', []);
 run('build-client.mjs', []);

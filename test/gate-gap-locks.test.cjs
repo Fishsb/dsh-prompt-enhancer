@@ -153,3 +153,90 @@ test('GAP-6 缺陷③源码面防回归：不得再出现 `X.length + \' bytes\'
     assert.match(src, /Buffer\.byteLength\(/, rel + ' 应以 Buffer.byteLength 取得真字节数');
   }
 });
+
+// ───────────────────────── 门禁缺口批 2（F1 · 2026-10-16）：同步面前置覆盖面 ─────────────────────────
+//
+// 病历（部署批 §7-F1）：`package.json` **在** `sync-runtime.mjs` 的同步面内（会被 `cpSync`
+//   覆盖到运行环境），而「三处同刻一致」与双 `--check` **都只覆盖代码产物**
+//   ⇒ 改 `exports["./client"]` / `files` 等清单字段时**全链零红**，运行环境已被静默改写。
+//
+// ⚠ 判据落点：`scripts/lib/sync-face.mjs`（**从同步脚本文面量派生**的面 + md5 对照）。
+//   本组把「覆盖面真的从 :117 派生 / 变异必红 / 负控必绿 / 有意不纳入有据」钉成机检。
+const syncFace = require(path.join(ROOT, 'scripts', 'lib', 'sync-face.mjs'));
+
+test('GAP-7 F1 覆盖面：同步面清单**从 sync-runtime 字面量派生**，且非产物面含 package.json', () => {
+  const face = syncFace.deriveSyncFace(ROOT);
+  // 派生面必须与同步脚本实名清单一致（含 package.json —— 病历点名的正是它）
+  for (const f of ['plugin-host.js', 'package.json', 'README.md', 'README.en.md', 'cordis.patch.yml']) {
+    assert.ok(face.files.includes(f), '同步面应含 ' + f + '（派生读数：' + face.files.join(',') + '）');
+  }
+  assert.deepEqual(face.dirs, ['prompts', 'assets'], '目录级同步面应派生为 prompts/assets');
+  const n = syncFace.syncFaceNonArtifact(ROOT);
+  assert.ok(n.included.includes('package.json'), 'package.json 必须纳入**非产物**覆盖面（F1 的病灶）');
+  assert.ok(!n.included.includes('plugin-host.js'), '产物不得混进非产物覆盖面（它已由双 --check 覆盖）');
+  assert.deepEqual(n.artifacts, ['plugin-host.js'], '产物分类应唯一位于 artifacts');
+  assert.deepEqual(n.excludedDirs, ['prompts', 'assets'], '有意不纳入的目录面须逐条可读');
+});
+
+test('GAP-8 F1 变异自证：改一处 package.json ⇒ 该前置**必红**（源↔运行环境漂移可见）', () => {
+  withFixture((dir) => {
+    // 造一个"运行环境"= 原样复制（部署后态）；先把同步面拉到两边一致
+    const rt = path.join(dir, '_rt');
+    fs.mkdirSync(rt, { recursive: true });
+    const n = syncFace.syncFaceNonArtifact(dir);
+    for (const rel of n.included) fs.copyFileSync(path.join(dir, rel), path.join(rt, rel));
+    assert.equal(syncFace.compareSyncFace(dir, rt).ok, true, '预置：两边一致时不得报漂移（负控在同一夹具内成立）');
+
+    // 变异：改 package.json 一个**清单字段**（不是版本号——F1 的病正是清单字段改而无声）
+    const pj = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+    assert.ok(Array.isArray(pj.files) && pj.files.length > 0, '夹具前提：package.json 应有 files 清单');
+    pj.files = pj.files.slice(0, -1);            // 删一项发布白名单
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pj, null, 2) + NL, 'utf8');
+
+    const c = syncFace.compareSyncFace(dir, rt);
+    assert.equal(c.ok, false, 'package.json 清单字段已变 ⇒ 该前置必须判红（修复前此形态全链零红）');
+    const row = c.rows.find((r) => r.file === 'package.json');
+    assert.equal(row.state, 'drift', 'package.json 应记为 drift（源↔运行环境 md5 不同）');
+    // 判别力自证：其余未动文件必须仍 match（否则是"整片报红"，无判别力）
+    assert.ok(c.rows.filter((r) => r.file !== 'package.json').every((r) => r.state === 'match'),
+      '未改动的文件不得连带报红（否则本对照无判别力）');
+    // 同口径复核：md5 必须与 md5sum 同值（复用既有算法，不新造）
+    const { execFileSync } = require('node:child_process');
+    const real = execFileSync('md5sum', [path.join(dir, 'package.json')], { encoding: 'utf8' }).split(/\s+/)[0];
+    assert.equal(row.treeMd5, real, '本模块 md5 应与 md5sum 同值（同一算法，不新造机制）');
+  });
+});
+
+test('GAP-9 F1 负控：不动任何文件 ⇒ **必绿**（含：运行环境缺件不得被判失败）', () => {
+  withFixture((dir) => {
+    const rt = path.join(dir, '_rt');
+    fs.mkdirSync(rt, { recursive: true });
+    const n = syncFace.syncFaceNonArtifact(dir);
+    for (const rel of n.included) fs.copyFileSync(path.join(dir, rel), path.join(rt, rel));
+    const c = syncFace.compareSyncFace(dir, rt);
+    assert.equal(c.ok, true, '不动任何文件时不得误报：' + syncFace.summarizeSyncFace(dir, rt));
+    assert.ok(c.rows.every((r) => r.state === 'match'), '全部条目应为 match');
+    // 负控的另一半：**空运行环境**（= 本批"未部署"实况）⇒ 记 absent，**不判失败**
+    const empty = path.join(dir, '_rt-empty');
+    fs.mkdirSync(empty, { recursive: true });
+    const e = syncFace.compareSyncFace(dir, empty);
+    assert.equal(e.ok, true, '运行环境缺件不得判失败（部署可合法未跑；本批明令不部署）');
+    assert.equal(e.absent.length, n.included.length, '缺件须逐条登记（可见，不是静默跳过）');
+  });
+  // 真实工作区负控：本批不得把真仓判红
+  assert.equal(syncFace.compareSyncFace(ROOT).ok, true,
+    '真实工作区应无漂移：' + syncFace.summarizeSyncFace(ROOT));
+});
+
+test('GAP-10 F1 fail-closed：同步脚本缺位 / 清单改名 ⇒ 派生**抛错**，不得静默回退到硬编码清单', () => {
+  withFixture((dir) => {
+    // 甲：脚本缺位
+    fs.rmSync(path.join(dir, 'scripts', 'sync-runtime.mjs'));
+    assert.throws(() => syncFace.deriveSyncFace(dir), /不在位/,
+      '同步脚本缺位时必须抛错（「解析不到就算过」是假绿）');
+    // 乙：清单字面量改名（派生锚点消失）
+    fs.writeFileSync(path.join(dir, 'scripts', 'sync-runtime.mjs'), 'const deployFiles = [];', 'utf8');
+    assert.throws(() => syncFace.deriveSyncFace(dir), /未能|解析/,
+      '字面量改名后必须抛错，不得凭记忆硬编码一份清单');
+  });
+});

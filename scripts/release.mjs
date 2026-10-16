@@ -1,7 +1,13 @@
 // release.mjs — v3.2.1-t（架构调整·发布全自动）
-// 一条命令完成发布：bump 版本 → build（含版本注入）→ --check 漂移校验 → 全量测试
+// 一条命令完成发布：bump 版本 → build → --check 漂移校验 → 全量测试
 // → npm pack → git commit/tag → 推 GitHub → 创建 Release + 上传 tgz。
 // tgz 永远等于当前代码（消除「发布后改动不入包」的历史问题）。
+//
+// ⚠ 口径订正（门禁缺口批 2 · 2026-10-16 · F2）：旧标题写「build（含**版本注入**）」，
+//   与实况不符 —— 实测 `src/host/**` 无 `__DASH_PLUGIN_VERSION__` 引用点、产物内亦 0 命中
+//   ⇒ **构建期不发生版本注入**（该语句为空转）。版本单一事实源 = `package.json`，
+//   由 `lib/harness.cjs` 的 `readPluginVersion()` **运行时直读**达成 ⇒ bump + 重建仍必要
+//   （产物要随源码更新），但**不是**"把版本号注入产物"。
 //
 // 用法（需要 GITHUB_TOKEN 环境变量，GitHub Personal Access Token）：
 //   GITHUB_TOKEN=xxx node scripts/release.mjs                 # patch 版（3.2.2 → 3.2.3）
@@ -80,7 +86,7 @@ const tag = 'v' + next;
 console.log('发布 ' + cur + ' → ' + next + '（tag ' + tag + '）' + (dryRun ? ' [dry-run]' : ''));
 
 // ---- 2. 构建 + 漂移校验 ----
-console.log('== build + 版本注入 ==');
+console.log('== build（版本注入见头注订正：实为运行时直读，非构建期注入）==');
 runNode('build-host.mjs', []);
 runNode('build-client.mjs', []);
 console.log('== 漂移校验（源码 ↔ 产物）==');
@@ -101,7 +107,7 @@ if (dryRun) {
 const pkg = JSON.parse(readFileSync(PKG, 'utf8'));
 pkg.version = next;
 writeFileSync(PKG, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
-runNode('build-host.mjs', []); // 产物同步注入新版本
+runNode('build-host.mjs', []); // 产物同步源码（版本号不经产物：见头注订正 —— 运行时直读 package.json）
 runNode('build-client.mjs', []);
 console.log('== npm pack ==');
 const packOut = sh(NODE, [NPM_CLI, 'pack', '--pack-destination', '.']).split('\n').pop().trim();
