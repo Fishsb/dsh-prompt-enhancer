@@ -80,6 +80,22 @@ function buildClient() {
     ['// @dsh-client-styles-inject\n', stylesChunk],
     ['// @dsh-client-app-inject\n', appChunk],
   ];
+  // ── chunk 契约门（2026-10-17 事故根治）────────────────────────────────
+  // 每个 chunk 必须是**字符串**（`module.exports = "<源码文本>"`）。
+  // 病历：src/client/voice/correction.js 曾以裸 JS 提交（`var ...; function ...` 且无
+  //   module.exports 包裹）⇒ require 返回**空对象** ⇒ `body.replace(marker, chunk)`
+  //   把对象字符串化成 "[object Object]" 注入产物 ⇒ 浏览器 new Function 求值抛
+  //   `Unexpected identifier 'Object'` ⇒ 整个 client 半部装载失败（web boot 报
+  //   「1 entry did not activate / import failed」）。
+  // 本门在**构建期**即拒绝，并给出违规 chunk 的 marker 与实得类型（不是等浏览器报错）。
+  const badChunks = injections.filter(([, c]) => typeof c !== 'string');
+  if (badChunks.length) {
+    console.error('[build-client] chunk 契约违反 —— 以下 chunk 未导出字符串：');
+    for (const [marker, c] of badChunks) console.error('  · ' + marker.trim() + '  → 实得 ' + (typeof c));
+    console.error('  修复：把 chunk 源码包成 module.exports = "<JSON 转义后的源码>";');
+    throw new Error('chunk 契约门未通过（' + badChunks.length + ' 个）');
+  }
+
   let previous;
   do {
     previous = body;
