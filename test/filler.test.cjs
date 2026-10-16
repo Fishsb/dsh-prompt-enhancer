@@ -152,6 +152,45 @@ test('FILLER-32 已退役面不得回流（旧规整 LLM 链 / 旧子键 / 旧 i
     'CHG-117：rpc-voice 不得再调 asr.transcribe');
 });
 
+// ─────────── ④-bis CHG-121 收尾批：儿化音白名单**加固**回归锁 ───────────
+// 定性（先量后补）：现行**无**风险 —— 「儿」不在任一语气词表内，位置保护也挡住词中「儿」。
+//   本块是**加固**（防将来词表扩张），故判据形态 = ① 加固条目逐条在位 ② 现行不得被改坏
+//   ③ **变异自证**：摘掉加固块 ⇒ 同一「词表扩张」变异下必被改坏（证明本锁不是恒真摆设）。
+const ERHUA_HARDENED = ['一会儿', '这会儿', '那会儿', '多会儿', '等会儿',
+  '有点儿', '一点儿', '差点儿', '玩儿', '门儿', '事儿', '味儿', '劲儿', '空儿',
+  '头儿', '苗儿', '伴儿'];
+// 模拟「将来词表扩张」：把「儿」列进受保护字表（**单因子**——位置保护保留）。
+//   ⚠ 与下方 FILLER-V01 的双因子变异不同：V01 证「位置保护承重」；本条证「白名单加固承重」。
+const addErToGuarded = (src) => {
+  const anchor = "var FILLER_CHARS_GUARDED = [";
+  assert.ok(src.includes(anchor), '变异锚点须存在（受保护字表）');
+  return src.replace(anchor, anchor + "'儿', ");
+};
+
+test('FILLER-40 ⭐CHG-121 加固：儿化音白名单逐条在位 + 现行不得改坏', () => {
+  for (const w of ERHUA_HARDENED) {
+    assert.ok(F.FILLER_PROTECTED.indexOf(w) !== -1, 'CHG-121：加固条目须入白名单 —— ' + w);
+    assert.equal(strip(w), w, 'CHG-121：现行不得改坏 —— ' + w);
+    assert.equal(strip('我想' + w), '我想' + w, 'CHG-121：句中周边不得改坏 —— ' + w);
+  }
+});
+
+test('FILLER-40V ⭐变异自证·加固有牙：摘掉加固块 ⇒ 词表扩张变异下必被改坏', () => {
+  const base = decodeChunk('src/client/voice/filler.js');
+  // ① 正例：有加固块 ⇒ 同一变异下**全部不得**被改坏
+  const withFix = loadFiller(addErToGuarded(base));
+  const broke = ERHUA_HARDENED.filter((w) => withFix.stripFillers(w).text !== w);
+  assert.deepEqual(broke, [], '有加固时「儿」入表也不得改坏，实测被改坏：' + JSON.stringify(broke));
+  // ② 摘掉加固块 == 退回「补白名单之前」⇒ 若本锁没牙（恒真）此处会静默通过
+  assert.ok(base.includes("'一会儿'"), 'CHG-121 加固块须存在（否则本变异无对象）');
+  const reverted = base.replace(/'一会儿', '这会儿', '那会儿', '多会儿', '等会儿',\n[\s\S]*?'头儿', '苗儿', '伴儿',\n/g, '');
+  assert.ok(!reverted.includes("'一会儿'"), '变异须真的摘掉了加固块');
+  const noFix = loadFiller(addErToGuarded(reverted));
+  const brokeReverted = ERHUA_HARDENED.filter((w) => noFix.stripFillers(w).text !== w);
+  assert.ok(brokeReverted.length > 0,
+    '摘掉加固后必须被改坏（否则本判据为恒真摆设）；实测被改坏 0 条');
+});
+
 // ─────────── ⑤ 变异自证 + 负控 ───────────
 // 变异：让「位置保护」失效（`notInsideWord` 恒真 ⇒ 完全不看位置）。
 //   ⚠ 单变「位置保护」**不会**伤到儿化音 —— 因为「儿」**根本不在语气词词表里**
