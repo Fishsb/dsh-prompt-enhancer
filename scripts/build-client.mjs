@@ -41,6 +41,8 @@ function buildClient() {
   // P1-a（2026-10-13 缩批）：RecordRTC vendor chunk 已退役（采集改浏览器原生 MediaRecorder）；
   // mic-button / voice-insert 已退役（按钮 UI 交官方；热键与填入逻辑搬入 hotkey.js）。
   // CHG-117（2026-10-16 · 规整改造批）：清口水词 —— 本地纯规则清理器（不调模型）
+  // CHG-143（纠错语音独立步批）：语音纠错的可见性状态 chunk（照 filler.js 既有模式）
+  const voiceCorrectionChunk = require('../src/client/voice/correction.js');
   const voiceFillerChunk = require('../src/client/voice/filler.js');
   const voiceStateChunk = require('../src/client/voice/state.js');
   const voiceRecorderChunk = require('../src/client/voice/recorder.js');
@@ -68,6 +70,7 @@ function buildClient() {
     ['// @dsh-client-comp-model-config-tab-inject\n', modelConfigTabChunk],
     ['// @dsh-client-comp-params-tab-inject\n', paramsTabChunk],
     ['// @dsh-client-comp-model-plugins-section-inject\n', modelPluginsSectionChunk],
+    ['// @dsh-client-voice-correction-inject\n', voiceCorrectionChunk],
     ['// @dsh-client-voice-filler-inject\n', voiceFillerChunk],
     ['// @dsh-client-voice-state-inject\n', voiceStateChunk],
     ['// @dsh-client-voice-recorder-inject\n', voiceRecorderChunk],

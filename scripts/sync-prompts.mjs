@@ -55,6 +55,10 @@ const NAME_MAP = {
   'assemble/continue.md': 'CONTINUE_PROMPT',
   'assemble/smart.md': 'SMART_TAIL_PROMPT',
   'discipline.md': 'DISCIPLINE_PROMPT',
+  // CHG-143（纠错语音独立步批）：**语音纠错步**的提示词 —— 承接从 `discipline.md`
+  // 第 6 条移出的「字词层低争议订正」受约束例外（四条合取判据 + 兜底 + 可见性，
+  // 逐字同款）⇒ 纠错能力由「增强模板内」搬到「语音链路独立步」（用户第三轮架构澄清）。
+  'correction.md': 'CORRECTION_PROMPT',
 };
 
 // 自动发现：扫描提示词包内全部 .md（排除包级/模式级 PACKAGE.md），按相对路径查 NAME_MAP 得常量名；

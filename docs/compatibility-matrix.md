@@ -35,13 +35,14 @@
 | `config/get` | client → host | 读取磁盘配置（$DSH_HOME/dsh-prompt-enhancer.config.json；DSH Desktop 动态端口配置恢复） | 只读 |
 | `config/set` | client → host | 写入磁盘配置（原子写 tmp+rename，≤1MB） | 用户触发 |
 | `voice/status` | client → host | 语音引擎就绪态（**委托官方 `ctx.speechToText.snapshot()`**）+ 清口水词就绪态 | 只读 |
+| `voice/correct` | client → host | **语音输入纠错**（独立语音增值步 · `CHG-143`）：识别完成后对草稿做**字词层低争议订正**（可带**最近 1 轮显式会话参考**判语境）；**与自动增强并联**、由 `voice.correction.enabled` 开关控制 | 用户触发 |
 
-> 注：`models/*` / `logs/*` / `template/*` / `enhance*` / `cancel` 共 **11** 条注册于 `plugin-host.js`（由 `lib/index.cjs` 读出 `BODY` 并桥接）；`config/*` / `voice/status` 共 **3** 条注册于 **host 半部 `lib/` 侧的真 CommonJS 模块**——`config/*` 在 `lib/rpc-config.cjs`、`voice/*` 在 `lib/rpc-voice.cjs`（P2-3 拆分批起；`lib/index.cjs` 现为**薄装配入口**，自身不注册 RPC）。两侧同挂 `/dsh-prompt-enhancer/rpc`，合计 **14** 条（以 `harness.handle(` 枚举逐条对照 —— **P2-3 起派生面 = `lib/` 下全部非生成 `.cjs` + `plugin-host.js`**，可由 `node scripts/rpc-manifest.mjs` 复算）。
+> 注：`models/*` / `logs/*` / `template/*` / `enhance*` / `cancel` / `voice/correct` 共 **12** 条注册于 `plugin-host.js`（由 `lib/index.cjs` 读出 `BODY` 并桥接）；`config/*` / `voice/status` 共 **3** 条注册于 **host 半部 `lib/` 侧的真 CommonJS 模块**——`config/*` 在 `lib/rpc-config.cjs`、`voice/status` 在 `lib/rpc-voice.cjs`（P2-3 拆分批起；`lib/index.cjs` 现为**薄装配入口**，自身不注册 RPC）。⚠ `CHG-143` 起 `voice/correct` 的**注册面在 bundle（`plugin-host.js`）内**，**不在** `lib/rpc-voice.cjs`（后者仍只注册 `voice/status`）——其参数校验 schema 仍在 `lib/rpc-schema.cjs`（schema 面与注册面**可分离**）。两侧同挂 `/dsh-prompt-enhancer/rpc`，合计 **15** 条（以 `harness.handle(` 枚举逐条对照 —— **P2-3 起派生面 = `lib/` 下全部非生成 `.cjs` + `plugin-host.js`**，可由 `node scripts/rpc-manifest.mjs` 复算）。
 >
 > ⚠ **历史**（**已退役，不再注册**）：`plugins/*`（4）· `update/check`·`update/pull`·`update/envcheck`（3）· `update/executorEnsure`·`update/install`·`update/restartNeeded`·`update/diagTail`（4）· `update/portRestart`·`update/makeShortcut`（2）· `voice/model*`·`voice/deploy*`（8）⇒ 共 21 条已随「插件管理 tab 退役 / 更新执行器退役 / 插件内重启能力退役 / P1-a 语音缩批」移除。**上方表格为现行集合，本节历史条目仅供旧版本对照，不代表现行能力。**
 
 
-> 注（**P2 · 2026-09-19 · 参数校验申报**）：上述 **14 条中 5 条有参数校验**（`lib/rpc-schema.cjs` 的 `schemas`），另 **9 条无校验且在此具名申报**——**禁止按类别笼统豁免**；新增线上方法却不申报、或申报过期，都会被 `node scripts/rpc-manifest.mjs --check` 拒绝（事实源由注册面派生，不靠人工清点）。
+> 注（**P2 · 2026-09-19 · 参数校验申报**）：上述 **15 条中 6 条有参数校验**（`lib/rpc-schema.cjs` 的 `schemas`），另 **9 条无校验且在此具名申报**——**禁止按类别笼统豁免**；新增线上方法却不申报、或申报过期，都会被 `node scripts/rpc-manifest.mjs --check` 拒绝（事实源由注册面派生，不靠人工清点）。
 >
 > | 方法 | 桶 | 理由 |
 > |---|---|---|

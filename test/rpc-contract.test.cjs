@@ -34,16 +34,25 @@ test('RPC-01 事实源一致性 --check 通过（注册面 / 文档面 / 申报�
 //     `CHG-115` `I-1`；且其调官方 `transcribe()` 漏传 `AbortSignal` 必失败 `I-3`）⇒ 整条死链。
 //   `bundled 11` / `gap 9` **不变**：前者是 plugin-host.js 注册面（本就不含该 RPC），
 //   后者 = live \ schemas（该 RPC **有** schema ⇒ 本就不在 gap）。
-test('RPC-02 派生清单结构锁：14 = 3(lib/index.cjs) + 11(plugin-host.js)，交集 0，schema 5，具名申报 9', () => {
+// CHG-143（2026-10-17 · 纠错语音独立步批）：数字锁 14 → **15**（bundled 11 → 12；schema 5 → 6）。
+//   ⚠ **事实同步，非改浅**：新增的是 **`voice/correct`**（语音识别完成后的**独立纠错步** ——
+//     用户第三轮架构澄清：纠错是语音链路上的独立一步、**不绑进增强管线**）。
+//   ⚠ 它注册在 **bundle（`plugin-host.js`）** 内（复用 host 侧 llm.stream 小调用式样），
+//     **不是** `lib/rpc-voice.cjs` ⇒ native 3 **不变**、bundled +1。
+//   `gap 9` **不变**（`voice/correct` **有** schema ⇒ 本就不在 gap）；仍逐项严格等号，未改区间/未跳过。
+test('RPC-02 派生清单结构锁：15 = 3(lib/index.cjs) + 12(plugin-host.js)，交集 0，schema 6，具名申报 9', () => {
   const r = run(['--json']);
   assert.equal(r.ok, true, 'rpc-manifest --json 失败：\n' + r.out);
   const m = JSON.parse(r.out);
   assert.equal(m.counts.native, 3, 'lib/index.cjs 注册面条数');
-  assert.equal(m.counts.bundled, 11, 'plugin-host.js 注册面条数');
-  assert.equal(m.counts.live, 14, '线上方法去重总数');
-  assert.equal(m.counts.schema, 5, 'schema 覆盖条数');
+  assert.equal(m.counts.bundled, 12, 'plugin-host.js 注册面条数');
+  assert.equal(m.counts.live, 15, '线上方法去重总数');
+  assert.equal(m.counts.schema, 6, 'schema 覆盖条数');
   assert.equal(m.counts.gap, 9, '具名申报的无校验条数');
   assert.equal(m.noSchema.length, m.counts.gap, 'gap 明细与计数一致');
+  // ⚠ CHG-143：纠错独立步的注册面 +++ 参数校验面（**新增锁，不是改浅**）
+  assert.ok(m.live.includes('voice/correct'), 'CHG-143：voice/correct 须在线上（纠错独立步的注册面）');
+  assert.ok(m.schemaCovered.includes('voice/correct'), 'CHG-143：voice/correct 须有 schema 校验');
   assert.ok(!m.live.includes('update/install'), 'P1-c：update/install 已退役（交回官方 plugin manager）');
   assert.ok(!m.live.includes('update/portRestart'), '已退役的重启 RPC 不得回流');
   // ⚠ CHG-117：`voice/transcribe` 已删 —— 与既有的「退役方法不得回流」同款锁（**新增锁，不是改浅**）

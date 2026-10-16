@@ -17,6 +17,62 @@
 
 ## [Unreleased]
 
+- **纠错改为「语音链路上的独立一步」+ 新增「语音纠错」开关（`CHG-143` · 纠错语音独立步批 · 2026-10-17）**：
+**用户三轮指示合读**（逐字，第三轮为架构澄清、以它为准）：「这个功能是通过提示詞增强的流程轮次做的，但是**是属于语言功能的增强模块**，
+就是这个纠错**可以独立存在**的，比如说**纠错功能打开的话提示詞自动增强没有打开的话，语言输入识别完成之后会自动的使用纠错然后就结束**，
+如果**自动增强和语言纠错都打开的话那就是语言输入完成之后先纠错然后接着增强**，这样的一个逻辑关系，**并不是集成绑定在提示詞增强一起的**」。
+⇒ **纠错 = 语音增值模块的一项**（与「自动增强 / 静音监测 / 热键 / 清口水词」同类），**不是**增强管线内的一步；**可脱离增强独立生效**。
+**⚠ 一处用户可感知的行为变更（务必逐字读）**：**提示词增强不再纠错** —— 原有的「字词层低争议订正」受约束例外**已从增强模板整体移出**
+（`discipline.md` 质量纪律第 6 条回归纯「不得替换」；`base`/`lite`/`standard` 三档的指针句与示例一并移除）；纠错改由**新的语音步**承担。
+⇒ **手动点 ✨ 一键增强时不再纠错**（用户第四项裁定：只有语音路径纠错）；**语音识别完成**时按两个开关的组合决定：
+**纠错关+增强关** ⇒ 不动 · **纠错关+增强开** ⇒ 只增强（现状不变）· ⭐**纠错开+增强关** ⇒ **只纠错 → 结束** · ⭐**纠错开+增强开** ⇒ **先纠错 → 再增强**。
+
+  **改动面（12 源文件 + 3 新增 + 2 产物重建）**：
+  ① **移除 8 处**（用户已批准 `UD-0038`「移除（推荐）」）—— `prompts/enhance/discipline.md:20` 第 6 条句内**单一连续区间 578 字符**（含四条合取判据/兜底/可见性）·
+  `base:6`/`lite:6`/`standard:6` **三处逐字同形指针句** · `standard:19` **第二处指针** ·
+  三个示例组 `base:60-68`（示例 7/8）· `lite:54-61`（示例 3/4）· `standard:55-58`（示例 3）。
+  ⚠ **护栏随能力搬迁、强度不降**：四条合取判据（唯一读法 / 只换单位 / 非事实面 / 非专名非数值）+ 兜底（拿不准不改：任一条无法当场判定 ⇒ **原样保留原文、不做任何订正**；禁止猜测）
+  + 可见性（**禁止文内标注** · 用户以**整段撤回**对照原文）⇒ **整块逐字**迁入新步提示词（机检：19/19 句逐字在位，`CHG143-G1`）。
+  ② **新语音纠错步** —— 新增 `prompts/enhance/correction.md`（`CORRECTION_PROMPT`）· 新增 `src/client/voice/correction.js`（可见性状态：runs/skipped/ok/changed/failed/lastCode）·
+  host 新增 RPC **`voice/correct`**（`enhance-handlers.js` 内；**独立于增强四阶段管道**，复用同款 `llm.stream` + `collectStream` + 超时闸；⚠ **剥离 `reasoningEffort`**、保留 `temperature=0.3`）·
+  **参考窗口 = 最近的显式会话轮次**（读法甲 · 前 1 轮 · `lite` 式同族；`fetchSessionHistory` → `extractHistoryConclusions`（**只取 text 块** ⇒ 与用户「显式信息」定义同向）→ `splitHistoryRounds(…,1,1)`）。
+  ③ **开关**：配置键 **`voice.correction.enabled`**（⚠ **不复用** `voice.filler.*`）· **默认关闭**（用户已定）· 取形**逐字对齐 `autoEnhance`**（`=== true`）·
+  **两侧白名单同批同形**：host `lib/asr.cjs` `sanitizeVoiceCfg` ↔ client `src/client/voice/state.js` `mergeVoice`（`M-3`）。
+  ④ **UI**：落设置页「**语音**」段落（`VoiceSection`，用户定性为语音功能）· 同款 `ToggleChip`（自述式「语音纠错开/关」）· `gridTemplateColumns` 四列 → **五列** ·
+  **诊断区可读**（`CorrectionDiag`，照抄 `FillerDiag` 模式读单一事实源 `voiceCfgState.value`；⚠ 位置纪律：**失败分支先于开关态分支**，承 `SW-1`）· i18n ZH/EN **各 +9 键**（`S-7` 平衡守恒）。
+  ⑤ **判据面事实同步**（**非改浅**）：RPC `14 → 15`（`voice/correct` 注册在 bundle 内 ⇒ native 3 不变、bundled 11 → 12；schema 5 → 6；`gap 9` 不变）⇒ 同批更新 `test/rpc-contract.test.cjs`（RPC-02 数字锁）· `scripts/arch-claims.mjs`（A201-1 严格等号 14 → 15）· `docs/compatibility-matrix.md`（§2 表 + 合计 + 校验申报）。
+
+  **已实测（方式/等级；数字可复现、附命令）**：
+  ⭐ **四组合矩阵逐格「调用次数 + 顺序」读数**（新增 `test/correction-step.test.cjs`，真实 `hotkey.js` 源码 + 假桥 + 共享 timeline）：
+  `CHG143-C1` 纠错关+增强关 ⇒ 纠错 **0** / 增强 **0**，timeline `[]` · `C2` 纠错关+增强开 ⇒ 纠错 **0** / 增强 **1**，timeline `[enhance]` ·
+  `C3` ⭐纠错开+增强关 ⇒ 纠错 **1** / 增强 **0**，timeline `[correct]`（**独立存在的唯一证据格**）· `C4` ⭐纠错开+增强开 ⇒ 纠错 **1** / 增强 **1**，timeline **`[correct, enhance]`**（顺序可证）。
+  另：`C5` 增强基于**纠错后**草稿发起（纠错产出真正流入下游）· `C6` 纠错失败**不吞掉**增强 · `C7` 增强关时纠错失败**不得**触发增强（负控）·
+  ⭐ **两个出口都给读数**：`C8`/`C9` 专测 `endedInFeedback`（**未识别**）出口（❗只改一个出口会漏一半）。
+  ⭐ **手动 ✨ 零纠错调用**（"零调用"证据，非"看着没变"）：`CHG143-M1` 断言 `helpers.js` 的增强入口**不含** `voice/correct`；`CHG143-M3` 断言手动路径**不读** `correction` 配置（来源显式区分）；
+  `CHG143-M2` 断言调度器**恰好 2 处调用**（两个语音出口）+ 产物内 `enhance` handler **体内零纠错调用**（不绑进增强管线）。
+  ⭐ **护栏搬迁逐字**：`CHG143-G1`（19 条片段逐字在位）· `CHG143-G2`（增强三档已无该例外 + 第 6 条核心句原样存活）· `CHG143-G3`（新常量进产物生成区、纪律层已无该例外）。
+  **开关默认关闭**：`CHG143-S1`（`VOICE_CFG_DEFAULTS.correction.enabled === false` + 取形对齐 `autoEnhance`）· `CHG143-S2`（**两侧白名单同形**逐字对照）。
+  **算例**：`npm test` ⇒ **tests 467 / pass 466 / fail 0 / skipped 1**（开工基线 450/449/0/1 ⇒ **断言总数 450 → 467，+17，未下降**；新增文件 `test/correction-step.test.cjs` 17 例）·
+  `npm run gate` ⇒ **5 环 PASS / FAIL 0 / SKIP 0、退出码 0**（`arch-claims` **断言 38 · 冲突 0 · SKIP 0**；**判据面指纹 `sha256:a6258c0248a75c2a` 逐字未变**）·
+  三 `--check` 全绿（`build-host` 版本 3.4.2 / `build-client` / `sync-prompts`（**20 个常量**））· 产物由脚本**两步重建**（`sync-prompts` 然后 `build-host`，`build-client`）·
+  `rpc-manifest --check` ⇒ 15 条线上方法 / schema 6 / 具名 9 / 0 孤儿 / 文档 100% 覆盖（双向）。
+  ⭐ **变异自证 + 负控**（**每例全新 pristine 副本**、剥 `(node:<PID>)`/UNDICI 噪声）：V2 顺序颠倒 ⇒ **RED**(7/10) · V3 开关判定失效 ⇒ **RED**(15/2) · V4 **漏未识别出口** ⇒ **RED**(14/3) · V5 手动 ✨ 也纠错 ⇒ **RED**(15/2) ·
+  **V1b 双门击穿**（"纠错开+增强关"错走成增强；同时击穿 `wantEnhance` 与 `fire()` 自带复核）⇒ **RED**(13/4，含 ⭐`C3` 与 `C1`/`C7`/`C9`) · **负控 N0**（不动任何文件）⇒ **GREEN**(17/17)。
+  ⚠ 如实登记一处：仅击穿 `wantEnhance`（V1）**仍 GREEN** —— 因为 `fire()` **自带** `autoEnhance === true` 复核（**两道独立门**，属既有冗余防护，非判据缺口）；V1b 同时击穿两门即 RED。
+  ⭐ **对抗式反例**：历史里出现过**同音的专名/术语/标识符/数值**（如项目代号、`timeOutMs` 大小写、版本号）时，模型可能"顺手改对"——**被挡于**：①判据③（标识符/文件名/路径/接口名/字段名/命令名/库名一律不动）②判据④（专名/数值一律不动）③**新步的上下文段**（明写"凡参考显示为专名/术语/命名/数值的字词 ⇒ 按判据③④一律不动"）④兜底（拿不准不改）。
+  ⚠ **代价（如实）**：移除后 `base`/`lite`/`standard` 三档**不再演示字词层边界**（示例失去对象，属**必然代价**）；⚠ **但不得据此认为护栏被放宽** —— 护栏**随例外一并移出**并**整块逐字**交由新步自带（`CHG143-G1` 机检）。
+  **门禁面附带处置（如实登记 · 已登记的第 4 次同类漂移，非缺陷）**：本批新增 3 个受控文件（`prompts/enhance/correction.md` / `src/client/voice/correction.js` / `test/correction-step.test.cjs`）⇒ `S-8` 受控读数 `141 → 144`，`arch-claims` 按该环既有设计判「**同环境读数漂移**」（**判据面指纹与 38 条断言逐字未变**）；按该环自身指引跑 `node scripts/arch-claims.mjs --write` ⇒ **diff 2 行**（`A201-1` 读数 14→15 条、`S-7` 268→277 键、`S-8` 141→144 件），**仅读数列、判据面未改** ⇒ `gate` 恢复 **退出码 0**。改前副本留 `/tmp`（P4 档为 gitignore 本地治理档，不进 git）。
+  **⚠ 未验证（不得读作已生效）**：**未部署、未重启 DSH ⇒ 本批改动尚未在运行中的 DSH 生效**（生效以部署 + 重启为界，**不以 commit 或版本号证明**）。
+  **模型行为面未验**：上述判据全部是**文本契约 / 调用编排**的机检（列表/顺序/次数/源码面），**不是**模型实跑行为；
+  "带会话历史是否真的能判对语境"、"纠错是否真的只动低争议字词"须**部署 + 重启 + 真实模型调用**才能验。
+  **`voice/correct` 的端到端效果未验**（需真实语音输入 + 真模型链）；**诊断区真实渲染**未做 DOM 实读（只证构造与判据）；**读法乙未被采纳**（见下）。
+  ⚠ **读法乙（按草稿形态自适应选两档强度）未被采纳及代价**：主持侧裁定采用**读法甲**（按最近的显式会话轮次取窗口）——理由：仓内取用机制**正是按轮次切片**（`splitHistoryRounds`）、与既有模式族同构，而读法乙**未见仓内对应机制**⇒不引入新机制。
+  ⇒ **代价**：若用户本意是"按草稿长短选轻量/标准两档强度"，则**该形态未实现**（当前固定前 1 轮）；将来若需两档，须另立机制（届时属新功能）。
+  **边界**：**未 bump**（`version` 仍 `3.4.2`）· 未打 tag · 未 Release · 未 publish · 未安装 · **未部署** · **未重启 DSH** ·
+  **不改生成物**（`plugin-host.js` / `lib/client.cjs` / `src/host/app.js` 生成区**只由脚本重建**）· **未改 `PROJECT.md` 正文**（本批改变正本 §7.1「四项」/§8.2 路线 A/术语表/R12 的事实 ⇒ **主持侧已获用户批准、事后一次回写**）·
+  **未改** `scripts/sync-runtime.mjs` 的部署语义（`A-3` 已裁）· **未改**官方源码或其 `node_modules` · `src/host/**` chunk 形态与 `new Function('harness', BODY)` 桥接**零触碰** ·
+  **未放宽**既有护栏（四条合取 / 拿不准不改 / 禁文内标注 + 整段撤回 ⇒ 全部**逐字迁入**新步，见 `CHG143-G1`）· 未碰账本区 `/home/lk/.dsh/hob-ledgers/**`。
+  — [PE-F02]（flow: 语音与识别链）
 - **`docs/compatibility-matrix.md` §2 的 RPC 计数陈述订正（`CHG-138` 陈旧投影订正批 · 事实订正 · 非行为变更 · 2026-10-16）**：**现象** = 该档 §2 的「参数校验申报」注里，「上述 **15 条中 6 条**有参数校验」与同档 `:39` 合计句的「合计 **14** 条」**并存两值**，而 `node scripts/rpc-manifest.mjs --json` 实算 = `{native:3, bundled:11, live:14, schema:5, gap:9}` ⇒ **`15`/`6` 为失真计数**（`6 + 9 = 15 ≠ live 14`，句中自相矛盾）。**成因（已取证到提交）** = `316cb1b`（`CHG-117` 规整改造批）因 `voice/transcribe` 退役把 `live 15 → 14`、`schema 6 → 5`，**只改到 `:39` 的合计句、漏改 `:44` 的校验句**（`git show 316cb1b^:` 与 `316cb1b:` 的 `grep -o "合计 \*\*[0-9]*\*\* 条"` 分别为 `15` / `14`）。**订正** = `上述 **15 条中 6 条**` → `上述 **14 条中 5 条**`（**`另 9 条无校验` 本就正确、原样保留**；该 9 条与 `:46-58` 具名申报表 9 行**逐名等于** `rpc-manifest` 的 `noSchema`）。**改动面 = 该档 1 行（`git diff --numstat` = `1 1`）**；⚠ **未动任何判据 / 脚本 / 产物**（该计数句**不被任何门禁环解析** —— `rpc-manifest.mjs` 只解析**方法名**与 §2 表行，`grep` 该脚本内 `parseInt` / 数字字面量**零命中**）。**同批收口**：`node scripts/arch-claims.mjs --write` 刷新其**本地治理档标记区**（`docs/internal/P4-状态归属-2026-09-19.md`，gitignored）之读数列 —— 成因 = `fe91d00` 新增 `scripts/lib/sync-face.mjs` 使 `S-8`「受控 N 件」**140 → 141**（**判据面未变**：前后指纹均 `sha256:a6258c0248a75c2a` / 38 条断言**逐字未变**，仅**读数列**随 `git ls-files` 文件集重算）⇒ `gate` 由 **exit 1 → exit 0**（5 环全 PASS）。**已实测（方式/等级）**：`npm test` **450 例**（改前 450/450 pass/0 skip；改后 449 pass/**1 skip** —— ⚠ **总数不变**，该 1 例为 `test/ring-state.test.cjs` 的 `P5-10b`，其**设计内**判定为「`gate --json` 无未判环时 `t.skip`」（`arch-claims` 转绿后未判环由 `['arch-claims']` 变空 ⇒ 该例由"真执行"转"形态 A 记 SKIP"，判别力由 `P5-10b2` 夹具承担））· `node scripts/gate.mjs` ⇒ **exit 0**（5 环 PASS 5 · FAIL 0 · SKIP 0）· `node scripts/arch-claims.mjs --check` ⇒ **exit 0**（断言 38 通过 · 冲突 0 · **指纹 `sha256:a6258c0248a75c2a` 未变**）。**未验证 / 如实登记**：⚠ **未部署、未重启 DSH**（本批只改文档 + 本地治理档）⇒ **不得读作已生效**；该档 `docs/` 顶层**不进 npm 包**（`package.json` `files` 白名单）。**结构性备注（须登记）**：此次 `S-8` 读数列漂移为**同类第 2 例**（第 1 例见 `CHG-126` §四.2：新增测试文件使 139 → 140）⇒「**新增/删除文件会牵动 `S-8` 读数列、须随批 `--write`**」这一**已知脆弱性仍然成立**，本批**只按环自身指引止血，未消除成因**。— [PE-F01]（flow: 门禁链）
 
 - **门禁缺口批 2：`F1` 部署前置覆盖面补齐 + `F2` 版本链口径订正（`CHG-127` · 最窄面 · 只补判据与文案，**不改插件行为**、不部署 · 2026-10-16）**：由来 = **部署批（`CHG-132`）在部署自证中实测出两处既有（**非本批引入**）「会掩盖问题」级缺口**，主持侧裁定处置方式后立批。**`F1`（中）——`package.json` 在同步面内，但「三处同刻一致」与双 `--check` 都只覆盖代码产物**：`scripts/sync-runtime.mjs:121` 的同步面 = `['plugin-host.js','package.json','README.md','README.en.md','cordis.patch.yml']`（+ `lib/*.cjs` 目录级 + `prompts`/`assets`）⇒ **具名面内的非产物文件共 4 件**（作业书只点名 `package.json`，实测面更宽，已按实测四件全覆盖）。**补法（不新造机制 / 不动部署语义）**：新增 **`scripts/lib/sync-face.mjs`** —— **从 `sync-runtime.mjs` 的实际清单字面量派生**同步面（**不**另写第二份硬编码，同 `lib-manifest.mjs` 的「从构建脚本派生」先例），按**产物 / 非产物**分类，并给出**可复算的前置对照**（逐件 md5，**复用既有 md5 对账那一套**）；CLI `node scripts/lib/sync-face.mjs [--json]` 使「同步面文件 ↔ 工作树/运行环境」的差异**在部署前可见**。**覆盖面逐条**：**纳入 4 件**＝`package.json` / `README.md` / `README.en.md` / `cordis.patch.yml`；**有意不纳入**＝`plugin-host.js`（由双 `--check` 覆盖）、`lib/**`（双 `--check` + `lib-manifest` 判据）、`prompts/**`（gate prompts 环 + 产物面判据）、`assets/**`（静态资源，无生成器 ⇒ 无「源码↔产物」比对面）。**判据**：`test/gate-gap-locks.test.cjs` 新增 **GAP-7..10**（覆盖面派生 + **变异自证**改一处 `package.json` 清单字段 ⇒ 必红 + **负控**不动文件 ⇒ 必绿 + **fail-closed** 脚本缺位/清单改名 ⇒ 抛错不静默回退）。**`F2`（低-中）——版本注入链口径订正（不补占位符机制）**：实测 `build-host.mjs:58` 的 `__DASH_PLUGIN_VERSION__` 占位符在 `src/host/**` 与产物中**命中均为 0**（`grep -rc`）⇒ 该 `split/join` **空转**；产物内 `PLUGIN_VERSION` **3 处（`plugin-host.js:63/75/2402`）全为历史注释**；版本一致性**实际由 `lib/harness.cjs:43-50` 的 `readPluginVersion()` 运行时直读 `package.json` 达成**（实算 `3.4.2`）。⇒ **订正口径（不再加第二套机制：运行时直读已达成「`package.json` = 版本单一事实源」）**：把**与实况不符的注释/文案**改为如实，**逐条**＝① `scripts/build-host.mjs`（头注 ① + `:56` 处，**只改注释，`split/join` 语句本身逐字保留**）② `scripts/release.mjs`（头注 + `== build + 版本注入 ==` 日志 + `// 产物同步注入新版本` 注释）③ `scripts/sync-runtime.mjs`（头注 + `// 1. 构建（含版本注入）`，**部署语义与同步面清单逐字未动**）④ `AGENTS.md:125/153/237/245/251`（⚠ 该档被 `.gitignore:19` 覆盖 ⇒ **不进 git**，仅本地生效，如实登记）⑤ **未发现同类**＝`docs/compatibility-matrix.md:116`（其表述为「运行时读…（非构建硬编码）」**本就如实**，无需改）；**登记不订正**＝`src/host/pure.js` 的那句现在式假话被原样注入到产物（`plugin-host.js:2402`），因**改它必然改产物字节**、与本批判据①「产物零改动」直接冲突 ⇒ 按「登记不订正」处置。**已实测（方式/等级）**：**改前基线** `npm test` **446 / 445 pass / 0 fail / 1 skip** · `npm run gate` **exit 0**（5 环 PASS · 0 FAIL · 0 SKIP）· 双 `--check` 均 `exit 0` · 产物 md5 `plugin-host.js 8856ff50d12c3a4c4785d0a785bde37f` / `lib/client.cjs 46139c857d93b52ab38978bc09b9c758`；**改后对账** `npm test` **450 / 449 pass / 0 fail / 1 skip**（**断言总数 446→450 上升，未下降**）· `npm run gate` **exit 0**（5 环全 PASS，**链级三态语义未被改浅**：`scripts/gate.mjs` 与 `scripts/lib/gate-exit.mjs` 逐字未动）· `build-host`（写）+ `--check` + `build-client --check` **三态均 exit 0** 且**产物 md5 与基线逐字节相同**（F2 判据①「产物零改动」成立）· 版本一致性 `readPluginVersion()` = `3.4.2` = `package.json`（运行期直读路径成立）。**未验证**（如实登记）：① **不部署**（作业书硬边界）⇒ 本批改动的 `lib/sync-face.mjs` 与文案**未进运行环境**、**未重启 DSH**；② 产物内/`lib/**` 两处假话**按边界登记未订正**；③ `AGENTS.md` 订正因 gitignore **不进远端**。**不改插件行为**：改动面 = 1 新脚本 + 1 测试文件 + 3 脚本注释/文案 + 1 gitignored 治理档；**未碰** `prompts/**`·`src/**`·`lib/**`（生成物 `plugin-host.js`/`lib/client.cjs` 字节未变）· `package.json`（只读）。
