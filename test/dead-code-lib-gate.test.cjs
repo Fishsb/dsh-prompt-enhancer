@@ -465,3 +465,104 @@ test('D-10 回归锁：被吞形态若复现，判据读数会立刻变化（端
     assert.match(r.out, /lib\/sys\.cjs/, 'A197-5 必须数到 lib/sys.cjs 那一处（旧剥离器会吞掉它）');
   });
 });
+
+// ── R7 client chunk 导出契约（源码层）+ 产物可求值性（产物层）回归锁 ──────────────
+// 病历（2026-10-17 · 线上事故收口批 · 承 CHG-143）：`src/client/voice/correction.js`
+//   以**裸 JS** 提交（其余 23 个 client chunk 写 `module.exports = "…"`）⇒ build-client 把对象
+//   字符串化成 `[object Object]` 注进 `lib/client.cjs` ⇒ 浏览器求值抛
+//   `Unexpected identifier 'Object'` ⇒ **整个 client 半部装载失败**，而 npm test 467 /
+//   gate 5 环 / 三 --check **一条都没盖住**。
+// ⚠ 本锁把「R7 必须能真的变红（两层）+ 不动时必须绿 + fail-closed」钉成机检。
+
+/** 把 chunk 文件解码回**其源码原文**（与 R2 同款包裹正则）。 */
+function decodeChunkFile(abs) {
+  const raw = fs.readFileSync(abs, 'utf8');
+  const m = raw.match(/module\.exports\s*=\s*"([\s\S]*)";?\s*$/);
+  assert.ok(m, '夹具前置：该 chunk 应为 JSON 字符串包裹形态');
+  return JSON.parse('"' + m[1] + '"');
+}
+/** 把 chunk 文件**改回裸 JS**（本次事故的真实形态）。⚠ 只在整仓副本内调用。 */
+function unwrapChunkToBareJs(dir, rel) {
+  const abs = path.join(dir, rel);
+  fs.writeFileSync(abs, decodeChunkFile(abs), 'utf8');
+}
+
+test('R7 变异自证（源码层）：任一 chunk 改回裸 JS ⇒ R7 必红且点名该文件', () => {
+  // ⚠ **任取一个** chunk（不是只有 correction.js）⇒ 证明覆盖面是「每个 chunk」而非「某文件」
+  const rel = 'src/client/voice/' + 'recorder' + '.js'; // 运行时拼接，避免本文件被误当成实现点位
+  withFixture((dir) => unwrapChunkToBareJs(dir, rel), (dir) => {
+    const r = runGate(dir);
+    assert.equal(r.code, 1, '源码层契约违反必须 exit 1（若为 0 则 R7 是恒真判据 = 假绿）');
+    assert.match(r.out, /FAIL \| R7 \|[^\n]*recorder\.js/, 'R7 必须点名违规 chunk');
+    assert.match(r.out, /导出形态违反/, 'R7 必须说明是导出形态（不是别的理由）');
+  });
+});
+
+test('R7 变异自证（产物层）：源码全对、仅产物被对象字符串化 ⇒ R7 必红且点名产物', () => {
+  withFixture((dir) => {
+    // 只在**产物**里注入 [object Object]，源码一个字节不动 ⇒ 隔离产物层
+    const p = path.join(dir, 'lib', 'client.cjs');
+    const s = fs.readFileSync(p, 'utf8');
+    const anchor = 'var correctionState = {';
+    assert.equal(s.split(anchor).length - 1, 1, '夹具前置：产物内应恰有 1 处该锚点');
+    fs.writeFileSync(p, s.replace(anchor, 'var correctionState = [object Object];'), 'utf8');
+  }, (dir) => {
+    const r = runGate(dir);
+    assert.equal(r.code, 1, '产物层污染必须 exit 1（R2 只看源码 ⇒ 只能由 R7 咬住）');
+    assert.match(r.out, /FAIL \| R7 \|[^\n]*\[object Object\]/, 'R7 必须点名污染计数（不是只报"求值失败"）');
+  });
+});
+
+test('R7 负控：不动任何文件 ⇒ R2/R7 均 PASS 且 exit 0（防"恒红"）', () => {
+  withFixture(null, (dir) => {
+    const r = runGate(dir);
+    assert.equal(r.code, 0, '正常态必须 exit 0');
+    assert.match(r.out, /PASS \| R7 \|/, 'R7 必须给出 PASS 行（不是"缺席即跳过"）');
+    assert.match(r.out, /PASS \| R2 \|/, 'R2 必须给出 PASS 行');
+  });
+});
+
+test('R7 fail-closed：产物缺位 / chunk 目录缺位 ⇒ FAIL，不得静默回退判绿', () => {
+  // ① 产物缺位
+  withFixture((dir) => { fs.rmSync(path.join(dir, 'lib', 'client.cjs')); }, (dir) => {
+    const r = runGate(dir);
+    assert.equal(r.code, 1, '产物缺位必须 exit 1（不得"没有就不判"）');
+    assert.match(r.out, /FAIL \| R7 \|[^\n]*产物缺位/, 'R7 必须报产物缺位');
+  });
+  // ② chunk 目录缺位（解析不出清单）
+  withFixture((dir) => { fs.renameSync(path.join(dir, 'src', 'client'), path.join(dir, 'src', 'client-moved')); }, (dir) => {
+    const r = runGate(dir);
+    assert.equal(r.code, 1, '扫描面缺位必须 exit 1（不得判绿）');
+    assert.match(r.out, /FAIL \| R2 \|[^\n]*目录缺位/, 'R2 必须报目录缺位');
+  });
+});
+
+test('R2 fail-closed（H2 活例修复）：读不出包裹的 chunk 不得再静默回退到原文而报 PASS', () => {
+  // 病历：原实现 `strip(mm ? JSON.parse(…) : raw)` ⇒ 裸 JS chunk 被当成 chunk 源码正常扫描
+  //   ⇒ 照常打 `PASS | 24 个 client chunk …`（读者 grep PASS 得到假读数）。
+  const rel = 'src/client/voice/' + 'filler' + '.js';
+  withFixture((dir) => unwrapChunkToBareJs(dir, rel), (dir) => {
+    const r = runGate(dir);
+    assert.equal(r.code, 1, '契约违反必须 exit 1');
+    assert.match(r.out, /FAIL \| R2 \|[^\n]*读不出 chunk 导出契约/, 'R2 必须显式报契约读取失败');
+    // ⚠ 关键：不得同时出现同一规则的 PASS 行（那正是本次事故的"读数看起来是绿的"）
+    assert.doesNotMatch(r.out, /PASS \| R2 \|/, 'R2 有契约违反时不得再打 PASS 行（防假读数）');
+  });
+});
+
+test('R7 覆盖面（host 面同族）：src/host 的 chunk 也在契约门内 ⇒ 改回裸 JS 必红', () => {
+  // ⚠ host 面**实读为同族**：5 个 chunk 全部写 `module.exports = "…"` 同一契约，
+  //   且 build-host.mjs 用同一 `body.replace(marker, chunk)` 注入 ⇒ 一并纳入。
+  const rel = 'src/host/' + 'diagnostics' + '.js'; // 运行时拼接（同既有纪律）
+  withFixture((dir) => {
+    const abs = path.join(dir, rel);
+    const raw = fs.readFileSync(abs, 'utf8');
+    const m = raw.match(/module\.exports\s*=\s*"([\s\S]*)";?\s*$/);
+    assert.ok(m, '夹具前置：host chunk 应为 JSON 字符串包裹形态');
+    fs.writeFileSync(abs, "'use strict';\n" + JSON.parse('"' + m[1] + '"'), 'utf8');
+  }, (dir) => {
+    const r = runGate(dir);
+    assert.equal(r.code, 1, 'host chunk 契约违反必须 exit 1（不得只盯 client）');
+    assert.match(r.out, /FAIL \| R7 \|[^\n]*src\/host\/diagnostics\.js/, 'R7 必须点名 host 违规 chunk');
+  });
+});

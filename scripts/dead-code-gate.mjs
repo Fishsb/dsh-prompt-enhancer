@@ -3,6 +3,7 @@
 // 用法: node scripts/dead-code-gate.mjs [--range A..B]   默认 HEAD~1..HEAD
 // R1 diff 新增声明(src/**)全仓引用<2 → FAIL；R2 client chunk 未声明标识符 → FAIL
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -147,7 +148,12 @@ for (const line of git(diffArgs).split('\n')) {
   };
 
   const chunks = [];
+  // ⚠ 契约违反计数（读不出包裹的 chunk 数）：> 0 时**不得**再打 R2 的 PASS 行
+  //   —— 同一条规则同时输出 PASS 与 FAIL 会让读者 grep `PASS | R2` 时得到假读数
+  //   （本次事故的形态之一就是「读数看起来是绿的」）。
+  let contractBad = 0;
   const collect = (dir) => {
+    if (!fs.existsSync(dir)) { fail('R2', 'client chunk 目录缺位（无扫描面 ⇒ 不得判绿）: ' + path.relative(ROOT, dir)); contractBad++; return; }
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, ent.name);
       if (ent.isDirectory()) { collect(full); continue; }
@@ -155,7 +161,16 @@ for (const line of git(diffArgs).split('\n')) {
       if (full.split(path.sep).includes('vendor')) continue;
       const raw = fs.readFileSync(full, 'utf8');
       const mm = raw.match(/module\.exports\s*=\s*"([\s\S]*)";?\s*$/);
-      chunks.push({ rel: path.relative(ROOT, full), code: strip(mm ? JSON.parse('"' + mm[1] + '"') : raw) });
+      // ⚠⚠ H2 活例修复（2026-10-17 client chunk 契约收口批）：原实现是
+      //   `strip(mm ? JSON.parse('"' + mm[1] + '"') : raw)` —— **解析不出包裹就静默回退到 raw 原文**。
+      //   实测本次事故（CHG-143 的 correction.js 为裸 JS，无 `module.exports = "…"` 包裹）：
+      //   `mm === null` ⇒ R2 拿 raw 当 chunk 源码 ⇒ **一段语法完整、自洽的裸 JS**
+      //   ⇒ declaredOf 覆盖其全部引用 ⇒ R2 照常报 `PASS | 24 个 client chunk 无未声明标识符`
+      //   ⇒ **门在扫，却对「读不出契约的 chunk」零鉴别力**（读者看见的 PASS 其实是空转）。
+      //   ⇒ 现改为 **fail-closed**：读不出契约即 FAIL，不再拿未解码的原文冒充 chunk 源码。
+      //     （口径先例：`sync-face.mjs` 「解析不到就算过 = 假绿」/ `arch-claims` S-5 退役说明。）
+      if (!mm) { fail('R2', path.relative(ROOT, full) + ' 读不出 chunk 导出契约（module.exports = "<JSON 字符串>"）⇒ 不得以原文冒充 chunk 源码'); contractBad++; continue; }
+      chunks.push({ rel: path.relative(ROOT, full), code: strip(JSON.parse('"' + mm[1] + '"')) });
     }
   };
   collect(path.join(ROOT, 'src', 'client'));
@@ -178,7 +193,8 @@ for (const line of git(diffArgs).split('\n')) {
       break;
     }
   }
-  if (!bad) pass('R2', scanned + ' 个 client chunk 无未声明标识符');
+  // ⚠ 只在**无契约违反**时才打 PASS 行 —— 否则同规则双行（FAIL+PASS）会成为假读数源。
+  if (!bad && !contractBad) pass('R2', scanned + ' 个 client chunk 无未声明标识符');
 }
 // ---- R3 产物清单 ↔ files 白名单一致（P1a 2026-09-19：幽灵声明是静默面）----
 // 背景：`package.json.files` 里的条目若磁盘不存在，`npm pack` **不报错、静默跳过**；
@@ -417,8 +433,106 @@ for (const line of git(diffArgs).split('\n')) {
   if (!r6bad) pass('R6', r6checked + ' 个系统面文件的注入点已退役且无裸拼复长（哨兵在位）');
 }
 
+// ==== R7 chunk 导出契约（源码层）+ 产物可求值性（产物层）====
+// 病历（2026-10-17 · 线上事故收口批 · 承 CHG-143）：
+//   `src/client/voice/correction.js` 以**裸 JS**提交（无 `module.exports = "…"` 包裹），而其余
+//   23 个 client chunk 都写该包裹 ⇒ `build-client.mjs` 的 `body.replace(marker, chunk)` 拿到的是
+//   **对象** ⇒ 字符串化成 `[object Object]` 注进 `lib/client.cjs` ⇒ 浏览器求值抛
+//   `Unexpected identifier 'Object'` ⇒ **整个 client 半部装载失败**。
+//
+// ⚠ 它为何穿过了既有全部判据（本环实读定性，详见收口批报告 §⑥）：
+//   ① **既有的 `bundle-smoke` 靶子是 `plugin-host.js`（host 半部）**，client 半部**无对等判据**
+//      ⇒ 属**覆盖缺口**（情形 2）；
+//   ② 本环 R2 **枚举了全部 client chunk**（触点存在）却写 `mm ? JSON.parse(…) : raw`
+//      —— **解析不出包裹就静默回退到原文** ⇒ 裸 JS chunk 与正常 chunk 同形通过
+//      ⇒ 属**触发点缺失**（情形 1），⚠ 且正是 `H2` 的又一活例（判据在扫、却被分支跳过而空转报 PASS）。
+//   ⇒ 故本规则的落点是**两层一起**：源码层的**触发点修复**（R2 已改 fail-closed）+ 本条的
+//     **显式契约断言**（源码层）与**产物可求值断言**（产物层，补 R2 不覆盖的那一面）。
+//
+// ⚠ **host 面同族核查（实读，非推断）**：`src/host/**` 的 5 个 chunk **写的是同一契约**
+//   （逐个 `require` 实测导出形态全为 `string`）+ `build-host.mjs` 用**同一 `body.replace(marker, chunk)` 注入**
+//   ⇒ **同族** ⇒ 一并纳入本规则（覆盖 `src/client` + `src/host` 两面）。
+//   两者**产物层**的既有覆盖不同（如实登记）：
+//     · host：产物 `plugin-host.js` 是**裸 JS**，`[object Object]` 直接落在语法面 ⇒ 既有
+//       `node --check`（CI Syntax check / sync-runtime 2.5 环）+ `bundle-smoke` 已能咬住（本环实测：必红）；
+//     · client：产物 `lib/client.cjs` 的 body 被 `JSON.stringify` 内嵌在**字符串字面量**里 ⇒
+//       `node --check` **天然无感**（实测 exit 0）且无等价的 bundle-smoke ⇒ **这才是缺口**。
+//   本规则两面都断言，故任一面回归都被咬住（不依赖"另一面已有别的门"这一外部事实）。
+//
+// 覆盖面无硬编码：递归枚举 `src/{client,host}/**.js` ⇒ **将来新增的 chunk 自动入网**（同 R5/R6 的派生纪律）。
+// fail-closed：目录缺位 / 清单为空 / 目标产物缺位 ⇒ 全部 FAIL，**不得静默回退或判绿**
+//   （口径先例：`sync-face.mjs`「解析不到就算过 = 假绿」/ `arch-claims` 的 S-5 退役说明）。
+{
+  const req = createRequire(import.meta.url);
+  const problems = [];
+  const FACES = [
+    { name: 'client', dir: path.join(ROOT, 'src', 'client'), artifact: path.join(ROOT, 'lib', 'client.cjs'), rel: 'src/client' },
+    { name: 'host', dir: path.join(ROOT, 'src', 'host'), artifact: path.join(ROOT, 'plugin-host.js'), rel: 'src/host' },
+  ];
+  let totalChunks = 0;
+  for (const face of FACES) {
+    const files = [];
+    const walk = (d) => {
+      for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+        const full = path.join(d, ent.name);
+        if (ent.isDirectory()) { if (ent.name !== 'vendor') walk(full); continue; }
+        if (ent.name.endsWith('.js')) files.push(full);
+      }
+    };
+    // ── 源码层：**每个** chunk 的导出形态必须 = string（不是「某文件合格」）──
+    if (!fs.existsSync(face.dir)) problems.push(face.rel + ' chunk 目录缺位（无扫描面 ⇒ 不得判绿）');
+    else {
+      walk(face.dir);
+      if (files.length === 0) problems.push(face.rel + ' chunk 清单解析为空（不得据此判绿）');
+      totalChunks += files.length;
+      for (const f of files.sort()) {
+        const rel = path.relative(ROOT, f);
+        let v;
+        try { v = req(f); } catch (e) {
+          // 裸 JS chunk 若在定义期就引用宿主全局会在此抛错 —— 同样属契约违反（fail-closed，不吞）
+          problems.push(rel + ' 载入失败（导出契约违反 / 定义期抛错）: ' + String(e && e.message).slice(0, 120));
+          continue;
+        }
+        if (typeof v !== 'string') problems.push(rel + ' 导出形态违反：实得 ' + typeof v + '（须为 string —— `module.exports = "<JSON 转义源码>"`）');
+        else if (v.length === 0) problems.push(rel + ' 导出空字符串（chunk 无内容）');
+      }
+    }
+    // ── 产物层：产物必须可求值（client 复用 bundle-smoke 对 host 的同款做法）──
+    if (!fs.existsSync(face.artifact)) { problems.push(face.name + ' 产物缺位: ' + path.relative(ROOT, face.artifact)); continue; }
+    const src = fs.readFileSync(face.artifact, 'utf8');
+    const contamination = (src.match(/\[object Object\]/g) || []).length;
+    if (contamination > 0) problems.push(path.relative(ROOT, face.artifact) + ' 含 ' + contamination + ' 处 [object Object]（chunk 被对象字符串化注入 ⇒ 求值必抛）');
+    if (face.name === 'client') {
+      // client 载体：外层 new Function(src) 只做装载，真正的 body 求值在 factory 内 ⇒ 必须调到 factory
+      let captured = null;
+      let loaderOk = true;
+      try { new Function('window', src)({ __ModuleLoader__: { load(o) { captured = o; } } }); }
+      catch (e) { loaderOk = false; problems.push('lib/client.cjs 整体求值失败: ' + String(e && e.message).slice(0, 120)); }
+      if (loaderOk) {
+        if (!captured || typeof captured.factory !== 'function') problems.push('lib/client.cjs 未注册 factory（__ModuleLoader__.load 未被调用）');
+        else {
+          try {
+            const ReactStub = new Proxy({}, { get: () => (() => null) });
+            captured.factory((name) => (name === 'react' ? ReactStub : {}));
+          } catch (e) {
+            // 内层 body 求值失败 —— 这正是浏览器装载时的失败点（[object Object] 在此抛 Unexpected identifier）
+            problems.push('lib/client.cjs factory 求值失败（浏览器同款装载点）: ' + String(e && e.message).slice(0, 120));
+          }
+        }
+      }
+    } else {
+      // host 载体：产物是裸 JS（lib/index.cjs 以 new Function('harness', BODY) 求值）⇒ 直接判语法
+      try { new Function('harness', src); }
+      catch (e) { problems.push('plugin-host.js 求值失败（lib/index.cjs 同款装载点）: ' + String(e && e.message).slice(0, 120)); }
+    }
+  }
+  for (const p of problems) fail('R7', p);
+  if (!problems.length) pass('R7', totalChunks + ' 个 chunk（client+host，含将来新增）导出形态均为 string｜'
+    + 'lib/client.cjs 浏览器同款求值 PARSE OK（污染 0 处）｜plugin-host.js 求值 PARSE OK（污染 0 处）');
+}
+
 console.log(failures ? ('\n✗ 门禁未通过（' + failures + ' 处）') : '\n✅ 死代码门禁通过');
 // 状态行与下面的退出码**同源同处**产出：不另算一遍，免出第二个裁决点。
 emitRingState('dead-code', failures ? 'FAIL' : 'PASS',
-  failures ? failures + ' 处 FAIL（R1–R6）' : 'R1–R6 全过');
+  failures ? failures + ' 处 FAIL（R1–R7）' : 'R1–R7 全过');
 process.exitCode = failures ? 1 : 0;
