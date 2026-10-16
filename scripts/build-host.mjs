@@ -17,8 +17,8 @@
 //      保留该替换语句本身是为守住既有 --check 语义（不属本批权限，见报告 §F2）。
 //   ② --check 模式：重建到内存，与磁盘现有产物对比——漂移（源码改了没重建，
 //      或产物被手改）即报错退出 1。供 sync-runtime / release / pre-commit 使用。
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
@@ -46,6 +46,64 @@ function buildHost() {
     ['// @dsh-pure-inject', pureChunk],
     ['// @dsh-enhance-inject', enhanceChunk],
   ];
+
+  // ── chunk 契约门（2026-10-17 契约面收口批 · 第 ① 件：补齐与 build-client 的**对称**）──
+  // 为什么补：事故发生形态是「**契约门只存在于两半部的一半**」——`build-client.mjs:83-97`
+  //   在**构建期**就拒绝非字符串 chunk，而本脚本此前**完全没有这道门**。两半部用**同一条**
+  //   注入方式（`composed.replace(marker, chunk)`）、写**同一份**契约
+  //   （`module.exports = "<JSON 转义源码>"`），却只有一半有门 ⇒ 该不对称本身就是缺陷。
+  // 契约：每个 chunk 必须是**字符串**（`module.exports = "…"` 包裹）。裸 JS chunk 经
+  //   `require` 返回**空对象** ⇒ 上面 `replace` 会把对象字符串化成 `[object Object]`
+  //   写进 `plugin-host.js` ⇒ `lib/index.cjs` 的 `new Function('harness', BODY)` 求值失败
+  //   ⇒ 整个 host 半部装载失败。本门在**构建期**即拒绝，并给出违规 chunk 的 marker 与实得类型。
+  //
+  // ⚠ 覆盖面 = **递归枚举** `src/host/**`（**不写死文件名**）⇒ 将来新增的 chunk 自动入网，
+  //   与 `dead-code-gate.mjs` 的 R5/R6/R7 同一派生纪律（同 build-client 门的「取全清单」口径）。
+  // ⚠ fail-closed：目录缺位 / 清单为空 / 模块载入抛错（裸 JS 在定义期引用宿主全局即抛）
+  //   一律**判红**，不静默回退、不跳过。
+  // ⚠ 归属口径：文件 → marker 用**模块身份**映射（同一 `require` 缓存项 ===），避免依赖文件名
+  //   与 marker 的命名约定；映射不到（= 该文件未被本脚本装配）时如实标注，**不猜一个 marker**。
+  const chunkDir = join(root, 'src', 'host');
+  const chunkFiles = [];
+  const walkChunks = (d) => {
+    for (const ent of readdirSync(d, { withFileTypes: true })) {
+      const full = join(d, ent.name);
+      // 与 dead-code-gate R7 同一排除口径（vendor 不属本仓契约面）
+      if (ent.isDirectory()) { if (ent.name !== 'vendor') walkChunks(full); continue; }
+      if (ent.name.endsWith('.js')) chunkFiles.push(full);
+    }
+  };
+  walkChunks(chunkDir);
+  const badChunks = [];
+  for (const full of chunkFiles.sort()) {
+    const rel = relative(root, full);
+    let value;
+    try {
+      value = require(full);
+    } catch (e) {
+      // 裸 JS chunk 若在定义期就引用宿主全局会在此抛错 —— 同样属契约违反（不吞）
+      badChunks.push({ rel, marker: null, type: '载入抛错 ' + String(e && e.message).slice(0, 80) });
+      continue;
+    }
+    if (typeof value === 'string') continue;
+    // marker 归属：按模块身份在既有装配清单里反查（不按文件名约定猜）
+    const hit = injections.find(([, chunk]) => chunk === value);
+    badChunks.push({ rel, marker: hit ? hit[0].trim() : null, type: typeof value });
+  }
+  if (chunkFiles.length === 0) {
+    throw new Error('chunk 契约门未通过：src/host 未枚举到任何 chunk（无扫描面 ⇒ 不得判绿）');
+  }
+  if (badChunks.length) {
+    console.error('[build-host] chunk 契约违反 —— 以下 chunk 未导出字符串：');
+    for (const b of badChunks) {
+      console.error('  · ' + (b.marker ? b.marker + '（' + b.rel + '）' : b.rel)
+        + (b.marker ? '' : '（⚠ 未被本脚本装配 ⇒ 见门禁 R4）')
+        + '  → 实得 ' + b.type);
+    }
+    console.error('  修复：把 chunk 源码包成 module.exports = "<JSON 转义后的源码>";');
+    throw new Error('chunk 契约门未通过（' + badChunks.length + ' 个）');
+  }
+
   let previous;
   do {
     previous = composed;

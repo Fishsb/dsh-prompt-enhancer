@@ -10,11 +10,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const ROOT = join(__dirname, '..');
-const decodeChunk = (rel) => {
-  const raw = readFileSync(join(ROOT, rel), 'utf8');
-  const m = raw.match(/module\.exports\s*=\s*"([\s\S]*)";?\s*$/);
-  return JSON.parse('"' + m[1] + '"');
-};
+// ⚠ 契约面收口批（2026-10-17 · 第 ② 件）：本地 `decodeChunk` 副本已删除，改共享单一事实源
+//   （`scripts/lib/chunk-decode.mjs`）。发病史 — 旧实现**无守卫**：`m === null` 时抛
+//   `TypeError: Cannot read properties of null (reading '1')` ⇒ **报错不点名是哪个 chunk**
+//   （本批实测复现）。共享解码器 fail-closed、出错**点名声**。
+//   ⚠ 取具名成员（解构）：`require()` 一个 ESM 模块拿到的是**命名空间对象**（不可调用），
+//     整体赋给 `decodeChunk` 会在调用点抛 `TypeError: decodeChunk is not a function`（实测）。
+const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 
 function loadFiller(src) {
   const code = src || decodeChunk('src/client/voice/filler.js');

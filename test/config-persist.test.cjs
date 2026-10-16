@@ -92,15 +92,14 @@ test('CFG-P09 config/set merge 行为：传单键保留其他键（模拟两写�
 //   而 config/set 是**顶层键级 merge** ⇒ 整份里的每个顶层键都覆盖磁盘，含页面内可能为默认值
 //   （`cloneDefaults().fallback = []`）⇒ 用户模型链被清空（实测：删最后一条模型 → 磁盘 fallback=[]）。
 // 修法：**只提交本次 patch**。本组用例断言该契约，并给变异自证（退回整份 ⇒ 必红）。
-function decodeStateChunk() {
-  const raw = readFileSync(join(__dirname, '..', 'src', 'client', 'state.js'), 'utf8');
-  const m = raw.match(/module\.exports = "([\s\S]*?)";?\s*$/);
-  assert.ok(m, 'src/client/state.js 须为单行 chunk 形态');
-  return JSON.parse('"' + m[1] + '"');
-}
+// ⚠ 契约面收口批（2026-10-17 · 第 ② 件）：本文件原有第 6 份**同契约异名副本** `decodeStateChunk`
+//   （只解 `src/client/state.js` 一件、正则写作非贪婪 `([\s\S]*?)`）。已收敛为共享单一事实源
+//   （`scripts/lib/chunk-decode.mjs`）；调用点把路径显式写出，取值实测逐字相同。
+//   ⚠ 取具名成员解构（`require()` 一个 ESM 模块拿到命名空间对象，不可直接调用 —— 实测）。
+const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 
 test('CFG-P10 P0：saveConfig 只提交本次 patch（不得整份提交 configState.value）', () => {
-  const src = decodeStateChunk();
+  const src = decodeChunk('src/client/state.js');
   const i = src.indexOf('function saveConfig(patch)');
   assert.ok(i > 0, '未找到 saveConfig');
   const seg = src.slice(i, i + 2600);
@@ -133,7 +132,7 @@ test('CFG-P11 P0 行为：页面无模型链时写入 voice 配置 ⇒ 磁盘 fa
 });
 
 test('CFG-P12 P0 变异自证：把 saveConfig 退回「整份提交」⇒ CFG-P10 必红', () => {
-  const src = decodeStateChunk();
+  const src = decodeChunk('src/client/state.js');
   const anchor = 'config: payload';
   assert.ok(src.includes(anchor), 'patch 提交锚点须存在');
   const mutated = src.replace(anchor, 'config: configState.value');

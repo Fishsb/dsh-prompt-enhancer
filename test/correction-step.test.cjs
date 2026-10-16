@@ -24,13 +24,11 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 
-/** 解码 chunk（与 official-bridge.test.cjs 同款：module.exports = "<json string>"）。 */
-function decodeChunk(rel) {
-  const raw = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-  const m = raw.match(/module\.exports\s*=\s*"([\s\S]*)";?\s*$/);
-  assert.ok(m, rel + ' 应为 JSON 字符串 chunk');
-  return JSON.parse('"' + m[1] + '"');
-}
+/** 解码 chunk（契约面收口批 2026-10-17 · 第 ② 件：本地副本已删除，改共享单一事实源）。
+ *  ⚠ 判别力**上升**（非等价搬移）：旧实现用 `assert.ok(m, …)`，只在**测试体内**失败且信息是
+ *  assertion 文案；共享解码器在**读取期**即 `throw`，错误**点名 chunk 文件**。
+ *  ⚠ 取具名成员解构（`require()` 一个 ESM 模块拿到命名空间对象，不可直接调用 —— 实测）。 */
+const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 
 // 极简 React 桩（ref/state 跨渲染持久；effect 每次渲染后执行）——照抄 official-bridge.test.cjs
 function makeMiniReact() {

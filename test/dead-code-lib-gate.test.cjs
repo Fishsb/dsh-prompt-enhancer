@@ -21,6 +21,9 @@ const { spawnSync } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
 const EXCLUDE = new Set(['.git', 'node_modules', '.dsh-worktrees', 'test-reports', 'internal']);
+// ⚠ 契约面收口批（2026-10-17 · 第 ② 件）：本文件两处 chunk 解码副本收敛到共享单一事实源。
+//   ⚠ 取具名成员解构（`require()` 一个 ESM 模块拿到命名空间对象，不可直接调用 —— 实测）。
+const { decodeChunkText } = require('../scripts/lib/chunk-decode.mjs');
 
 /** 整仓副本 + git init（dead-code-gate 默认 range HEAD~1..HEAD，需要 git 元数据） */
 function mkFixture() {
@@ -474,12 +477,12 @@ test('D-10 回归锁：被吞形态若复现，判据读数会立刻变化（端
 //   gate 5 环 / 三 --check **一条都没盖住**。
 // ⚠ 本锁把「R7 必须能真的变红（两层）+ 不动时必须绿 + fail-closed」钉成机检。
 
-/** 把 chunk 文件解码回**其源码原文**（与 R2 同款包裹正则）。 */
+/** 把 chunk 文件解码回**其源码原文**。
+ *  ⚠ 契约面收口批（2026-10-17 · 第 ② 件）：原为第 7 份**同契约异名副本**
+ *  （`/module\.exports\s*=\s*"([\s\S]*)";?\s*$/` + `assert.ok` + `JSON.parse`），
+ *  已改为委托共享单一事实源（`scripts/lib/chunk-decode.mjs`）—— 取值不变、点名声更强。 */
 function decodeChunkFile(abs) {
-  const raw = fs.readFileSync(abs, 'utf8');
-  const m = raw.match(/module\.exports\s*=\s*"([\s\S]*)";?\s*$/);
-  assert.ok(m, '夹具前置：该 chunk 应为 JSON 字符串包裹形态');
-  return JSON.parse('"' + m[1] + '"');
+  return decodeChunkText(fs.readFileSync(abs, 'utf8'), abs);
 }
 /** 把 chunk 文件**改回裸 JS**（本次事故的真实形态）。⚠ 只在整仓副本内调用。 */
 function unwrapChunkToBareJs(dir, rel) {
@@ -556,10 +559,9 @@ test('R7 覆盖面（host 面同族）：src/host 的 chunk 也在契约门内 �
   const rel = 'src/host/' + 'diagnostics' + '.js'; // 运行时拼接（同既有纪律）
   withFixture((dir) => {
     const abs = path.join(dir, rel);
-    const raw = fs.readFileSync(abs, 'utf8');
-    const m = raw.match(/module\.exports\s*=\s*"([\s\S]*)";?\s*$/);
-    assert.ok(m, '夹具前置：host chunk 应为 JSON 字符串包裹形态');
-    fs.writeFileSync(abs, "'use strict';\n" + JSON.parse('"' + m[1] + '"'), 'utf8');
+    // ⚠ 第 8 处同契约副本（本批收敛）：改用共享解码器，取值不变（本批实测 29 chunk 上
+    //   loose/anchored 两形态逐字同值）、点名声更强。
+    fs.writeFileSync(abs, "'use strict';\n" + decodeChunkText(fs.readFileSync(abs, 'utf8'), rel), 'utf8');
   }, (dir) => {
     const r = runGate(dir);
     assert.equal(r.code, 1, 'host chunk 契约违反必须 exit 1（不得只盯 client）');

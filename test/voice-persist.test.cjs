@@ -12,6 +12,19 @@ const assert = require('node:assert/strict');
 
 const libSchema = require('../lib/rpc-schema.cjs');
 const asr = require('../lib/asr.cjs');
+// ⚠ 契约面收口批（2026-10-17 · 第 ② 件）：本文件原有第 9 处**同契约副本**（三处 i18n 解码点），
+//   且是**静默回退**形态：`const m = i18n.match(/module\.exports = "([\s\S]*)"…/); const body = m ? m[1] : i18n;`
+//   —— 解不出包裹时**拿产物原文冒充 chunk 源码**（与 `dead-code-gate` R2 收口前、`sync-face` 的
+//   「解析不到就算过 = 假绿」同形反模式）。本批实测：把 `src/client/i18n.js` 改成裸 JS，
+//   旧实现静默回退后仍数出 ZH/EN 各 96 键 ⇒ **三条断言照样判绿（假绿）**。
+//   现收敛到共享单一事实源（fail-closed、点名声）。⚠ 取具名成员解构 —— `require()` 一个
+//   ESM 模块拿到命名空间对象，不可直接调用（实测）。
+const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+
+/** 解出 i18n chunk 源码原文（本文件三处解码点的单一落点；再往下分 ZH/EN 两段）。 */
+function decodeI18nBody() {
+  return decodeChunk('src/client/i18n.js');
+}
 
 // ---- 1. voice/* RPC schema 校验 ----
 test('VOICE-P01 voice/status 无参数通过', () => {
@@ -142,9 +155,8 @@ test('VOICE-P10 status 组装：委托官方 speechToText + filler configured �
 
 // CHG-117：`>= 37` 为**下界**锁；实测 87 键仍满足（refine→filler 改名 + 移除 3 键未触及下界）
 test('VOICE-P12 i18n voice 键 ZH/EN 平衡（>=37 键成对，v3.2.9 快捷键 +6）', () => {
-  const i18n = readFileSync(join(__dirname, '..', 'src', 'client', 'i18n.js'), 'utf8');
-  const m = i18n.match(/module\.exports = \"([\s\S]*)\"\s*;?\s*$/);
-  const body = m ? m[1] : i18n;
+  // 契约面收口批（2026-10-17 · 第 ② 件）：改共享解码器（fail-closed，不再静默回退到原文）。
+  const body = decodeI18nBody();
   const zh = body.split('const EN = {')[0] || '';
   const en = body.split('const EN = {')[1] || '';
   const z = (zh.match(/voice[A-Za-z]+:/g) || []).length;
@@ -185,9 +197,8 @@ test('VOICE-P19 hotkey 配置白名单 + 产物含快捷键/双触发逻辑', ()
   assert.ok(client.includes('pressStart') && client.includes('pressEnd'), '产物缺按下/松开触发抽象');
   assert.ok(client.includes('voiceHotkeyCapturing'), '产物缺录制 i18n 引用');
   // i18n 键平衡（v3.2.9 +6 键 → 37）
-  const i18n = readFileSync(join(__dirname, '..', 'src', 'client', 'i18n.js'), 'utf8');
-  const m = i18n.match(/module\.exports = \"([\s\S]*)\"\s*;?\s*$/);
-  const body = m ? m[1] : i18n;
+  // 契约面收口批（2026-10-17 · 第 ② 件）：改共享解码器（fail-closed，不再静默回退到原文）。
+  const body = decodeI18nBody();
   const zh = body.split('const EN = {')[0] || '';
   const en = body.split('const EN = {')[1] || '';
   const z = (zh.match(/voice[A-Za-z]+:/g) || []).length;
@@ -264,9 +275,8 @@ test('VOICE-P24 产物含 autoEnhance 触发链路 + i18n 键平衡（v3.2.17 +3
   assert.ok(client.includes("typeof enhance !== 'function'"), '产物缺 enhance 可用性守卫（自动触发调用）');
   assert.ok(client.includes('endedInFeedback'), '产物缺官方失败出口判定（失败时不得进入等写回）');
   // i18n 键平衡（P2：+4 键 → 44）
-  const i18n = readFileSync(join(__dirname, '..', 'src', 'client', 'i18n.js'), 'utf8');
-  const m = i18n.match(/module\.exports = \"([\s\S]*)\"\s*;?\s*$/);
-  const body = m ? m[1] : i18n;
+  // 契约面收口批（2026-10-17 · 第 ② 件）：改共享解码器（fail-closed，不再静默回退到原文）。
+  const body = decodeI18nBody();
   const zh = body.split('const EN = {')[0] || '';
   const en = body.split('const EN = {')[1] || '';
   const z = (zh.match(/voice[A-Za-z]+:/g) || []).length;

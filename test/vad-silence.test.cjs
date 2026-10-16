@@ -13,16 +13,13 @@
 // ⚠ 计时精度**未实测**（最坏偏差 ~VAD_POLL_MS = 100ms 粒度，见 U12/B4）——本文件**不**断言精度。
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
-const decodeChunk = (rel) => {
-  const raw = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-  const m = raw.match(/(?:^|\n)module\.exports = "([\s\S]*)";?\s*$/);
-  if (!m) throw new Error('chunk wrapper mismatch: ' + rel);
-  return JSON.parse('"' + m[1] + '"');
-};
+// ⚠ 契约面收口批（2026-10-17 · 第 ② 件）：本地 `decodeChunk` 副本已删除，改共享单一事实源
+//   （`scripts/lib/chunk-decode.mjs`，fail-closed 且报错点名声）。取具名成员解构 ——
+//   `require()` 一个 ESM 模块拿到的是命名空间对象，不可直接调用（实测）。
+const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 
 // 求值 state.js：得到归一化 / 帧数派生（§7.4 的单一事实源）
 function loadState() {

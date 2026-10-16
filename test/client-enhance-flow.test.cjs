@@ -5,16 +5,15 @@
 // 另加接线契约断言（button/bar 源码必须含关键接线标记），专防 f6fa822 式"注释有、代码无"半成品。
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 
-const ROOT = path.resolve(__dirname, '..');
-const decodeChunk = (rel) => {
-  const raw = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-  const m = raw.match(/module\.exports\s*=\s*"([\s\S]*)";?\s*\n$/);
-  if (!m) throw new Error('chunk wrapper mismatch: ' + rel);
-  return JSON.parse('"' + m[1] + '"');
-};
+// ⚠ 契约面收口批（2026-10-17 · 第 ② 件）：本地 `decodeChunk` 副本已删除，改共享单一事实源
+//   （`scripts/lib/chunk-decode.mjs`）。随副本一并删去不再使用的 `fs` / `path` / `ROOT`
+//   三处声明（本文件原仅解码器在用）。
+//   ⚠ 本处判别力**实际上升**（非等价搬移）：旧正则
+//   `/module\.exports\s*=\s*"([\s\S]*)";?\s*\n$/` 要求结尾恰为换行，实测在
+//   `src/client/components/model-main-section.js`（该文件以 `\r\n"` 结束）上 **NO-MATCH**；
+//   共享解码器取 `;?[ \t\r\n]*$`，该 chunk 现能被正确解出。
+const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 
 function loadHelpers() {
   const src = decodeChunk('src/client/helpers.js');

@@ -18,13 +18,11 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const CHUNK = 'src/client/voice/official-bridge.js';
 
-const decodeChunk = (rel) => {
-  const raw = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-  // 行首锚定（chunk 头部注释里可能含代码样文本，裸 module.exports 正则会被误导）
-  const m = raw.match(/(?:^|\n)module\.exports = "([\s\S]*)";?\s*$/);
-  if (!m) throw new Error('chunk wrapper mismatch: ' + rel);
-  return JSON.parse('"' + m[1] + '"');
-};
+// ⚠ 契约面收口批（2026-10-17 · 第 ② 件）：本地 `decodeChunk` 副本已删除，改共享单一事实源
+//   （`scripts/lib/chunk-decode.mjs`）。原实现的「行首锚定」依据已搬进该模块头注；
+//   fail-closed 与「报错点名声」两条语义逐字保留。⚠ 取具名成员解构 —— `require()` 一个
+//   ESM 模块拿到的是命名空间对象，不可直接调用（实测）。
+const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 
 // §7.4 起：official-bridge 依赖 state.js 的单一事实源（vadSilenceMsOf / vadRequiredQuiet / voiceCfgState）。
 // 测试注入**真实的 state.js**（而非桩），以保证「两条入口共用同一值」在测试里也是同一份实现。
