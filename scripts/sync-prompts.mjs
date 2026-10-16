@@ -196,17 +196,68 @@ const segEnd = segEndIdx + endMarker.length;
 const generated = header + buildSection() + '\n' + footer;
 const updated = hostSrc.slice(0, segStart) + escapeForJsonString(generated) + hostSrc.slice(segEnd);
 
-if (updated === hostSrc) {
-  console.log('✓ prompts 与 plugin-host.js 生成区一致');
-  emitRingState('prompts', 'PASS', '生成区与 ' + SKILL_ROOT + ' 下的 md 源逐字一致（' + SOURCES.length + ' 个常量，零漂移）');
-  process.exit(0);
+// ── 产物面判据（② · 2026-10-16 门禁缺口批）─────────────────────────────────────
+// 病：本环旧口径只比 «md ↔ src/host/app.js 生成区»。若有人跑了 sync-prompts 但**漏跑 build-host**
+//   （或产物被手改/陈旧），本环判绿，而 plugin-host.js —— **真正被装载的产物** —— 里仍是旧提示词：
+//   提示词改动从未进产物，门禁却全绿（「会掩盖问题」级）。
+// 判据：**--check** 时，产物内**同一生成区**（同 BEGIN 锚 + 同 END 锚）必须与刚算出的 generated 逐字相同。
+//   产物缺位 / 找不到标记区 / 区域不一致 ⇒ 判红（fail-closed，不猜「大概没过时」）。
+// ⚠ 作用域：本判据只进 `--check`（门禁环）。**写调用**（无旗标）语义不变——它只负责「md → app.js」，
+//   产物由 build-host 重生产物；写路径不新增失败面（否则单纯的 sync 会被产物陈旧连带判死，
+//   那会把「同步」变成「必须一次跑完两步」，超出本环职责）。写路径也不再假报 PASS（见文末）。
+const PRODUCT = path.join(ROOT, 'plugin-host.js');
+const IS_CHECK = process.argv.includes('--check');
+function productRegion(src) {
+  const a = src.indexOf(genBegin);
+  if (a === -1) return null;
+  const b = src.indexOf(endMarker, a);
+  if (b === -1) return null;
+  return src.slice(a, b + endMarker.length);
 }
-if (process.argv.includes('--check')) {
+let productSrc = null;
+try { productSrc = fs.readFileSync(PRODUCT, 'utf8'); } catch { /* 缺位 → 下面按不一致判 */ }
+const productRegionText = productSrc === null ? null : productRegion(productSrc);
+const inProduct = productRegionText === generated;
+/** 产物面不一致的**归因**（三种形态分开说，读者才知道该跑哪一步） */
+const productWhy = productSrc === null
+  ? '产物 plugin-host.js 缺位（无法取证）'
+  : (productRegionText === null
+    ? '产物 plugin-host.js 内找不到生成标记区（' + BEGIN + ' / ' + END + '）'
+    : '产物 plugin-host.js 内生成区 ≠ 该 md 源应有的生成区（跑了 sync-prompts 但漏跑 build-host，或产物陈旧/被手改）');
+
+if (updated === hostSrc) {
+  if (!IS_CHECK) {
+    // 写调用 + 无需写：md 与 app.js 生成区已一致。**不记 PASS**（本次是写调用，产物面未判）——
+    // 旧文案在此处打印「prompts 与 plugin-host.js 生成区一致」并记 PASS，正是缺陷②的假绿措辞来源。
+    console.log('✓ 生成区无需同步（md 与 src/host/app.js 生成区已一致）');
+    emitRingState('prompts', 'SKIP', '本次为同步（写）调用且无需写入：md 与生成区已一致，未判产物漂移');
+    process.exit(0);
+  }
+  if (inProduct) {
+    console.log('✓ prompts 与 plugin-host.js 生成区一致');
+    emitRingState('prompts', 'PASS', '生成区与 ' + SKILL_ROOT + ' 下的 md 源逐字一致（' + SOURCES.length + ' 个常量，零漂移）｜产物面同源逐字一致');
+    process.exit(0);
+  }
+  emitRingState('prompts', 'FAIL', '产物未同步：' + productWhy);
+  console.error('✗ 产物未同步：src/host/app.js 生成区与 md 一致，但' + productWhy);
+  console.error('  修复：node scripts/build-host.mjs（据 src/host 重生产物）后重跑本检查。');
+  process.exit(1);
+}
+if (IS_CHECK) {
   emitRingState('prompts', 'FAIL', '生成区漂移：' + SKILL_ROOT + ' 下的 md 源与 src/host/app.js 生成区不一致');
-  console.error('✗ 生成区漂移：prompts/*.md 与 plugin-host.js 不一致，请运行 node scripts/sync-prompts.mjs');
+  console.error('✗ 生成区漂移：prompts/*.md 与 src/host/app.js 生成区不一致。');
+  console.error('  修复：node scripts/sync-prompts.mjs && node scripts/build-host.mjs（两步都要跑——只跑前者不会更新产物）');
   process.exit(1);
 }
 fs.writeFileSync(HOST, updated, 'utf8');
-console.log('✓ plugin-host.js 生成区已同步（' + SOURCES.map((s) => s.name).join('/') + '）');
+console.log('✓ src/host/app.js 生成区已同步（' + SOURCES.map((s) => s.name).join('/') + '）');
+// ⚠ 措辞订正（② · 2026-10-16）：旧文案说「plugin-host.js 生成区已同步」——**不实**：本脚本只写
+//   src/host/app.js，产物要靠 build-host 重建。提示词改动要生效必须**两步都跑**，此处如实说明。
+if (inProduct) {
+  console.log('  产物 plugin-host.js 的生成区已是同源内容（本次写入未使其过期）。');
+} else {
+  console.log('  ⚠ 产物 plugin-host.js 的生成区**尚未同步**（本脚本不写产物）——须再跑 node scripts/build-host.mjs。');
+}
 // 本次是**同步（写）**调用：漂移被修掉了，但「修之前是否一致」这一判定并未作出——不记 PASS。
-emitRingState('prompts', 'SKIP', '本次为同步（写）调用：已写入生成区 ' + SOURCES.length + ' 个常量，未判漂移');
+emitRingState('prompts', 'SKIP', '本次为同步（写）调用：已写入生成区 ' + SOURCES.length + ' 个常量，未判漂移'
+  + (inProduct ? '' : '（产物面已同步=false，须补跑 build-host）'));

@@ -85,4 +85,8 @@ if (args.includes('--check')) {
 
 mkdirSync(join(root, 'lib'), { recursive: true });
 writeFileSync(join(root, 'plugin-host.js'), output, 'utf8');
-console.log('plugin-host.js written (' + output.length + ' bytes, version ' + require('../package.json').version + ')');
+// ⚠ 口径订正（③ · 2026-10-16 门禁缺口批）：`output.length` 是 JS 字符串长度（UTF-16 码元数），
+//   **不是字节数**——本产物含大量 CJK，两者实测差了 99371（218244 字符 vs 317615 字节）。
+//   旧文案把字符数标成 "bytes"，使日志/报告里的体积读数失实（读者以为产物只有 213 KiB）。
+//   `writeFileSync(..., 'utf8')` 实际落盘字节数 = Buffer.byteLength(output, 'utf8')，据此标注。
+console.log('plugin-host.js written (' + output.length + ' chars / ' + Buffer.byteLength(output, 'utf8') + ' bytes, version ' + require('../package.json').version + ')');

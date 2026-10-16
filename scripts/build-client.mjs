@@ -175,4 +175,6 @@ if (args.includes('--check')) {
 
 mkdirSync(join(root, 'lib'), { recursive: true });
 writeFileSync(join(root, 'lib', 'client.cjs'), template, 'utf8');
-console.log('lib/client.cjs written (' + template.length + ' bytes)');
+// ⚠ 口径订正（③ · 2026-10-16 门禁缺口批，与 build-host.mjs 同源）：`template.length` 是字符串长度
+//   （UTF-16 码元数），不是字节数；本产物亦含 CJK（实测 252904 字符 vs 319470 字节）。
+console.log('lib/client.cjs written (' + template.length + ' chars / ' + Buffer.byteLength(template, 'utf8') + ' bytes)');
