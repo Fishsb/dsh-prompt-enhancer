@@ -41,7 +41,7 @@
 > ⚠ **历史**（**已退役，不再注册**）：`plugins/*`（4）· `update/check`·`update/pull`·`update/envcheck`（3）· `update/executorEnsure`·`update/install`·`update/restartNeeded`·`update/diagTail`（4）· `update/portRestart`·`update/makeShortcut`（2）· `voice/model*`·`voice/deploy*`（8）⇒ 共 21 条已随「插件管理 tab 退役 / 更新执行器退役 / 插件内重启能力退役 / P1-a 语音缩批」移除。**上方表格为现行集合，本节历史条目仅供旧版本对照，不代表现行能力。**
 
 
-> 注（**P2 · 2026-09-19 · 参数校验申报**）：上述 **15 条中 6 条有参数校验**（`lib/rpc-schema.cjs` 的 `schemas`），另 **9 条无校验且在此具名申报**——**禁止按类别笼统豁免**；新增线上方法却不申报、或申报过期，都会被 `node scripts/rpc-manifest.mjs --check` 拒绝（事实源由注册面派生，不靠人工清点）。
+> 注（**P2 · 2026-09-19 · 参数校验申报**）：上述 **14 条中 5 条有参数校验**（`lib/rpc-schema.cjs` 的 `schemas`），另 **9 条无校验且在此具名申报**——**禁止按类别笼统豁免**；新增线上方法却不申报、或申报过期，都会被 `node scripts/rpc-manifest.mjs --check` 拒绝（事实源由注册面派生，不靠人工清点）。
 >
 > | 方法 | 桶 | 理由 |
 > |---|---|---|
