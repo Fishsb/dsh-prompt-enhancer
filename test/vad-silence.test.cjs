@@ -196,24 +196,159 @@ test('VADSIL-P13 须保留：自适应底噪校准与触发门 heardSpeech 在�
   }
 });
 
-test('VADSIL-P14 UI 在位：下拉框 + 滑块 + 双向同步（§7.4 点名形态）', () => {
-  const vs = decodeChunk('src/client/voice/voice-section.js');
-  assert.ok(vs.includes('silenceRow'), '设置段缺静音时长行');
-  assert.ok(vs.includes("t('voiceVadSilenceLabel')"), '缺标签文案引用');
-  assert.ok(vs.includes("type: 'range'"), '缺滑块（§7.4 点名：下拉框 + 滑块）');
-  assert.ok(vs.includes("min: '1', max: '5', step: '1'"), '滑块域必须 1–5 整数');
-  assert.ok(vs.includes('[1, 2, 3, 4, 5].map'), '下拉必须恰好 5 档');
-  assert.ok(vs.includes('dsh-vi-slider'), '缺自绘滑块样式类（§7.4：滑块须自绘）');
-  // 两条控件都必须经同一 setter（双向同步，同一归一化入口）
-  // 调用点严格 === 2（下拉 onChange / 滑块 onChange 各一）⇒ 证明两条控件共用同一 setter
-  assert.equal((vs.match(/setSilence\(/g) || []).length, 2, '下拉与滑块须共用同一 setSilence（双向同步，调用点严格 2 处）');
-  assert.ok(vs.includes('const setSilence = (next) =>'), '缺 setSilence 定义');
-  assert.ok(vs.includes('normalizeVadSilenceMs(Number(next))'), 'setter 必须经同一归一化入口（非法值回落）');
-  // 样式确实自绘（styles.js 有该类）
-  const st = decodeChunk('src/client/styles.js');
-  assert.ok(st.includes('.dsh-vi-slider'), 'styles.js 缺自绘滑块样式');
-  assert.ok(st.includes('::-webkit-slider-thumb'), '缺 WebKit 自绘（轨道/握手）');
-  assert.ok(st.includes('::-moz-range-thumb'), '缺 Firefox 自绘（轨道/握手）');
+// ───────── VADSIL-P14（2026-10-17 布局批订正）─────────
+// ⚠ 订正依据：用户点名「静音监测开关搬到第二行、覆盖掉静音时长标签与下拉框、滑块 1–5 ⇒ 0–5，
+//   0 = 静音监测关闭」⇒ 旧断言「下拉必须恰好 5 档 / 滑块域必须 1–5 / 两条控件共用 setSilence」
+//   已与新布局不符，**逐条按新布局订正**（订正前后对照见报告 §③）。
+// ⚠ 手法升级（承 client chunk 契约事故的成因形态）：**真实载入 voice-section.js**
+//   （decodeChunk → 求值 → 渲染 → 展开函数组件），**不再以子串断言代替**，也**不以外部桩替代该文件**。
+//   ⇒ 这样判据同时兜住「文件被真实解码」这一面（契约事故的成因正是"新 chunk 用桩绕过、从不真载入"）。
+
+/** 渲染 voice-section.js 的 VoiceSection，返回展开后的元素树（真载入，无桩替代）。 */
+function renderVoiceSection(cfg) {
+  const src = decodeChunk('src/client/voice/voice-section.js');
+  const ReactStub = {
+    createElement: (type, props, ...kids) => {
+      const flat = kids.flat(9).filter((k) => k !== null && k !== undefined && k !== false);
+      const pr = Object.assign({}, props || {});
+      if (flat.length) pr.children = flat.length === 1 ? flat[0] : flat;
+      return { type, props: pr, kids: flat };
+    },
+    useState: (init) => [typeof init === 'function' ? init() : init, () => {}],
+    useRef: (init) => ({ current: init }),
+    useEffect: () => {},
+  };
+  const saved = [];
+  const S = loadState();
+  // ⚠ 组件与真实 state.js **共用同一个 voiceCfgState 对象**（否则 saveVoiceCfg 写一处、组件读另一处，
+  //   判据就成了"看着像"而非真行为）。cfg 作为初始值写入该单一事实源。
+  const voiceCfgState = S.voiceCfgState;
+  voiceCfgState.value = Object.assign({}, S.VOICE_CFG_DEFAULTS, {
+    autoEnhance: false, correction: { enabled: false }, filler: { enabled: false },
+    hotkey: { enabled: false, combo: '' },
+  }, cfg || {});
+  const factory = new Function(
+    'React', 'makeT', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'saveVoiceCfg', 'syncVoiceFromHost',
+    'vadSilenceMsOf', 'normalizeVadSilenceMs', 'MarqueeSelect', 'CollapsibleSection',
+    'OfficialVoiceDiag', 'FillerDiag', 'CorrectionDiag', 'voiceHotkeyDisplay',
+    'setTimeout', 'clearTimeout', 'window',
+    src + '\n;return { VoiceSection };'
+  );
+  const api = factory(
+    ReactStub, () => (k) => k, { call: () => Promise.resolve({ ok: false }) },
+    voiceCfgState, () => () => {},
+    // ⚠ 真实 saveVoiceCfg（取自 state.js）⇒ 本判据走**真** mergeVoice，不用桩伪造合并语义
+    (patch) => { saved.push(patch); S.saveVoiceCfg(patch); },
+    () => {}, S.vadSilenceMsOf, S.normalizeVadSilenceMs,
+    (p) => ReactStub.createElement('mselect', {}, p.children),
+    (p) => ReactStub.createElement('section', {}, p.children),
+    () => null, () => null, () => null, (c) => String(c || ''),
+    setTimeout, clearTimeout, {}
+  );
+  const expand = (n) => {
+    if (!n || typeof n !== 'object') return n;
+    if (typeof n.type === 'function') { const o = n.type(n.props); return o ? expand(o) : null; }
+    return { type: n.type, props: n.props, kids: (n.kids || []).map(expand).filter(Boolean) };
+  };
+  return { tree: expand(api.VoiceSection({})), saved, S, voiceCfgState };
+}
+
+/** 取第一行 / 第二行（第一行 = grid 行；第二行 = 其后的 dsh-plg-row）。 */
+function layoutRows(cfg) {
+  const r = renderVoiceSection(cfg);
+  const section = r.tree.kids[0];
+  const kids = section.kids.filter((k) => k && typeof k === 'object');
+  const row1 = kids.find((k) => k.props && k.props.style && k.props.style.gridTemplateColumns);
+  const row2 = kids[kids.indexOf(row1) + 1];
+  return { r, row1, row2 };
+}
+
+/** 从第二行取三件（开关 / 滑块 / 读数）。 */
+function row2Parts(row2) {
+  const chip = row2.kids.find((k) => typeof k.type === 'string' && k.type === 'button');
+  const slider = row2.kids.find((k) => k.props && k.props.type === 'range');
+  const readout = row2.kids.find((k) => k.props && k.props.className === 'dsh-plg-muted');
+  return { chip, slider, readout };
+}
+
+test('VADSIL-P14 第一行由 5 格订正为 4 格：静音监测开关已搬走（真载入渲染断言）', () => {
+  const { row1 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 }, autoEnhance: false, correction: { enabled: false }, filler: { enabled: false }, hotkey: { enabled: false, combo: '' } });
+  assert.ok(row1, '第一行（grid 行）必须在位');
+  assert.equal(row1.props.style.gridTemplateColumns, 'auto auto auto minmax(0,1fr)',
+    '格子数须与格数同步：4 格 ⇒ 3 个 auto + minmax（旧值五个 auto + minmax，已订正）');
+  assert.equal(row1.kids.length, 4, '第一行须恰 4 个直接子元素（原 5 个：自动增强/静音监测/语音纠错/清口水词/热键）');
+  const texts = row1.kids.map((k) => JSON.stringify(k.props.children || '')).join('|');
+  assert.equal(texts.includes('voiceVadShort'), false, '第一行**不得**再含静音监测开关（已搬到第二行）');
+  for (const k of ['voiceAutoEnhance', 'voiceCorrectionShort', 'voiceRefineShort']) {
+    assert.ok(texts.includes(k), '第一行须仍含 ' + k + '（其余三个开关语义未变）');
+  }
+  assert.equal(row1.kids.filter((k) => k.type === 'button').length, 3,
+    '第一行须恰 3 个开关按钮（原 4 个 ⇒ 静音监测已移出）');
+});
+
+test('VADSIL-P14b 第二行 = 开关 + 滑块 + 读数；标签与下拉框已被覆盖删除', () => {
+  const { row2 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 } });
+  assert.ok(row2, '第二行必须在位');
+  assert.equal(row2.props.className, 'dsh-plg-row', '第二行容器仍是 dsh-plg-row');
+  assert.equal(row2.kids.length, 3, '第二行须恰 3 件（开关 + 滑块 + 读数），实际 ' + row2.kids.length);
+  const { chip, slider, readout } = row2Parts(row2);
+  assert.ok(chip && /dsh-plg-tgl/.test(chip.props.className), '第二行第 1 件须是 ToggleChip（静音监测开关）');
+  assert.ok(JSON.stringify(chip.props.children || '').includes('voiceVadShort'), '第二行开关须是静音监测文案（从第一行搬来）');
+  assert.ok(slider, '第二行第 2 件须是滑块');
+  assert.ok(readout, '第二行第 3 件须是读数（本席裁定保留 ⇒ 滑块有数值反馈）');
+  // ⚠ 用户点名删除的两件：标签 + 下拉框
+  assert.equal(row2.kids.some((k) => k.type === 'label'), false, '第二行的「静音时长」label 必须已删除');
+  assert.equal(row2.kids.some((k) => k.type === 'mselect'), false, '第二行的 MarqueeSelect 下拉必须已删除');
+});
+
+test('VADSIL-P14c 滑块档位订正 1–5 ⇒ 0–5（0 = 关闭；档位域 silenceMs 仍只 1–5）', () => {
+  const { row2 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 } });
+  const { slider } = row2Parts(row2);
+  assert.equal(slider.props.min, '0', '滑块最小值须为 0（旧值 1，已订正 —— 0 = 静音监测关闭）');
+  assert.equal(slider.props.max, '5', '滑块最大值仍为 5（档位域不变）');
+  assert.equal(slider.props.step, '1', '步长仍为 1');
+  assert.ok(slider.props.className.includes('dsh-vi-slider'), '滑块仍用自绘类 dsh-vi-slider');
+  // ⚠ 档位域不变：silenceMs 只取 1–5 秒（0 不得进入 silenceMs）
+  const S = loadState();
+  assert.equal(S.normalizeVadSilenceMs(0), 2000, 'normalizeVadSilenceMs 的域不得改：0 仍非法 ⇒ 回落 2000');
+  for (const n of [1, 2, 3, 4, 5]) assert.equal(S.normalizeVadSilenceMs(n), n * 1000, '档位 ' + n + ' 秒仍合法');
+});
+
+test('VADSIL-P14d 单一事实源：0 档写 enabled=false 且 silenceMs 保持原值（关→开回到上次档位）', () => {
+  // ⚠ 本批实测发现（主持侧列为待测疑点，实测**成立**）：saveVoiceCfg 的 patch.vad **整体替换** vad 对象
+  //   ⇒ 只写 { vad: { enabled } } 时 mergeVoice 把 silenceMs 归一为默认 2000 ⇒ 档位被静默重置。
+  //   ⇒ 故开关写入必须带上当前 silenceMs；本断言锁住「0 档只置 enabled=false、silenceMs 保持原值」。
+  // ⚠ 必须**同一个渲染实例**里取 row2 与 state（跨实例会拿到两份 voiceCfgState ⇒ 判据失真）
+  const r = renderVoiceSection({ vad: { enabled: true, silenceMs: 5000 } });
+  const rows = r.tree.kids[0].kids.filter((k) => k && typeof k === 'object');
+  const row1 = rows.find((k) => k.props && k.props.style && k.props.style.gridTemplateColumns);
+  const { slider } = row2Parts(rows[rows.indexOf(row1) + 1]);
+  // 走**真实滑块 onChange**把档位拨到 0
+  slider.props.onChange({ target: { value: '0' } });
+  assert.equal(r.S.voiceCfgState.value.vad.enabled, false, '0 档须置 enabled = false');
+  assert.equal(r.S.voiceCfgState.value.vad.silenceMs, 5000, '0 档**不得**改动 silenceMs（保持原值 5000 ⇒ 重开回上次档位）');
+  assert.equal(r.S.voiceCfgState.value.vad.silenceMs === 0, false, '⛔ silenceMs 不得被写成 0（那是另立第二份真相）');
+  // 同一事实源下重渲染：滑块须显示 0（反向联动「静音监测关 ⇒ 滑块自动到 0」）
+  const t2 = (function () { const R = r; return R; })();
+  assert.equal(t2.S.voiceCfgState.value.vad.enabled, false, '关闭态已在单一事实源上生效');
+  const again = renderVoiceSection({ vad: { enabled: false, silenceMs: 5000 } });
+  const arows = again.tree.kids[0].kids.filter((k) => k && typeof k === 'object');
+  const ar1 = arows.find((k) => k.props && k.props.style && k.props.style.gridTemplateColumns);
+  assert.equal(row2Parts(arows[arows.indexOf(ar1) + 1]).slider.props.value, '0', 'enabled=false ⇒ 滑块**自动到 0**（反向联动）');
+  // 关 → 开 往返：档位须保持 5（不得回落 2）
+  const back = layoutRows({ vad: { enabled: true, silenceMs: r.S.voiceCfgState.value.vad.silenceMs } });
+  assert.equal(row2Parts(back.row2).slider.props.value, '5', '关→开后滑块须回到 5（silenceMs 未被重置为 2000）');
+});
+
+test('VADSIL-P14e 读数为 0 档显示「已关闭」文案（复用既有键，不新增 i18n 键）', () => {
+  const on = layoutRows({ vad: { enabled: true, silenceMs: 3000 } });
+  const off = layoutRows({ vad: { enabled: false, silenceMs: 3000 } });
+  const rOn = row2Parts(on.row2).readout, rOff = row2Parts(off.row2).readout;
+  assert.equal(typeof rOn.props.children, 'string', '1–5 档读数须是字符串（N + 单位）');
+  assert.match(rOn.props.children, /^3\s/, '1–5 档读数须以档位数字开头（实际 ' + JSON.stringify(rOn.props.children) + '）');
+  assert.ok(String(rOn.props.children).includes('voiceVadSilenceUnit'), '1–5 档读数须带单位键');
+  assert.equal(rOff.props.children, 'voiceSilenceOff', '0 档读数须为 t(voiceSilenceOff)（实际 ' + JSON.stringify(rOff.props.children) + '）');
+  assert.equal(String(rOff.props.children).includes('0 '), false, '⚠ 0 档**不得**显示「0 秒」（会被读成"零秒静音判定"，与"关闭"语义冲突）');
 });
 
 test('VADSIL-P15 i18n：新增 3 键且 ZH/EN 键集相等（S-7）', () => {
@@ -294,4 +429,102 @@ test('VADSIL-V04 变异自证·负控必绿：同一变异下非法值回落判�
   for (const v of [0, 6, 1.5, 'x', null]) {
     assert.equal(M.normalizeVadSilenceMs(v), 2000, '负控·非法值 ' + JSON.stringify(v) + ' 仍回落 2000');
   }
+});
+
+// ═════════ VADSIL-P14x 变异自证（三处各自退回 ⇒ 相应判据必红）═════════════
+// ⚠ 手法：**内存变异**（把真 chunk 源码文本改一处后求值）——不落盘、不碰工作区，
+//   与「关闭 /tmp 副本内变异」等效，但避免在测试里做文件系统写（更安全、更快）。
+// ⚠ 变异名一律运行时拼接，避免在源码里形成字面量。
+
+/** 用给定源码文本渲染（与 renderVoiceSection 同环境，仅源码不同）。 */
+function renderWithSource(src, cfg) {
+  const ReactStub = {
+    createElement: (type, props, ...kids) => {
+      const flat = kids.flat(9).filter((k) => k !== null && k !== undefined && k !== false);
+      const pr = Object.assign({}, props || {});
+      if (flat.length) pr.children = flat.length === 1 ? flat[0] : flat;
+      return { type, props: pr, kids: flat };
+    },
+    useState: (init) => [typeof init === 'function' ? init() : init, () => {}],
+    useRef: (init) => ({ current: init }),
+    useEffect: () => {},
+  };
+  const S = loadState();
+  S.voiceCfgState.value = Object.assign({}, S.VOICE_CFG_DEFAULTS, { vad: { enabled: true, silenceMs: 3000 } }, cfg || {});
+  const factory = new Function(
+    'React', 'makeT', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'saveVoiceCfg', 'syncVoiceFromHost',
+    'vadSilenceMsOf', 'normalizeVadSilenceMs', 'MarqueeSelect', 'CollapsibleSection',
+    'OfficialVoiceDiag', 'FillerDiag', 'CorrectionDiag', 'voiceHotkeyDisplay',
+    'setTimeout', 'clearTimeout', 'window',
+    src + '\n;return { VoiceSection };'
+  );
+  const api = factory(
+    ReactStub, () => (k) => k, { call: () => Promise.resolve({ ok: false }) },
+    S.voiceCfgState, () => () => {}, (patch) => { S.saveVoiceCfg(patch); },
+    () => {}, S.vadSilenceMsOf, S.normalizeVadSilenceMs,
+    (p) => ReactStub.createElement('mselect', {}, p.children),
+    (p) => ReactStub.createElement('section', {}, p.children),
+    () => null, () => null, () => null, (c) => String(c || ''),
+    setTimeout, clearTimeout, {}
+  );
+  const expand = (n) => {
+    if (!n || typeof n !== 'object') return n;
+    if (typeof n.type === 'function') { const o = n.type(n.props); return o ? expand(o) : null; }
+    return { type: n.type, props: n.props, kids: (n.kids || []).map(expand).filter(Boolean) };
+  };
+  const tree = expand(api.VoiceSection({}));
+  const kids = tree.kids[0].kids.filter((k) => k && typeof k === 'object');
+  const row1 = kids.find((k) => k.props && k.props.style && k.props.style.gridTemplateColumns);
+  return { row1, row2: kids[kids.indexOf(row1) + 1], S };
+}
+
+test('VADSIL-P14x-1 变异①：开关仍留第一行 ⇒ P14 必红（判据有牙）', () => {
+  const src = decodeChunk('src/client/voice/voice-section.js');
+  // 把静音监测开关**搬回**第一行（用**改前的原形态**内联表达式，避免 TDZ：
+  //   row1 在 vadOn 声明之前 ⇒ 变异块不得引用 vadOn）
+  const chipBlock = "    React.createElement(ToggleChip, {\n      on: !!(v.vad && v.vad.enabled !== false),\n      onText: t('voiceVadShort') + t(v.vad && v.vad.enabled !== false ? 'voiceAutoEnhanceOn' : 'voiceAutoEnhanceOff'),\n      title: t('voiceVadEnabled'),\n      onToggle: () => saveVoiceCfg({ vad: { enabled: !(v.vad && v.vad.enabled !== false) } }),\n    }),\n";
+  const anchorRow = "    React.createElement('div', { className: 'dsh-plg-row' },\n      React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceHotkeyCombo')),";
+  assert.ok(src.includes(anchorRow), '前置：热键行锚点须在位');
+  const back = src
+    .replace("'auto auto auto minmax(0,1fr)'", "'auto auto auto auto minmax(0,1fr)'")
+    .replace(anchorRow, chipBlock + anchorRow);
+  const mu = renderWithSource(back, {});
+  // 变异后：第一行 5 格且含 voiceVadShort ⇒ P14 的两条断言必红
+  assert.equal(mu.row1.props.style.gridTemplateColumns, 'auto auto auto auto minmax(0,1fr)', '变异后 grid 应回到 5 列');
+  assert.ok(JSON.stringify(mu.row1.kids.map((k) => k.props.children || '')).includes('voiceVadShort'),
+    '变异后第一行应重新含静音监测 ⇒ P14 的「第一行不得含 voiceVadShort」必红（判据有牙）');
+});
+
+test('VADSIL-P14x-2 变异②：滑块最小值仍为 1 ⇒ P14c 必红（判据有牙）', () => {
+  const src = decodeChunk('src/client/voice/voice-section.js');
+  const mutated = src.replace("min: '0', max: '5', step: '1'", "min: '1', max: '5', step: '1'");
+  assert.notEqual(mutated, src, '前置：变异锚点须命中');
+  const mu = renderWithSource(mutated, {});
+  const sl = mu.row2.kids.find((k) => k.props && k.props.type === 'range');
+  assert.equal(sl.props.min, '1', '变异后滑块 min 应为 1 ⇒ P14c 的「min 须为 0」必红（判据有牙）');
+});
+
+test('VADSIL-P14x-3 变异③：把 0 写进 silenceMs（而非只置 enabled=false）⇒ P14d 必红（判据有牙）', () => {
+  const src = decodeChunk('src/client/voice/voice-section.js');
+  const anchor = 'silenceMs: zero ? silenceMsNow : normalizeVadSilenceMs(Number(next))';
+  assert.ok(src.includes(anchor), '前置：setSilence 的写入锚点须在位');
+  // 退回「另立第二份真相」的写法：0 直接写进 silenceMs
+  const mutated = src.replace(anchor, 'silenceMs: Number(next) === 0 ? 0 : normalizeVadSilenceMs(Number(next))');
+  const mu = renderWithSource(mutated, { vad: { enabled: true, silenceMs: 5000 } });
+  const sl = mu.row2.kids.find((k) => k.props && k.props.type === 'range');
+  sl.props.onChange({ target: { value: '0' } });
+  // ⚠ 变异把 0 写进 silenceMs ⇒ mergeVoice 视 0 为非法 ⇒ 归一为默认 2000（**不是 0**，但同样**不是 5000**）
+  //   ⇒ P14d 的「silenceMs 须保持原值 5000」必红 —— 这正是该判据要咬住的"档位被重置"。
+  const got = mu.S.voiceCfgState.value.vad.silenceMs;
+  assert.notEqual(got, 5000,
+    '变异后 silenceMs 不再保持 5000（实得 ' + got + '）⇒ P14d 的「保持原值」必红（判据有牙）');
+  assert.equal(mu.S.voiceCfgState.value.vad.enabled, false, '变异后 enabled 仍为 false（0 档语义未变）');
+});
+
+test('VADSIL-P14x-4 负控：不动任何文件 ⇒ P14 系列全绿（防"恒红"）', () => {
+  const { row1, row2 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 } });
+  assert.equal(row1.props.style.gridTemplateColumns, 'auto auto auto minmax(0,1fr)', '负控：4 列');
+  assert.equal(row2.kids.length, 3, '负控：第二行 3 件');
+  assert.equal(row2Parts(row2).slider.props.min, '0', '负控：滑块 min 0');
+  assert.equal(row2Parts(row2).slider.props.max, '5', '负控：滑块 max 5');
 });

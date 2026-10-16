@@ -17,6 +17,26 @@
 
 ## [Unreleased]
 
+- **设置页「语音」段布局调整：静音监测开关移到第二行 + 滑块扩档到 0–5（0 = 关闭）（`CHG-144` · 语音段布局批 · 2026-10-17）**：
+**用户指示（逐字）**：「设置的UI组件位置样式需要调整一下，就是把静音检测 的开关直接放到下一行的静音时长和下拉框覆盖掉，第二行就是静音检测的开关组件+一个滑块组件，还有把滑块组件的1235秒改成012345,调成0的时候就是静音检测关闭，同样如果静音检测关闭滑块也自动调整到0对应」。
+**用户可感知的 UI 变化（三件）**：① **第一行由 5 格变 4 格** —— `自动增强 | 语音纠错 | 清口水词 | 静音监测·热键`（原为 `自动增强 | 静音监测 | 语音纠错 | 清口水词 | 热键`；`gridTemplateColumns` 同步由 `auto auto auto auto minmax(0,1fr)` 改为 `auto auto auto minmax(0,1fr)`）。
+② **第二行 = 静音监测开关（从第一行搬来）+ 滑块 + 数值读数**；原「静音时长」`label` 与 `MarqueeSelect` 下拉**已删除**（按用户点名"覆盖掉"）。
+③ **滑块档位 `1–5` ⇒ `0–5`**：`0` = **静音监测关闭**；**反向亦成立**（静音监测关 ⇒ 滑块自动到 `0`）。
+**⚠ 单一事实源（本批硬性纪律）**：**开关真相仍然只有 `vad.enabled` 一个** —— 滑块上的 `0` 只是"关闭"的**界面表示**，**不是第二个真相**；⛔ **未**引入 `silenceMs === 0` 这套第二语义（同族缺陷 `M-2`/`M-3` 的形态）。
+⇒ 读：滑块值 = `vad.enabled ? round(silenceMs / 1000) : 0`；写 `0`：**只置 `enabled = false`**，**`silenceMs` 保持原值** ⇒ 重开回到**上次档位**（不回落 2 秒）。
+**⚠ 档位域不变**：`silenceMs` **永远只取 1–5 秒**；`normalizeVadSilenceMs` 的既有域与「非法值回落 2000」**一字未改**（未走"配置 schema 变更"路径）。
+**读数文案**：`1–5` 档 = 既有 `N + t('voiceVadSilenceUnit')`（如「3 秒」）；**`0` 档 = `t('voiceSilenceOff')`（复用既有键）**，⛔ **不显示「0 秒」**（否则会被读成"零秒静音判定"，与"关闭"语义冲突）⇒ **未新增任何 i18n 键**（`S-7` ZH/EN 键集平衡不受影响）。
+**⭐ 本批实测查出的既有缺陷（主持侧列为待测疑点，实测成立，已在同批修掉）**：`saveVoiceCfg(patch)` = `mergeVoice({...voiceCfgState.value, ...patch})` ⇒ **`patch.vad` 会整体替换 `vad` 对象** ⇒ 开关若只写 `{ vad: { enabled } }`，`mergeVoice` 会把 `silenceMs` **归一为默认 2000**。
+**实读复现**：选 5 秒 ⇒ `{enabled:true,silenceMs:5000}`；开关关闭（旧写法）⇒ `{enabled:false,silenceMs:2000}`；再打开 ⇒ `silenceMs` **仍 2000** ⇒ **用户选的档位被静默重置**（正是"关一下再开，档位没了"）。
+⇒ **写法改为带上当前 `silenceMs`**（`silenceMs: zero ? silenceMsNow : normalizeVadSilenceMs(Number(next))`）⇒ 关闭/重开后档位**保持 5000**（实测往返：`5000 → 关 → 5000`）。
+**⚠ 同批订正被旧布局锁住的既有判据（未放宽、未删除任何断言，该文件断言总数 20 ⇒ 28 上升）**：`test/vad-silence.test.cjs` 的 `VADSIL-P14` 原锁「下拉必须恰好 5 档 / 滑块域必须 1–5 / 两条控件共用 `setSilence` 严格 2 处调用」⇒ 与新布局直接冲突，已按新布局**订正为 5 条**（`P14` 第一行 4 格 + `P14b` 第二行三件且标签/下拉已删 + `P14c` 档位 0–5 且 `silenceMs` 域不变 + `P14d` 0 档只置 `enabled=false` 且 `silenceMs` 保持原值 + `P14e` 0 档读数用 `voiceSilenceOff`），**手法同时升级**：由**子串断言**改为**真实载入 `voice-section.js`**（`decodeChunk` → 求值 → 渲染 → 展开函数组件）—— 这正是 client chunk 契约事故的成因形态（"新 chunk 用外部桩绕过、从不真载入"）的反向加固；另增 4 条变异自证/负控（`P14x-1..4`）。
+**改动面（3 文件）**：`src/client/voice/voice-section.js`（布局 + 0 档写入，**语义面仅"写入形态"**）· `lib/client.cjs`（产物重建，**非手改**）· `test/vad-silence.test.cjs`（P14 订正 + 变异自证）。
+**⭐ 形态契约（承 `CHG-143` 事故）**：`voice-section.js` 改后**仍是 `module.exports = "…"` 形态**（首末 token 与同目录 6 个 chunk 对形；构建期契约门与 `gate` 环内 `R7` 均绿）；产物 `lib/client.cjs` 的 `[object Object]` 污染计数 = **0**，浏览器同款求值 **PARSE OK**。
+**已实测（方式/等级；数字可复现、附命令）**：`npm test` ⇒ **tests 481 · pass 480 · fail 0 · skipped 1**（断言总数 **473 → 481**，**未下降**；净增 8 = `vad-silence` 由 20 → 28：P14 系列 1 → 5 条 + 新增 `P14x-1..4` 4 条变异自证/负控）· `node scripts/gate.mjs` ⇒ **exit 0**（5 环 PASS 5 · FAIL 0 · SKIP 0；dead-code 环自报 `R1–R7 全过`，`R7` 逐字：`29 个 chunk（client+host，含将来新增）导出形态均为 string｜lib/client.cjs 浏览器同款求值 PARSE OK（污染 0 处）｜plugin-host.js 求值 PARSE OK（污染 0 处）`）· 双 `--check` 全绿（`build-client --check` = `lib/client.cjs OK（源码 ↔ 产物一致）`）· `node --check lib/client.cjs` ⇒ exit 0 · `node scripts/lib/sync-face.mjs` ⇒ exit 0（4/4 `[match]`）。
+**⭐ 变异自证（三处各自退回，均**内存变异**、不落盘）**：① 开关仍留第一行（并恢复 5 列 grid）⇒ `P14`/`P14b` 必红 · ② 滑块最小值仍为 `1` ⇒ `P14c` 必红 · ③ 把 `0` 写进 `silenceMs`（而非只置 `enabled=false`）⇒ `P14d` 必红（实测 `silenceMs` 不再保持 5000）。**⭐ 负控**：不动任何文件 ⇒ `P14/P14b/P14c/P14d/P14e` 全绿（`P14x-4` 显式锁定）。
+**⚠ 未实测 / 不得读作已生效**：**未部署、未重启 DSH** ⇒ **运行中的插件仍是旧代 UI 布局**，用户需自行重启/刷新后才可见新布局；本批只到"源码 + 产物 + 判据"三层，**不主张已生效**。⚠ 另未做真实浏览器渲染复核（本轮以 `node` 求值 + 元素树断言覆盖，属**装载点同款**判据，不等价于真机视觉验收）。
+**边界**：**未 bump**（`version` 仍 `3.4.2`）· 未打 tag · 未 Release · 未 publish · 未安装 · **未部署** · **未重启 DSH** · **未改** `prompts/**` · **未改** `PROJECT.md` 正文 · **未改** `test/**` 之外的脚本逻辑 · **未改** `lib/**` 手改面与 `plugin-host.js` · **未碰账本区** · **未改**官方源码或其 `node_modules` · `src/host/**` chunk 形态与 `new Function('harness', BODY)` 桥接 **零触碰** · 探针只放 `/tmp`。— [PE-F02]（flow: 语音与识别链）
+
 - **纠错改为「语音链路上的独立一步」+ 新增「语音纠错」开关（`CHG-143` · 纠错语音独立步批 · 2026-10-17）**：
 **用户三轮指示合读**（逐字，第三轮为架构澄清、以它为准）：「这个功能是通过提示詞增强的流程轮次做的，但是**是属于语言功能的增强模块**，
 就是这个纠错**可以独立存在**的，比如说**纠错功能打开的话提示詞自动增强没有打开的话，语言输入识别完成之后会自动的使用纠错然后就结束**，
