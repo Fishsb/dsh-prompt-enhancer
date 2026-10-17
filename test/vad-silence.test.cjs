@@ -226,7 +226,7 @@ function renderVoiceSection(cfg) {
   }, cfg || {});
   const factory = new Function(
     'React', 'makeT', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'saveVoiceCfg', 'syncVoiceFromHost',
-    'vadSilenceMsOf', 'normalizeVadSilenceMs', 'MarqueeSelect', 'CollapsibleSection',
+    'vadSilenceMsOf', 'normalizeVadSilenceMs', 'CollapsibleSection',
     'OfficialVoiceDiag', 'FillerDiag', 'CorrectionDiag', 'voiceHotkeyDisplay',
     'setTimeout', 'clearTimeout', 'window',
     src + '\n;return { VoiceSection };'
@@ -237,7 +237,6 @@ function renderVoiceSection(cfg) {
     // ⚠ 真实 saveVoiceCfg（取自 state.js）⇒ 本判据走**真** mergeVoice，不用桩伪造合并语义
     (patch) => { saved.push(patch); S.saveVoiceCfg(patch); },
     () => {}, S.vadSilenceMsOf, S.normalizeVadSilenceMs,
-    (p) => ReactStub.createElement('mselect', {}, p.children),
     (p) => ReactStub.createElement('section', {}, p.children),
     () => null, () => null, () => null, (c) => String(c || ''),
     setTimeout, clearTimeout, {}
@@ -295,7 +294,16 @@ test('VADSIL-P14b 第二行 = 开关 + 滑块 + 读数；标签与下拉框已�
   assert.ok(readout, '第二行第 3 件须是读数（本席裁定保留 ⇒ 滑块有数值反馈）');
   // ⚠ 用户点名删除的两件：标签 + 下拉框
   assert.equal(row2.kids.some((k) => k.type === 'label'), false, '第二行的「静音时长」label 必须已删除');
-  assert.equal(row2.kids.some((k) => k.type === 'mselect'), false, '第二行的 MarqueeSelect 下拉必须已删除');
+  // ⚠ 2026-10-17（残项收口批）：本断言原为「渲染树里无 `mselect` 元素」—— 但该形态**依赖 harness 注入
+  //   `MarqueeSelect` 桩**；桩一旦移除（死形参收敛），渲染树里不可能出现 `mselect` ⇒ 断言**恒真、失去鉴别力**。
+  //   ⇒ 升级为**源码层**判据（读该 chunk 的**解码后源码**），两义均判：①不调用 ②无参数级引用残留。
+  {
+    const src = decodeChunk('src/client/voice/voice-section.js');
+    assert.equal(/React\.createElement\(\s*MarqueeSelect\b/.test(src), false,
+      '第二行不得再创建 MarqueeSelect（源码层，不依赖 harness 桩）');
+    assert.equal(src.includes("MarqueeSelect"), false,
+      '该 chunk 源码不得残留任何 MarqueeSelect 引用（含注释外的一切形态）');
+  }
 });
 
 test('VADSIL-P14c 滑块档位订正 1–5 ⇒ 0–5（0 = 关闭；档位域 silenceMs 仍只 1–5）', () => {
@@ -309,6 +317,12 @@ test('VADSIL-P14c 滑块档位订正 1–5 ⇒ 0–5（0 = 关闭；档位域 si
   const S = loadState();
   assert.equal(S.normalizeVadSilenceMs(0), 2000, 'normalizeVadSilenceMs 的域不得改：0 仍非法 ⇒ 回落 2000');
   for (const n of [1, 2, 3, 4, 5]) assert.equal(S.normalizeVadSilenceMs(n), n * 1000, '档位 ' + n + ' 秒仍合法');
+  // ⚠ 2026-10-17（残项收口批 · 补回）：以下三条**自绘滑块样式**断言系布局批（CHG-144）改写 P14 时
+  //   **误删**（原在旧 P14 末尾），属「放宽既有断言」⇒ 本批按原样**补回**（不是新增判据，是恢复）。
+  const st = decodeChunk('src/client/styles.js');
+  assert.ok(st.includes('.dsh-vi-slider'), 'styles.js 缺自绘滑块样式');
+  assert.ok(st.includes('::-webkit-slider-thumb'), '缺 WebKit 自绘（轨道/握手）');
+  assert.ok(st.includes('::-moz-range-thumb'), '缺 Firefox 自绘（轨道/握手）');
 });
 
 test('VADSIL-P14d 单一事实源：0 档写 enabled=false 且 silenceMs 保持原值（关→开回到上次档位）', () => {
@@ -450,7 +464,7 @@ function renderWithSource(src, cfg) {
   S.voiceCfgState.value = Object.assign({}, S.VOICE_CFG_DEFAULTS, { vad: { enabled: true, silenceMs: 3000 } }, cfg || {});
   const factory = new Function(
     'React', 'makeT', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'saveVoiceCfg', 'syncVoiceFromHost',
-    'vadSilenceMsOf', 'normalizeVadSilenceMs', 'MarqueeSelect', 'CollapsibleSection',
+    'vadSilenceMsOf', 'normalizeVadSilenceMs', 'CollapsibleSection',
     'OfficialVoiceDiag', 'FillerDiag', 'CorrectionDiag', 'voiceHotkeyDisplay',
     'setTimeout', 'clearTimeout', 'window',
     src + '\n;return { VoiceSection };'
@@ -459,7 +473,6 @@ function renderWithSource(src, cfg) {
     ReactStub, () => (k) => k, { call: () => Promise.resolve({ ok: false }) },
     S.voiceCfgState, () => () => {}, (patch) => { S.saveVoiceCfg(patch); },
     () => {}, S.vadSilenceMsOf, S.normalizeVadSilenceMs,
-    (p) => ReactStub.createElement('mselect', {}, p.children),
     (p) => ReactStub.createElement('section', {}, p.children),
     () => null, () => null, () => null, (c) => String(c || ''),
     setTimeout, clearTimeout, {}
