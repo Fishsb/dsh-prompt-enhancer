@@ -1587,6 +1587,8 @@ function friendlyMessage(failure) {
     case 'ABORTED': return 'request cancelled';
     case 'NO_MODEL': return 'no model configured, add models in settings';
     case 'ALL_MODELS_UNAVAILABLE': return 'all models unavailable, check model config and retry';
+    // 2026-10-17（纠错服务端守卫批）：`voice/correct` 的**开关跳过**码 —— 与「跑了没事」可判（不得静默失效）。
+    case 'CORRECTION_DISABLED': return 'voice correction is off (voice.correction.enabled=false), skipped';
     default: return failure && failure.message ? failure.message : 'optimize failed';
   }
 }
@@ -4566,12 +4568,97 @@ return {
       }
     }
 
+    // ================= 纠错服务端守卫（2026-10-17 · 纠错服务端守卫批 · 第 ① 件）=================
+    // 病历（真机复核批实测）：`voice/correct` **不读** `voice.correction.enabled` —— 开关此前**只**由
+    //   client 的 `runCorrectionThenMaybeEnhance` 拦截 ⇒ 把开关置 false 后直调该 RPC **2/2 次**
+    //   都走到模型（本批只读复现，见报告 §②；上一批读数是 10/10，本批**未重跑 10 次**）。
+    //
+    // 本席处置（用户裁定，作业书 §1.2）：**服务端补守卫**；client 那道**保留**（纵深防御两层，不是冗余）。
+    //
+    // ⚠⚠ **配置从哪读（本席自查修正的关键一处，见报告 §④）**：
+    //   起初本席写成读 `args.config`（随请求带来的配置），**实测发现那是错的** ——
+    //   client 的调度口传的是 `configState`（**增强配置**），其形状里**既无 `voice` 也无 `correction`**
+    //   （`src/client/state.js` 的 `cloneDefaults()` 逐字无这两个键）⇒ 若读它，
+    //   **开关打开时也会被判成"关"** ⇒ 把可用功能**永久关死**（正是「拆东墙补西墙」）。
+    //   ⇒ 正解：读**服务端已归一化**的配置 —— `harness.readVoiceConfig()`
+    //     = `rpcConfig.readConfig()`（磁盘那一份）→ `asr.sanitizeVoiceCfg()`（host 白名单唯一实现）。
+    //     ⚠ 这条路径**不是**本批新造的：两者都是既有函数，本批只接线（`lib/index.cjs` 注入），
+    //       故**没有**"同一事实第二份实现"（`M-3`）。
+    //
+    // ⚠ 三条纪律（逐条对齐作业书原文）：
+    //   ① **配置走已归一化的既有路径**：`readVoiceConfig()` ⇒ 返回的是 `sanitizeVoiceCfg` 的产物，
+    //      取形已是 `=== true` 的布尔；本处再取 `=== true` 是**同形加固**（不是第二份解析）。
+    //      若该面不可用（测试夹具未注入 / 读盘失败）⇒ **回退**到请求随行的 `args.config`
+    //      （`voice.correction` 或顶层 `correction` 两种包装位置，取形式逐字相同）——
+    //      ⚠ 该回退**只服务于"无磁盘面的调用方"**，产品链路上永远走第一路。
+    //   ② **取形须 `=== true`**（与 `mergeVoice` / `sanitizeVoiceCfg` 同形）——⛔ 不得写成 `!== false`，
+    //      那会把「缺省」读成「开」，与本开关「缺省=关」的语义相反。
+    //   ③ **fail-closed**：读不到 ⇒ 按「关」处理，**但必须在响应里可见**
+    //      （`skipped` + `code` + `skippedBy`），不得静默。
+    //
+    // ★ 返回值语义（关键设计，承正本 §7.7「不得静默失效」· R12 诊断口径）：
+    //   「没跑因开关」与「跑了没事」**必须可判** ⇒ 跳过时返回
+    //     `{ ok: true, skipped: true, skippedBy: <原因>, code: 'CORRECTION_DISABLED', text, message }`
+    //   ⛔ 不得伪造成 `changed:false` 的「正常无改动」（那会让「关了」与「没错字」同形）——
+    //      `changed` 在跳过时**故意缺位**（缺位即"没跑过"）。
+    //   为什么 `ok: true`：守卫**不是失败**（是用户的选择），调用方不该把它当错误重试/报错；
+    //   区分点是 `skipped` 与 `code`，不是 `ok`。
+    const CORRECTION_DISABLED_CODE = 'CORRECTION_DISABLED';
+    const CORRECTION_ENABLED_REASON = 'correction.enabled';
+    // 取形：`=== true`（与 `sanitizeVoiceCfg`／`mergeVoice` 同形）；读不到即 false（fail-closed）。
+    function correctionEnabledOf(rawCfg) {
+      const c = rawCfg && typeof rawCfg === 'object' ? rawCfg : null;
+      if (!c) return false;                       // fail-closed
+      const top = c.correction;
+      if (top && typeof top === 'object') return top.enabled === true;
+      const v = c.voice;
+      if (v && typeof v === 'object' && v.correction && typeof v.correction === 'object') return v.correction.enabled === true;
+      return false;                               // 缺省 = 关（与两侧白名单同口径）
+    }
+    // 读到"开关真值 + 来源"（来源进响应 `skippedBy`，让"从哪读的"也可见）。
+    // 优先**服务端已归一化**的 face；缺位才回退请求随行 config（见上方 ① 的说明）。
+    function resolveCorrectionSwitch(argsCfg) {
+      let face = null;
+      try {
+        face = (harness && typeof harness.readVoiceConfig === 'function') ? harness.readVoiceConfig() : null;
+      } catch (e) { face = null; }
+      if (face && typeof face === 'object') {
+        return { on: correctionEnabledOf(face) === true, from: 'host-normalized' };
+      }
+      // 回退：无磁盘面（单测夹具/非 bundle 载体）。⚠ 这只在 face 缺位时发生。
+      return { on: correctionEnabledOf(argsCfg) === true, from: 'request-config' };
+    }
+
     async function runCorrection(args) {
       const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : 'unknown';
       const text = args && typeof args.text === 'string' ? args.text : '';
       if (text.trim() === '') return { ok: false, code: 'GUARD', message: friendlyMessage({ code: 'GUARD' }) };
       if (llm === undefined) return { ok: false, code: 'NO_LLM', message: friendlyMessage({ code: 'NO_LLM' }) };
       const cfg = validateConfig(args && args.config);
+      // ⚠ 守卫位置纪律：必须在**参数校验之后**（GUARD/NO_LLM 的既有语义不抢跑）、
+      //   且在**任何模型动作之前**（chain 建立/历史读取/stream 调用都不得发生）——
+      //   「开关关闭 ⇒ 不调模型」的判据就是「走到这里就 return」。
+      //   取形来源 = `resolveCorrectionSwitch()`：**优先服务端已归一化**的 face
+      //   （`harness.readVoiceConfig()` ⇒ `readConfig` → `sanitizeVoiceCfg`，两者都是既有函数，本批只接线）；
+      //   仅当该 face 缺位（单测夹具 / 非 bundle 载体）才回退请求随行的 `args.config`。
+      //   ⚠ 回退**不是**第二份语义：取形式逐字相同（`=== true`），只是包装位置不同。
+      //   缺省/读不到 ⇒ false ⇒ 跳过且**可见**（`switchFrom` 写明是哪一侧判的）。
+      const corrSwitch = resolveCorrectionSwitch(args && args.config);
+      if (corrSwitch.on !== true) {
+        // 跳过原因点名**是哪一侧**判的关（host 归一化面 / 请求随行 config）—— 便于排查"读错源"。
+        hlog('[correction] skipped session=' + sessionId + ' from=' + corrSwitch.from);
+        // ★ 返回值语义：「因开关没跑」必须与「跑了但没改动」**可判** ⇒ skipped/code 双标记。
+        //   ⛔ 不给 `changed`（缺位 = 没跑过），⛔ 不返回 ok:false（守卫不是失败）。
+        return {
+          ok: true,
+          skipped: true,
+          skippedBy: CORRECTION_ENABLED_REASON,
+          switchFrom: corrSwitch.from,
+          code: CORRECTION_DISABLED_CODE,
+          text,
+          message: friendlyMessage({ code: CORRECTION_DISABLED_CODE }),
+        };
+      }
       const chain = buildTryChain(cfg.fallback);
       if (chain.length === 0) return { ok: false, code: 'NO_MODEL', message: friendlyMessage({ code: 'NO_MODEL' }) };
       // 参考窗口失败 ⇒ 空参考（纠错仍可依据草稿本身与判据①–④执行，降级不阻断）
