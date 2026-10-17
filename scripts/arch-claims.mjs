@@ -45,6 +45,8 @@ import { emitRingState, installCrashGuard } from './lib/ring-state.mjs';
 // D-10 修正批（2026-10-14）：剥注释器收敛到单一事实源（原为内联「先块后行」实现，会吞代码）。
 import { codeOnly as importedCodeOnly } from './lib/code-only.mjs';
 import * as libManifest from './lib/lib-manifest.mjs';
+// 声明面三面相等（甲-1）的判定逻辑——单一事实源，纯函数可内存变异自证（S-10 消费）。
+import { compareDeclaredSurface } from './lib/declared-surface.mjs';
 import { resolveGovRoot } from './lib/gov-root.mjs';
 
 installCrashGuard('arch-claims');
@@ -1020,6 +1022,42 @@ const STRUCTURAL = [
       + '｜畸形 --eol 行 ' + malformed.length
       + '｜负控 命中 ' + neg.badText.length + '/1'
       + (zero ? '｜⚠ 空扫：分母含 0（' + rows.length + '/' + j.text.length + '/' + j.bins.length + '），不判绿' : ''));
+  }),
+
+  // ── S-10（治理面落地批 2026-10-17 · 处置正本 §12.13.2 **甲-1**）────────────────────────
+  // 病历（甲-1 原文）：`peerDependencies` ↔ `dsh.client.inject` 逐项相等**这条红线无任何机械判据**
+  //   —— 实测 `grep -rn "peerDependencies" scripts/ test/` 零命中（范围 = 工作区 `scripts/` + `test/`）。
+  //   后果不是小错：宿主的 compatibility 门（`dsh-app-boot/lib/index.js` `evaluatePluginCompatibility`）
+  //   只审 `peerDependencies` 里 `@deepseek-ai/dsh*` 命名空间，任一不满足即 **deny 整个 bundle**
+  //   ⇒ 现象为 profile 启动阶段 `skipping profile bundle`、插件 UI 全无且**客户端零提示**（不可观测）。
+  //
+  // 判据形态（**三面相等**，逐面**真实读取**，任一面读不到即 fail-closed 判红）：
+  //   ① `package.json` 的 `peerDependencies` **键集**
+  //   ② `package.json` 的 `dsh.client.inject` **项集**
+  //   ③ `package-lock.json` root 条目（`packages[""]`）的 `peerDependencies` **键集**（镜像面）
+  //
+  // ⚠ **判据边界（如实写明，⛔ 不得让判据看起来比实际更强）**：
+  //   · 本断言只判**集合相等**（本仓红线 §五 的原文形态）。它**不判**：
+  //     ‑ 某个名字**是否实存/可解析**（那属 `C-31`「待验证的依赖名不得留在声明面」，人载 + 外部环境实算）；
+  //     ‑ **semver 区间是否覆盖目标运行时**（同上，须实算）。
+  //   · **命名空间边界**：宿主 compatibility 门**只审 `@deepseek-ai/dsh*`**。本断言对**全集合**判相等
+  //     （红线原文如此），但若将来注入面出现**非该命名空间**的包，**宿主不会审它** ⇒ 本断言的"绿"
+  //     在那类名字上**不代表**"宿主认可其可解析"。⇒ 读数里显式打印命名空间外的项数，使该边界**可见**，
+  //     而不是让读者把"三面相等"读成"全部已实算可解析"。
+  A('S-10', '结构', '声明面三面相等：`peerDependencies` 键集 == `dsh.client.inject` 项集 == `package-lock.json` root 镜像键集（⚠ 只判集合相等；不判实存/semver；宿主只审 `@deepseek-ai/dsh*`）', '三面集合逐名相等，且各面非空（任一面读不到 ⇒ fail-closed 判红）', () => {
+    // 判定逻辑收敛到单一事实源（`scripts/lib/declared-surface.mjs`）：纯函数 ⇒ 可内存变异自证
+    // （回归锁见 `test/governance-landing-locks.test.cjs`），此处只做**磁盘读取 + 读数呈现**。
+    let pkg, lock;
+    try { pkg = JSON.parse(read('package.json')); } catch (e) { return no('package.json 不可解析：' + String(e.message).slice(0, 60)); }
+    try { lock = JSON.parse(read('package-lock.json')); } catch (e) { return no('package-lock.json 不可解析：' + String(e.message).slice(0, 60)); }
+    const r = compareDeclaredSurface(pkg, lock);
+    return assert(r.ok,
+      r.reason
+      + (r.peer.length || r.inject.length || r.lockPeer.length
+        ? `｜peer ${r.peer.length} 项${r.peer.length ? ' [' + r.peer.join(',') + ']' : ''}｜inject ${r.inject.length} 项｜lock-root ${r.lockPeer.length} 项`
+        : '')
+      // ⚠ 边界行：让"宿主只审该命名空间"这一事实**在读数里可见**，防读者高估本断言的覆盖面
+      + `｜⚠ 判据边界：只判集合相等，⛔ 不判实存/semver（属 C-31 人载）；宿主 compatibility 门只审 @deepseek-ai/dsh* ⇒ 命名空间外 ${r.outsideNamespace.length} 项${r.outsideNamespace.length ? '（' + r.outsideNamespace.join(',') + '）其"相等"不代表宿主认可可解析' : '（当前无此类项）'}`);
   }),
 ];
 
