@@ -20,7 +20,7 @@ Restart DSH afterwards (also after updating or removing) — the ✨ button appe
 
 **Prompt optimization**
 
-- ✨ **One-click enhance** — rewrite the current draft; keep refining, undo, or cancel while enhancing
+- ✨ **One-click optimize** — rewrite the current draft; keep refining, undo, or cancel while optimizing
 - **5 modes** — Basic / Lite / Standard / Expert / One-click Publish
 - **Memory switch** — pre-send rounds accumulate into a memory chain, cleared on send (off by default)
 - **Model chain** — try models in order, add/remove/reorder, toggle thinking, test connectivity inline
