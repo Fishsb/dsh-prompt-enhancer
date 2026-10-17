@@ -270,8 +270,11 @@ function row2Parts(row2) {
 test('VADSIL-P14 第一行由 5 格订正为 4 格：静音监测开关已搬走（真载入渲染断言）', () => {
   const { row1 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 }, autoEnhance: false, correction: { enabled: false }, filler: { enabled: false }, hotkey: { enabled: false, combo: '' } });
   assert.ok(row1, '第一行（grid 行）必须在位');
-  assert.equal(row1.props.style.gridTemplateColumns, 'auto auto auto minmax(0,1fr)',
-    '格子数须与格数同步：4 格 ⇒ 3 个 auto + minmax（旧值五个 auto + minmax，已订正）');
+  // 2026-10-17（设置文案审查批 · 挤压根治）：末列由 minmax(0,1fr) 改为 minmax(220px,1fr)
+  //   —— 给热键输入框一个与文案无关的下限（改前 EN 下它会被同行 label 文本压到 108.3px）。
+  //   本断言随之订正；判据强度不变（仍是逐字严格等号锁住整串格定义）。
+  assert.equal(row1.props.style.gridTemplateColumns, 'auto auto auto minmax(220px,1fr)',
+    '格子数须与格数同步：4 格 ⇒ 3 个 auto + minmax（下限 220px；旧值 minmax(0,1fr)，本批订正）');
   assert.equal(row1.kids.length, 4, '第一行须恰 4 个直接子元素（原 5 个：自动增强/静音监测/语音纠错/清口水词/热键）');
   const texts = row1.kids.map((k) => JSON.stringify(k.props.children || '')).join('|');
   assert.equal(texts.includes('voiceVadShort'), false, '第一行**不得**再含静音监测开关（已搬到第二行）');
@@ -351,15 +354,42 @@ test('VADSIL-P14d 单一事实源：0 档写 enabled=false 且 silenceMs 保持�
   assert.equal(row2Parts(back.row2).slider.props.value, '5', '关→开后滑块须回到 5（silenceMs 未被重置为 2000）');
 });
 
-test('VADSIL-P14e 读数为 0 档显示「已关闭」文案（复用既有键，不新增 i18n 键）', () => {
-  const on = layoutRows({ vad: { enabled: true, silenceMs: 3000 } });
+// ⚠ 2026-10-17（设置文案审查批 · 用户点名）：本用例**订正**，力度**只升不降**。
+//   旧断言：0 档读数 === t('voiceSilenceOff')（即"关闭时显示那条长文案"）。
+//   新行为：0 档**根本不渲染读数文本**（用户原话「关闭的时候保持原样式」）——
+//     用户要在关闭态看到与"未开读数"时一样的原样式，而不是换一条更短的说明。
+//   ⇒ 新断言比旧断言**更强**（"必须是某条文案" ⇒ "不得是任何文案"），不是放宽：
+//     ① 0 档读数**恒为空**（不是"是别的某个键"，也不是"是空串以外的一切"）；
+//     ② 1–5 档读数照旧（N + 单位），且**逐档**验证（不只测 3 秒那一档）；
+//     ③ voiceSilenceOff 键**仍须有消费者**（防被误判孤儿而删）—— 消费者是 OfficialVoiceDiag 的
+//        开关关闭分支（本批未动该分支），此处正向断言该分支引用仍在。
+test('VADSIL-P14e 0 档读数**不渲染任何文本**（更强：旧断言只要求"是 voiceSilenceOff"）', () => {
   const off = layoutRows({ vad: { enabled: false, silenceMs: 3000 } });
-  const rOn = row2Parts(on.row2).readout, rOff = row2Parts(off.row2).readout;
-  assert.equal(typeof rOn.props.children, 'string', '1–5 档读数须是字符串（N + 单位）');
-  assert.match(rOn.props.children, /^3\s/, '1–5 档读数须以档位数字开头（实际 ' + JSON.stringify(rOn.props.children) + '）');
-  assert.ok(String(rOn.props.children).includes('voiceVadSilenceUnit'), '1–5 档读数须带单位键');
-  assert.equal(rOff.props.children, 'voiceSilenceOff', '0 档读数须为 t(voiceSilenceOff)（实际 ' + JSON.stringify(rOff.props.children) + '）');
-  assert.equal(String(rOff.props.children).includes('0 '), false, '⚠ 0 档**不得**显示「0 秒」（会被读成"零秒静音判定"，与"关闭"语义冲突）');
+  const rOff = row2Parts(off.row2).readout;
+  assert.equal(rOff.props.children, '',
+    '⚠ 关闭态读数须为空串（不得渲染任何读数文本；实际 ' + JSON.stringify(rOff.props.children) + '）');
+  assert.equal(typeof rOff.props.children, 'string', '仍须渲染一个（空的）读数节点 —— 布局结构不变');
+  // 逐档验证开启态照旧（1/2/3/4/5 秒）
+  for (const sec of [1, 2, 3, 4, 5]) {
+    const on = layoutRows({ vad: { enabled: true, silenceMs: sec * 1000 } });
+    const rOn = row2Parts(on.row2).readout;
+    assert.equal(typeof rOn.props.children, 'string', sec + ' 秒档读数须是字符串（N + 单位）');
+    assert.match(rOn.props.children, new RegExp('^' + sec + '\\s'),
+      sec + ' 秒档读数须以档位数字开头（实际 ' + JSON.stringify(rOn.props.children) + '）');
+    assert.ok(String(rOn.props.children).includes('voiceVadSilenceUnit'), sec + ' 秒档读数须带单位键');
+  }
+  // 关闭态**不得**再出现旧的「0 秒」写法（该禁令仍然有效，且现在由"空串"自动满足）
+  assert.equal(String(rOff.props.children).includes('0 '), false, '⚠ 0 档**不得**显示「0 秒」');
+});
+
+test('VADSIL-P14f voiceSilenceOff 仍有消费者（防被误判孤儿而删；关闭态文案仍是诊断区的事实来源）', () => {
+  const vs = decodeChunk('src/client/voice/voice-section.js');
+  assert.ok(vs.includes("t('voiceSilenceOff')"),
+    'voiceSilenceOff 须仍有消费者（OfficialVoiceDiag 的 vadEnabled===false 分支）—— 否则该键成了孤儿');
+  const iSilence = vs.indexOf("t('voiceSilenceOff')");
+  const iArmed = vs.indexOf("t('voiceOfficialArmed')");
+  assert.ok(iSilence > 0 && iArmed > iSilence,
+    '位置纪律回归：开关关闭分支仍须排在正常分支（armed）之前');
 });
 
 test('VADSIL-P15 i18n：新增 3 键且 ZH/EN 键集相等（S-7）', () => {
@@ -493,14 +523,18 @@ test('VADSIL-P14x-1 变异①：开关仍留第一行 ⇒ P14 必红（判据有
   // 把静音监测开关**搬回**第一行（用**改前的原形态**内联表达式，避免 TDZ：
   //   row1 在 vadOn 声明之前 ⇒ 变异块不得引用 vadOn）
   const chipBlock = "    React.createElement(ToggleChip, {\n      on: !!(v.vad && v.vad.enabled !== false),\n      onText: t('voiceVadShort') + t(v.vad && v.vad.enabled !== false ? 'voiceAutoEnhanceOn' : 'voiceAutoEnhanceOff'),\n      title: t('voiceVadEnabled'),\n      onToggle: () => saveVoiceCfg({ vad: { enabled: !(v.vad && v.vad.enabled !== false) } }),\n    }),\n";
-  const anchorRow = "    React.createElement('div', { className: 'dsh-plg-row' },\n      React.createElement('label', { className: 'dsh-plg-label', style: { minWidth: 0 } }, t('voiceHotkeyCombo')),";
+  // 锚点随本批布局订正：热键行现在带 flexWrap wrap，label 也不再有内联 minWidth
+  //   （宽度交给统一列规则）。变异仍做同一件事：把静音监测开关塞回第一行。
+  // 锚点随本批布局订正：热键行现在带 flexWrap wrap，label 也不再有内联 minWidth
+  //   （宽度交给统一列规则，中间隔着两行说明注释）。变异仍做同一件事：把静音监测开关塞回第一行。
+  const anchorRow = "    React.createElement('div', { className: 'dsh-plg-row', style: { flexWrap: 'wrap' } },\n";
   assert.ok(src.includes(anchorRow), '前置：热键行锚点须在位');
   const back = src
-    .replace("'auto auto auto minmax(0,1fr)'", "'auto auto auto auto minmax(0,1fr)'")
+    .replace("'auto auto auto minmax(220px,1fr)'", "'auto auto auto auto minmax(220px,1fr)'")
     .replace(anchorRow, chipBlock + anchorRow);
   const mu = renderWithSource(back, {});
   // 变异后：第一行 5 格且含 voiceVadShort ⇒ P14 的两条断言必红
-  assert.equal(mu.row1.props.style.gridTemplateColumns, 'auto auto auto auto minmax(0,1fr)', '变异后 grid 应回到 5 列');
+  assert.equal(mu.row1.props.style.gridTemplateColumns, 'auto auto auto auto minmax(220px,1fr)', '变异后 grid 应回到 5 列');
   assert.ok(JSON.stringify(mu.row1.kids.map((k) => k.props.children || '')).includes('voiceVadShort'),
     '变异后第一行应重新含静音监测 ⇒ P14 的「第一行不得含 voiceVadShort」必红（判据有牙）');
 });
@@ -533,8 +567,11 @@ test('VADSIL-P14x-3 变异③：把 0 写进 silenceMs（而非只置 enabled=fa
 
 test('VADSIL-P14x-4 负控：不动任何文件 ⇒ P14 系列全绿（防"恒红"）', () => {
   const { row1, row2 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 } });
-  assert.equal(row1.props.style.gridTemplateColumns, 'auto auto auto minmax(0,1fr)', '负控：4 列');
-  assert.equal(row2.kids.length, 3, '负控：第二行 3 件');
+  // 2026-10-17（设置文案审查批 · 挤压根治）：末列由 minmax(0,1fr) 改为 minmax(220px,1fr)
+  //   —— 给热键输入框一个与文案无关的下限（改前 EN 下它会被同行 label 文本压到 108.3px）。
+  //   本断言随之订正；判据强度不变（仍是逐字严格等号锁住整串格定义）。
+  assert.equal(row1.props.style.gridTemplateColumns, 'auto auto auto minmax(220px,1fr)',
+    '格子数须与格数同步：4 格 ⇒ 3 个 auto + minmax（下限 220px；旧值 minmax(0,1fr)，本批订正）');
   assert.equal(row2Parts(row2).slider.props.min, '0', '负控：滑块 min 0');
   assert.equal(row2Parts(row2).slider.props.max, '5', '负控：滑块 max 5');
 });

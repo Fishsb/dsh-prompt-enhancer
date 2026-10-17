@@ -923,7 +923,7 @@ test('OVB-W03 接线：设置页诊断区在位（不静默失效的可见面）
   assert.ok(vs.includes('snap.sessionsStarted > 0'), 'D-1 修复须以官方会话计数分支（严格可判别）');
   const i18n = decodeChunk('src/client/i18n.js');
   for (const k of ['voiceOfficialDiagTitle', 'voiceOfficialActive', 'voiceOfficialMissed', 'voiceOfficialAbandon', 'voiceOfficialSelfCapture', 'voiceOfficialArmed', 'voiceOfficialDisabled',
-    'voiceOfficialVerified', 'voiceOfficialStartMissed', 'voiceOfficialFeedback', 'voiceOfficialFeedbackSeen']) {
+    'voiceOfficialVerified', 'voiceOfficialStartMissed', 'voiceOfficialFeedback', 'voiceOfficialFeedbackSeen', 'voiceOfficialFeedbackSeenAgo']) {
     assert.ok(i18n.includes(k + ":"), 'i18n 缺键 ' + k);
   }
   // ZH/EN 键集必须相等（S-7）
@@ -932,7 +932,9 @@ test('OVB-W03 接线：设置页诊断区在位（不静默失效的可见面）
   const zk = (zh.match(/voiceOfficial[A-Za-z]+:/g) || []).sort();
   const ek = (en.match(/voiceOfficial[A-Za-z]+:/g) || []).sort();
   assert.deepEqual(zk, ek, 'voiceOfficial* ZH/EN 键集必须相等（S-7）');
-  assert.equal(zk.length, 11, 'voiceOfficial* 键数锁定为 11（严格 ===：7 原有 + 4 本批新增）');
+  // 2026-10-17（设置文案审查批 · 报障 D）：新增 voiceOfficialFeedbackSeenAgo（带时距的失败文案）
+  //   => 键数 11 -> 12。仍是严格 === 锁（不是放宽成 >=）：多一个少一个都红。
+  assert.equal(zk.length, 12, 'voiceOfficial* 键数锁定为 12（严格 ===：原 11 + 本批 1 条带时距的失败文案）');
 });
 
 // F-11（2026-10-13）：用户可见面不得出现未替换的占位符，且计数只留一个
@@ -942,7 +944,7 @@ test('OVB-W04 F-11：诊断区成功态原文不含未替换占位符，且计�
   // 键：不得再含 printf 风格 %d（本项目约定为 {n}）
   assert.ok(!/voiceOfficialVerified: '[^']*%d/.test(i18n), 'F-11：键内不得再用 %d（约定 {n}）');
   assert.ok(/voiceOfficialVerified: '[^']*\{n\}[^']*'/.test(i18n), 'F-11：键内须含 {n} 占位符');
-  assert.ok(/voiceOfficialVerified: 'Official capture observed \(\{n\}[^']*'/.test(i18n), 'F-11：EN 键同样须含 {n}');
+  assert.ok(/voiceOfficialVerified: '[^']*\{n\}[^']*'/.test(i18n), 'F-11：EN 键同样须含 {n}（文案值本批改白话，故不锁原文前缀）');
   // 渲染处：只代入，不再追加计数（不得同时出现 replace 与第二个拼接）
   const seg = vs.slice(vs.indexOf('voiceOfficialVerified'), vs.indexOf('voiceOfficialVerified') + 220);
   assert.ok(seg.includes(".replace('{n}'"), 'F-11：渲染处须代入 {n}');
@@ -952,12 +954,15 @@ test('OVB-W04 F-11：诊断区成功态原文不含未替换占位符，且计�
   const t = (k) => { const m = new RegExp("  " + k + ": '([^']*)'"); const r = i18n.match(m); return r ? r[1] : ''; };
   const zhText = t('voiceOfficialVerified').replace('{n}', '1');
   assert.equal(/[{]n[}]|%d/.test(zhText), false, 'F-11：代入后不得残留占位符 —— ' + zhText);
-  assert.equal(zhText, '已观测到官方采集（共 1 次）', 'F-11：成功态原文须恰为一次计数');
+  // 2026-10-17（设置文案审查批）：文案本批改白话 => 不得再锁旧原文值。
+  //   判据强度不降：仍要求代入后 (a) 无占位符残留 (b) 恰好只出现一次计数。
+  assert.equal((zhText.match(/1/g) || []).length, 1, 'F-11：成功态原文须恰出现一次计数（实际 ' + zhText + '）');
 });
 
 test('OVB-W05 F-11 变异自证：把键退回 %d（且渲染处仍追加）⇒ OVB-W04 必红', () => {
   const i18n = decodeChunk('src/client/i18n.js');
-  const anchor = "voiceOfficialVerified: '已观测到官方采集（共 {n} 次）'";
+  // 锚点随文案重写订正（值变了，键与占位符约定不变）：从当前 i18n 动态取该键的现值
+  const anchor = "voiceOfficialVerified: '" + (i18n.match(/voiceOfficialVerified: '([^']*)'/) || [0, ''])[1] + "'";
   assert.ok(i18n.includes(anchor), 'F-11 修复锚点须存在');
   const mutated = i18n.replace(anchor, "voiceOfficialVerified: '已观测到官方采集（共 %d 次）'");
   assert.ok(!/voiceOfficialVerified: '[^']*%d/.test(i18n), '前置：修复后不得含 %d');
@@ -1964,20 +1969,28 @@ function renderDiagKey(snap, mutate) {
   //   （首版即栽在 "Identifier 'text' has already been declared" —— 变异用例自己先崩，等于没做自证）
   const seg = vs.slice(vs.indexOf('  let text;'), vs.indexOf('const diagTitle'));
   assert.ok(seg.includes('let text;'), '诊断分支切片须含 text 声明（防锚点漂移后静默取到空段）');
+  // 2026-10-17（报障 D）：诊断分支现在用同 chunk 内的 ovbSinceLabel() 折算时距
+  //   => 求值该切片时须提供同一实现（从**真实 chunk** 里取，不在这里另写一份）。
+  const sinceSrc = vs.slice(vs.indexOf('function ovbSinceLabel'), vs.indexOf('function OfficialVoiceDiag'));
+  assert.ok(sinceSrc.includes('function ovbSinceLabel'), '须能从真实 chunk 取到 ovbSinceLabel 实现');
   const factory = new Function('snap', 't', 'officialVoiceBridge',
-    'return (function(){' + seg + ' return text; })();');
+    sinceSrc + '\nreturn (function(){' + seg + ' return text; })();');
   return factory(snap, t, null);
 }
 
+// 失败文案键族（本批把上次失败改成带时距版本；旧键保留给无时刻的退化态）
+const isFailKey = (k) => k === 'voiceOfficialFeedbackSeen' || k === 'voiceOfficialFeedbackSeenAgo';
 test('OVB-DT-V01 变异自证·正例必红：退回累计语义 ⇒ DT02 的核心判据必须失败', () => {
   const snap = { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 2,
     endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false,
-    feedbackSeen: 1, lastSessionFailed: false };   // 经历：1 次失败 + 之后 1 次成功
+    feedbackSeen: 1, lastSessionFailed: false, lastSessionFailedAt: 0 };   // 经历：1 次失败 + 之后 1 次成功
   const fixed = renderDiagKey(snap, null);
-  assert.notEqual(fixed, 'voiceOfficialFeedbackSeen', '修正后：成功会话之后不得再报失败（前置）');
+  // 2026-10-17：失败文案本批改为带时距版本（voiceOfficialFeedbackSeenAgo）=> 判据按语义族判定；
+  //   仍要求成功之后不得再报失败，只是不再锁死单一键名（键名不是语义）。
+  assert.equal(isFailKey(fixed), false, '修正后：成功会话之后不得再报失败（前置）');
   const mutated = renderDiagKey(snap, mutateCumulative);
-  assert.equal(mutated, 'voiceOfficialFeedbackSeen',
-    '⚠ 退回累计语义后，该快照仍会报「上次官方会话以失败收场」= 陈旧读数不自消 —— 若本断言不成立，说明判据没牙');
+  assert.equal(isFailKey(mutated), true,
+    '⚠ 退回累计语义后，该快照仍会报上次失败 = 陈旧读数不自消 —— 若本断言不成立，说明判据没牙');
 });
 
 test('OVB-DT-V02 变异自证·负控必绿：同一变异下「最近一次真失败」仍须报失败', () => {
@@ -1985,9 +1998,9 @@ test('OVB-DT-V02 变异自证·负控必绿：同一变异下「最近一次真�
     endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false,
     feedbackSeen: 1, lastSessionFailed: true };    // 最近一次**就是**那场失败
   const fixed = renderDiagKey(snap, null);
-  assert.equal(fixed, 'voiceOfficialFeedbackSeen', '修正后：真失败仍须可见（不得静默失效）');
+  assert.equal(isFailKey(fixed), true, '修正后：真失败仍须可见（不得静默失效）');
   const mutated = renderDiagKey(snap, mutateCumulative);
-  assert.equal(mutated, 'voiceOfficialFeedbackSeen', '负控：该快照在两种语义下都必须报失败');
+  assert.equal(isFailKey(mutated), true, '负控：该快照在两种语义下都必须报失败');
 });
 
 // ⚠ 变异自证（桥侧）：DT-V01/V02 只覆盖**渲染**分支；DT02 的核心是**桥**的读数语义
