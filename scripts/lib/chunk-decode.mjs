@@ -89,6 +89,34 @@ export function decodeChunkText(raw, label) {
  * @param {{root?: string}} [opts] `root`：相对路径的解析基准，缺省 = 本仓根
  * @returns {string} 解出的源码原文
  */
+/**
+ * 枚举 chunk 文件（**与 `dead-code-gate` 的 R7 同一口径**：递归、排除 `vendor`、只认 `.js`）。
+ *
+ * ⚠ 为什么放在这里（本仓 S6 教训）：枚举规则一旦各处各写一份，就会出现「判据扫的面
+ *   与门禁扫的面不是同一个面」—— 某处漏掉一个目录，判据照样打 PASS。
+ *   ⇒ 本函数是 test 面的**唯一枚举口径**；`dead-code-gate.mjs` 的 R7 环是它的对拍源
+ *     （测试侧 CS-13 拿 R7 自报的 chunk 数来核本函数读数，不一致即红）。
+ *   ⚠ 本批**不改** `dead-code-gate.mjs`（硬边界：不动环结构）⇒ 两侧仍是各自实现，
+ *     但**读数被交叉校验**，漂移不会被静默吞掉。
+ *
+ * @param {string} root 仓库根
+ * @param {string} [relDir] 相对 root 的目录（缺省 = 两面都扫 src/client + src/host）
+ * @returns {string[]} 相对 root 的 POSIX 路径，已排序
+ */
+export function listChunkFiles(root, relDir) {
+  const dirs = relDir ? [relDir] : [path.join('src', 'client'), path.join('src', 'host')];
+  const out = [];
+  const walk = (d) => {
+    for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, ent.name);
+      // 与 R7 同一排除口径（vendor 不属本仓契约面）
+      if (ent.isDirectory()) { if (ent.name !== 'vendor') walk(full); continue; }
+      if (ent.name.endsWith('.js')) out.push(path.relative(root, full).split(path.sep).join('/'));
+    }
+  };
+  for (const rel of dirs) walk(path.join(root, rel));
+  return out.sort();
+}
 export function decodeChunk(file, opts) {
   const root = (opts && opts.root) || REPO_ROOT;
   const abs = path.isAbsolute(file) ? file : path.resolve(root, file);
