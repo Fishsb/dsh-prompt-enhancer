@@ -17,6 +17,13 @@
 
 ## [Unreleased]
 
+- **对外文档整理批：README 中/英重写 + 兼容矩阵订正（对外文档整理，无功能变化 · 2026-10-18）**：用户指示「仓库信息要简洁」，本批只动对外文档，**零代码改动**。**① README**：中/英同批重写，行数 110/109 → 53/53（−52%/−51%），结构收敛为 是什么 / 解决什么 / 安装 / 能做什么 / 设置项速查；删去内部实现细节（chunk 形态 · `new Function` 桥接 · 槽位契约 · 模块清单）与退役能力描述（云端/本地双引擎 · 一键重启 · 插件自建麦克风按钮 · 插件管理 tab）；补齐静音监测与清口水词、语音纠错与自动增强的实际默认态。
+  **② `docs/compatibility-matrix.md`**：只改失效项 —— §1 删「是否支持一键更新」列（自建更新通道已退役）；§3 `template.pick` 内置键补为 `default` / `increment`（旧 `supplement` / `dev` 读时迁移）；§3 localStorage 键由不存在的 `dsh-prompt-enhancer:config` 改为 `dsh.enhance.config.v2`；§4 注明 `protocolVersion` 现无代码读写（仅历史对照）。
+  **③ `package.json`**：`description` 与 README 首段对齐（`keywords` 未改）。⚠ 该文件属 `sync-face` 部署同步面（非产物件）⇒ 与运行环境 md5 的对照会转为 drift，须待部署时同步，属**预期**非缺陷。
+  **已实测**：`npm test` 558 / 557 pass / 0 fail / 1 skip（与改前同值）· `node scripts/gate.mjs` exit 0（5 环 PASS）· 双 `--check` 绿 · `git diff --stat` 仅 4 个文档/清单文件。
+  **⚠ 未验证**：未部署、未重启 DSH；外部目录站（dsh-plugin.org / dshplug.com / dsh.so）的抓取内容是否随之更新未验证。
+  **账本**：`archive/2026-10-18-repo-docs-slim/REPORT.md`。
+
 - **判停（VAD 静音检测）判据形态变更批：拆绝对下界 0.025 → 相对量（噪声底×倍率）· 拆指数平滑 · 双阈值迟滞 + 连续帧确认 · 2026-10-17 · [PE-F03 / PE-F05]**：承用户报障「语音输入时候要很大声音而且说话一旦音量降低，语音输入就检测不到语音输入了然后静音检测触发就停止了」＋「静音检查关闭就正常了」。
 **① 三件叠因（逐件定位）**：F-1 `OVB_THRESHOLD = 0.025` 作为 `Math.max(0.025, noiseFloor*2.5)` 的**下界**，底噪 < 0.01 时阈值**完全不再跟随底噪** ⇒ 正常/偏小音量过不了门（必须很大声）；F-2 `smoothRms = smoothRms*0.7 + rms*0.3` 把峰值压到约 0.70×（≈ −3 dB）；F-3 `heardSpeech` 一次性闩锁**永不复位** ⇒ 门被大声打开后，小声段每帧都算安静 ⇒ 2 s 即派发点击官方停止（一降就停）。
 **② 判据改为相对量（不是把常数改小）**：`rms >= noiseFloor × OVB_NOISE_FACTOR`。依据：官方 `getUserMedia` **不传 autoGainControl**（实读官方 `dsh-experimental-client-ui-voice-input/lib/client.js:1532-1534`：只有 echoCancellation / noiseSuppression / deviceId）⇒ AGC 走浏览器默认（通常开）⇒ 同一句话**绝对 RMS 前后不可比**，而 AGC 同时放大语音与环境噪声 ⇒ **比值近似不变**。⛔ 不变量①（原样转发官方 constraints）**未动**——不补 `autoGainControl:false`。

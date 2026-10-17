@@ -1,109 +1,53 @@
 # dsh-prompt-enhancer
 
-A DeepSeek Harness (DSH) plugin with **two core capabilities**:
+A DeepSeek Harness (DSH) plugin: turn a composer draft into a clear, actionable prompt in one click — and add a hotkey plus stop-on-silence to voice input.
 
-- ✨ **Prompt enhancement** — rewrite composer drafts in place with one click, fully undoable
-- 💬 **Voice recognition** — stops on silence; transcription is provided by the official `speechToText` service, and the transcript is filled into the draft
+A draft is often half a requirement, so the model asks again — click ✨ and it is rewritten in place, undoable. With voice, just speak; it stops on a pause and the transcript lands back in the composer.
 
-[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
-[![Release date](https://img.shields.io/github/release-date/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
-[![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers)
+[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases) [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers)
 
-## ✨ Two core features
-
-### 1. Prompt enhancement (✨)
-
-The ✨ button in the composer toolbar triggers an independent LLM call and rewrites the current draft in place; keep refining, undo anytime, or cancel while enhancing.
-
-- **One-click enhance** — the ✨ button triggers an independent LLM call and replaces the draft; continue refining, undo anytime, cancel while enhancing
-- **5 optimization modes** — Basic (direct) / Lite (previous-round context) / Standard (rules + retrieval) / Expert (task analysis + full retrieval) / One-click Publish (complete dev-spec generator)
-- **Memory switch** — when on, pre-send rounds (optimize → edit → re-optimize) accumulate into a memory chain the next round replays and senses your edit direction; sending the message clears it; when off, nothing is read or written
-- **Model chain** — try multiple models in order, reorder, toggle thinking, run inline connectivity tests
-
-### 2. Voice recognition (💬)
-
-Use the official 🎤 record button (or this plugin's hotkey) to start listening; the transcript (produced by the official `speechToText` service) → optional refinement (de-filler) → filled into the draft → can be enhanced with one click. Audio stays in memory only and is never written to disk.
-
-**Both recording entry points behave the same**: the plugin's **auto-stop on silence** and **auto-enhance** are offered on **both** the **hotkey path** and the **official microphone button path** — when you click the official microphone button, the plugin observes the **same** capture by wrapping the browser's standard recording API (observation only, no behaviour change) and, on detecting silence, triggers the official control's own stop, so the official "transcribe → insert" chain is unaffected.
-
-- **Transcription delegated to the official service** — the recognition engine and models come from DSH's official `speechToText` (including its settings page); the plugin ships no engine and downloads no models (slim release)
-- **Stops on silence** — VAD silence detection, no manual stop needed; with adaptive noise-floor calibration, and a configurable silence duration (1-5 s, default 2 s)
-- **Works on the official path too** — clicking the official microphone button triggers the same auto-stop and auto-enhance (the plugin only observes; it does not modify the official chain)
-- **Hotkey wake** — recordable global hotkey, tap / long-press dual trigger
-- **Transcript refinement** — optionally refine the transcript through the base LLM to remove filler words
-- **Auto-enhance** — when on, filling the draft after recognition automatically triggers prompt enhancement
-
-## 🔧 Other capabilities
-
-- 🌐 **i18n** — follows the DSH interface language (中文 / English)
-
-## 🚀 Install
+## Install
 
 ```sh
 dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.4.2
+dsh plugin --profile web update dsh-prompt-enhancer   # update
+dsh plugin --profile web remove dsh-prompt-enhancer   # remove
 ```
 
-Restart DSH (`dsh web`) after installing — the ✨ button appears in the composer toolbar.
+Restart DSH afterwards (also after updating or removing) — the ✨ button appears in the composer toolbar. Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) installed locally and `pnpm` in PATH.
 
-> ℹ️ **Version note**: the latest tag **`v3.4.2` (2026-10-09)** contains the **Windows platform fix** — it fixes the host **silently exiting about 5 seconds after start** on Windows (the worker process scan treated every node process on the machine — including the host itself — as a worker to reap, so the host killed itself; the UI then sat on "reconnecting" forever). The command above installs that tag.
->
-> Earlier releases: **v3.4.1** (2026-10-06) contains the **DSH 0.2.x compatibility fix** — it fixes the plugin being rejected at load time by the host's compatibility gate on DSH `0.2.0` and later, which made ✨/🎤 and the settings card disappear entirely (Issue #11 / #12; ⚠ that 🎤 was the plugin's own button **at that time**; it has since been retired and the composer's 🎤 is now provided by the official control). If you previously installed `#main` under the old note, re-running the command above pins you to a released version.
->
-> Older: **v3.4.0** (2026-09-19) added the ✨ official slot-contract fix (Issue #8 / #10) and the cloud ASR fix (Issue #9), and **removed the in-plugin restart capability** (restart DSH manually after an update) — see [release notes](release-notes/3.4.0.md).
->
-> Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) installed locally and `pnpm` in PATH.
->
-> **Client compatibility (voice recognition)**: the **🎤 in the composer toolbar is provided by the official voice control** (`@deepseek-ai/dsh-experimental-client-ui-voice-input`, slot `conversation.input.activity`) and is **not an element rendered by this plugin**; the plugin's own 🎤 has been retired. This plugin's voice value-adds are **UI-less**: the hotkey channel (`conversation.input.right`; hotkey → record → transcribe → insert) plus auto-stop/auto-enhance on the official path. These value-adds rely on the client injecting `inputActions.setDraft` (the official web client satisfies this); third-party clients implementing the same contract can load it, and when the capability set differs the value-add paths **degrade gracefully** (no insert capability → transcript appended to the end of the draft; no injection at all → value-add paths disabled with a notice; **the official 🎤 itself still works**). **The recognition engine and models are delegated to the official `speechToText` service**: the plugin itself ships **no engine** and **downloads no models**; choosing and obtaining engines/models happens in the official voice settings. See [compatibility notes](docs/compatibility-matrix.md) (client dependency boundary and slot contract).
->
-> **Composer toolbar client contract**: the **✨** button and the error strip mount on the session-scoped slots `conversation.input.right` / `conversation.input.dock` (**🎤 is outside this contract** — it is rendered by the official control on `conversation.input.activity`). The official renderer (`@deepseek-ai/dsh-client-ui-renderer` ≥ 0.1.2-rc.1; web and DSH Desktop share the same source) injects **a `sessionId` prop, `useSession`/`useInput` selector hooks, and an `inputActions` prop** into slot entries (it never provides `props.session` / `props.input`); the plugin reads state through that contract since that fix (Issue #8 / #10, commit `0197ae7`, released with `v3.4.0`) and keeps a fallback for older hosts that provide the `props.session` / `props.input` shape. Third-party client renderers must implement the same contract (`sessionId` plus the hooks and actions above) for **✨** to render (the official 🎤 is not bound by this contract).
+## What it does
 
-Update / remove:
+**Prompt enhancement**
 
-```sh
-dsh plugin --profile web update dsh-prompt-enhancer
-dsh plugin --profile web remove dsh-prompt-enhancer
-```
+- ✨ **One-click enhance** — rewrite the current draft; keep refining, undo, or cancel while enhancing
+- **5 modes** — Basic / Lite / Standard / Expert / One-click Publish
+- **Memory switch** — pre-send rounds accumulate into a memory chain, cleared on send (off by default)
+- **Model chain** — try models in order, add/remove/reorder, toggle thinking, test connectivity inline
 
-> After `remove`, restart DSH to fully unload the running instance.
->
-> After an update is installed, restart DSH manually for it to take effect (the plugin no longer restarts DSH for you).
+**Voice input** (transcription is provided by DSH's official `speechToText`; the plugin ships no engine and downloads no models)
 
-## 📦 Library notes
+- **Two entry points** — the official 🎤 button, or the plugin hotkey (tap to start / tap to stop; long-press = hold to talk, release to stop)
+- **Stop on silence** — auto-stop with a configurable 1-5 s silence window (default 2 s), can be turned off entirely
+- **Filler removal** — local rule-based cleanup of filler words / repeats / drawn-out sounds; no rewriting, no additions (on by default)
+- **Transcript correction** — word-level fixes after transcription, voice path only (off by default)
+- **Auto-enhance** — trigger enhancement automatically once the transcript is in the draft (off by default)
 
-Core logic lives in standalone Node modules, reusable from other scripts: `lib/platform-service.cjs` (cross-platform service management), `lib/sys.cjs` (env & paths). See each module's header comments.
+Buttons and text follow the DSH interface language (中文 / English).
 
-> P1-c (2026-10-13): the former `lib/updater-host.cjs` (the plugin's own update executor: download / verify / install / rollback) **has been retired** — plugin updates now go through the official plugin manager (see "Update / remove" above).
+## Settings at a glance
 
-## 🎯 Usage (prompt enhancement)
+Settings → "Prompt Enhancer"; changes save immediately:
 
-1. Type any non-empty text (slash commands keep their prefix; only the body is optimized)
-2. Click the **✨** button
-3. Wait for the independent LLM call; the draft is replaced with the enhanced version
-4. Not satisfied? Click **Undo** to restore the original
-
-## 📸 See it work
-
-**Voice recognition** (the **official** 🎤 record button; this plugin adds stop-on-silence):
-
-![Voice recognition](docs/screenshots/voice-main.png)
-
-**Voice recognition settings** (hotkey wake / silence auto-stop / refinement / auto-enhance):
-
-![Voice recognition settings](docs/screenshots/voice-settings.png)
-
-## ⚙️ Configuration
-
-Settings → "Models & plugins" (since P1-c there are **only the "Model configuration" / "Optimization parameters" tabs** — the former "Plugins" tab is retired; plugin version management is back to the official plugin manager):
-
-| Tab | Description |
+| Where | What |
 |---|---|
-| **Model configuration** | Configure the optimization model chain: tried in order, reorderable; the **Voice recognition** section (hotkey wake / silence auto-stop / refinement / auto-enhance) |
-| **Optimization parameters** | Mode / memory switch / context budget / timeout & output limits / templates |
+| Model chain | Model chain; Voice input: hotkey, stop-on-silence (1-5 s), filler removal, transcript correction, auto-enhance |
+| Optimization | Mode, template, memory switch, context budget, timeout / reply length / output limit |
 
-## 📚 Docs
+Capture, transcription and writing back are all handled by DSH's official voice control — the plugin only adds the value-adds above. Audio is not written to disk.
 
-- [Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
-- [CHANGELOG](CHANGELOG.md)
-- [Compatibility notes](docs/compatibility-matrix.md)
+![Voice input](docs/screenshots/voice-main.png)
 
-> Privacy: the plugin records or reports nothing; enhanced results come from an external LLM — verify before sending.
+[Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases) · [CHANGELOG](CHANGELOG.md) · [Compatibility notes](docs/compatibility-matrix.md)
+
+> Privacy: the plugin records and reports nothing; enhanced results come from an external LLM — verify before sending.

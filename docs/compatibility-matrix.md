@@ -7,11 +7,11 @@
 
 ## 1. 支持形态
 
-| 形态 | 持久性 | 更新方式 | 是否支持一键更新 |
-|---|---|---|---|
-| bundle | ✅ 持久 | `dsh plugin add/update` + 重启 | ✅ |
-| 动态 Cordis | ❌ 会话级 | `cordis_define` + `cordis_run` | ❌ |
-| 脚本副本 | ✅ 持久 | 覆盖文件 | ❌ |
+| 形态 | 持久性 | 更新方式 |
+|---|---|---|
+| bundle | ✅ 持久 | `dsh plugin add/update` + 重启 |
+| 动态 Cordis | ❌ 会话级 | `cordis_define` + `cordis_run` |
+| 脚本副本 | ✅ 持久 | 覆盖文件 |
 
 ---
 
@@ -79,7 +79,7 @@
 | `outputLimit` | number | 见代码 | 输出上限 |
 | `template.mode` | string | `builtin` | 模板模式（兼容保留；新 UI 以每模式 `pick` 为准） |
 | `template.texts` | object | 内置 | 每模式模板（兼容保留；有 `pick` 时不再参与解析） |
-| `template.pick` | object | 各模式 `default` | 每模式选中模板键：`default`（模板1 现有默认）/ `supplement`（模板2 增量补充完善）/ `dev`（模板3 增量完善·开发向）/ `custom:<index>`（自定义列表条目）；非法/越界回退 `default` |
+| `template.pick` | object | 各模式 `default` | 每模式选中模板键：`default`（默认模板）/ `increment`（增量模板）/ `custom:<index>`（自定义列表条目）；非法/越界回退 `default`。旧内置键 `supplement` / `dev` 读取时迁为 `increment`（`plugin-host.js:1691`） |
 | `template.custom` | object | 各模式 `[]` | 每模式自定义模板列表 `[{name, text}]`：≤10 条/模式，`text` ≤4000，`name` ≤40 |
 | `fallback` | array | 内置 | 模型链 |
 | `customModels` | array | `[]` | 自定义模型 |
@@ -95,7 +95,7 @@
 
 | key | 说明 |
 |---|---|
-| `dsh-prompt-enhancer:config` | 配置缓存（重构后迁移至 entry config） |
+| `dsh.enhance.config.v2` | 配置缓存（`src/client/constants.js` 的 `CONFIG_KEY`；旧键 `dsh.enhance.config.v1` 仅读迁移） |
 | 会话内存 `memoryRounds` | 记忆链（仅内存） |
 
 ---
@@ -105,7 +105,7 @@
 | 插件版本 | client protocol | executor protocol | 说明 |
 |---|---|---|---|
 | ≤ 2.8.3 | 隐式 | 0.1.5 / 0.1.6 | 无显式协议版本 |
-| 3.0.0（重构目标） | `protocolVersion: 1` | `protocolVersion: 1` | 显式协商 |
+| 3.0.0（重构目标） | `protocolVersion: 1` | `protocolVersion: 1` | 显式协商（⚠ `protocolVersion` 现无代码读写：`src/` `lib/` `plugin-host.js` 全零命中，仅作历史对照） |
 | 3.2.x | `protocolVersion: 1` | 0.1.12+（内容哈希重建） | update/portRestart 独立化（服务模式 schtasks / 默认模式脚本）；执行器专注一键更新/watchdog（该 RPC 与 watchdog 已于 3.3.x 之后的迭代退役，此处仅作历史版本对照） |
 | 3.3.x – 3.4.2（当前） | `protocolVersion: 1` | **已退役（无）** | ⚠ **P1-c（2026-10-13）：更新执行器整体退役**（`lib/updater-host.cjs` / `lib/stage-install.cjs` 已删）⇒ **executor protocol 概念不再适用**，更新/安装交回官方 plugin manager；**插件内重启能力退役**（`update/portRestart` / `update/makeShortcut` / 执行器 `restart` / watchdog / 维护救援 CLI 全部移除）；**`update/install` 亦已退役**（勿再误读为现行能力）——装完由官方流程提示重启 DSH 生效 |
 

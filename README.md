@@ -1,110 +1,53 @@
 # dsh-prompt-enhancer
 
-DeepSeek Harness (DSH) 插件。**两大核心能力**：
+DeepSeek Harness（DSH）插件：一键把输入框草稿增强成清晰、可执行的提示词，并为语音输入补上热键与「说完自动停」。
 
-- ✨ **提示词增强** — 输入框草稿一键改写，不满意可撤回
-- 💬 **语音识别** — 说完自动停；识别由官方 `speechToText` 提供，识别结果填入草稿
+草稿常常只有半句要求，交给模型后还要来回补问——点一下 ✨ 就地改写，不满意可撤回；语音则直接说，停顿即停，结果落回输入框。
 
-[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
-[![Release date](https://img.shields.io/github/release-date/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
-[![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers)
+[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases) [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers)
 
-## ✨ 两大核心功能
-
-### 1. 提示词增强（✨）
-
-输入框工具行的 ✨ 按钮触发一次独立 LLM 调用，直接改写当前草稿；可继续优化、可撤回、增强中可取消。
-
-- **一键增强** — ✨ 按钮触发独立 LLM 调用，直接替换草稿；可继续优化、可撤回、增强中可取消
-- **5 种优化模式** — 基础（直发）/ 轻量（结合上一轮对话参考）/ 标准（规则 + 检索）/ 专家（任务分析 + 全量检索）/ 一键发布（生成完整开发规格）
-- **记忆开关** — 开启后，发送前的多轮「优化→修改→再优化」累积为记忆链，下一轮代入历史并感知修改方向；发送消息即清空，关闭后完全停止读写
-- **模型链** — 按序尝试多个模型，可增删改序、开关思考、行内连通性测试
-
-### 2. 语音识别（💬）
-
-用官方 🎤 录音按钮（或本插件快捷键）开始说话，识别（交由官方 `speechToText` 服务）→ 可选规整（去口水词）→ 填入草稿 → 可一键优化。录音仅内存中转不落盘。
-
-**两条录音入口能力一致**：插件的**静音自动停**与**自动增强**在**插件快捷键路径**与**官方麦克风按钮路径**上**都提供**——点官方麦克风按钮时，插件通过包装浏览器标准录音接口观测**同一路**采集（只观测、不改行为），判静音后触发官方自身的停止，官方「转写→写回」链路不受影响。
-
-- **识别交由官方** — 识别引擎与模型由 DSH 官方 `speechToText` 提供（含其设置页），插件不再自带引擎、不下载模型（发布物精简）
-- **说完自动停** — VAD 静音检测，无需手动停止；含自适应底噪校准，静音判定时长可配（1–5 秒，默认 2 秒）
-- **官方路径同样生效** — 点官方麦克风按钮时同样触发上述自动停与自动增强（插件只观测、不改官方链路）
-- **快捷键唤醒** — 可录制全局快捷键，点按 / 长按双触发
-- **文本规整** — 识别结果可选经基座 LLM 规整，去口语化
-- **自动增强** — 开启后识别填入草稿即自动触发提示词增强
-
-## 🔧 其他能力
-
-- 🌐 **多语言** — 按钮与文案跟随 DSH 界面语言（中文 / English）
-
-## 🚀 安装
+## 安装
 
 ```sh
 dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.4.2
+dsh plugin --profile web update dsh-prompt-enhancer   # 更新
+dsh plugin --profile web remove dsh-prompt-enhancer   # 卸载
 ```
 
-安装后重启 DSH（`dsh web`），输入框工具行出现 ✨ 按钮即安装成功。
+装完（或更新 / 卸载后）重启 DSH，输入框工具行出现 ✨ 即安装成功。需本机已装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 且 `pnpm` 在 PATH 中。
 
-> ℹ️ **版本说明**：最新 tag **`v3.4.2`（2026-10-09）**已包含 **Windows 平台修复**——修复 Windows 上宿主启动约 5 秒后**静默退出**（worker 进程扫描在 Windows 上把本机全部 node 进程（含宿主自身）当 worker 回收，导致宿主杀掉自己；表现为界面永久停在「自动重连中」），上面的命令直接装该 tag。
->
-> 历史版本要点：**v3.4.1**（2026-10-06）已包含 **DSH 0.2.x 兼容性修复**——修复插件在 DSH `0.2.0` 及以后被宿主兼容性门拒绝装载、✨/🎤 与设置页卡片全部消失的问题（Issue #11 / #12；⚠ 该处 🎤 指**当时**由本插件自建的按钮，该按钮已于后续版本退役，现输入框的 🎤 由官方控件提供）。若你此前按旧说明装的是 `#main`，按上面命令重装即可锁到已发布版本。
->
-> 更早：**v3.4.0**（2026-09-19）起包含 ✨ 官方槽位契约修复（Issue #8 / #10）与云端语音修复（Issue #9），并**移除了插件内重启能力**（更新后请手动重启 DSH）。详见 [release notes](release-notes/3.4.0.md)。
->
-> 需本机已装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 且 `pnpm` 在 PATH 中。
->
-> **客户端兼容性（语音识别）**：输入框工具行的 **🎤 由官方语音控件提供**（`@deepseek-ai/dsh-experimental-client-ui-voice-input`，槽位 `conversation.input.activity`），**不是本插件渲染的元素**；插件自建 🎤 已退役。本插件的语音增值**内置无 UI**：快捷键通道（`conversation.input.right`，热键→录音→识别→填入）与官方路径的自动停/自动增强。这些增值依赖客户端注入 `inputActions.setDraft`（官方 web client 已满足）；第三方客户端若实现同一契约即可加载，能力集不同时增值路径自动**降级**（无插入能力 → 识别结果追加到草稿末尾；完全不注入 → 增值路径停用并提示；**官方 🎤 自身仍可用**）。**识别引擎与模型改由官方 `speechToText` 负责**：插件自身**不携带引擎、不下载模型**；引擎与模型的选择、获取都在官方语音设置里完成。详见 [兼容性矩阵](docs/compatibility-matrix.md)（客户端依赖边界与槽位契约）。
->
-> **输入框工具行客户端契约**：**✨** 按钮与错误提示挂载在会话级槽位 `conversation.input.right` / `conversation.input.dock`（**🎤 不在本契约内**——它由官方控件渲染于 `conversation.input.activity`）。官方渲染器（`@deepseek-ai/dsh-client-ui-renderer` ≥ 0.1.2-rc.1，web 与 DSH Desktop 同源）向槽位条目注入 **`sessionId` prop + `useSession`/`useInput` 选择器 hook + `inputActions` prop**（不提供 `props.session` / `props.input`）；插件自该修复（Issue #8 / #10，commit `0197ae7`，自 `v3.4.0` 起随 tag 发布）起按该契约取值，并兼容旧宿主（提供 `props.session` / `props.input` 形态）。第三方客户端渲染器若以其它方式提供会话/输入状态，需实现同一契约（`sessionId` + 上述 hooks 与 actions），**✨** 方可显示（官方 🎤 不受本契约约束）。
+## 能做什么
 
+**提示词增强**
 
-更新 / 卸载：
+- ✨ **一键增强** — 改写当前草稿，可继续优化、可撤回、增强中可取消
+- **5 种模式** — 基础 / 轻量 / 标准 / 专家 / 一键发布
+- **记忆开关** — 发送前的多轮优化累积为记忆链，发送即清空（默认关）
+- **模型链** — 多个模型按序尝试，可增删改序、开关思考、行内测连通性
 
-```sh
-dsh plugin --profile web update dsh-prompt-enhancer
-dsh plugin --profile web remove dsh-prompt-enhancer
-```
+**语音输入**（识别由 DSH 官方 `speechToText` 提供；插件不自带识别引擎、不下载模型）
 
-> 卸载后必须重启 DSH 才能从运行中移除。
->
-> 更新安装完成后需**手动重启 DSH** 生效（插件不再代为重启）。
+- **两种入口** — 官方 🎤 按钮，或插件热键（点按开始 / 再按停止；长按 = 按住说、松开停）
+- **静音监测** — 说完自动停，判定时长 1–5 秒可调（默认 2 秒），可整体关闭
+- **清口水词** — 本地规则清理语气词 / 重复 / 拖音，不改写、不新增（默认开）
+- **语音纠错** — 识别完成后做字词层订正，仅作用于语音路径（默认关）
+- **自动增强** — 识别结果填入草稿后自动触发增强（默认关）
 
-## 📦 库说明
+按钮与文案跟随 DSH 界面语言（中文 / English）。
 
-核心逻辑拆分为独立 Node 模块，可复用：`lib/platform-service.cjs`（跨平台服务管理）、`lib/sys.cjs`（环境与路径）。详见各模块头注释。
+## 设置项速查
 
-> P1-c（2026-10-13）：原 `lib/updater-host.cjs`（插件自建更新执行器：下载 / 校验 / 安装 / 回滚）**已退役** —— 插件更新改走官方 plugin manager（见上方「更新 / 卸载」）。
+设置 →「提示词增强」，改动即时保存：
 
-## 🎯 使用（提示词增强）
-
-1. 输入任意非空文本（斜杠命令保留前缀，只优化正文）
-2. 点击 **✨** 按钮
-3. 等待独立 LLM 调用完成，草稿被替换为增强版本
-4. 不满意点击 **可撤回** 恢复原文
-
-## 📸 效果展示
-
-**语音识别**（**官方** 🎤 录音按钮；本插件为其提供说完自动停）：
-
-![语音识别](docs/screenshots/voice-main.png)
-
-**语音识别设置**（快捷键唤醒 / 静音自动停 / 文本规整 / 自动增强）：
-
-![语音识别设置](docs/screenshots/voice-settings.png)
-
-## ⚙️ 配置
-
-设置 →「模型与插件」（P1-c 起**只有「模型配置」/「优化参数」两个 tab**——原「插件管理」tab 已退役，插件版本管理交回官方 plugin manager）：
-
-| Tab | 说明 |
+| 位置 | 内容 |
 |---|---|
-| **模型配置** | 配置优化模型链，按序尝试、可增删改序；**语音识别**段落（快捷键唤醒 / 静音自动停 / 文本规整 / 自动增强） |
-| **优化参数** | 优化模式 / 记忆开关 / 上下文预算 / 超时与输出上限 / 模板 |
+| 模型配置 | 模型链；语音识别：热键、静音监测（1–5 秒）、清口水词、语音纠错、自动增强 |
+| 优化参数 | 优化模式、模板、记忆开关、上下文预算、超时 / 回复长度 / 输出上限 |
 
-## 📚 文档
+录音采集、识别与写回都由 DSH 官方语音控件完成，插件只叠加上述增值。录音不落盘。
 
-- [Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases)
-- [CHANGELOG](CHANGELOG.md)
-- [兼容性说明](docs/compatibility-matrix.md)
+![语音输入](docs/screenshots/voice-main.png)
+
+[Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases) · [CHANGELOG](CHANGELOG.md) · [兼容性说明](docs/compatibility-matrix.md)
 
 > 隐私：插件不记录、不上报任何数据；增强结果来自外部 LLM，发送前请自行核对。
