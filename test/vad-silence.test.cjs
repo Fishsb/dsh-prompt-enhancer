@@ -249,12 +249,26 @@ function renderVoiceSection(cfg) {
   return { tree: expand(api.VoiceSection({})), saved, S, voiceCfgState };
 }
 
-/** 取第一行 / 第二行（第一行 = grid 行；第二行 = 其后的 dsh-plg-row）。 */
+/**
+ * 「开关行」谓词（2026-10-18 UI 回退修复批订正）。
+ *
+ * ⚠ 病历：本函数原先以 props.style.gridTemplateColumns 认行 —— 那是**形态绑定**：
+ *   布局从 grid 换成 flex+wrap 之后，谓词找不到行 ⇒ P14 系列判据**集体红**（不是行为坏了，是判据认不出行）。
+ *   ⇒ 改成**语义谓词**：一行里装着「≥2 个 ToggleChip（.dsh-plg-tgl）」的那个直接子元素。
+ *   ⚠ 判据强度不降：它锁的仍是「哪一行装开关、装了几个」，不是「用什么 CSS 排列」。
+ *     反过来说：把开关换成非 .dsh-plg-tgl 的元素、或把开关挪到别的容器，谓词同样认不出 ⇒ 仍会红。
+ */
+function isSwitchesRow(k) {
+  if (!k || typeof k !== 'object' || !Array.isArray(k.kids)) return false;
+  return k.kids.filter((c) => c && c.props && typeof c.props.className === 'string' && /dsh-plg-tgl/.test(c.props.className)).length >= 2;
+}
+
+/** 取第一行 / 第二行（第一行 = 装多个开关的那行；第二行 = 其后的 dsh-plg-row）。 */
 function layoutRows(cfg) {
   const r = renderVoiceSection(cfg);
   const section = r.tree.kids[0];
   const kids = section.kids.filter((k) => k && typeof k === 'object');
-  const row1 = kids.find((k) => k.props && k.props.style && k.props.style.gridTemplateColumns);
+  const row1 = kids.find(isSwitchesRow);
   const row2 = kids[kids.indexOf(row1) + 1];
   return { r, row1, row2 };
 }
@@ -270,11 +284,15 @@ function row2Parts(row2) {
 test('VADSIL-P14 第一行由 5 格订正为 4 格：静音监测开关已搬走（真载入渲染断言）', () => {
   const { row1 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 }, autoEnhance: false, correction: { enabled: false }, filler: { enabled: false }, hotkey: { enabled: false, combo: '' } });
   assert.ok(row1, '第一行（grid 行）必须在位');
-  // 2026-10-17（设置文案审查批 · 挤压根治）：末列由 minmax(0,1fr) 改为 minmax(220px,1fr)
-  //   —— 给热键输入框一个与文案无关的下限（改前 EN 下它会被同行 label 文本压到 108.3px）。
-  //   本断言随之订正；判据强度不变（仍是逐字严格等号锁住整串格定义）。
-  assert.equal(row1.props.style.gridTemplateColumns, 'auto auto auto minmax(220px,1fr)',
-    '格子数须与格数同步：4 格 ⇒ 3 个 auto + minmax（下限 220px；旧值 minmax(0,1fr)，本批订正）');
+  // 2026-10-18（UI 回退修复批）：本行由 **grid** 改为 **flex + wrap**（grid 列不回流，
+  //   末列被 220px 硬下限顶住时会把整行高度撑到 68/96px ⇒ 开关被 stretch 成近方形）。
+  //   ⇒ 断言随之从「逐字锁 gridTemplateColumns」改为「锁 flex+wrap 三件 + 开关数」。
+  //   ⚠ 强度只升不降：新增「必须 flexWrap:wrap」「必须 alignItems:center（禁止 stretch 撑高）」两条，
+  //     它们正是本批回归的直接成因判据（旧格定义断言对「撑成方块」完全无鉴别力）。
+  assert.equal(row1.props.style.display, 'flex', '第一行须是 flex 容器（grid 列不回流 ⇒ 会把行高撑起来）');
+  assert.equal(row1.props.style.flexWrap, 'wrap', '第一行须允许换行（窄视口下热键子行整块折行，而不是撑高本行）');
+  assert.equal(row1.props.style.alignItems, 'center', '⛔ 第一行不得用默认 stretch —— 那会把开关沿块轴拉成方块（本批回归成因）');
+  assert.equal(row1.props.style.gridTemplateColumns, undefined, '⛔ 第一行不得再是 grid（回退标志）');
   assert.equal(row1.kids.length, 4, '第一行须恰 4 个直接子元素（原 5 个：自动增强/静音监测/语音纠错/清口水词/热键）');
   const texts = row1.kids.map((k) => JSON.stringify(k.props.children || '')).join('|');
   assert.equal(texts.includes('voiceVadShort'), false, '第一行**不得**再含静音监测开关（已搬到第二行）');
@@ -288,7 +306,11 @@ test('VADSIL-P14 第一行由 5 格订正为 4 格：静音监测开关已搬走
 test('VADSIL-P14b 第二行 = 开关 + 滑块 + 读数；标签与下拉框已被覆盖删除', () => {
   const { row2 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 } });
   assert.ok(row2, '第二行必须在位');
-  assert.equal(row2.props.className, 'dsh-plg-row', '第二行容器仍是 dsh-plg-row');
+  // 2026-10-18（UI 回退修复批）：本行新增读数槽类 dsh-vi-silence-row（给读数一个 em 计的最小占位，
+  //   使关/开两态滑块等宽）。⇒ 从「严格等于 'dsh-plg-row'」改为「必须含 dsh-plg-row 且必须含槽类」——
+  //   两条都在，强度不降（新增的槽类本身是本批判据 B 的载体，必须被锁住）。
+  assert.ok(/\bdsh-plg-row\b/.test(row2.props.className), '第二行容器仍须是 dsh-plg-row（实际 ' + row2.props.className + '）');
+  assert.ok(/\bdsh-vi-silence-row\b/.test(row2.props.className), '第二行须带读数槽类 dsh-vi-silence-row（关/开两态滑块等宽的载体）');
   assert.equal(row2.kids.length, 3, '第二行须恰 3 件（开关 + 滑块 + 读数），实际 ' + row2.kids.length);
   const { chip, slider, readout } = row2Parts(row2);
   assert.ok(chip && /dsh-plg-tgl/.test(chip.props.className), '第二行第 1 件须是 ToggleChip（静音监测开关）');
@@ -335,7 +357,7 @@ test('VADSIL-P14d 单一事实源：0 档写 enabled=false 且 silenceMs 保持�
   // ⚠ 必须**同一个渲染实例**里取 row2 与 state（跨实例会拿到两份 voiceCfgState ⇒ 判据失真）
   const r = renderVoiceSection({ vad: { enabled: true, silenceMs: 5000 } });
   const rows = r.tree.kids[0].kids.filter((k) => k && typeof k === 'object');
-  const row1 = rows.find((k) => k.props && k.props.style && k.props.style.gridTemplateColumns);
+  const row1 = rows.find(isSwitchesRow);
   const { slider } = row2Parts(rows[rows.indexOf(row1) + 1]);
   // 走**真实滑块 onChange**把档位拨到 0
   slider.props.onChange({ target: { value: '0' } });
@@ -347,7 +369,7 @@ test('VADSIL-P14d 单一事实源：0 档写 enabled=false 且 silenceMs 保持�
   assert.equal(t2.S.voiceCfgState.value.vad.enabled, false, '关闭态已在单一事实源上生效');
   const again = renderVoiceSection({ vad: { enabled: false, silenceMs: 5000 } });
   const arows = again.tree.kids[0].kids.filter((k) => k && typeof k === 'object');
-  const ar1 = arows.find((k) => k.props && k.props.style && k.props.style.gridTemplateColumns);
+  const ar1 = arows.find(isSwitchesRow);
   assert.equal(row2Parts(arows[arows.indexOf(ar1) + 1]).slider.props.value, '0', 'enabled=false ⇒ 滑块**自动到 0**（反向联动）');
   // 关 → 开 往返：档位须保持 5（不得回落 2）
   const back = layoutRows({ vad: { enabled: true, silenceMs: r.S.voiceCfgState.value.vad.silenceMs } });
@@ -392,6 +414,62 @@ test('VADSIL-P14f voiceSilenceOff 仍有消费者（防被误判孤儿而删；�
     '位置纪律回归：开关关闭分支仍须排在正常分支（armed）之前');
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// 2026-10-18（UI 回退修复批）：新增两组**成因级**判据（P14g / P14h）。
+//   病历：上一批把开关写成固定 96px，并把行从 grid 换成 flex（本批才发现 grid 是撑高的真凶）。
+//   旧判据只锁「行是不是 4 格」，对「开关被撑成 96×96 近方形」**完全无鉴别力** ——
+//   用户在真机上看到四块大方块，测试却全绿。⇒ 这里直接锁**成因**（宽度来源 + 高度来源），
+//   它们不依赖任何一次 DOM 量测，因此能在 `node --test` 里跑。
+// ═══════════════════════════════════════════════════════════════════════════════
+
+test('VADSIL-P14g 开关宽度**不得**由固定像素决定（本批回归成因：固定 96px ⇒ 近方形）', () => {
+  const { row1 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 } });
+  const chips = row1.kids.filter((k) => k.type === 'function' || (k.props && /dsh-plg-tgl/.test(String(k.props.className || ''))));
+  assert.ok(chips.length >= 3, '第一行须至少有 3 个开关可判（实际 ' + chips.length + '）');
+  const src = decodeChunk('src/client/voice/voice-section.js');
+  // ① 源码面：**ToggleChip 自身**的 style 不得含 `width: <数字>px`（只判开关，不误伤热键 label/清除按钮）
+  const chipStart = src.indexOf("const ToggleChip = (p) =>");
+  assert.ok(chipStart > 0, '前置：须能定位 ToggleChip 定义');
+  const chipBlock = src.slice(chipStart, src.indexOf('}, p.onText);', chipStart));
+  const fixedW = /style:\s*\{[^}]*width:\s*'\d+px'/.test(chipBlock);
+  assert.equal(fixedW, false,
+    '⛔ 开关宽度不得写成固定像素（本批核心禁令）：固定宽与内容无关 ⇒ 行高一旦被撑起，开关就成近方形');
+  // ② 源码面：必须显式声明 width:auto（宽度由文字 + 内边距决定）
+  assert.ok(/style:\s*\{[^}]*width:\s*'auto'/.test(chipBlock), '开关须显式 width:auto ⇒ 宽度由「文字 + 内边距」决定');
+  // ③ 源码面：min-width 只作为**兜底下限**存在，且必须是 px 下限（不是定宽）
+  const mw = chipBlock.match(/minWidth:\s*'(\d+)px'/);
+  assert.ok(mw, '开关须有 min-width 兜底（否则 EN 最长态会被裁）');
+  assert.ok(Number(mw[1]) >= 96, 'min-width 须 ≥ 96（EN 最长现实取值 102.13px 的兜底，实测见报告 §⑤C）；实得 ' + mw[1]);
+});
+
+test('VADSIL-P14h 开关高度**不得**由网格拉伸决定（本批回归成因：grid stretch ⇒ 96×96）', () => {
+  const { row1 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 } });
+  // 成因①：第一行不得是 grid（grid 列不回流，末列被下限顶住时整行高度被撑起）
+  assert.notEqual(row1.props.style.display, 'grid', '⛔ 第一行不得是 grid —— 那是行高被撑起的成因');
+  assert.equal(row1.props.style.display, 'flex', '第一行须是 flex');
+  // 成因②：必须是 flex-wrap（窄视口下折行而不是撑高）
+  assert.equal(row1.props.style.flexWrap, 'wrap', '⛔ 必须 flexWrap:wrap（否则窄视口只能撑高）');
+  // 成因③：对齐方式不得是默认 stretch
+  assert.equal(row1.props.style.alignItems, 'center', '⛔ 必须 alignItems:center —— 默认 stretch 会把开关沿块轴拉成方块');
+});
+
+test('VADSIL-P14i 静音行：滑块吃满 + 读数有槽（关/开两态滑块等宽的载体）', () => {
+  const { row2 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 } });
+  assert.ok(/\bdsh-vi-silence-row\b/.test(row2.props.className), '静音行须带 dsh-vi-silence-row（读数槽的挂载点）');
+  assert.equal(row2.props.style.flexWrap, 'nowrap', '⛔ 静音行三件须在同一行（不得折行 —— 折行会让读数跑到滑块下面）');
+  const st = decodeChunk('src/client/styles.js');
+  // 滑块：flex:1 1 auto（⛔ 不是 1 1 0 —— 0 基线在无显式宽度的容器里会塌成一小段）
+  const m = st.match(/'\.dsh-vi-slider\{([^}]*)\}'/);
+  assert.ok(m, 'styles.js 须有 .dsh-vi-slider 规则');
+  assert.ok(/flex:1 1 auto/.test(m[1]), '⛔ 滑块须 flex:1 1 auto（实得 ' + m[1].slice(0, 60) + '）—— 1 1 0 会在无显式宽容器里塌');
+  assert.equal(/flex:1 1 0\b/.test(m[1]), false, '⛔ 滑块不得回到 flex:1 1 0（本批回归成因之一）');
+  assert.ok(/min-width:96px/.test(m[1]), '滑块须保留 min-width:96px 下限');
+  // 读数槽：flex:none + em 计最小占位（关态空串与开态「N 秒」同占位 ⇒ 两态滑块等宽）
+  const rd = st.match(/'\.dsh-vi-silence-row > \.dsh-plg-muted\{([^}]*)\}'/);
+  assert.ok(rd, 'styles.js 须有 .dsh-vi-silence-row > .dsh-plg-muted 读数槽规则');
+  assert.ok(/flex:none/.test(rd[1]), '读数须 flex:none（不参与再分配）');
+  assert.ok(/min-width:\s*[\d.]+em/.test(rd[1]), '读数槽须用 em 计最小占位（px 会给开关引入固定像素的同族问题；实得 ' + rd[1].slice(0, 60) + '）');
+});
 test('VADSIL-P15 i18n：新增 3 键且 ZH/EN 键集相等（S-7）', () => {
   const i18n = decodeChunk('src/client/i18n.js');
   for (const k of ['voiceVadSilenceLabel', 'voiceVadSilenceUnit', 'voiceVadSilenceHint']) {
@@ -514,7 +592,7 @@ function renderWithSource(src, cfg) {
   };
   const tree = expand(api.VoiceSection({}));
   const kids = tree.kids[0].kids.filter((k) => k && typeof k === 'object');
-  const row1 = kids.find((k) => k.props && k.props.style && k.props.style.gridTemplateColumns);
+  const row1 = kids.find(isSwitchesRow);
   return { row1, row2: kids[kids.indexOf(row1) + 1], S };
 }
 
@@ -523,18 +601,14 @@ test('VADSIL-P14x-1 变异①：开关仍留第一行 ⇒ P14 必红（判据有
   // 把静音监测开关**搬回**第一行（用**改前的原形态**内联表达式，避免 TDZ：
   //   row1 在 vadOn 声明之前 ⇒ 变异块不得引用 vadOn）
   const chipBlock = "    React.createElement(ToggleChip, {\n      on: !!(v.vad && v.vad.enabled !== false),\n      onText: t('voiceVadShort') + t(v.vad && v.vad.enabled !== false ? 'voiceAutoEnhanceOn' : 'voiceAutoEnhanceOff'),\n      title: t('voiceVadEnabled'),\n      onToggle: () => saveVoiceCfg({ vad: { enabled: !(v.vad && v.vad.enabled !== false) } }),\n    }),\n";
-  // 锚点随本批布局订正：热键行现在带 flexWrap wrap，label 也不再有内联 minWidth
-  //   （宽度交给统一列规则）。变异仍做同一件事：把静音监测开关塞回第一行。
-  // 锚点随本批布局订正：热键行现在带 flexWrap wrap，label 也不再有内联 minWidth
-  //   （宽度交给统一列规则，中间隔着两行说明注释）。变异仍做同一件事：把静音监测开关塞回第一行。
-  const anchorRow = "    React.createElement('div', { className: 'dsh-plg-row', style: { flexWrap: 'wrap' } },\n";
+  // 锚点随本批布局订正（2026-10-18 UI 回退修复批）：热键子行现在带 flex/minWidth/flexWrap 三件。
+  //   变异仍做同一件事：把静音监测开关塞回第一行（于是第一行变成 4 个 ToggleChip）。
+  const anchorRow = "    React.createElement('div', { className: 'dsh-plg-row', style: { flex: '1 1 320px', minWidth: '320px', flexWrap: 'wrap' } },\n";
   assert.ok(src.includes(anchorRow), '前置：热键行锚点须在位');
-  const back = src
-    .replace("'auto auto auto minmax(220px,1fr)'", "'auto auto auto auto minmax(220px,1fr)'")
-    .replace(anchorRow, chipBlock + anchorRow);
+  const back = src.replace(anchorRow, chipBlock + anchorRow);
   const mu = renderWithSource(back, {});
-  // 变异后：第一行 5 格且含 voiceVadShort ⇒ P14 的两条断言必红
-  assert.equal(mu.row1.props.style.gridTemplateColumns, 'auto auto auto auto minmax(220px,1fr)', '变异后 grid 应回到 5 列');
+  // 变异后：第一行含 4 个 ToggleChip（且含 voiceVadShort）⇒ P14 的「恰 3 个开关/不得含 voiceVadShort」必红
+  assert.equal(mu.row1.kids.filter((k) => k.type === 'button').length, 4, '变异后第一行应变成 4 个开关按钮');
   assert.ok(JSON.stringify(mu.row1.kids.map((k) => k.props.children || '')).includes('voiceVadShort'),
     '变异后第一行应重新含静音监测 ⇒ P14 的「第一行不得含 voiceVadShort」必红（判据有牙）');
 });
@@ -567,11 +641,15 @@ test('VADSIL-P14x-3 变异③：把 0 写进 silenceMs（而非只置 enabled=fa
 
 test('VADSIL-P14x-4 负控：不动任何文件 ⇒ P14 系列全绿（防"恒红"）', () => {
   const { row1, row2 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 } });
-  // 2026-10-17（设置文案审查批 · 挤压根治）：末列由 minmax(0,1fr) 改为 minmax(220px,1fr)
-  //   —— 给热键输入框一个与文案无关的下限（改前 EN 下它会被同行 label 文本压到 108.3px）。
-  //   本断言随之订正；判据强度不变（仍是逐字严格等号锁住整串格定义）。
-  assert.equal(row1.props.style.gridTemplateColumns, 'auto auto auto minmax(220px,1fr)',
-    '格子数须与格数同步：4 格 ⇒ 3 个 auto + minmax（下限 220px；旧值 minmax(0,1fr)，本批订正）');
+  // 2026-10-18（UI 回退修复批）：本行由 **grid** 改为 **flex + wrap**（grid 列不回流，
+  //   末列被 220px 硬下限顶住时会把整行高度撑到 68/96px ⇒ 开关被 stretch 成近方形）。
+  //   ⇒ 断言随之从「逐字锁 gridTemplateColumns」改为「锁 flex+wrap 三件 + 开关数」。
+  //   ⚠ 强度只升不降：新增「必须 flexWrap:wrap」「必须 alignItems:center（禁止 stretch 撑高）」两条，
+  //     它们正是本批回归的直接成因判据（旧格定义断言对「撑成方块」完全无鉴别力）。
+  assert.equal(row1.props.style.display, 'flex', '第一行须是 flex 容器（grid 列不回流 ⇒ 会把行高撑起来）');
+  assert.equal(row1.props.style.flexWrap, 'wrap', '第一行须允许换行（窄视口下热键子行整块折行，而不是撑高本行）');
+  assert.equal(row1.props.style.alignItems, 'center', '⛔ 第一行不得用默认 stretch —— 那会把开关沿块轴拉成方块（本批回归成因）');
+  assert.equal(row1.props.style.gridTemplateColumns, undefined, '⛔ 第一行不得再是 grid（回退标志）');
   assert.equal(row2Parts(row2).slider.props.min, '0', '负控：滑块 min 0');
   assert.equal(row2Parts(row2).slider.props.max, '5', '负控：滑块 max 5');
 });
