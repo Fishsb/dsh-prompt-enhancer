@@ -41,10 +41,13 @@ function makeFakeEnv(opts) {
   const o = opts || {};
   const timers = [];
   const frames = [];              // 每次 tick 返回的 RMS（归一化）
-  // 默认脚本：5 帧校准（低）+ 1 帧语音（高）+ 20 帧静音 ⇒ 达标自动停
+  // 默认脚本：5 帧校准（低）+ **真实语流包络**（音节峰 + 字间回落到环境底噪）+ 25 帧静音 ⇒ 达标自动停
+  // ⚠ 2026-10-17（判停修复批 · CHG-178）订正：原默认脚本是「1 帧 0.5 ⇒ 静音」——
+  //   那是**单帧尖峰**，不是语音。新判据要求连续帧确认 + 相对倍率，
+  //   单帧尖峰本来就**不该**把门撞开（正是 C 判据要锁的东西）⇒ 夹具必须改成真实形态。
   for (let i = 0; i < 5; i++) frames.push(0.001);
-  frames.push(0.5);
-  for (let i = 0; i < 20; i++) frames.push(0.001);
+  for (let i = 0; i < 4; i++) { for (const v of [0.03, 0.07, 0.09, 0.07, 0.03]) frames.push(v); frames.push(0.001, 0.001); }
+  for (let i = 0; i < 25; i++) frames.push(0.001);
 
   const recorderInstances = [];
   class FakeMediaRecorder {
@@ -1410,8 +1413,18 @@ function makeGenEnv(gen) {
 }
 
 // 用生成器驱动：重建假件的 analyser 取帧源
-function installGenFrames(env, gen) {
+function installGenFrames(env, gen, opts) {
+  const o = opts || {};
+  // ⚠ 2026-10-17（判停修复批）：夹具须能驱动**两条**取帧路径
+  //   （主路径 = getFloatTimeDomainData；回落 = getByteTimeDomainData）。
+  //   o.float === true ⇒ 装上 float32 实现；否则**不装** ⇒ 桥的探测走 fail-closed 回落。
   const FakeAnalyser = function () { this.fftSize = 1024; };
+  if (o.float === true) {
+    FakeAnalyser.prototype.getFloatTimeDomainData = function (buf) {
+      const v = Math.max(-1, Math.min(1, gen()));
+      for (let i = 0; i < buf.length; i++) buf[i] = v;
+    };
+  }
   FakeAnalyser.prototype.getByteTimeDomainData = function (buf) {
     const v = Math.max(0, Math.min(1, gen()));
     const byte = Math.max(0, Math.min(255, Math.round(128 + v * 128)));
@@ -1450,9 +1463,9 @@ async function driveVad(env, bridge, cap) {
 test('OVB-VAD-01 F2 首要假设：校准窗含语音（起始即说话）⇒ 修复后**必须**自动停', async () => {
   const env = makeFakeEnv({ recordingPhase: true });
   installGenFrames(env, stageGen([
-    { frames: 5, rms: 0.05 },     // 校准窗：用户按下即开口 ⇒ 样本含语音
-    { frames: 100, rms: 0.05 },   // 持续说话（与校准同电平）
-    { frames: 300, rms: 0.001 },  // 说完停顿
+    { frames: 5, rms: 0.05 },                        // 校准窗：用户按下即开口 ⇒ 样本含语音
+    ...speechEnv(0.05, 0.012, 8, 2),                  // 持续说话（含字间回落）
+    { frames: 300, rms: 0.001 },                      // 说完停顿
   ]));
   const bridge = loadBridge(env);
   bridge.install();
@@ -1466,7 +1479,7 @@ test('OVB-VAD-02 F2\' 真实形态：校准含语音 + 语音有起伏（词间�
   const env = makeFakeEnv({ recordingPhase: true });
   installGenFrames(env, stageGen([
     { frames: 5, rms: 0.05 },
-    { frames: 100, rms: 0.08 },
+    ...speechEnv(0.08, 0.02, 10, 2),                  // 有起伏的真实语音
     { frames: 300, rms: 0.001 },
   ]));
   const bridge = loadBridge(env);
@@ -1475,23 +1488,25 @@ test('OVB-VAD-02 F2\' 真实形态：校准含语音 + 语音有起伏（词间�
   assert.equal(r.clicks, 1, '有起伏的真实语音同样必须能自动停（阈值须已自愈回落）');
 });
 
-test('OVB-VAD-03 F1 低电平边界（语音低于绝对下限 0.025）⇒ **不得**误停（负控）', async () => {
+test('OVB-VAD-03 F1 低电平语流（峰值 0.020，低于旧绝对下限 0.025）⇒ 说完必须能停（A 方向）', async () => {
+  // ⚠ 判据方向订正（本批）：旧判据是「低于绝对下限 0.025 ⇒ **不得**停」。
+  //   那正是把病因（绝对下界钉死阈值）固化成了预期 —— 硬边界明令禁止把该判停的断言改松，
+  //   同理也不得把「因下界过高而测不到的正常音量」固化成不该判到。
+  //   新判据：低电平**语流**（0.020，占空比约 0.6）说完 ⇒ 必须判停；同时锁住阈值 < 0.025。
   const env = makeFakeEnv({ recordingPhase: true });
   installGenFrames(env, stageGen([
     { frames: 5, rms: 0.001 },
-    { frames: 100, rms: 0.02 },   // 音量低于绝对阈值下限
+    ...speechEnv(0.020, 0.008, 8, 1),                 // 低电平语流（旧绝对下界下永不过门）
     { frames: 300, rms: 0.001 },
   ]));
   const bridge = loadBridge(env);
   bridge.install();
   const r = await driveVad(env, bridge);
-  assert.equal(r.clicks, 0, '语音电平低于绝对阈值下限时不得误判为说话（防误停取向保持）');
+  assert.equal(r.clicks, 1, '正常偏低音量（0.020）说完 ⇒ 必须能判停（这正是「必须很大声」的正面）');
 });
-
 test('OVB-VAD-04 N1 关键负控：校准窗含语音/噪声但**此后从未说话** ⇒ 绝不得误停', async () => {
-  // ⚠ 本判据是修复的**反向锁**：自愈会让阈值快速回落，若不同步清掉平滑残留，
-  //   校准窗的电平会被残留的 smoothRms 当作「听到过语音」⇒ 误计静音帧 ⇒ 误停。
-  //   （本席第一版修复即命中该形态，被本夹具抓到后加了 VAD-2「校准结束清平滑」。）
+  // ⚠ 本判据是修复的**反向锁**：自愈会让阈值快速回落，若把校准窗的电平误算成「听到过语音」，
+  //   就会误计静音帧 ⇒ 误停。
   const env = makeFakeEnv({ recordingPhase: true });
   installGenFrames(env, stageGen([
     { frames: 5, rms: 0.05 },     // 校准含噪（用户按按钮时有环境声/呼吸）
@@ -1513,23 +1528,90 @@ test('OVB-VAD-05 F3 高底噪（持续噪声不下降）⇒ 语音未过抬高�
   const bridge = loadBridge(env);
   bridge.install();
   const r = await driveVad(env, bridge);
-  assert.equal(r.clicks, 0, '持续高底噪下语音未过门 ⇒ 不得计静音（与旧实现同取向；本判据锁住"未过门就不停"）');
+  assert.equal(r.clicks, 0, '持续高底噪下语音未过门 ⇒ 不得计静音（本判据锁住「未过门就不停」）');
 });
 
-test('OVB-VAD-06 读数不静默：VAD 内部状态必须进诊断快照（门是否开过可判）', async () => {
+test('OVB-VAD-06 读数不静默：VAD 内部状态必须进诊断快照（当下可判，不是只记「曾开过」）', async () => {
   const env = makeFakeEnv({ recordingPhase: true });
   installGenFrames(env, stageGen([{ frames: 400, rms: 0.001 }]));
   const bridge = loadBridge(env);
   bridge.install();
   await driveVad(env, bridge);
   const snap = bridge.snapshot();
+  // ① 既有四个字段必须在（历史口径，保留）
   for (const k of ['vadHeardSpeech', 'vadQuietFrames', 'vadThreshold', 'vadNoiseFloor']) {
-    assert.ok(Object.prototype.hasOwnProperty.call(snap, k), '诊断快照缺读数 ' + k + '（门从未开过这一形态此前**无法判别**）');
+    assert.ok(Object.prototype.hasOwnProperty.call(snap, k), '诊断快照缺读数 ' + k);
   }
-  assert.equal(snap.vadHeardSpeech, false, '全程静音 ⇒ 门未开过（这正是用户现场"一直录"的那一格）');
+  // ② ⚠ F-5 新增：**当下**可判字段（回答「门开着但没声音」vs「门根本没开」）
+  for (const k of ['vadFrameSpeech', 'vadSpeaking', 'vadRms', 'vadSnr', 'vadThresholdOff',
+    'vadResolution', 'vadPath', 'vadPathErrors', 'vadFrames', 'vadCalibrating', 'vadDiag']) {
+    assert.ok(Object.prototype.hasOwnProperty.call(snap, k),
+      '快照缺**当下**读数 ' + k + '（F-5：只暴露「曾开过」无法区分「门开着但没声音」与「门根本没开」）');
+  }
+  assert.equal(snap.vadHeardSpeech, false, '全程静音 ⇒ 门未开过');
+  assert.equal(snap.vadFrameSpeech, false, '本帧判定必须如实为「安静」');
+  assert.equal(typeof snap.vadRms, 'number', 'vadRms 必须是数值（本帧原始 RMS）');
+  assert.equal(typeof snap.vadResolution, 'number', 'vadResolution 必须是数值（当前判据下限）');
+  assert.ok(typeof snap.vadDiag === 'string' && snap.vadDiag.length > 0, 'vadDiag 必须是非空串（供 title 一次拼入）');
+  for (const seg of ['path=', 'rms=', 'snr=', 'frame=', 'thr=', 'floor=', 'res=', 'frames=', 'cal=']) {
+    assert.ok(snap.vadDiag.indexOf(seg) >= 0, 'vadDiag 缺字段 ' + seg + '（title 里须能读到原始读数）');
+  }
+  assert.equal(snap.vadPath === 'float' || snap.vadPath === 'byte', true, 'vadPath 必须是两条已知路径之一');
 });
 
-// ── 变异自证：把修复退回（仅降不升的自愈 + 校准清平滑）⇒ 判据必须转红 ──────────
+// ── A/B/C/D 四向夹具（变异自证与负控共用同一套，避免「各写一套夹具」）──────────────
+// ⚠ 夹具物理约束（本批实测）：音节间的回落回到的是**环境底噪**，不是一个中间值。
+//   先写成中间值（0.008/0.010）时，底噪跟踪会把它当成环境电平、把阈值抬到 0.020
+//   ⇒ 小声 0.030 只是勉强过关。真实录音里不存在「说话时底噪自动抬高」这回事。
+const AMB_LOW = 0.002;
+const SYL_ENV = [0.35, 0.8, 1.0, 0.75, 0.3];
+/** 真实语音包络：音节峰从 floor 抬到 peak，再回落；gap = 字间停顿帧数 */
+function speechEnv(peak, floor, syllables, gap) {
+  const out = [];
+  for (let i = 0; i < syllables; i++) {
+    for (const k of SYL_ENV) out.push({ frames: 1, rms: floor + (peak - floor) * k });
+    if (gap) out.push({ frames: gap, rms: floor });
+  }
+  return out;
+}
+// A：大声说一段 → 音量降到正常/偏小但仍高于底噪×倍率 → 必须**不**判停
+const SCEN_A = () => [
+  { frames: 5, rms: AMB_LOW },
+  ...speechEnv(0.09, AMB_LOW, 25, 2),     // 大声 2.5 s
+  // ⚠ 续说段要足够长（> 驱动上限 900 帧）：stageGen 在脚本耗尽后**沿用末段常量**，
+  //   若续说段短于驱动上限，末段会被拉成一条恒定电平的"伪静音"⇒ 用例自己制造出判停。
+  ...speechEnv(0.030, AMB_LOW, 300, 2),   // 小声续说 30 s（高于底噪×倍率）
+];
+// A'：大声之后接**恒定**小声 0.018（诊断批给的另一组电平）
+const SCEN_A_CONST = () => [
+  { frames: 5, rms: AMB_LOW },
+  ...speechEnv(0.09, AMB_LOW, 25, 2),
+  { frames: 2000, rms: 0.018 },
+];
+// B：说过话之后真正停止 ⇒ 必须在 requiredQuiet（2.0 s）附近判停
+const SCEN_B = () => [
+  { frames: 5, rms: AMB_LOW },
+  ...speechEnv(0.09, AMB_LOW, 25, 2),
+  { frames: 400, rms: 0.0015 },
+];
+// C：从未说过话（只有底噪）⇒ 必须不判停
+const SCEN_C = () => [
+  { frames: 5, rms: AMB_LOW },
+  { frames: 400, rms: 0.0018 },
+];
+// C'：环境噪声**方波式**起伏（风扇/空调/桌面震动：档位一抬就是 2-3 帧）——
+//   这是「窗口凑数」确认法会误开、而「连续帧」确认法必须拒绝的形态。
+const SCEN_C_SQUARE = () => {
+  const a = [{ frames: 5, rms: 0.006 }];
+  for (let i = 0; i < 40; i++) a.push({ frames: 3, rms: 0.010 }, { frames: 3, rms: 0.004 });
+  return a;
+};
+// D：校准窗含语音 ⇒ 之后真实安静 ⇒ 阈值必须降回底噪量级
+const SCEN_D = () => [
+  { frames: 5, rms: 0.09 },
+  { frames: 400, rms: 0.0012 },
+];
+
 // ⚠ 只在**内存副本**内变异（不动仓库文件）。
 function loadMutantBridge(env, mutate) {
   const src = mutate(decodeChunk(CHUNK));
@@ -1551,56 +1633,164 @@ function loadMutantBridge(env, mutate) {
   bridge.setTimer(env.timerSvc);
   return bridge;
 }
-
-// 变异①：把「运行期自愈（只降不升）」整段退回 ⇒ 校准被语音污染后阈值不再回落
-function mutateNoSelfHeal(src) {
-  const anchor = 'if (rms < noiseFloor) {';
-  assert.ok(src.includes(anchor), '变异锚点须存在（自愈分支）');
-  return src.replace(anchor, 'if (false) {');
+async function runScen(stages, mutate, floatMode) {
+  const env = makeFakeEnv({ recordingPhase: true });
+  installGenFrames(env, stageGen(stages), { float: floatMode === true });
+  const bridge = mutate ? loadMutantBridge(env, mutate) : loadBridge(env);
+  bridge.install();
+  const r = await driveVad(env, bridge, 900);
+  // 判停时刻：driveVad 已把时间轴推到底 ⇒ clicks>0 时用 ticks 折算毫秒（100ms/帧）
+  const tClick = r.clicks > 0 ? r.ticks * 100 : null;
+  return { clicks: r.clicks, quiet: r.snap.vadQuietFrames, thr: r.snap.vadThreshold,
+    floor: r.snap.vadNoiseFloor, heard: r.snap.vadHeardSpeech, path: r.snap.vadPath,
+    res: r.snap.vadResolution, tClick, snap: r.snap };
 }
-// 变异②：把「校准结束清平滑残留」退回 ⇒ N1 形态被误判为「听到过语音」⇒ 误停
-function mutateKeepSmooth(src) {
-  const anchor = '            smoothRms = 0;\n';
-  assert.ok(src.includes(anchor), '变异锚点须存在（校准清平滑）');
-  return src.replace(anchor, '');
+
+test('OVB-VAD-10 A 方向（本次报障的正面）：大声 → 小声续说 ⇒ **0 次** onSilence', async () => {
+  const r = await runScen(SCEN_A());
+  assert.equal(r.clicks, 0, 'A：大声说过后降到 0.030 续说 10 s ⇒ **不得**判停');
+  assert.equal(r.heard, true, 'A：门必须开过（否则「不得停」是假绿）');
+  assert.ok(r.quiet <= 2, 'A：续说期间连续静音帧必须≈0（实测 ' + r.quiet + '；判停需 20 帧）');
+  assert.ok(r.thr < 0.025, 'A：阈值必须已下探到旧绝对值 0.025 以下（实测 ' + r.thr.toFixed(4) + '）');
+});
+
+test('OVB-VAD-10b A2 方向·恒定小声：大声之后接恒定 0.018 ⇒ 不得判停', async () => {
+  const r = await runScen(SCEN_A_CONST());
+  assert.equal(r.clicks, 0, 'A2：恒定 0.018 续说 10 s ⇒ 不得判停（诊断批复现场景的第二口径）');
+  assert.equal(r.heard, true, 'A2：门必须开过（大声段已确认语音）');
+});
+
+test('OVB-VAD-11 B 方向（功能不得坏）：说过话后真安静 ⇒ 必须在 requiredQuiet 附近判停', async () => {
+  const r = await runScen(SCEN_B());
+  assert.equal(r.clicks, 1, 'B：真正停止说话 ⇒ 必须判停（⛔ 不得永远不停）');
+  const required = 20; // 默认 silenceMs=2000 / 100ms
+  assert.ok(r.quiet >= required - 1 && r.quiet <= required + 1,
+    'B：判停时的连续静音帧数须在 ' + required + ' 附近（实测 ' + r.quiet + '）');
+  assert.ok(r.tClick !== null && r.tClick > 0, 'B：须给出实测判停时刻（本用例 ' + r.tClick + 'ms）');
+});
+
+test('OVB-VAD-12 D 方向（校准被污染仍能自愈）：校准 0.09 ⇒ 阈值必须降回底噪量级', async () => {
+  const r = await runScen(SCEN_D());
+  assert.equal(r.clicks, 0, 'D：从未说话 ⇒ 不得判停（与 C 同向）');
+  assert.ok(r.floor < 0.005, 'D：底噪必须从 0.09 回落到 0.005 以下（实测 ' + r.floor.toFixed(5) + '）');
+  assert.ok(r.thr < 0.025, 'D：阈值必须远低于旧绝对值 0.025（实测 ' + r.thr.toFixed(5) + '）');
+});
+
+test('OVB-VAD-13 C 方向·反向锁：从未说话 ⇒ 不得判停（含底噪方波起伏）', async () => {
+  const rc = await runScen(SCEN_C());
+  assert.equal(rc.clicks, 0, 'C：只有底噪 ⇒ 不得判停');
+  assert.equal(rc.heard, false, 'C：门从未开过（这正是「一直录」那一格）');
+  const rs = await runScen(SCEN_C_SQUARE());
+  assert.equal(rs.clicks, 0, 'C2：环境噪声方波起伏 ⇒ 不得判停（连续帧确认必须拒绝它）');
+  assert.equal(rs.heard, false, 'C2：方波噪声不得把门撞开');
+});
+
+test('OVB-VAD-14 双路径行为一致：float32 与 8-bit 回落路径同向，且回落路径**不得更松**', async () => {
+  const src = decodeChunk(CHUNK);
+  // ① 两条路径都在源码里，且回落是**显式**的（fail-closed + 可判读数）
+  assert.ok(src.indexOf('getFloatTimeDomainData') >= 0, '缺 float32 主路径');
+  assert.ok(src.indexOf('getByteTimeDomainData') >= 0, '缺 8-bit 回落路径');
+  assert.ok(/useFloat = false;/.test(src), '缺 fail-closed 回落动作（读到脏/空缓冲必须回落）');
+  assert.ok(/vad-float-path-fallback/.test(src), '回落必须留下可判读数（不得静默降级）');
+  // ② 下限与**测量分辨率**挂钩（不是经验常数）
+  assert.ok(src.indexOf('const OVB_QUANT_STEP_8BIT = 1 / 256;') >= 0, '8-bit 下限须与量化台阶挂钩（1/256）');
+  assert.ok(src.indexOf('const OVB_FLOAT_RESOLUTION = 1 / 32768;') >= 0, 'float 下限须与 16-bit PCM 台阶挂钩');
+  // ③ 行为同向：同一夹具两条路径都必须 0 次判停
+  const rAf = await runScen(SCEN_A(), null, true);
+  const rAb = await runScen(SCEN_A(), null, false);
+  assert.equal(rAf.clicks, 0, 'A·float 路径：不得判停');
+  assert.equal(rAb.clicks, 0, 'A·8-bit 路径：不得判停（两路径必须同向）');
+  assert.equal(rAf.path, 'float', 'float 路径须如实报 path=float');
+  assert.equal(rAb.path, 'byte', '8-bit 路径须如实报 path=byte');
+  assert.ok(rAb.res > rAf.res, '8-bit 分辨率必须大于 float（更粗、下限更高 = 更严，⛔ 不得更松）');
+  // ④ B 方向两条路径都必须判停
+  const rBf = await runScen(SCEN_B(), null, true);
+  const rBb = await runScen(SCEN_B(), null, false);
+  assert.equal(rBf.clicks, 1, 'B·float 路径：必须判停');
+  assert.equal(rBb.clicks, 1, 'B·8-bit 路径：必须判停');
+});
+
+// ── 变异自证（本批三条件，缺一即不算修好）────────────────────────────────────────
+// 变异①：把「阈值跟随底噪」退回**原绝对下界 0.025** ⇒ A 必红（= 用户报障形态的根因确认）
+function mutateAbsLowerBound(src) {
+  // ⚠ 必须**两条阈值都**套回绝对下界：只改开阈而不改关阈时，迟滞带下沿仍会放行
+  //   （实测：只改开阈 ⇒ A2 仍绿 ⇒ 变异不成立、判据看似没牙）。
+  const a1 = 'vadThreshold = Math.min(OVB_THRESHOLD_MAX, f * OVB_NOISE_FACTOR);';
+  const a2 = 'vadThresholdOff = Math.min(vadThreshold, Math.max(f, vadThreshold * OVB_HYSTERESIS));';
+  assert.ok(src.indexOf(a1) >= 0 && src.indexOf(a2) >= 0, '变异锚点须存在（两条阈值）');
+  const out = src
+    .replace(a1, 'vadThreshold = Math.min(OVB_THRESHOLD_MAX, Math.max(0.025, f * OVB_NOISE_FACTOR));')
+    .replace(a2, 'vadThresholdOff = Math.min(vadThreshold, Math.max(0.025, f, vadThreshold * OVB_HYSTERESIS));');
+  assert.notEqual(out, src, '变异必须真的改到源码');
+  return out;
+}
+// 变异②：下限设成 0（无下限）⇒ C 必红（微响即判「在说话」⇒ 永不判停的反面：误停）
+function mutateNoLowerBound(src) {
+  const anchor = 'const measurableFloor = () => resolution * OVB_RESOLUTION_STEPS;';
+  assert.ok(src.indexOf(anchor) >= 0, '变异锚点须存在（分辨率下限）');
+  const out = src.replace(anchor, 'const measurableFloor = () => 0;');
+  assert.notEqual(out, src, '变异必须真的改到源码');
+  return out;
+}
+// 变异③：删掉「从未说话不得判停」的反向锁 ⇒ C 必红
+function mutateNoHeardGuard(src) {
+  const anchor = '        } else if (heardSpeech) {';
+  assert.ok(src.indexOf(anchor) >= 0, '变异锚点须存在（heardSpeech 反向锁）');
+  const out = src.replace(anchor, '        } else if (true) {');
+  assert.notEqual(out, src, '变异必须真的改到源码');
+  return out;
 }
 
-test('OVB-VAD-V01 变异自证·正例必红：退回「无自愈」⇒ F2 判据必须失败', async () => {
-  const env = makeFakeEnv({ recordingPhase: true });
-  installGenFrames(env, stageGen([
-    { frames: 5, rms: 0.05 }, { frames: 100, rms: 0.05 }, { frames: 300, rms: 0.001 },
-  ]));
-  const bridge = loadMutantBridge(env, mutateNoSelfHeal);
-  bridge.install();
-  const r = await driveVad(env, bridge);
-  const wouldPass = (r.clicks === 1);
-  assert.equal(wouldPass, false, '退回无自愈后 F2（校准含语音）判据必须为红 —— 若仍绿说明判据没牙');
+test('OVB-VAD-V01 变异自证·正例必红：把「阈值跟随底噪」退回原绝对下界 0.025 ⇒ A 判据必须失败', async () => {
+  // ⚠ 用 A2（0.018 语流）作变异靶，不是 A（0.030）：绝对下界 0.025 在 0.030 上**恰好**过得去，
+  //   用它做靶会让判据看似没牙。0.018 < 0.025 正是用户「必须很大声」的量化形态
+  //   （诊断批扫参：正常/偏小音量 0.022-0.045 都过不了 0.025 这道门）。
+  const r = await runScen(SCEN_A_CONST(), mutateAbsLowerBound);
+  assert.equal(r.clicks, 1, '退回绝对下界后 A2（0.018 续说不得判停）必须转红 ⇒ 证明判据有牙，且根因就是这个下界');
 });
 
-test('OVB-VAD-V02 变异自证·负控必绿：同一变异下 F1 低电平判据仍须通过', async () => {
-  const env = makeFakeEnv({ recordingPhase: true });
-  installGenFrames(env, stageGen([
-    { frames: 5, rms: 0.001 }, { frames: 100, rms: 0.02 }, { frames: 300, rms: 0.001 },
-  ]));
-  const bridge = loadMutantBridge(env, mutateNoSelfHeal);
-  bridge.install();
-  const r = await driveVad(env, bridge);
-  assert.equal(r.clicks, 0, '负控·低电平不得误停（与自愈无关，必须仍绿）');
+test('OVB-VAD-V02 变异自证·负控必绿：同一变异下 B（说完真安静必须停）仍须通过', async () => {
+  const r = await runScen(SCEN_B(), mutateAbsLowerBound);
+  assert.equal(r.clicks, 1, '负控·说完真安静 ⇒ 两个实现下都必须停（与下界无关，必须仍绿）');
 });
 
-test('OVB-VAD-V03 变异自证·正例必红：退回「不清平滑」⇒ N1 误停判据必须失败', async () => {
+test('OVB-VAD-V03 变异自证·正例必红：下限设成 0（无下限）⇒ C 判据必须失败', async () => {
+  // ⚠ 靶场景 = **数字静音/亚分辨率底噪**（0.00002）：此时"下限"是唯一挡住阈值趋零的东西。
+  //   普通底噪（0.0018）远高于下限 ⇒ 把下限设 0 读数完全不变，那种靶子证明不了判据有牙。
   const env = makeFakeEnv({ recordingPhase: true });
   installGenFrames(env, stageGen([
-    { frames: 5, rms: 0.05 }, { frames: 400, rms: 0.002 },
+    { frames: 5, rms: 0.00002 },
+    { frames: 60, rms: 0.00002 }, { frames: 3, rms: 0.0009 },   // 偶发微响（远低于任何正常阈值）
+    { frames: 60, rms: 0.00002 }, { frames: 3, rms: 0.0009 },
+    { frames: 300, rms: 0.00002 },
   ]));
-  const bridge = loadMutantBridge(env, mutateKeepSmooth);
+  const bridge = loadMutantBridge(env, mutateNoLowerBound);
   bridge.install();
-  const r = await driveVad(env, bridge);
-  const wouldPass = (r.clicks === 0);
-  assert.equal(wouldPass, false, '退回不清平滑后 N1（校准含噪但未说话）必须**误停** ⇒ 证明该判据有牙');
+  const r = await driveVad(env, bridge, 900);
+  // ⚠ 判别点在**门是否被打开**（heardSpeech），不是「是否判停」：
+  //   这里的失败形态是「微响被当成语音」⇒ 反向锁失守。若断言 clicks 就测错了对象
+  //   （本轮静音足够长时它会顺带判停，但那只是打开门的后果，不是判据本身）。
+  assert.equal(r.snap.vadHeardSpeech, true,
+    '无下限 ⇒ 阈值≈0 ⇒ 亚分辨率底噪里的微响即被确认成语音 ⇒ C 的门必须被错误撞开（判据转红）');
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
+test('OVB-VAD-V04 变异自证·正例必红：删掉「从未说话不得判停」保护 ⇒ C 判据必须失败', async () => {
+  const r = await runScen(SCEN_C(), mutateNoHeardGuard);
+  assert.equal(r.clicks, 1, '删掉反向锁 ⇒ 底噪起伏会被计入静音帧 ⇒ C 必须转红');
+});
+
+test('OVB-VAD-V05 负控·基线必绿：不动 ⇒ A/B/C/D 全绿（含两路径）', async () => {
+  const a = await runScen(SCEN_A());
+  const b = await runScen(SCEN_B());
+  const c = await runScen(SCEN_C());
+  const d = await runScen(SCEN_D());
+  assert.equal(a.clicks, 0, '负控 A：不得判停');
+  assert.equal(b.clicks, 1, '负控 B：必须判停');
+  assert.equal(c.clicks, 0, '负控 C：不得判停');
+  assert.equal(d.clicks, 0, '负控 D：不得判停');
+  assert.ok(d.thr < 0.025, '负控 D：阈值必须已下探');
+});
+
 // SW-1（2026-10-15 接线批）：`vad.enabled` 开关必须**真的约束运行期行为**
 // ═══════════════════════════════════════════════════════════════════════════════
 // 病（上批报出）：`voice-section.js` 写 `vad.enabled` **8 处**，`official-bridge.js` **引用 0 处**
