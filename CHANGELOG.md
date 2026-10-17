@@ -17,6 +17,11 @@
 
 ## [Unreleased]
 
+- **对外文档定位对齐批：总概念立为「提示词优化 + 语音输入增强」（对外文档定位对齐，无功能变化 · 2026-10-18）**：用户指示「项目现在总体的概念是**提示词优化 + 语音输入增强**」，本批只调措辞与结构，**零代码改动、行数不变**。**① README 首句**：由「一键把输入框草稿增强成清晰、可执行的提示词，并为语音输入补上热键与说完自动停」改为「**提示词优化** + **语音输入增强** —— …」，两块并列为头条；中/英同批（`README.md:3` / `README.en.md:3`）。**② 「能做什么」两个小标题**：「提示词增强」→「**提示词优化**」、「语音输入」→「**语音输入增强**」（中/英各 1 行，字数不变）。**③ `package.json` description** 收为同概念一句 `prompt optimization (✨) + voice input enhancement (💬)`（原句尾巴带实现细节；`keywords` 未改）。**行数**：`README.md` 53 → **53**、`README.en.md` 53 → **53**（未增）。**④ `About` 与 `Topics`** 属 GitHub 仓库设置字段（不在本仓、不可由 agent 修改）⇒ 文案与标签建议见账本报告 §④，须用户手改。
+  **已实测**：`git diff --stat` 仅 `README.md` / `README.en.md` / `package.json`（另见他批在途文件，未纳入）· `npm test` 与 `gate` 读数见报告 §⑥ · `S-8` 未漂（157 件不变）。
+  **⚠ 未验证**：未部署、未重启 DSH；`About`/`Topics` 未改（本席不可达）；GitHub 仓库描述字段仍为旧文案。
+  **账本**：`archive/2026-10-18-repo-positioning/REPORT.md`。
+
 - **对外文档整理批：README 中/英重写 + 兼容矩阵订正（对外文档整理，无功能变化 · 2026-10-18）**：用户指示「仓库信息要简洁」，本批只动对外文档，**零代码改动**。**① README**：中/英同批重写，行数 110/109 → 53/53（−52%/−51%），结构收敛为 是什么 / 解决什么 / 安装 / 能做什么 / 设置项速查；删去内部实现细节（chunk 形态 · `new Function` 桥接 · 槽位契约 · 模块清单）与退役能力描述（云端/本地双引擎 · 一键重启 · 插件自建麦克风按钮 · 插件管理 tab）；补齐静音监测与清口水词、语音纠错与自动增强的实际默认态。
   **② `docs/compatibility-matrix.md`**：只改失效项 —— §1 删「是否支持一键更新」列（自建更新通道已退役）；§3 `template.pick` 内置键补为 `default` / `increment`（旧 `supplement` / `dev` 读时迁移）；§3 localStorage 键由不存在的 `dsh-prompt-enhancer:config` 改为 `dsh.enhance.config.v2`；§4 注明 `protocolVersion` 现无代码读写（仅历史对照）。
   **③ `package.json`**：`description` 与 README 首段对齐（`keywords` 未改）。⚠ 该文件属 `sync-face` 部署同步面（非产物件）⇒ 与运行环境 md5 的对照会转为 drift，须待部署时同步，属**预期**非缺陷。

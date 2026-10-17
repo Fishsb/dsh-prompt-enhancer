@@ -1,6 +1,6 @@
 # dsh-prompt-enhancer
 
-A DeepSeek Harness (DSH) plugin: turn a composer draft into a clear, actionable prompt in one click — and add a hotkey plus stop-on-silence to voice input.
+A DeepSeek Harness (DSH) plugin: **prompt optimization** + **voice input enhancement** — rewrites a composer draft into something clearer and more actionable, and adds a hotkey, stop-on-silence, filler removal and correction to voice input.
 
 A draft is often half a requirement, so the model asks again — click ✨ and it is rewritten in place, undoable. With voice, just speak; it stops on a pause and the transcript lands back in the composer.
 
@@ -18,14 +18,14 @@ Restart DSH afterwards (also after updating or removing) — the ✨ button appe
 
 ## What it does
 
-**Prompt enhancement**
+**Prompt optimization**
 
 - ✨ **One-click enhance** — rewrite the current draft; keep refining, undo, or cancel while enhancing
 - **5 modes** — Basic / Lite / Standard / Expert / One-click Publish
 - **Memory switch** — pre-send rounds accumulate into a memory chain, cleared on send (off by default)
 - **Model chain** — try models in order, add/remove/reorder, toggle thinking, test connectivity inline
 
-**Voice input** (transcription is provided by DSH's official `speechToText`; the plugin ships no engine and downloads no models)
+**Voice input enhancement** (transcription is provided by DSH's official `speechToText`; the plugin ships no engine and downloads no models)
 
 - **Two entry points** — the official 🎤 button, or the plugin hotkey (tap to start / tap to stop; long-press = hold to talk, release to stop)
 - **Stop on silence** — auto-stop with a configurable 1-5 s silence window (default 2 s), can be turned off entirely
