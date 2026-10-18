@@ -32,12 +32,17 @@ const SELF = 'test/test-inventory.test.cjs';
 
 // ⚠ 白名单：**故意不在 `npm test` 清单里**的测试目录文件。每条都必须带理由。
 //   ⚠ 加新条目的门槛：先回答「为什么它不能进 `npm test`」——答不出就该进清单，不是进白名单。
-const WHITELIST = {
-  'test/a6-drill.cjs':
-    '一次性 L3 拦截演练脚本（非 node:test 用例：整文件是顶层顺序语句 + assert，没有 test() 注册）。' +
-    '2026-10-18 实测它**本身已红**：第 42 行调 `mod.installStagedTarball`，而该导出面已随 P1-c ' +
-    '（执行器退役批，`lib/index.cjs:85-86`）删除 ⇒ TypeError。⛔ 未删、⛔ 未跳过，如实登记待处置。',
-};
+//
+// 2026-10-19（清债批 D-3）：唯一的历史条目 `test/a6-drill.cjs` 已**退役并删除**（不是"修好"）。
+//   依据（只读实测，范围逐条写明）：
+//     · `package.json` `scripts.test` 从未列它（`indexOf('a6-drill') === -1`）；
+//     · 它调用的 `mod.installStagedTarball` **不在任何导出面**：`require('lib/index.cjs')` 的
+//       导出键实测为 `name,inject,apply,isTrustedRpcRequest,readBody,registerRpcRoute`（无该项），
+//       该名字在 `lib/index.cjs:85-86` 只剩一行"已随执行器退役移除"的注释；
+//     · 除自身外，全仓引用它的只有本文件的白名单条目与 `docs/**` / `CHANGELOG.md` / `.roundtable` 的历史记述
+//       （⛔ 那些是记述面，不是消费者）。
+//   ⇒ 能力已彻底退役、无可修对象 ⇒ 删文件 + 删白名单条目，不留"长期躺在白名单里"的债。
+const WHITELIST = {};
 
 /** 纯函数：便于变异自证（不落盘也能喂假输入）。 */
 function audit(listed, disk, whitelist) {

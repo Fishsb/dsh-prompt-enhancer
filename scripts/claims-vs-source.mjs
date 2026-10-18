@@ -83,6 +83,23 @@ if (json) {
     for (const p of res.problems) console.log(`  · [${p.kind}] ${p.id} ${p.msg}`);
     if (res.problems.some((p) => p.kind === 'differ')) {
       console.log('  ⚠ 「differ」= 正本所述与工作区实算不符 ⇒ **只报告，不得自行改正本**（正本归主持侧面）。');
+      // 2026-10-19（清债批 D-4）：红时打印**可直接复制的订正指令**。
+      //   ⚠ 本工具仍是**只读对照器**：只打印"该改什么"，⛔ 不写正本、不生成补丁文件。
+      //   每条含三件事：① 哪条事实失真（条目 id）② 正本现值 vs 实算值 ③ 明确下一步（改哪个正本位置）。
+      console.log('');
+      console.log('=== 订正指令（可直接复制执行 · ⚠ 本工具只读，不会替你改）===');
+      for (const r of res.rows) {
+        if (r.verdict !== 'differ') continue;
+        const said = (r.said || []).join(' / ');
+        const got = (r.got || []).join(' / ');
+        console.log('① 失真事实：' + r.id + ' —— ' + r.what);
+        console.log('② 读数对照：正本现值 = ' + said + ' ' + r.unit + ' ；工作区实算 = ' + got + ' ' + r.unit);
+        console.log('③ 下一步：请在正本 ' + r.anchorAt + ' 把 ' + said + ' 改为 ' + got + ' ' + r.unit + '；');
+        console.log('   改完重跑：node scripts/claims-vs-source.mjs --project ' + (res.projectPath || '<正本路径>'));
+        console.log('');
+      }
+      console.log('⚠ 若某条属「正本措辞变了导致锚点解析不出」而不是数字失真，见上方 [unjudged] 行——');
+      console.log('   那类要改的是**正本措辞**（让锚点可解析），不是数字。');
     }
   } else {
     console.log(`✓ 逐条一致：${res.rows.length} 条可派生事实全部对上（正本所述 == 工作区实算）`);

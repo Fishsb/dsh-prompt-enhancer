@@ -528,8 +528,13 @@ test('GEOLOCK-B4 行内子项清单 = 本预算的分母（多出/少一项都�
   //   把上面对 flex 的读取变成假读数 ⇒ 预算数字不再代表真实占位）
   assert.equal(/dsh-plg-ms-(fill|content)/.test(row), false,
     '⛔ 行内选择器不得带 dsh-plg-ms-fill / dsh-plg-ms-content（会覆盖 flex ⇒ 预算失真）');
-  // 失效徽标（预算里那 20px 上界的对象）必须在位——它若被删，B2 的上界就该同步下调
-  assert.equal((row.match(/dsh-plg-badge-invalid/g) || []).length, 1, '前置：失效徽标须仍在位（预算为它留了上界）');
+  // 失效徽标（预算里那 20px 上界的对象）必须在位——它若被删，B2 的上界就该同步下调。
+  //   ⚠ 2026-10-19（清债批 D-2）：该节点原先挂的 `dsh-plg-badge-invalid` 是**孤儿类**
+  //     （styles.js 解码全文零规则）⇒ 类名已换成既有 `.dsh-plg-upd-outdated`（告警色），
+  //     **节点本身与 `⚠` 字形、title 一字未动**。本断言据此改判**节点在不在**（沿用"失效徽标在位"
+  //     这一语义），⛔ 不再绑定那个已退役的类名——否则锁会把"删孤儿类"判成"删了徽标"（假红）。
+  assert.equal((row.match(/className: 'dsh-plg-upd-outdated', title: t\('cfgRowInvalid'\)/g) || []).length, 1,
+    '前置：失效徽标节点须仍在位（预算为它留了 20px 上界）');
 });
 
 test('GEOLOCK-B5 真机可用宽只以**具名常量**出现一次（⛔ 不许散落魔数）+ 来源与装置互算', async () => {

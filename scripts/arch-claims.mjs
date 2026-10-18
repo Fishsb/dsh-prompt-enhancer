@@ -1315,6 +1315,45 @@ if (has('--check')) {
   if (drift.kind === 'drift') {
     const attr = driftAttribution(drift, localFp, localN, SNAP_ENV);
     console.log(`✗ ${attr.faceChanged ? '投影已过期' : '投影读数漂移'}：请跑 --write 重生成（${attr.tail}）`);
+    // ── D-5（清债批 2026-10-19）：红得能自解释 ────────────────────────────────
+    //   病历：S-8（行尾契约 / 受控件数）漂移在历史上已第 9 次出现，而每次的**输出**只说明
+    //   "投影与判据表不一致"，不告诉人：拿什么命令修、这次的差异是哪几个文件造成的、
+    //   以及最要命的一条——**读数必须在提交之后取**（提交前写进去的投影下次提交后立刻再漂）。
+    //   ⇒ 本段只在**真漂移**时打印，逐条补齐这三件事。
+    //   ⚠ 硬边界（红线）：只**打印**，⛔ 不改通过条件、不改三态语义、不改指纹、不自动 --write。
+    {
+      const s8 = RUN.find((x) => x.id === 'S-8');
+      // 档内记的受控件数（S-8 的 actual 里那段「受控 N 件」）vs 本次实算
+      const numFrom = (t) => { const m = String(t || '').match(/受控 (\d+) 件/); return m ? Number(m[1]) : null; };
+      const A = numFrom(docRegion);
+      const B = numFrom(s8 && s8.actual);
+      console.log('');
+      console.log('=== 自解释（本环红了要你做什么）===');
+      console.log('① 修复命令（可直接复制）——');
+      console.log('   node scripts/arch-claims.mjs --write');
+      console.log('② 本次漂移的逐文件成因 ——');
+      if (A !== null && B !== null && A !== B) {
+        console.log('   档内受控件数 A=' + A + ' 件；本次实算 B=' + B + ' 件（相差 ' + (B - A) + ' 件）');
+        let st = '';
+        try { st = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8', timeout: 20000 }); } catch { /* git 不可用则略 */ }
+        const lines = String(st).split('\n').filter((l) => l.trim());
+        if (lines.length) {
+          console.log('   工作区未提交差集（git status --porcelain）——受控件数就是被这些条目改的：');
+          for (const l of lines.slice(0, 40)) console.log('     ' + l);
+          if (lines.length > 40) console.log('     …另有 ' + (lines.length - 40) + ' 条，跑 git status 看全');
+        } else {
+          console.log('   工作区干净 ⇒ 差异来自**档生成之后**的提交；逐文件用：');
+          console.log('     git log --oneline --name-status -20');
+        }
+      } else if (A !== null && B !== null) {
+        console.log('   受控件数未变（A=B=' + A + ' 件）⇒ 本漂移不是"文件增删"造成的；成因见上行走廊：' + attr.why);
+      } else {
+        console.log('   未能从档内/实算里解析出受控件数（判定信息见上一行）⇒ 逐文件请跑：git status --porcelain / git log --name-status');
+      }
+      console.log('③ ⚠ 读数须在**提交之后**取 —— --write 写进去的是「当前工作区读数」；');
+      console.log('   若还有未提交改动（新增/删除/改行尾），投影会在下次提交后**立刻再漂**。');
+      console.log('   正确顺序：先 commit ⇒ 再 --write ⇒ 再 commit 那次投影刷新。');
+    }
     emitRingState('arch-claims', ringState[0], ringState[1]);
     process.exit(1);
   }
