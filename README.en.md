@@ -14,7 +14,7 @@ dsh plugin --profile web update dsh-prompt-enhancer   # update
 dsh plugin --profile web remove dsh-prompt-enhancer   # remove
 ```
 
-Restart DSH afterwards (also after updating or removing) — the ✨ button appears in the composer toolbar. Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) installed locally and `pnpm` in PATH.
+Restart DSH afterwards (also after updating or removing) — the ✨ button appears in the composer toolbar. Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) **≥ 0.1.0-rc.6** installed locally and `pnpm` in PATH.
 
 ## What it does
 

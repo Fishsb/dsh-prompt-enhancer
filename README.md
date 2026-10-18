@@ -14,7 +14,7 @@ dsh plugin --profile web update dsh-prompt-enhancer   # 更新
 dsh plugin --profile web remove dsh-prompt-enhancer   # 卸载
 ```
 
-装完（或更新 / 卸载后）重启 DSH，输入框工具行出现 ✨ 即安装成功。需本机已装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 且 `pnpm` 在 PATH 中。
+装完（或更新 / 卸载后）重启 DSH，输入框工具行出现 ✨ 即安装成功。需本机已装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) **≥ 0.1.0-rc.6** 且 `pnpm` 在 PATH 中。
 
 ## 能做什么
 
