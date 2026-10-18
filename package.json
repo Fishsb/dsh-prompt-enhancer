@@ -4,6 +4,7 @@
   "description": "DeepSeek Harness (DSH) plugin: prompt optimization (✨) + voice input enhancement (💬)",
   "main": "lib/index.cjs",
   "type": "commonjs",
+  "license": "Apache-2.0",
   "files": [
     "lib",
     "plugin-host.js",

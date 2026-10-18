@@ -4,7 +4,7 @@ DeepSeek Harness（DSH）插件：**提示词优化** + **语音输入增强** �
 
 草稿常常只有半句要求，交给模型后还要来回补问——点一下 ✨ 就地改写，不满意可撤回；语音则直接说，停顿即停，结果落回输入框。
 
-[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases) [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers)
+[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases) [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 ## 安装
 
@@ -48,6 +48,6 @@ dsh plugin --profile web remove dsh-prompt-enhancer   # 卸载
 
 ![语音输入](docs/screenshots/voice-main.png)
 
-[Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases) · [CHANGELOG](CHANGELOG.md) · [兼容性说明](docs/compatibility-matrix.md)
+[Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases) · [CHANGELOG](CHANGELOG.md) · [兼容性说明](docs/compatibility-matrix.md) · Licensed under [Apache-2.0](LICENSE)
 
 > 隐私：插件不记录、不上报任何数据；增强结果来自外部 LLM，发送前请自行核对。
