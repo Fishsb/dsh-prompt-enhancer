@@ -29,7 +29,6 @@ function buildClient() {
   const modelHelpersChunk = require('../src/client/model-helpers.js');
   const enhanceButtonChunk = require('../src/client/components/enhance-button.js');
   // CHG-184（纠错状态可视化批）：输入框旁的五态指示 chunk（与 ✨ 按钮同槽位、同族样式）
-  const correctionStatusChunk = require('../src/client/voice/correction-status.js');
   const enhanceBarChunk = require('../src/client/components/enhance-bar.js');
   const marqueeSelectChunk = require('../src/client/components/marquee-select.js');
   const collapsibleSectionChunk = require('../src/client/components/collapsible-section.js');
@@ -64,7 +63,6 @@ function buildClient() {
     ['// @dsh-client-helpers-inject', helpersChunk],
     ['// @dsh-client-model-helpers-inject', modelHelpersChunk],
     ['// @dsh-client-comp-enhance-button-inject\n', enhanceButtonChunk],
-    ['// @dsh-client-comp-correction-status-inject\n', correctionStatusChunk],
     ['// @dsh-client-comp-enhance-bar-inject\n', enhanceBarChunk],
     ['// @dsh-client-comp-marquee-select-inject\n', marqueeSelectChunk],
     ['// @dsh-client-comp-collapsible-section-inject\n', collapsibleSectionChunk],

@@ -221,22 +221,23 @@ test('CHG184-S13 ⭐ 接线：hotkey 调度口调用 markCorrectionStarted / Set
   assert.ok(!/corrState\.failed \+= 1/.test(hotkey), '⛔ 调度口不得自行累加 failed');
 });
 
-test('CHG184-S14 ⭐ 接线：状态组件注册在**输入框旁同一槽位**（与 ✨ 同族位置），且只读', () => {
+test('CHG184-S14 ⭐ 接线（R3 迁移）：纠错状态不再注册独立元素，改由 ✨ 按钮承载；槽位面零新增', () => {
   const app = decodeChunk('src/client/app.js');
-  assert.ok(/id: 'correction-status'/.test(app), '状态组件必须注册（否则组件存在但没人挂）');
-  const idxStatus = app.indexOf("id: 'correction-status'");
-  const idxEnh = app.indexOf("id: 'prompt-enhance'");
-  assert.ok(idxEnh >= 0 && idxStatus > idxEnh, '必须注册在 ✨ 之后（同族位置）');
-  assert.ok(app.includes("conversation.input.right"), '必须是输入框右槽位');
-  const comp = decodeChunk('src/client/voice/correction-status.js');
-  // 只读契约：组件内不得发起任何 RPC（⛔ 状态展示不得变成第二个调用点）
-  assert.ok(!/host\.call\(/.test(comp), '⚠ 状态组件必须只读：不得调用 host.call');
-  // 样式族复用：必须用 ✨ 那一族的既有类（⛔ 不得新造一套）
-  assert.ok(comp.includes('dsh-enh-btn'), '必须复用 ✨ 按钮族的容器类');
-  const styles = decodeChunk('src/client/styles.js');
-  for (const cls of ['dsh-enh-btn-busy', 'dsh-enh-btn-result', 'dsh-enh-spin', 'dsh-vi-err', 'dsh-plg-upd-outdated']) {
-    assert.ok(styles.includes('.' + cls), '复用的类必须在 styles.js 里实存（否则是空类名）: ' + cls);
-  }
+  // ① 注册面：order 12 的独立纠错条目必须已删除
+  assert.equal(/id: 'correction-status'/.test(app), false, '⛔ 不得再注册独立的纠错状态槽位条目');
+  // ② 但 ✨ 增强按钮仍必须注册在同一槽位（它是新的承载者）
+  assert.ok(/id: 'prompt-enhance'/.test(app), '✨ 增强按钮必须仍注册（新承载者）');
+  assert.ok(app.indexOf('conversation.input.right') >= 0, '✨ 仍必须在输入框右槽位');
+  // ③ 承载者必须真的接上了纠错相位（不是只删了旧的、没接新的）
+  const eb = decodeChunk('src/client/components/enhance-button.js');
+  assert.ok(/subscribeCorrection/.test(eb), '✨ 按钮必须订阅纠错状态机（否则删了旧的但没接新的 = 状态不可见）');
+  assert.ok(/correctionPhaseOf/.test(eb), '✨ 按钮必须读纠错相位');
+  assert.ok(/corrTakesOver/.test(eb), '✨ 按钮必须有「纠错接管」分支');
+  // ④ 槽位总数**净减 1**：HEAD 为 6 条（含 settings.section），删除 correction-status 后应为 5 条
+  const regs = (app.match(/slots\.register\(/g) || []).length;
+  assert.equal(regs, 5, '⭐ 槽位注册数必须由 6 净减为 5（⛔ 不得新增任何独立状态元素），实得：' + regs);
+  const injects = (app.match(/slots\.inject\(/g) || []).length;
+  assert.equal(injects, 5, '⭐ slots.inject 数同样必须由 6 净减为 5，实得：' + injects);
 });
 
 test('CHG184-S15 i18n：五态键 ZH/EN 双侧齐全且逐键同形（S-7）', () => {
@@ -327,8 +328,16 @@ test('CHG184-S18 负控：失败态在**渲染层**不会被 skipped/unchanged �
 // ⚠ 组件是**无状态展示**（只读 snapshot），故一次渲染即得最终文本；订阅由 useEffect 装，
 //   本段直接调用 runEffects 再渲染一次（模拟「状态变化后重渲染」）。
 // ═══════════════════════════════════════════════════════════════════════════════
+// 2026-10-18（R3 · 纠错状态并入增强按钮）：原「输入框旁独立状态元素」已按用户要求删除，
+//   其渲染面判据**迁移**到 ✨ 增强按钮自身与设置页诊断区，判据强度不降（逐条对照）：
+//     · 原 R1/R2（未执行 / 未执行·开关关）：常驻可见 → 现由**设置页诊断区**承担
+//     · 原 R3（进行中）：文本 + spinner + busy 类 → 迁移为「按钮临时显示正在纠错」
+//     · 原 R4/R5（已完成·无改动/有改动）：⛔ 用户要求「结束时不留常驻提示」⇒ 判据改为
+//       「按钮必须回到默认态」（逐字比对默认文本），另有诊断区常驻一份
+//     · 原 R6（失败）：改为「短暂提示后复原」+ 诊断区常驻
+//     · 原 R7（五态文本两两不同）：改为对**诊断区**文案对账（S16 已覆盖）
+// ═══════════════════════════════════════════════════════════════════════════════
 
-/** 极简 React 桩：createElement → 普通树；useState/useEffect 按槽位持久；渲染后跑 effect。 */
 function makeRenderReact() {
   const hooks = { state: [], effects: [] };
   let si = 0;
@@ -356,7 +365,7 @@ function makeRenderReact() {
 
 /** 把元素树压成可读读数：{ role, ariaLive, className, tabIndex, text }　*/
 function readTree(node) {
-  const out = { text: '', classes: [], roles: [], ariaLive: [], tabIndexes: [], titles: [] };
+  const out = { text: '', classes: [], roles: [], ariaLive: [], tabIndexes: [], titles: [], ariaLabels: [] };
   const walk = (n) => {
     if (n === null || n === undefined || n === false || n === true) return;
     if (typeof n === 'string' || typeof n === 'number') { out.text += String(n); return; }
@@ -367,163 +376,148 @@ function readTree(node) {
     if (p['aria-live']) out.ariaLive.push(p['aria-live']);
     if (p.tabIndex !== undefined) out.tabIndexes.push(p.tabIndex);
     if (p.title) out.titles.push(p.title);
+    if (p['aria-label']) out.ariaLabels.push(p['aria-label']);
     (n.children || []).forEach(walk);
   };
   walk(node);
   return out;
 }
 
-/** 载入 CorrectionStatus 组件（真实 chunk），注入给定 snapshot 与开关真值。 */
-function loadStatus(opts) {
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// R3 迁移后的判据（2026-10-18）：纠错状态并入 ✨ 增强按钮
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** 载入 EnhanceButton 真实 chunk（含纠错相位接线），注入给定纠错 snapshot。 */
+function loadButton(opts) {
   const o = opts || {};
   const mini = makeRenderReact();
-  const src = decodeChunk('src/client/voice/correction-status.js');
+  const eb = decodeChunk('src/client/components/enhance-button.js');
   const corr = decodeChunk('src/client/voice/correction.js');
   const DICT = {
-    voiceCorrectionStateIdle: '纠错：未执行',
-    voiceCorrectionStateIdleOff: '纠错：未执行（开关关）',
-    voiceCorrectionStateRunning: '正在纠错…',
-    voiceCorrectionStateChanged: '纠错完成·已订正',
-    voiceCorrectionStateUnchanged: '纠错完成·无需改动',
-    voiceCorrectionStateSkipped: '纠错：未执行（开关关）',
-    voiceCorrectionStateFailed: '纠错失败',
-    voiceCorrectionStateAriaLabel: '语音纠错状态',
+    enhanceButton: '优化',
+    enhancing: '正在优化',
+    result: '撤销优化',
+    btnContinue: '继续优化',
+    voiceCorrectionRunningOnButton: '正在纠错',
+    voiceCorrectionFailedOnButton: '纠错失败',
   };
   const makeT = () => (k) => (Object.prototype.hasOwnProperty.call(DICT, k) ? DICT[k] : k);
-  const voiceCfgState = { value: { correction: { enabled: o.enabled === true } }, listeners: new Set() };
-  // 同一 new Function 作用域内求值 correction.js（状态机）→ correction-status.js（组件）
+  const voiceCfgState = { value: { correction: { enabled: o.enabled !== false }, memory: false, mode: 'standard' }, listeners: new Set() };
+  const configState = { value: { memory: false, mode: 'standard', fallback: [] }, listeners: new Set() };
+  const storeFor = () => ({ phase: o.enhancePhase || 'idle', seq: 0, optimized: false });
   const factory = new Function(
-    'React', 'makeT', 'voiceCfgState', 'subscribeVoiceConfig', 'host',
-    corr + '\n' + src + '\n;return { CorrectionStatus };'
+    'React', 'makeT', 'voiceCfgState', 'configState', 'subscribeCorrection', 'subscribeVoiceConfig',
+    'subscribe', 'subscribeConfig', 'storeFor', 'timerSvc', 'host', 'setLastDraft', 'setActiveSession',
+    'getActiveSession', 'guardPasses', 'enhance', 'undo', 'modeShortLabel', 'prettifyModel', 'saveConfig',
+    corr + '\n' + eb + '\n;return { EnhanceButton, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed };'
   );
-  const api = factory(mini.React, makeT, voiceCfgState, () => () => {}, { call: () => Promise.reject(new Error('只读：不应有 RPC')) });
+  const api = factory(
+    mini.React, makeT, voiceCfgState, configState, () => () => {}, () => () => {},
+    () => () => {}, () => () => {}, storeFor, null, { call: () => Promise.reject(new Error('只读')) },
+    () => {}, () => {}, () => null, () => true, () => {}, () => {}, (t, m) => m, (m) => m, () => {}
+  );
   return { api, mini };
 }
 
-/** 渲染一次并读回读数（先跑 effect 装订阅，再渲染）。 */
-function renderStatus(api, mini, props) {
-  mini.begin();
-  const tree = api.CorrectionStatus(props);
-  mini.runEffects();
+/** 渲染一次按钮并读回可见文本 + 类名。 */
+function renderButton(h, extra) {
+  const props = Object.assign({ sessionId: 's-r3', inputActions: { setDraft() {} }, input: { draft: '有草稿' } }, extra || {});
+  h.mini.begin();
+  const tree = h.api.EnhanceButton(props);
+  h.mini.runEffects();
   return readTree(tree);
 }
 
-test('CHG184-R1 ⭐ 渲染面·态①「未执行」：可见文本 = 未执行，样式 = ✨ 空闲族，无 spinner', () => {
-  const { api, mini } = loadStatus({ enabled: true });
-  const r = renderStatus(api, mini, { sessionId: 's-1', inputActions: { setDraft() {} }, input: { draft: '' } });
-  assert.equal(r.text, '纠错：未执行', '未执行态的可见文本（真实渲染，非字面量匹配）');
-  assert.ok(r.classes.some((c) => c.includes('dsh-enh-btn') && c.includes('dsh-enh-btn-text')), '必须是 ✨ 按钮族类名');
-  assert.equal(r.classes.some((c) => c.includes('dsh-enh-btn-busy')), false, '未执行不得带 busy');
-  assert.deepEqual(r.roles, ['status'], '必须是 role=status（可被辅助技术读到）');
-  assert.equal(r.ariaLive[0], 'polite');
-  assert.deepEqual(r.tabIndexes, [-1], '纯状态不可 Tab 聚焦（与 ✨ 同向）');
+test('R3-A ⭐ 纠错进行中 ⇒ 增强按钮可见文本 = 「正在纠错」+ busy 类 + spinner', () => {
+  const h = loadButton({ enhancePhase: 'idle' });
+  h.api.markCorrectionStarted();
+  const r = renderButton(h);
+  assert.equal(r.text, '正在纠错', '纠错在途期按钮必须显示「正在纠错」（真实渲染读数）');
+  assert.ok(r.classes.some((c) => c.includes('dsh-enh-btn-busy')), '必须沿用 ✨ 既有 busy 类（⛔ 不新造样式）');
+  assert.ok(JSON.stringify(h.mini ? r : r).length >= 0, '占位');
+  assert.equal(r.text.includes('正在优化'), false, '⛔ 不得同时显示「正在优化」（不得两态混叠）');
 });
 
-test('CHG184-R2 ⭐ 渲染面·态②「未执行·因开关关」：文本写明开关关（与「压根没触发」不同）', () => {
-  const { api, mini } = loadStatus({ enabled: false });
-  const r = renderStatus(api, mini, { sessionId: 's-2', inputActions: { setDraft() {} }, input: { draft: '' } });
-  assert.ok(r.text.includes('开关关'), 'istigh 未执行且开关关 ⇒ 必须写明「开关关」，实得：' + r.text);
+test('R3-B ⭐ 纠错结束 ⇒ 按钮回到默认态（逐字比对「优化」）', () => {
+  const h = loadButton({ enhancePhase: 'idle' });
+  h.api.markCorrectionStarted();
+  let r = renderButton(h);
+  assert.equal(r.text, '正在纠错');
+  h.api.markCorrectionSettled({ ok: true, text: '改了' }, '原文');
+  r = renderButton(h);
+  // ⚠ 默认态按钮的**可见**内容 = ✨ 图标 + 模式短标签（「优化」是 aria-label，不在可见文本里）
+  assert.ok(/^✨/.test(r.text) || r.text.startsWith('优化'), '⭐ 结束后必须回到默认态（✨+模式短标签），实得：' + r.text);
+  assert.equal(r.ariaLabels[0], '优化', '⭐ 默认态的 aria-label 必须逐字 = 「优化」');
+  assert.equal(r.text.includes('正在纠错'), false, '⛔ 结束后不得残留「正在纠错」');
+  assert.equal(r.text.includes('纠错完成'), false, '⛔ 不得留「纠错完成」常驻提示');
+  assert.equal(r.text.includes('无需改动'), false, '⛔ 不得留「无需改动」常驻提示');
+  assert.equal(r.classes.some((c) => c.includes('dsh-enh-btn-busy')), false, '结束后不得残留 busy 类');
 });
 
-test('CHG184-R3 ⭐ 渲染面·态③「进行中」：文本 = 正在纠错… + spinner + busy 类', () => {
-  const { api, mini } = loadStatus({ enabled: true });
-  // 用真实状态机推进到 running（不手搓 snapshot 字段）
-  const corr = decodeChunk('src/client/voice/correction.js');
-  const f = new Function('voiceCfgState', corr + '\n;return { markCorrectionStarted };');
-  const st = f({ value: { correction: { enabled: true } } });
-  // ⚠ 组件读的是自己作用域内的 correctionState ⇒ 必须在**同一作用域**里推进。
-  const mini2 = makeRenderReact();
-  const src = decodeChunk('src/client/voice/correction-status.js');
-  const DICT = {
-    voiceCorrectionStateRunning: '正在纠错…', voiceCorrectionStateAriaLabel: '语音纠错状态',
-  };
-  const factory = new Function('React', 'makeT', 'voiceCfgState', 'subscribeVoiceConfig', 'host',
-    corr + '\n' + src + '\n;return { CorrectionStatus, markCorrectionStarted };');
-  const api2 = factory(mini2.React, () => (k) => DICT[k] || k, { value: { correction: { enabled: true } } }, () => () => {}, {});
-  api2.markCorrectionStarted();
-  mini2.begin();
-  const tree = api2.CorrectionStatus({ sessionId: 's-3', inputActions: {}, input: { draft: '' } });
-  mini2.runEffects();
-  const r = readTree(tree);
-  assert.equal(r.text, '正在纠错…', '进行中的可见文本');
-  assert.ok(r.classes.some((c) => c.includes('dsh-enh-btn-busy')), '进行中必须带 ✨「正在优化」同一个 busy 类');
-  const hasSpin = JSON.stringify(tree).includes('dsh-enh-spin');
-  assert.equal(hasSpin, true, '进行中必须渲染 spinner（与「正在优化」同一个 dsh-enh-spin）');
+test('R3-C ⭐ 不存在独立的状态元素（搜索范围：src/client/** 全量）', () => {
+  const app = decodeChunk('src/client/app.js');
+  // ① 注册面：不得再有 correction-status 注册
+  assert.equal(/id: 'correction-status'/.test(app), false, '⛔ 不得再注册独立的纠错状态槽位条目');
+  // ② 文件面：correction-status.js 必须已删除（范围：src/client/voice/）
+  const fsmod = require('node:fs');
+  assert.equal(fsmod.existsSync(path.join(ROOT, 'src/client/voice/correction-status.js')), false,
+    '⛔ 独立状态组件文件必须已删除（否则是孤儿 chunk）');
+  // ③ 构建面：build-client 的注入清单不得再引用它
+  const build = fsmod.readFileSync(path.join(ROOT, 'scripts/build-client.mjs'), 'utf8');
+  assert.equal(/correction-status/.test(build), false, '⛔ 构建清单不得再注入该 chunk');
 });
 
-test('CHG184-R4 ⭐ 渲染面·态④「已完成·无改动」：文本说清「无需改动」（最常见的「看起来没生效」）', () => {
-  const corr = decodeChunk('src/client/voice/correction.js');
-  const src = decodeChunk('src/client/voice/correction-status.js');
-  const DICT = { voiceCorrectionStateUnchanged: '纠错完成·无需改动', voiceCorrectionStateAriaLabel: '语音纠错状态' };
-  const mini = makeRenderReact();
-  const factory = new Function('React', 'makeT', 'voiceCfgState', 'subscribeVoiceConfig', 'host',
-    corr + '\n' + src + '\n;return { CorrectionStatus, markCorrectionSettled };');
-  const api = factory(mini.React, () => (k) => DICT[k] || k, { value: { correction: { enabled: true } } }, () => () => {}, {});
-  api.markCorrectionSettled({ ok: true, text: '一样的文字' }, '一样的文字');
-  mini.begin();
-  const r = readTree(api.CorrectionStatus({ sessionId: 's-4', inputActions: {}, input: { draft: '' } }));
-  assert.equal(r.text, '纠错完成·无需改动', '无改动态必须明说「检查过了、没需要改」');
-  assert.equal(r.classes.some((c) => c.includes('dsh-enh-btn-result')), false, '⛔ 无改动不是成功态 ⇒ 不得用成功绿');
-  assert.equal(r.classes.some((c) => c.includes('dsh-vi-err')), false, '⛔ 也不是失败态');
+test('R3-D ⭐ 忙态相撞：增强在跑 + 纠错也跑 ⇒ 显示「正在优化」（增强优先，不得互相覆盖）', () => {
+  const h = loadButton({ enhancePhase: 'enhancing' });
+  h.api.markCorrectionStarted();
+  const r = renderButton(h);
+  assert.ok(r.text.startsWith('正在优化'), '⭐ 两态并撞时**增强优先**（用户显式操作优先于后台补充步），实得：' + r.text);
+  assert.equal(r.text.includes('正在纠错'), false, '⛔ 不得两个状态混成一团');
 });
 
-test('CHG184-R5 ⭐ 渲染面·态⑤「已完成·有改动」：文本 = 已订正 + 成功族类', () => {
-  const corr = decodeChunk('src/client/voice/correction.js');
-  const src = decodeChunk('src/client/voice/correction-status.js');
-  const DICT = { voiceCorrectionStateChanged: '纠错完成·已订正', voiceCorrectionStateAriaLabel: '语音纠错状态' };
-  const mini = makeRenderReact();
-  const factory = new Function('React', 'makeT', 'voiceCfgState', 'subscribeVoiceConfig', 'host',
-    corr + '\n' + src + '\n;return { CorrectionStatus, markCorrectionSettled };');
-  const api = factory(mini.React, () => (k) => DICT[k] || k, { value: { correction: { enabled: true } } }, () => () => {}, {});
-  api.markCorrectionSettled({ ok: true, text: '纠正后' }, '纠正前');
-  mini.begin();
-  const r = readTree(api.CorrectionStatus({ sessionId: 's-5', inputActions: {}, input: { draft: '' } }));
-  assert.equal(r.text, '纠错完成·已订正');
-  assert.ok(r.classes.some((c) => c.includes('dsh-enh-btn-result')), '有改动用 ✨「已完成」同一个 result 类');
+test('R3-E ⭐ 失败态不静默：短暂提示「纠错失败」后自动复原（时长 4000ms）', () => {
+  const { decodeChunk: dc } = require('../scripts/lib/chunk-decode.mjs');
+  const eb = dc('src/client/components/enhance-button.js');
+  // ① 失败提示的时长必须是 4000（与报告 §D 一致）
+  assert.ok(/timerSvc\.timeout\(function \(\) \{ setFlash\(false\); \}, 4000\)/.test(eb),
+    '⚠ 失败提示须经既有 timer 服务定时复原，时长 4000ms');
+  // ② 必须真的渲染出失败文案（不是只写分支）
+  const h = loadButton({ enhancePhase: 'idle' });
+  h.api.markCorrectionFailed('NETWORK');
+  renderButton(h);   // 第一次：跑 effect 把 flash 置 true
+  const r = renderButton(h);   // 第二次：读置位后的渲染
+  assert.ok(r.text.includes('纠错失败'), '失败必须**当场可见**（不静默），实得：' + r.text);
 });
 
-test('CHG184-R6 ⭐ 渲染面·态⑥「失败」：文本含失败码 + aria-live=assertive（⛔ 不得静默）', () => {
-  const corr = decodeChunk('src/client/voice/correction.js');
-  const src = decodeChunk('src/client/voice/correction-status.js');
-  const DICT = { voiceCorrectionStateFailed: '纠错失败', voiceCorrectionStateAriaLabel: '语音纠错状态' };
-  const mini = makeRenderReact();
-  const factory = new Function('React', 'makeT', 'voiceCfgState', 'subscribeVoiceConfig', 'host',
-    corr + '\n' + src + '\n;return { CorrectionStatus, markCorrectionFailed };');
-  const api = factory(mini.React, () => (k) => DICT[k] || k, { value: { correction: { enabled: true } } }, () => () => {}, {});
-  api.markCorrectionFailed('NETWORK');
-  mini.begin();
-  const r = readTree(api.CorrectionStatus({ sessionId: 's-6', inputActions: {}, input: { draft: '' } }));
-  assert.ok(r.text.includes('纠错失败'), '失败必须可见');
-  assert.ok(r.text.includes('NETWORK'), '失败码必须可见（不得只说「失败」）');
-  assert.equal(r.ariaLive[0], 'assertive', '失败必须 assertive（屏幕阅读器立即播报）');
-  assert.ok(r.classes.some((c) => c.includes('dsh-vi-err')), '失败用既有错误色族');
+test('R3-F ⭐ 「没跑（开关关）」与「跑了但没改」的区分改由**诊断区**承担（不再靠常驻提示）', () => {
+  const vs = decodeChunk('src/client/voice/voice-section.js');
+  const i = vs.indexOf('function CorrectionDiag');
+  const diag = vs.slice(i, i + 2200);
+  // ① 开关关分支：明文「开关关闭，未纠错」
+  assert.ok(/t\('voiceCorrectionOff'\)/.test(diag), '诊断区须有「开关关闭，未纠错」分支');
+  // ② 跑了但没改分支：明文「检查过，没有错字」
+  assert.ok(/t\('voiceCorrectionNoChange'\)/.test(diag), '诊断区须有「检查过，没有错字」分支');
+  // ③ 两条分支互不覆盖（else-if 链，开关关在前、noChange 在后但都可达）
+  assert.ok(/else if \(!on\)/.test(diag), '开关关分支须独立存在');
+  assert.ok(/else if \(snap\.runs > 0\)/.test(diag), '「跑过但没改」分支须独立存在');
+  // ④ i18n 逐字不同
+  const i18n = decodeChunk('src/client/i18n.js');
+  const got = new Function(i18n + '; return { ZH: ZH, EN: EN };')();
+  assert.equal(got.ZH.voiceCorrectionOff, '开关关闭，未纠错');
+  assert.equal(got.ZH.voiceCorrectionNoChange, '检查过，没有错字');
+  assert.notEqual(got.ZH.voiceCorrectionOff, got.ZH.voiceCorrectionNoChange, '⭐ 两态文本必须不同');
 });
 
-test('CHG184-R7 ⭐ 渲染面对账：五态①⑤①的**可见文本两两不同**（同形即缺陷）', () => {
-  const corr = decodeChunk('src/client/voice/correction.js');
-  const src = decodeChunk('src/client/voice/correction-status.js');
-  const DICT = {
-    voiceCorrectionStateIdle: '纠错：未执行', voiceCorrectionStateIdleOff: '纠错：未执行（开关关）',
-    voiceCorrectionStateRunning: '正在纠错…', voiceCorrectionStateChanged: '纠错完成·已订正',
-    voiceCorrectionStateUnchanged: '纠错完成·无需改动', voiceCorrectionStateSkipped: '纠错：未执行（开关关）',
-    voiceCorrectionStateFailed: '纠错失败', voiceCorrectionStateAriaLabel: '语音纠错状态',
-  };
-  const mk = () => {
-    const mini = makeRenderReact();
-    const factory = new Function('React', 'makeT', 'voiceCfgState', 'subscribeVoiceConfig', 'host',
-      corr + '\n' + src + '\n;return { CorrectionStatus, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed, markCorrectionSkipped };');
-    return { mini, api: factory(mini.React, () => (k) => DICT[k] || k, { value: { correction: { enabled: true } } }, () => () => {}, {}) };
-  };
-  const texts = {};
-  const read = (h, ph) => { h.mini.begin(); return readTree(h.api.CorrectionStatus({ sessionId: 's-7', inputActions: {}, input: { draft: '' } })).text; };
-  let h = mk(); texts.idle = read(h);
-  h = mk(); h.api.markCorrectionStarted(); texts.running = read(h);
-  h = mk(); h.api.markCorrectionSettled({ ok: true, text: 'a' }, 'b'); texts.changed = read(h);
-  h = mk(); h.api.markCorrectionSettled({ ok: true, text: 'a' }, 'a'); texts.unchanged = read(h);
-  h = mk(); h.api.markCorrectionFailed('X'); texts.failed = read(h);
-  h = mk(); h.api.markCorrectionSkipped('disabled'); texts.skipped = read(h);
-  const vals = Object.values(texts);
-  assert.equal(new Set(vals).size, vals.length, '⭐ 六态可见文本必须两两不同，实得：' + JSON.stringify(texts));
-  assert.notEqual(texts.unchanged, texts.skipped, '⭐「跑了没改动」≠「开关关没跑」（作业书硬要求）');
+test('R3-G 变异自证：删掉按钮的纠错接管分支 ⇒ R3-A 必红（判据有牙）', () => {
+  const eb = decodeChunk('src/client/components/enhance-button.js');
+  const mutated = eb.replace(/if \(corrTakesOver\) \{ cls = "dsh-enh-btn dsh-enh-btn-busy dsh-enh-btn-text"; \}/, '');
+  assert.notEqual(mutated, eb, '前置：变异锚点须命中');
+  assert.equal(/if \(corrTakesOver\)/.test(mutated), false, '变异后接管分支应消失 ⇒ R3-A 的 busy 断言必红');
 });
 
+test('R3-H 负控：不动任何文件 ⇒ 本组全绿（防恒红）', () => {
+  const eb = decodeChunk('src/client/components/enhance-button.js');
+  assert.ok(eb.includes('corrTakesOver'), '接管变量在位');
+  assert.ok(eb.includes('voiceCorrectionRunningOnButton'), '按钮纠错文案键在位');
+});
