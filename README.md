@@ -4,7 +4,7 @@ DeepSeek Harness（DSH）插件：**提示词优化** + **语音输入增强** �
 
 草稿常常只有半句要求，交给模型后还要来回补问——点一下 ✨ 就地改写，不满意可撤回；语音则直接说，停顿即停，结果落回输入框。
 
-[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases) [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases) [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![DSH](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FFishsb%2Fdsh-prompt-enhancer%2Fmain%2Fpackage.json&query=%24.peerDependencies%5B%27%40deepseek-ai%2Fdsh-client-locale%27%5D&label=DSH&color=blue)](docs/compatibility-matrix.md)
 
 ## 安装
 

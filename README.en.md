@@ -4,7 +4,7 @@ A DeepSeek Harness (DSH) plugin: **prompt optimization** + **voice input enhance
 
 A draft is often half a requirement, so the model asks again — click ✨ and it is rewritten in place, undoable. With voice, just speak; it stops on a pause and the transcript lands back in the composer.
 
-[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases) [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases) [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![DSH](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FFishsb%2Fdsh-prompt-enhancer%2Fmain%2Fpackage.json&query=%24.peerDependencies%5B%27%40deepseek-ai%2Fdsh-client-locale%27%5D&label=DSH&color=blue)](docs/compatibility-matrix.md)
 
 ## Install
 
