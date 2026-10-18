@@ -203,7 +203,18 @@ async function codeOf(rel) {
   return codeOnly(decodeChunk(rel));
 }
 
-// ───────── 锁 A：语音设置必须在 tab 层（与「模型配置」「优化参数」同层）─────────
+// ───────── 锁 A（2026-10-19 已反向）：语音块必须在「模型配置」tab 内、与模型卡片同级 ─────────
+//
+// ⚠ 本锁的方向**在这一批被反转**（原方向见 0deffcc：那时断言「语音必须在 tab 层」）。
+//   反转原因：用户在 2026-10-19 推翻了 CHG-202 的 tab 方案，原话逐字——
+//     「模型配置和语音输入不用分两个 tab 进入，还是之前的一样在一个 tab 界面」。
+//   ⇒ 正解是**同一 tab 内的两个平级板块**（不是页签平级，也不是嵌在对方卡片里）。
+//   ⇒ 锁的判据随之变成三条：①语音块在「模型配置」tab 之内；②它与模型配置卡片是**同级兄弟**；
+//     ③它**不得**再作为独立 tab 出现。两条错误方向（嵌进去 / 提成 tab）都必须被挡住。
+//
+// ⚠ 判据范围（否定性断言的**范围**必须写明）：只判 src/client/components/** 与 src/client/voice/**
+//   这些 client chunk 的**代码面**（已剥注释）；⛔ 不判产物字节、⛔ 不判运行期 DOM 层级。
+//   运行期层级的读数由 scripts/settings-layout-audit.mjs 的 geom 快照另测（见本批报告 §④）。
 
 /** 页内 tab 表的解析结果：{ block, entries:[{key,labelKey}] }；解析不出返回 null（fail-closed）。 */
 function parseTabTable(pluginsCode) {
@@ -220,54 +231,83 @@ function parseTabTable(pluginsCode) {
   return { block: block, entries: entries };
 }
 
-/** tab 正文分派：voice / models / params 三支各自渲染哪个组件（解析不出为 null）。 */
+/** tab 正文分派：models / params 两支各自渲染哪个组件（解析不出为 null）。
+ *  ⚠ 2026-10-19：voice 支**已按用户要求删除** ⇒ 本解析器不再有 voice 字段（有它即等于语音又成了 tab）。 */
 function parseTabBodyDispatch(pluginsCode) {
   const pick = (re) => { const m = pluginsCode.match(re); return m ? m[1] : null; };
   return {
-    voice: pick(/tab === 'voice'\s*\?\s*React\.createElement\((VoiceSection)\b/),
     models: pick(/tab === 'models'\s*\?\s*React\.createElement\((ModelConfigTab)\b/),
     params: pick(/:\s*React\.createElement\((ParamsTab)\b/),
   };
 }
 
-test('GEOLOCK-A1 「语音输入」必须是**页内 tab 表**里的一项（与模型配置/优化参数同一处定义）', async () => {
+/** ⭐ 模型配置 tab 正文的**顶层子项**序列（只取 return 里 React.Fragment 的直接子项）。
+ *  用途：判「语音块与模型卡片是否同级兄弟」——即两者都是同一个 Fragment 的直接子项、
+ *  且顺序上「语音」紧跟在「模型配置」之后（同级、无包裹）。
+ *  解析不出返回 null（fail-closed）。 */
+function parseCfgTabTopLevel(cfgCode) {
+  const head = 'return React.createElement(React.Fragment, null,';
+  const i = cfgCode.indexOf(head);
+  if (i < 0) return null;
+  const j = cfgCode.indexOf('\n  );', i);
+  if (j < 0) return null;
+  const body = cfgCode.slice(i + head.length, j);
+  // 顶层子项 = 行首（两/四个空格缩进后）以 React.createElement(...) 开头的调用
+  const rows = [];
+  const re = /^\s*React\.createElement\((\w+)/gm;
+  let m;
+  while ((m = re.exec(body)) !== null) rows.push(m[1]);
+  return rows;
+}
+
+test('GEOLOCK-A1 页内 tab 表只能是 models / params 两项（⛔ 语音不得再是 tab）', async () => {
   const plugins = await codeOf('src/client/components/model-plugins-section.js');
   const tabTable = parseTabTable(plugins);
   assert.ok(tabTable, '前置：须能定位页内 tab 表 const tabs = [...]');
   const keys = tabTable.entries.map((e) => e.key);
-  // ① 三项**同一处定义**且都在：语音不是另起一行 tab，也不是别处的第二套 tab 条
-  assert.deepEqual(keys, ['models', 'voice', 'params'],
-    '页内 tab 表须逐项为 models / voice / params（语音与另两个同层）；实得 ' + JSON.stringify(keys));
-  // ② 语音项的标签键必须是 tabVoice
-  const voice = tabTable.entries.find((e) => e.key === 'voice');
-  assert.equal(voice.labelKey, 'tabVoice', '语音 tab 的标签键须是 tabVoice；实得 ' + voice.labelKey);
-  // ③ 表里不得出现第四项（出现即意味着又加了 tab，需本锁同步评估）
-  assert.equal(tabTable.entries.length, 3, '页内 tab 表须恰为 3 项；实得 ' + tabTable.entries.length);
+  // ① 只剩两个 tab（用户 2026-10-19 推翻三 tab 方案）
+  assert.deepEqual(keys, ['models', 'params'],
+    '⭐ 页内 tab 表须恰为 models / params 两项（语音不再单独占一个 tab）；实得 ' + JSON.stringify(keys));
+  // ② ⛔ 语音绝不能再作为 tab 出现（这是本锁要挡的第一个错误方向）
+  assert.equal(keys.indexOf('voice'), -1,
+    '⛔ 语音不得再作为一个 tab（用户原话「不用分两个 tab 进入」）；实得 ' + JSON.stringify(keys));
+  // ③ 表里不得出现第三项
+  assert.equal(tabTable.entries.length, 2, '页内 tab 表须恰为 2 项；实得 ' + tabTable.entries.length);
 });
 
-test('GEOLOCK-A2 tab 正文分派：voice 分支必须渲染 VoiceSection（且另两支各就位）', async () => {
+test('GEOLOCK-A2 tab 正文分派只剩 models / params 两支（⛔ 无 voice 分支）', async () => {
   const plugins = await codeOf('src/client/components/model-plugins-section.js');
   const dispatch = parseTabBodyDispatch(plugins);
-  assert.equal(dispatch.voice, 'VoiceSection', "⛔ tab === 'voice' 分支须渲染 VoiceSection（语音 tab 的正文）");
   assert.equal(dispatch.models, 'ModelConfigTab', 'models 分支须渲染 ModelConfigTab');
   assert.equal(dispatch.params, 'ParamsTab', 'params 分支须渲染 ParamsTab');
-  // ⚠ 分派必须由**同一个 tab 状态**驱动（三支是同一个三元链）—— 防「另起一套条件渲染」的假平级
-  assert.ok(/const body = tab === 'voice'\s*\?\s*React\.createElement\(VoiceSection, props\)\s*:\s*tab === 'models'/.test(plugins),
-    '三支须是同一条 const body = tab === … 三元链（同一处 tab 状态）');
+  // ⛔ 不得存在 voice 分支（它一旦回来，语音就又是一个 tab）
+  assert.equal(/tab === 'voice'/.test(plugins), false,
+    "⛔ 正文分派里不得再出现 tab === 'voice' 分支（语音已回到「模型配置」tab 内）");
+  assert.equal(/<VoiceSection\b|createElement\(VoiceSection\b/.test(plugins), false,
+    '⛔ ModelPluginsSection 不得直接挂 VoiceSection（那是「语音=tab」形态的残留）');
 });
 
-test('GEOLOCK-A3 ⛔ 语音**不得**是「模型配置」tab 正文里的卡片（历史回退形态）', async () => {
+test('GEOLOCK-A3 ⭐ 语音块必须在「模型配置」tab 之内，且与模型配置卡片是同级兄弟', async () => {
   const cfgTab = await codeOf('src/client/components/model-config-tab.js');
-  // ⚠ 必须判**剥注释后的代码**：该文件注释里仍写着「VoiceSection 已从本 tab 移出」的病史，
-  //   裸 grep 会被那段注释命中 ⇒ 假红（本仓已实测过"全文 grep 命中注释"这类假阳性）。
-  assert.equal(/VoiceSection/.test(cfgTab), false,
-    '⛔ ModelConfigTab 的**代码**里不得出现 VoiceSection —— 它就是本批之前的历史形态'
-    + '（语音是「模型配置」正文第 2 张卡片 ⇒ 切到「优化参数」时整块消失，且被 tab 名罩住 = 从属）');
-  // 正面钉住正文里那张卡片是谁
-  assert.ok(/React\.createElement\(ModelMainSection,/.test(cfgTab), '前置：ModelConfigTab 正文须仍含 ModelMainSection');
+  // ① 语音块**在里面**（正文顶层挂一个 VoiceSection）
+  assert.ok(/React\.createElement\(VoiceSection\b/.test(cfgTab),
+    '⭐ ModelConfigTab 的代码里必须挂 VoiceSection（语音块回到「模型配置」tab 内）');
+  // ② 与模型配置卡片**同一父级、同一层级**：两者都是 return 的 React.Fragment 直接子项
+  const top = parseCfgTabTopLevel(cfgTab);
+  assert.ok(top, '前置：须能定位 ModelConfigTab 的 return React.createElement(React.Fragment, null, …) 块');
+  assert.ok(top.indexOf('ModelMainSection') >= 0, '前置：顶层子项须含 ModelMainSection；实得 ' + JSON.stringify(top));
+  assert.ok(top.indexOf('VoiceSection') >= 0, '⭐ 顶层子项须含 VoiceSection（同级兄弟）；实得 ' + JSON.stringify(top));
+  // ③ 同级 = 两者都是**顶层直接子项**（不是其中一个被塞进另一个的 props.children）
+  const iModel = top.indexOf('ModelMainSection');
+  const iVoice = top.indexOf('VoiceSection');
+  assert.notEqual(iModel, -1, '前置：ModelMainSection 在顶层');
+  assert.notEqual(iVoice, -1, 'VoiceSection 在顶层');
+  // ④ 语音**紧跟**在模型配置之后（这一对就是「两块并列」的结构表达）
+  assert.equal(iVoice, iModel + 1,
+    '⭐ VoiceSection 须紧接 ModelMainSection 之后（两块平级并列、中间不得夹入别的层级）；实得序列 ' + JSON.stringify(top));
 });
 
-test('GEOLOCK-A4 VoiceSection 全 client chunk 只挂载**一处**，且该处就是 tab 分派', async () => {
+test('GEOLOCK-A4 VoiceSection 全 client chunk 只挂载**一处**，且该处就是「模型配置」tab 正文', async () => {
   const { listChunkFiles } = require('../scripts/lib/chunk-decode.mjs');
   const { codeOnly } = await import('../scripts/lib/code-only.mjs');
   const clients = listChunkFiles(ROOT).filter((f) => f.indexOf('src/client/') === 0);
@@ -278,58 +318,70 @@ test('GEOLOCK-A4 VoiceSection 全 client chunk 只挂载**一处**，且该处�
     const n = (code.match(/React\.createElement\(VoiceSection\b/g) || []).length;
     if (n > 0) sites.push(rel + ' x' + n);
   }
-  // 唯一挂载点 = tab 分派 ⇒ 换个地方塞一张卡片会立刻变红（不只是"模型配置"那一处）
-  assert.deepEqual(sites, ['src/client/components/model-plugins-section.js x1'],
-    'VoiceSection 须**只在** tab 分派处挂载一次；实得 ' + JSON.stringify(sites));
+  // 唯一挂载点 = 「模型配置」tab 正文（多一处或换一处都立刻变红）
+  assert.deepEqual(sites, ['src/client/components/model-config-tab.js x1'],
+    'VoiceSection 须**只在** ModelConfigTab 正文挂载一次；实得 ' + JSON.stringify(sites));
 });
 
-test('GEOLOCK-A5 三个 tab 标签都在 i18n 两侧，且「语音输入」是语音 tab 的中文标签', () => {
+test('GEOLOCK-A5 语音块标题 = 「语音增强」（中英各一），且两个 tab 标签均在 i18n 两侧', () => {
   const i18n = decodeChunk('src/client/i18n.js');
   const dict = new Function(i18n + '\n;return { ZH: ZH, EN: EN };')();
   assert.equal(typeof dict.ZH, 'object', '前置：ZH 字典须可求值');
   assert.equal(typeof dict.EN, 'object', '前置：EN 字典须可求值');
-  // ① 三个 tab 的标签键在两侧都存在（缺一个 ⇒ 该 tab 渲染成 undefined）
-  for (const k of ['tabModels', 'tabVoice', 'tabParams']) {
+  // ① 两个 tab 的标签键在两侧都存在
+  for (const k of ['tabModels', 'tabParams']) {
     assert.equal(typeof dict.ZH[k], 'string', 'ZH 缺 tab 标签键 ' + k);
     assert.equal(typeof dict.EN[k], 'string', 'EN 缺 tab 标签键 ' + k);
   }
-  // ②「语音输入」这四个字就是标签本身（用户原话 CHG-188 / CHG-202 的落点）
-  assert.equal(dict.ZH.tabVoice, '语音输入', 'ZH 的 tabVoice 须逐字为「语音输入」；实得 ' + dict.ZH.tabVoice);
-  // ③ 三个标签互不相同（都叫一个名 = 用户仍分不出层次）
-  const zh = ['tabModels', 'tabVoice', 'tabParams'].map((k) => dict.ZH[k]);
-  assert.equal(new Set(zh).size, 3, '三个 tab 中文标签须互不相同；实得 ' + JSON.stringify(zh));
+  // ② ⭐ 块标题已改名：语音输入 → 语音增强（用户本轮要求）
+  assert.equal(dict.ZH.voiceSectionTitle, '语音增强',
+    '⭐ ZH 的 voiceSectionTitle 须为「语音增强」；实得 ' + JSON.stringify(dict.ZH.voiceSectionTitle));
+  assert.equal(dict.EN.voiceSectionTitle, 'Voice Enhancement',
+    '⭐ EN 的 voiceSectionTitle 须为「Voice Enhancement」；实得 ' + JSON.stringify(dict.EN.voiceSectionTitle));
+  // ③ 页面标题 = 「提示词 · 语音增强」（⛔ 无任何前置符号）
+  assert.equal(dict.ZH.navModelPlugins, '提示词 · 语音增强',
+    '⭐ ZH 的 navModelPlugins 须为「提示词 · 语音增强」；实得 ' + JSON.stringify(dict.ZH.navModelPlugins));
+  assert.equal(/^[\u4e00-\u9fa5]/.test(dict.ZH.navModelPlugins), true,
+    '⛔ 页面标题不得以任何符号/emoji 开头（须以中文起头）；实得 ' + JSON.stringify(dict.ZH.navModelPlugins));
+  // ④ 两个 tab 标签互不相同
+  const zh = ['tabModels', 'tabParams'].map((k) => dict.ZH[k]);
+  assert.equal(new Set(zh).size, 2, '两个 tab 中文标签须互不相同；实得 ' + JSON.stringify(zh));
 });
 
-test('GEOLOCK-A-V 变异自证：语音退回「模型配置」正文卡片 ⇒ A3/A4 必红（锁 A 有牙）+ 负控', async () => {
+test('GEOLOCK-A-V 变异自证：两个错误方向各自打红（嵌回卡片内 / 改回独立 tab）+ 负控', async () => {
   const plugins = await codeOf('src/client/components/model-plugins-section.js');
   const cfgTab = await codeOf('src/client/components/model-config-tab.js');
 
-  // ⭐ 变异①（= 本批之前的**历史形态**：语音作为「模型配置」正文的第 2 张卡片）：
-  //   在 ModelMainSection 之后（正文渲染块内）再挂一个 VoiceSection。
-  const mutatedCfg = cfgTab.replace(
-    /saveFallback: saveFallback \}\)/,
-    'saveFallback: saveFallback }),\n    React.createElement(VoiceSection, { t: t })');
-  assert.notEqual(mutatedCfg, cfgTab, '前置：变异①锚点须命中（正文渲染块的 ModelMainSection 调用）');
-  assert.equal(/VoiceSection/.test(mutatedCfg), true, '前置：变异①后代码里应重新出现 VoiceSection');
-  // ⇒ A3 的断言（代码面零 VoiceSection）必红
-  assert.equal(!/VoiceSection/.test(mutatedCfg), false, '变异①后 GEOLOCK-A3 必红（语音又成了 tab 正文里的卡片）');
-  // ⇒ A4 的断言（全 client 只一处挂载）也必红：把它算进「挂载点集合」里
-  const sitesOf = (code) => (code.match(/React\.createElement\(VoiceSection\b/g) || []).length;
-  const mutatedSites = [['model-plugins-section', sitesOf(plugins)], ['model-config-tab', sitesOf(mutatedCfg)]]
-    .filter((x) => x[1] > 0).map((x) => x[0]);
-  assert.deepEqual(mutatedSites, ['model-plugins-section', 'model-config-tab'],
-    '变异①后挂载点变成 2 处 ⇒ GEOLOCK-A4 必红');
+  // ⭐ 方向①：把语音**嵌进模型配置卡片内部**（= 退回从属；本轮之前的错误方向之一）
+  //   做法：不再作为顶层子项，而是塞进 ModelMainSection 的 props 里（当成它的孩子）。
+  const nested = cfgTab.replace(
+    'React.createElement(VoiceSection, { t: t }),',
+    'React.createElement(ModelMainSection, { t: t, children: React.createElement(VoiceSection, { t: t }) }),');
+  assert.notEqual(nested, cfgTab, '前置：方向①锚点须命中（顶层 VoiceSection 那一行）');
+  const topNested = parseCfgTabTopLevel(nested);
+  // ⇒ A3 的「语音是顶层子项」必红
+  assert.equal(topNested.indexOf('VoiceSection') >= 0, false,
+    '方向①后 GEOLOCK-A3 必红（语音不再是顶层同级兄弟，已被嵌进模型卡片）');
+  assert.equal(topNested.indexOf('ModelMainSection') >= 0, true, '方向①后 ModelMainSection 仍应在顶层');
 
-  // ⭐ 变异②：把 voice 从 tab 表里摘掉 ⇒ A1 必红
-  const mutatedTab = plugins.replace("['voice', t('tabVoice')],", '');
-  assert.notEqual(mutatedTab, plugins, '前置：变异②锚点须命中（tab 表里的语音项）');
-  const t2 = parseTabTable(mutatedTab);
-  assert.ok(t2, '前置：变异②后仍须能定位 tab 表');
-  assert.deepEqual(t2.entries.map((e) => e.key), ['models', 'params'], '变异②后 A1 必红（语音不再是一个 tab）');
+  // ⭐ 方向②：把语音**改回独立 tab**（= 本批正在纠正的那个过度方案）
+  const asTab = plugins
+    .replace("    ['params', t('tabParams')],", "    ['voice', t('tabVoice')],\n    ['params', t('tabParams')],")
+    .replace("const body = tab === 'models'", "const body = tab === 'voice' ? React.createElement(VoiceSection, props)\n    : tab === 'models'");
+  assert.notEqual(asTab, plugins, '前置：方向②锚点须命中（tab 表末项 + 正文分派首支）');
+  const t2 = parseTabTable(asTab);
+  // ⇒ A1 的「tab 只有两项、且无 voice」必红
+  assert.deepEqual(t2.entries.map((e) => e.key), ['models', 'voice', 'params'],
+    '方向②后 A1 必红（语音又成了一个 tab）');
+  assert.notEqual(t2.entries.map((e) => e.key).indexOf('voice'), -1, '方向②后 A1 的「无 voice」腿必红');
+  // ⇒ A2 的「无 voice 分支」也必红
+  assert.equal(/tab === 'voice'/.test(asTab), true, '方向②后 A2（无 voice 分支）必红');
 
-  // 负控：不动任何文件 ⇒ 上述假设在**原文件**上均成立（防"恒红"）
-  assert.equal(/VoiceSection/.test(cfgTab), false, '负控：原文件代码面确无 VoiceSection');
-  assert.deepEqual(parseTabTable(plugins).entries.map((e) => e.key), ['models', 'voice', 'params'], '负控：tab 表三项在位');
+  // 负控：不动任何文件 ⇒ 上述断言在**原文件**上均成立（防「恒红」）
+  assert.ok(/React\.createElement\(VoiceSection\b/.test(cfgTab), '负控：原文件确实挂载 VoiceSection');
+  assert.deepEqual(parseTabTable(plugins).entries.map((e) => e.key), ['models', 'params'], '负控：tab 表恰两项');
+  assert.deepEqual(parseCfgTabTopLevel(cfgTab).filter((x) => x === 'ModelMainSection' || x === 'VoiceSection'),
+    ['ModelMainSection', 'VoiceSection'], '负控：两块为同级兄弟且语音在后');
 });
 
 // ───────── 锁 B：模型行固定宽合计 ≤ 真机可用宽 ─────────
