@@ -187,6 +187,10 @@ function browserDriver() {
   function measureScenario(scn, overrides) {
     var root = document.getElementById('root');
     root.innerHTML = '';
+    // 2026-10-18（R2 · 判据 A 的多宽度要求）：装置须能在**指定 row1 宽**下量测。
+    //   row1 = root - 30（真机实测恒定偏移：宿主 padding 链 root 564 → row1 534）。
+    //   ⚠ 只在装置里设 #root 宽，不改任何插件规则；row1 实测宽另行记账（见 out.row1W）。
+    if (P.row1W) { root.style.width = (P.row1W + 30) + 'px'; } else { root.style.width = ''; }
     var rt = buildRuntime(scn, overrides);
     // 按场景选 tab：'params' / 'models' ⇒ 直接渲染该 tab 的真实组件；
     // （tab 状态由真实组件持有，而 shim 的 useState 只取初值 ⇒ 不伪造 UI 状态，直接进组件面）
@@ -210,7 +214,13 @@ function browserDriver() {
     var ROW_SEL = '.dsh-plg-row, .dsh-plg-row-duo, .dsh-plg-field, .dsh-cfg-sec-head, .dsh-plg-testarea-head, .dsh-vi-section > div, .dsh-plg-col';
     var rows = [].slice.call(root.querySelectorAll(ROW_SEL));
     var seen = [];
-    var out = { id: scn.id, rows: [], texts: [], rootOverflow: null, visibleText: '' };
+    var sec = root.querySelector('.dsh-vi-section');
+    var row1El = sec ? sec.children[0] : null;
+    var r1 = row1El ? row1El.getBoundingClientRect() : null;
+    var out = { id: scn.id, rows: [], texts: [], rootOverflow: null, visibleText: '',
+      row1W: r1 ? Math.round(r1.width * 100) / 100 : null,
+      row1H: r1 ? Math.round(r1.height * 100) / 100 : null,
+      rootW: Math.round(root.getBoundingClientRect().width * 100) / 100 };
     rows.forEach(function (row, idx) {
       if (seen.indexOf(row) !== -1) return;
       seen.push(row);
@@ -226,6 +236,9 @@ function browserDriver() {
           // 下限读数（"任何文案长度下都不会窄于它"的判据基元）
           minW: isFinite(mw) ? Math.round(mw * 100) / 100 : 0,
           flex: cc.flex,
+          // 2026-10-18（R2 装置缺陷修复）：边界读数——装置未注入宿主 token 时 border 整条失效
+          //   （computed 为 0px / none），这正是「读数比真机少 2px」的成因 => 必须可读、可前后对照。
+          borderW: cc.borderTopWidth, borderStyle: cc.borderTopStyle, borderColor: cc.borderTopColor,
         };
       });
       var texts = [].slice.call(row.querySelectorAll('span, label, p, button, h2, h3, li, div')).filter(function (e) {
@@ -254,6 +267,62 @@ function browserDriver() {
       });
       texts.forEach(function (x) { out.texts.push(Object.assign({ row: idx }, x)); });
     });
+    // ── 全量几何快照（2026-10-18 R2：判据 E 要求逐项可对比，含静音行）──
+    //   只读数、不判定；每项给 x/y/w/h 与中心 y（cy）。
+    function box(el) {
+      if (!el) return null;
+      var r = el.getBoundingClientRect();
+      var cs2 = getComputedStyle(el);
+      return {
+        x: Math.round(r.x * 100) / 100, y: Math.round(r.y * 100) / 100,
+        w: Math.round(r.width * 100) / 100, h: Math.round(r.height * 100) / 100,
+        cy: Math.round((r.y + r.height / 2) * 100) / 100,
+        borderW: cs2.borderTopWidth, borderStyle: cs2.borderTopStyle, borderColor: cs2.borderTopColor,
+        pad: cs2.padding, minW: cs2.minWidth, flex: cs2.flex,
+      };
+    }
+    var geom = { row1: box(row1El) };
+    if (row1El) {
+      var kids = [].slice.call(row1El.children);
+      geom.chips = [].slice.call(row1El.querySelectorAll('button.dsh-plg-tgl')).map(function (c, i) { return { idx: i, text: String(c.textContent || '').slice(0, 24), cls: String(c.className || ''), box: box(c) }; });
+      var hot = kids.length ? kids[kids.length - 1] : null;
+      // 2026-10-18（R2 · 判据 B）：输入框**可读性**原始读数——显示值 / scW / clW / title。
+      //   判据：scrollWidth <= clientWidth + 1 ⇒ 当前串**完整可见**；否则必须靠 title/悬停看全。
+      if (hot && hot.children.length >= 2) {
+        var inpEl = hot.children[1];
+        var inpCS = getComputedStyle(inpEl);
+        geom.inputRead = {
+          value: String(inpEl.value || ''),
+          title: inpEl.getAttribute('title') || '',
+          aria: inpEl.getAttribute('aria-label') || '',
+          scrollW: inpEl.scrollWidth, clientW: inpEl.clientWidth,
+          contentW: Math.round((inpEl.getBoundingClientRect().width - parseFloat(inpCS.paddingLeft) * 2 - parseFloat(inpCS.borderLeftWidth) * 2) * 100) / 100,
+          fullyVisible: inpEl.scrollWidth <= inpEl.clientWidth + 1,
+        };
+      }
+      geom.hotCol = box(hot);
+      if (hot && hot.children.length >= 3) {
+        geom.hotLabel = box(hot.children[0]);
+        geom.hotInput = box(hot.children[1]);
+        geom.hotClear = box(hot.children[2]);
+        geom.hotKids = [].slice.call(hot.children).map(function (c) { return { tag: c.tagName.toLowerCase(), cls: String(c.className || ''), text: String(c.textContent || '').slice(0, 24), title: c.getAttribute('title') || '', aria: c.getAttribute('aria-label') || '', box: box(c) }; });
+      }
+      geom.row1Kids = kids.map(function (c) { return { tag: c.tagName.toLowerCase(), cls: String(c.className || ''), box: box(c) }; });
+    }
+    if (sec) {
+      geom.sectionKids = [].slice.call(sec.children).map(function (c) { return { tag: c.tagName.toLowerCase(), cls: String(c.className || ''), box: box(c) }; });
+      var sil = sec.querySelector('.dsh-vi-silence-row');
+      geom.silenceRow = box(sil);
+      if (sil) {
+        geom.silenceChip = box(sil.querySelector('button.dsh-plg-tgl'));
+        geom.slider = box(sil.querySelector('.dsh-vi-slider'));
+        geom.readout = box(sil.querySelector('.dsh-plg-muted'));
+        geom.silenceKids = [].slice.call(sil.children).map(function (c) { return { tag: c.tagName.toLowerCase(), cls: String(c.className || ''), box: box(c) }; });
+      }
+    }
+    geom.cards = [].slice.call(root.querySelectorAll('.dsh-cfg-sec')).map(function (c, i) { return { idx: i, w: Math.round(c.getBoundingClientRect().width * 100) / 100, box: box(c) }; });
+    geom.root = box(root);
+    out.geom = geom;
     out.rootOverflow = { scrollW: root.scrollWidth, clientW: root.clientWidth };
     out.visibleText = String(root.innerText || '').replace(/\s+/g, ' ');
     return out;

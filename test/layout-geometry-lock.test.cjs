@@ -73,7 +73,7 @@ test('GEOLOCK-03 热键子行 = flex 项 + flexWrap wrap（内层可折行，但
 
 test('GEOLOCK-04 热键输入框 = border-box（⭐ 本批修复点：这 2px 决定它折不折行）', () => {
   const s = voiceSrc();
-  const inp = s.match(/style: \{ flex: '1 1 0', minWidth: '120px'([^}]*) \},/);
+  const inp = s.match(/style: \{ flex: '1 1 0', minWidth: '96px'([^}]*) \},/);
   assert.ok(inp, '前置：须能定位热键输入框 style');
   // ⭐ 本批根因：输入框 min-width:120px 是**内容宽**（content-box）⇒ 实际最小占位 120+2*padding。
   //   子行最小内容宽 = 72(label) + (120+padding) + 92(清除) + 2*8(gap) > 列宽 322 ⇒ 折行 2px。
@@ -108,9 +108,9 @@ test('GEOLOCK-06 两块卡片 = 同款边界（并列层级不得回退成"从�
 
 test('GEOLOCK-07 变异自证：把输入框的 box-sizing 去掉 ⇒ GEOLOCK-04 必红（本锁有牙）', () => {
   const s = voiceSrc();
-  const mutated = s.replace("style: { flex: '1 1 0', minWidth: '120px', boxSizing: 'border-box' }", "style: { flex: '1 1 0', minWidth: '120px' }");
+  const mutated = s.replace("style: { flex: '1 1 0', minWidth: '96px', boxSizing: 'border-box' }", "style: { flex: '1 1 0', minWidth: '96px' }");
   assert.notEqual(mutated, s, '前置：变异锚点须命中');
-  const inp = mutated.match(/style: \{ flex: '1 1 0', minWidth: '120px'([^}]*) \},/);
+  const inp = mutated.match(/style: \{ flex: '1 1 0', minWidth: '96px'([^}]*) \},/);
   assert.ok(inp, '前置：变异后仍须能定位');
   assert.equal(/boxSizing: 'border-box'/.test(inp[1]), false, '变异后应无 box-sizing ⇒ GEOLOCK-04 的断言必红');
 });
@@ -121,4 +121,58 @@ test('GEOLOCK-08 负控：不动任何文件 ⇒ 本锁全绿（防"恒红"）',
   assert.ok(/const ToggleChip = \(p\) =>/.test(s), 'ToggleChip 在位');
   const st = styleSrc();
   assert.ok(st.length > 1000, 'styles 可读');
+});
+
+// ───────── 2026-10-18（R2 · 热键列收窄批）新增回归锁 ─────────
+// 背景：用户裁定 A 方案（P1 收窄热键列内容）⇒ 本批只改两处：
+//   ① 清除按钮⇒图标按钮（必须保留 title + aria-label）；
+//   ② 热键 label⇒极短标记（必须保留 title + aria-label）。
+// 这四条锁就是那两处不得回退的机载判据（GEOLOCK-09..12）+ 变异自证与负控。
+//   ⚠ 为何锁“可发现性”：图标化最大风险不是宽度，而是用户看不懂那个图标是什么——
+//     = 图标化后必须仍能通过悬停/读屏器得知语义。
+
+
+test('GEOLOCK-09 清除按钮 = 图标按钮且 title/aria-label 保留（R2 第 1 处）', () => {
+  const s = voiceSrc();
+  const m = s.match(/className: 'dsh-plg-btn dsh-plg-btn-icononly', title: t\('voiceHotkeyClear'\), 'aria-label': t\('voiceHotkeyClear'\), onClick: clearHotkey \}/);
+  assert.ok(m, '清除按钮须是图标按钮（dsh-plg-btn-icononly）且同时带 title + aria-label（不得变成不可发现）');
+  assert.equal(/style: \{ width: '92px', whiteSpace: 'nowrap' \}/.test(s), false, '⛔ 不得回到 92px 文本按钮（那会把本列内容下限抬回 300+）');
+});
+
+test('GEOLOCK-10 热键 label = 极短标记且 title/aria-label 保留（R2 第 2 处）', () => {
+  const s = voiceSrc();
+  const m = s.match(/React\.createElement\('label', \{ className: 'dsh-plg-label', style: \{ width: 'auto', minWidth: '0' \}, title: t\('voiceHotkeyCombo'\), 'aria-label': t\('voiceHotkeyCombo'\) \}/);
+  assert.ok(m, 'label 须确为极短标记且带 title + aria-label（原文案不丢）');
+  assert.equal(/style: \{ width: '72px', minWidth: '72px' \} \}, t\('voiceHotkeyCombo'\)/.test(s), false, '⛔ 不得回到 72px 文字 label');
+  // 负控范围声明：本条只判热键列内那一个 label，不判全仓其余 label
+  assert.equal(s.split("className: 'dsh-plg-label'").length - 1 >= 1, true, '其余处的 dsh-plg-label 不受本条约束（判据范围 = 热键列）');
+});
+
+test('GEOLOCK-11 热键列内容下限与输入框下限（R2 算术必然）', () => {
+  const s = voiceSrc();
+  assert.ok(/className: 'dsh-plg-row', style: \{ flex: '1 1 160px', minWidth: '160px', flexWrap: 'wrap' \} \},/.test(s),
+    '热键列 min-width 须随两处改动下移到 160px（旧 320px 会让本列必然整块折行）');
+  const inp = s.match(/style: \{ flex: '1 1 0', minWidth: '(\d+)px', boxSizing: 'border-box' \},/);
+  assert.ok(inp, '前置：须能定位热键输入框 style');
+  assert.equal(inp[1], '96', '输入框 min-width 须为 96px（含内边距的占位：96-24-2=70px 内容宽），实得 ' + inp[1]);
+  assert.ok(/boxSizing: 'border-box'/.test(inp[0]), '⛔ 不得丢掉 box-sizing:border-box（GEOLOCK-04 的成果）');
+});
+
+test('GEOLOCK-12 变异自证 + 负控（R2 锁有牙）', () => {
+  const s = voiceSrc();
+  // 变异①：清除按钮退回 92px 文本形态 ⇒ GEOLOCK-09 必红
+  const m1 = s.replace(
+    "className: 'dsh-plg-btn dsh-plg-btn-icononly', title: t('voiceHotkeyClear'), 'aria-label': t('voiceHotkeyClear'), onClick: clearHotkey }",
+    "className: 'dsh-plg-btn', style: { width: '92px', whiteSpace: 'nowrap' }, onClick: clearHotkey }");
+  assert.notEqual(m1, s, '前置：变异①锚点须命中');
+  assert.equal(/className: 'dsh-plg-btn dsh-plg-btn-icononly', title: t\('voiceHotkeyClear'\)/.test(m1), false,
+    '变异①后 GEOLOCK-09 的断言必红');
+  // 变异②：热键列 min-width 回到 320 ⇒ GEOLOCK-11 必红
+  const m2 = s.replace("style: { flex: '1 1 160px', minWidth: '160px', flexWrap: 'wrap' }",
+    "style: { flex: '1 1 320px', minWidth: '320px', flexWrap: 'wrap' }");
+  assert.notEqual(m2, s, '前置：变异②锚点须命中');
+  assert.equal(/flex: '1 1 160px', minWidth: '160px'/.test(m2), false, '变异②后 GEOLOCK-11 的断言必红');
+  // 负控：不动任何文件 ⇒ 上述两条假设均成立（防“恒红”）
+  assert.ok(/className: 'dsh-plg-btn dsh-plg-btn-icononly', title: t\('voiceHotkeyClear'\)/.test(s), '负控：图标按钮在位');
+  assert.ok(/flex: '1 1 160px', minWidth: '160px'/.test(s), '负控：热键列下限在位');
 });

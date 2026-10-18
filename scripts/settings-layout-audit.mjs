@@ -44,6 +44,8 @@ const has = (k) => args.includes(k);
 const ROOT = path.resolve(argOf('--root', REPO_ROOT));
 const JSON_OUT = argOf('--json', '');
 const ONLY = argOf('--only', '');
+// 2026-10-18（R2 · 判据 A 多宽度）：--row1 <px> 指定 row1 宽（不传 = 自然宽 718，装置默认口径）。
+const ROW1_W = Number(argOf('--row1', '')) || 0;
 
 const CHUNKS = [
   'src/client/i18n.js',
@@ -66,6 +68,34 @@ function readChunk(rel) {
   // ⚠ decodeChunk(file, opts) 的第二参是 { root }（不是裸路径）。传裸路径会**静默**回落到本仓根
   //   —— 那样 --root 失效，变异/负控会量到错的树（本席实测踩到过：M 系列曾量到工作树）。
   return decodeChunk(rel, { root: ROOT });
+}
+
+// ⭐ 2026-10-18（R2 · 装置缺陷修复）：本装置此前**只注入插件 CSS、不注入宿主 token**，
+//   ⇒ border:1px solid var(--dsw-alias-border-l2) 在解析期即非法（变量未定义）⇒ 整条 border 声明被丢弃
+//   ⇒ chip 恒 30px 高、border 恒 0px none（真机 32px / 1px solid）—— 读数系统性少 2px。
+//   ⇒ 现注入宿主 15 个实际 token 值（取自真机 getComputedStyle(document.body)，逐字）；只**定义变量**，
+//     不覆盖任何插件规则。--no-host-tokens 退回注入前行为（供前后对照读数，见报告 §⑥）。
+const HOST_TOKENS = {
+  '--dsw-alias-bg-layer-2': '#fff',
+  '--dsw-alias-bg-layer-3': '#fff',
+  '--dsw-alias-border-l2': '#0000001a',
+  '--dsw-alias-brand-primary': '#0f1115',
+  '--dsw-alias-button-primary-hover': '#43454a',
+  '--dsw-alias-interactive-bg-hover': '#2631480f',
+  '--dsw-alias-interactive-bg-hover-danger': '#ec13130d',
+  '--dsw-alias-label-dimmed': '#e1e5ee',
+  '--dsw-alias-label-primary': '#0f1115',
+  '--dsw-alias-label-secondary': '#61666b',
+  '--dsw-alias-label-tertiary': '#81858c',
+  '--dsw-alias-state-business-primary': '#4176e6',
+  '--dsw-alias-state-error-primary': '#ec1313',
+  '--dsw-alias-state-success-primary': '#22c55e',
+  '--dsw-alias-state-warn-primary': '#f59e0b',
+};
+const HOST_TOKENS_ON = !has('--no-host-tokens');
+function hostTokenCSS() {
+  const decl = Object.entries(HOST_TOKENS).map(([k, v]) => k + ':' + v).join(';');
+  return ':root,body{' + decl + '}';
 }
 
 // ── 「最长现实取值」表（§2.1②：不得只测"当前恰好短"那一态）──
@@ -219,9 +249,11 @@ function buildPage() {
   delete chunks['src/client/styles.js'];
   const css = new Function(cssSrc + '\n;return CSS;')();
   if (typeof css !== 'string' || css.length < 500) throw new Error('styles chunk 未产出 CSS 字符串（实得 ' + typeof css + '）');
-  const payload = { chunks, realisticMax: REALISTIC_MAX, scenarios: scenarios() };
+  const payload = { chunks, realisticMax: REALISTIC_MAX, scenarios: scenarios(), row1W: ROW1_W };
   const json = JSON.stringify(payload).replace(/</g, '\\u003c');
-  return '<!doctype html><html lang="zh"><head><meta charset="utf-8"><style>' + css + '</style></head><body>'
+  const tokenCSS = HOST_TOKENS_ON ? hostTokenCSS() : '';
+  if (HOST_TOKENS_ON) console.log('HOST-TOKENS | injected ' + Object.keys(HOST_TOKENS).length + ' 变量（含 --dsw-alias-border-l2）');
+  return '<!doctype html><html lang="zh"><head><meta charset="utf-8"><style>' + tokenCSS + css + '</style></head><body>'
     + '<div id="root"></div>'
     + '<script id="payload" type="application/json">' + json + '<' + '/script>'
     + '<script>' + DRIVER + '<' + '/script></body></html>';

@@ -603,7 +603,7 @@ test('VADSIL-P14x-1 变异①：开关仍留第一行 ⇒ P14 必红（判据有
   const chipBlock = "    React.createElement(ToggleChip, {\n      on: !!(v.vad && v.vad.enabled !== false),\n      onText: t('voiceVadShort') + t(v.vad && v.vad.enabled !== false ? 'voiceAutoEnhanceOn' : 'voiceAutoEnhanceOff'),\n      title: t('voiceVadEnabled'),\n      onToggle: () => saveVoiceCfg({ vad: { enabled: !(v.vad && v.vad.enabled !== false) } }),\n    }),\n";
   // 锚点随本批布局订正（2026-10-18 UI 回退修复批）：热键子行现在带 flex/minWidth/flexWrap 三件。
   //   变异仍做同一件事：把静音监测开关塞回第一行（于是第一行变成 4 个 ToggleChip）。
-  const anchorRow = "    React.createElement('div', { className: 'dsh-plg-row', style: { flex: '1 1 320px', minWidth: '320px', flexWrap: 'wrap' } },\n";
+  const anchorRow = "    React.createElement('div', { className: 'dsh-plg-row', style: { flex: '1 1 160px', minWidth: '160px', flexWrap: 'wrap' } },\n";
   assert.ok(src.includes(anchorRow), '前置：热键行锚点须在位');
   const back = src.replace(anchorRow, chipBlock + anchorRow);
   const mu = renderWithSource(back, {});
