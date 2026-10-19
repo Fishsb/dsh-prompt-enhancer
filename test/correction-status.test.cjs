@@ -211,9 +211,12 @@ test('CHG184-S12 ⭐⭐ 位置纪律：failed 相位在任何推导路径下都�
 // ───────────────────── 接线层：调度口真的在用状态机 ─────────────────────
 test('CHG184-S13 ⭐ 接线：hotkey 调度口调用 markCorrectionStarted / Settled / Failed（不是只定义没人用）', () => {
   const hotkey = decodeChunk('src/client/voice/hotkey.js');
-  assert.ok(hotkey.includes('markCorrectionStarted()'), '起手必须记 running');
-  assert.ok(/markCorrectionSettled\(r, cur\)/.test(hotkey), 'settle 必须把**发起前的草稿**传进去（changed 差分判据）');
-  assert.ok(hotkey.includes("markCorrectionFailed('NETWORK')"), 'catch 分支必须记失败（不得静默）');
+  // ⚠ 会话归属批（2026-10-19）改形：四个 markCorrection* 都要带**本会话 sessionId**（相位归属），
+  //   故本断言的形态从 'markCorrectionStarted()' 改为带参形态 —— ⛔ 不是放宽：
+  //   原来只判「调了」，现在还判「把归属传对了」（判据**加强**）。
+  assert.ok(/markCorrectionStarted\(sessionId\)/.test(hotkey), '起手必须记 running 且带上会话归属');
+  assert.ok(/markCorrectionSettled\(r, cur, sessionId\)/.test(hotkey), 'settle 必须把**发起前的草稿**与会话归属一起传进去（changed 差分判据 + 归属）');
+  assert.ok(hotkey.includes("markCorrectionFailed('NETWORK', sessionId)"), 'catch 分支必须记失败并带归属（不得静默）');
   assert.ok(hotkey.includes('markCorrectionSkipped'), '跳过分支必须仍在（开关约束可见）');
   // 负控：调度口**不得**再自己增减计数（那会形成第二个真值）
   assert.ok(!/corrState\.runs \+= 1/.test(hotkey), '⛔ 调度口不得自行累加 runs（单一事实源在 correction.js）');
@@ -520,4 +523,109 @@ test('R3-H 负控：不动任何文件 ⇒ 本组全绿（防恒红）', () => {
   const eb = decodeChunk('src/client/components/enhance-button.js');
   assert.ok(eb.includes('corrTakesOver'), '接管变量在位');
   assert.ok(eb.includes('voiceCorrectionRunningOnButton'), '按钮纠错文案键在位');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 会话归属批（2026-10-19）：**纠错相位必须归属到发生那次纠错的会话**
+//
+// 病历（用户逐字报障）：「梳理一下纠错功能，现在新建或者切换到其他会话会显示纠错失败排查一下」。
+// 根因实读：correctionState 是**页面级单例**、无 sessionId 维度，而 ✨ 按钮的失败闪现只看全局 phase
+//   ⇒ A 会话失败后相位一直停在 failed，切到 B / 新建会话时按钮**照样**闪「纠错失败」。
+//
+// 本组判据（⛔ 不判「有没有写 sessionId」这种字面，判**行为**）：
+//   A 正控：phase=failed 且 owner=会话 X ⇒ **会话 Y 视角**的相位必须是 idle（不显示失败）
+//            —— 含「切换会话后重新挂载」这条路径（新挂载即重新按 sessionId 求相位）
+//   B 负控：同一会话 X 视角**仍必须是 failed**（防一刀切成「永不显示」）
+//   C 保守腿：owner 未知 / 调用方没给 sessionId ⇒ **不套用**归属闸（宁可显示，也不静默真故障）
+//
+// ⚠ 判别力自证：本文件末尾有 A1/B1 两条**变异**用例 —— 把归属闸退回（等价于改前代码）⇒ A1 必红；
+//   把闸门写成「一律 idle」⇒ B1 必红。
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('SCOPE-A ⭐ 正控：会话 X 的失败**不得**外泄到会话 Y（含切换后重新挂载的路径）', () => {
+  const c = loadCorrection({ enabled: true });
+  // 会话 X 上发生一次真实失败
+  c.markCorrectionStarted('sess-X');
+  c.markCorrectionSettled({ ok: false, code: 'TIMEOUT' }, '原文', 'sess-X');
+  // ⚠ 状态机是页面级单例（不改它的生命周期）⇒ 新会话看到的是**同一份** state；
+  //   归属闸在 correctionPhaseOf 里按观察者 sessionId 分流（这正是本批的判据点）。
+  const snap = c.correctionSnapshot();
+  assert.equal(snap.phase, 'failed', '前提：state 里仍是 failed（单例，未清计数）');
+  assert.equal(snap.ownerSessionId, 'sess-X', '相位必须记在发起它的会话名下');
+  // ① 观察者 = X ⇒ 仍失败（B 负控的另一半，见下条）
+  assert.equal(c.correctionPhaseOf(snap, 'sess-X'), 'failed');
+  // ② 观察者 = Y（切换/新建会话）⇒ **idle**（这一次不属于 Y）
+  assert.equal(c.correctionPhaseOf(snap, 'sess-Y'), 'idle',
+    '⭐ 切到别的会话后不得再显示上一次会话的纠错失败');
+  assert.equal(c.correctionPhaseOf(snap, 'sess-Y'), c.CORRECTION_PHASES.IDLE);
+  // ③ 展示层随之：Y 的按钮拿到的展示键必须是 idle 键，⛔ 不得是 StateFailed
+  const viewY = c.correctionPhaseView(c.correctionPhaseOf(snap, 'sess-Y'));
+  assert.equal(viewY.key, 'voiceCorrectionStateIdle', 'Y 的按钮必须落回 idle 文案');
+  assert.notEqual(viewY.key, 'voiceCorrectionStateFailed', '⛔ 不得显示「纠错失败」');
+  // ④ 反向负控（防「一律 idle」）：X 自己的展示键仍必须是 StateFailed
+  const viewX = c.correctionPhaseView(c.correctionPhaseOf(snap, 'sess-X'));
+  assert.equal(viewX.key, 'voiceCorrectionStateFailed', 'X 自己的失败必须当场可见');
+  assert.equal(viewX.ariaLive, 'assertive', '失败态仍用 assertive（屏幕阅读器立即播报，未被削弱）');
+});
+
+test('SCOPE-B ⭐ 负控：同一会话 X 仍必须显示失败（防「一刀切成永不显示」）', () => {
+  const c = loadCorrection({ enabled: true });
+  c.markCorrectionStarted('sess-X');
+  c.markCorrectionSettled({ ok: false, code: 'STREAM_THROW' }, '原文', 'sess-X');
+  const snap = c.correctionSnapshot();
+  assert.equal(c.correctionPhaseOf(snap, 'sess-X'), 'failed',
+    '⭐ 失败发生在自己会话 ⇒ 必须仍可见（不得为了不误报而静默掉真故障）');
+  // 且失败**优先于**该会话后续的正常态读数（位置纪律不变）
+  assert.equal(c.correctionPhaseOf({ phase: 'failed', inFlight: true, ownerSessionId: 'sess-X' }, 'sess-X'), 'failed');
+  // 累计计数不受归属闸影响（设置页诊断读的是它，本批未动）
+  assert.equal(snap.failed, 1, '失败计数照旧累加（诊断区仍可读）');
+  assert.equal(snap.lastFailCode, 'STREAM_THROW', '失败码照旧记录');
+});
+
+test('SCOPE-C 保守腿：归属未知 / 调用方未给 sessionId ⇒ 不套用归属闸（不静默真故障）', () => {
+  const c = loadCorrection({ enabled: true });
+  // 旧调用形态（不传 sessionId）⇒ owner 保持 ''
+  c.markCorrectionStarted();
+  c.markCorrectionSettled({ ok: false, code: 'NO_MODEL' }, '原文');
+  const snap = c.correctionSnapshot();
+  assert.equal(snap.ownerSessionId, '', '未传归属 ⇒ owner 保持空（不编造）');
+  assert.equal(c.correctionPhaseOf(snap, 'sess-any'), 'failed', 'owner 未知时不得套用归属闸（保守：仍显示）');
+  assert.equal(c.correctionPhaseOf(snap), 'failed', '未给 sessionId 时行为与改前逐字一致');
+});
+
+test('SCOPE-D ⭐ 切换/新建会话的渲染读数（改前 vs 改后，两态可判）', () => {
+  // 这条给报告 §3 用的**可判定读数**：同一份 state，按「观察者会话」取相位与展示键。
+  const c = loadCorrection({ enabled: true });
+  c.markCorrectionStarted('sess-A');
+  c.markCorrectionSettled({ ok: false, code: 'TIMEOUT' }, 'x', 'sess-A');
+  const snap = c.correctionSnapshot();
+  const read = (sid) => {
+    const ph = c.correctionPhaseOf(snap, sid);
+    const v = c.correctionPhaseView(ph);
+    return { session: sid, phase: ph, key: v.key, cls: v.cls };
+  };
+  const rows = [read('sess-A'), read('sess-B'), read('sess-C')];
+  assert.deepEqual(rows.map((r) => r.phase), ['failed', 'idle', 'idle']);
+  assert.deepEqual(rows.map((r) => r.cls), ['dsh-enh-btn-text dsh-vi-err', 'dsh-enh-btn-text', 'dsh-enh-btn-text']);
+  // 负控：三行不得同形（否则「已归属」只是形而上）
+  assert.notEqual(rows[0].phase, rows[1].phase, '⭐ 发起会话与其它会话必须可判不同');
+});
+
+test('SCOPE-E ⭐ 端到端（驱动 markCorrection* 的真实调用形态）：不传归属 ⇒ 失败会外泄', () => {
+  // 变异③的补充判据：只判「hotkey 文本里有 sessionId」是**形而上**的——
+  //   本用例直接按**两种调用形态**驱动状态机，读「别的会话会不会看到失败」。
+  const A = loadCorrection({ enabled: true });
+  A.markCorrectionStarted('sess-X');
+  A.markCorrectionSettled({ ok: false, code: 'TIMEOUT' }, 'x', 'sess-X');
+  assert.equal(A.correctionPhaseOf(A.correctionSnapshot(), 'sess-Y'), 'idle', '带归属 ⇒ Y 不显示');
+  const B = loadCorrection({ enabled: true });
+  // 旧形态（= 变异③：hotkey 不回传归属）
+  B.markCorrectionStarted();
+  B.markCorrectionSettled({ ok: false, code: 'TIMEOUT' }, 'x');
+  assert.equal(B.correctionSnapshot().ownerSessionId, '', '不传归属 ⇒ owner 记空（可见，不是静默）');
+  // ⚠ 这是**既有的保守语义**（owner 未知 ⇒ 不套用闸），本用例把它钉成可判事实：
+  //   它同时也是「hotkey 必须传 sessionId」这条接线断言的**行为侧理由** ——
+  //   一旦 hotkey 忘了传，owner 恒空 ⇒ 归属闸整体失效 ⇒ 本缺陷复发。
+  assert.equal(B.correctionPhaseOf(B.correctionSnapshot(), 'sess-Y'), 'failed',
+    '⚠ 记录保守语义：owner 未知时 Y 会看到失败（这正是必须由 hotkey 传归属的原因）');
 });
