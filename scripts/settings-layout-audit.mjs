@@ -173,26 +173,46 @@ const BASE_CFG = {
 };
 const PROVIDERS = [{ provider: 'deepseek-official', name: 'DeepSeek 官方', models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash' }] }];
 
+// ⭐ 2026-10-19（装置自检批 · 堵第三类假绿「测点被结构改动清空、判据仍 PASS」）
+//   ⚠ 病史（本仓实测）：`voice-*` 五个场景此前**不带 `tab`**，驱动在无 `tab` 时走
+//     `ModelPluginsSection`（缺省 `models`）。上一批把语音块移出 `models` tab 后，
+//     这五个场景**再也没测到语音块**（实测 `rows=1` / `chips=0` / `slider=undefined`），
+//     而 audit 仍报 PASS —— 判据一个字未改，测点却被结构改动悄悄清空。
+//   ⇒ 两道闸（本文件）：
+//     ① **场景必须显式声明 `tab`**（下面 push 里 fail-closed 抛错，⛔ 不再依赖缺省值）；
+//     ② **逐场景测点下限**（PROBES + probeAudit：命中不足即 FAIL，并点名声景/控件/期望/实得）。
+//   ⚠ 下限是**逐场景**声明的（⛔ 不是一刀切一个数字）：模型行场景刻意**不**断言语音块的
+//     `chips`/`slider`（它本就只关心模型行），所以「语音块被搬走」不会让模型行场景误红。
+const TAB_VALUES = ['models', 'params'];
+
 function scenarios() {
   const out = [];
-  const push = (id, extra) => out.push(Object.assign({ id, cfg: BASE_CFG, voice: BASE_VOICE, providers: PROVIDERS, save: { phase: 'idle' } }, extra));
-  push('voice-vad-off', { voice: Object.assign({}, BASE_VOICE, { vad: { enabled: false, silenceMs: 3000 } }) });
-  push('voice-vad-on-1', { voice: Object.assign({}, BASE_VOICE, { vad: { enabled: true, silenceMs: 1000 } }) });
-  push('voice-vad-on-5', { voice: Object.assign({}, BASE_VOICE, { vad: { enabled: true, silenceMs: 5000 } }) });
-  push('voice-hotkey-set', { voice: Object.assign({}, BASE_VOICE, { hotkey: { enabled: true, combo: 'Control+Shift+Alt+Meta+KeyQ' } }) });
-  push('voice-all-on', { voice: { autoEnhance: true, correction: { enabled: true }, filler: { enabled: true }, vad: { enabled: true, silenceMs: 5000 }, hotkey: { enabled: true, combo: 'Control+Shift+KeyA' } } });
-  push('diag-normal', { diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 3, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false }, filler: { runs: 5, cleaned: 2, removedTotal: 7, skipped: 0, lastRemoved: [], legacyChecked: true, legacyCleaned: false }, correction: { runs: 3, ok: 3, changed: 1, failed: 0, skipped: 0, lastCode: '', lastSkipReason: '' } });
-  push('diag-abandon', { diag: { installed: true, abandonReason: 'stop-click-dispatch-failed', selfCapture: false, startMissed: 0, sessionsStarted: 1, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false } });
-  push('diag-startmissed', { diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 2, sessionsStarted: 0, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false } });
-  push('diag-feedback', { diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 1, endedInFeedback: true, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 1, feedbackMessage: '未识别到语音', lastSessionFailed: true } });
-  push('diag-sessionfailed', { diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 2, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 1, lastSessionFailed: true } });
-  push('diag-sessionfailed-old', { diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 2, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 1, lastSessionFailed: true, lastSessionFailedAt: Date.now() - 40 * 86400000 } });   // 40 天前
-  push('diag-sessionfailed-recent', { diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 2, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 1, lastSessionFailed: true, lastSessionFailedAt: Date.now() - 10 * 60000 } });      // 10 分钟前
-  push('diag-sessionfailed-recovered', { diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 3, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 1, lastSessionFailed: false } });
-  push('diag-missed', { diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 1, endedInFeedback: false, sessionsMissed: 1, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false } });
-  push('diag-disabled', { diag: { installed: false, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 0, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false } });
-  push('diag-selfcapture', { diag: { installed: true, abandonReason: '', selfCapture: true, startMissed: 0, sessionsStarted: 0, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false } });
-  push('diag-notready', { providers: [], status: { ok: true, speech: { available: false, providers: [] } } });
+  const push = (id, extra) => {
+    // ⚠ fail-closed：场景没有显式 tab ⇒ 直接抛错（宁可不跑，也不静默落到缺省 tab 空跑）
+    if (!extra || TAB_VALUES.indexOf(extra.tab) < 0) {
+      throw new Error('场景 ' + id + ' 必须显式声明 tab（' + TAB_VALUES.join('|') + '）——⛔ 不得依赖缺省值');
+    }
+    // ⚠ probeMins 随场景下发到浏览器侧只是为了让它跟着场景走；判定仍在 Node 侧（probeAudit）。
+    if (!PROBE_MINS[id]) throw new Error('场景 ' + id + ' 未在 PROBE_MINS 声明测点下限（fail-closed：新增场景必须声明）');
+    out.push(Object.assign({ id, cfg: BASE_CFG, voice: BASE_VOICE, providers: PROVIDERS, save: { phase: 'idle' }, probeMins: PROBE_MINS[id] }, extra));
+  };
+  push('voice-vad-off', { tab: 'models', voice: Object.assign({}, BASE_VOICE, { vad: { enabled: false, silenceMs: 3000 } }) });
+  push('voice-vad-on-1', { tab: 'models', voice: Object.assign({}, BASE_VOICE, { vad: { enabled: true, silenceMs: 1000 } }) });
+  push('voice-vad-on-5', { tab: 'models', voice: Object.assign({}, BASE_VOICE, { vad: { enabled: true, silenceMs: 5000 } }) });
+  push('voice-hotkey-set', { tab: 'models', voice: Object.assign({}, BASE_VOICE, { hotkey: { enabled: true, combo: 'Control+Shift+Alt+Meta+KeyQ' } }) });
+  push('voice-all-on', { tab: 'models', voice: { autoEnhance: true, correction: { enabled: true }, filler: { enabled: true }, vad: { enabled: true, silenceMs: 5000 }, hotkey: { enabled: true, combo: 'Control+Shift+KeyA' } } });
+  push('diag-normal', { tab: 'models', diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 3, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false }, filler: { runs: 5, cleaned: 2, removedTotal: 7, skipped: 0, lastRemoved: [], legacyChecked: true, legacyCleaned: false }, correction: { runs: 3, ok: 3, changed: 1, failed: 0, skipped: 0, lastCode: '', lastSkipReason: '' } });
+  push('diag-abandon', { tab: 'models', diag: { installed: true, abandonReason: 'stop-click-dispatch-failed', selfCapture: false, startMissed: 0, sessionsStarted: 1, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false } });
+  push('diag-startmissed', { tab: 'models', diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 2, sessionsStarted: 0, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false } });
+  push('diag-feedback', { tab: 'models', diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 1, endedInFeedback: true, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 1, feedbackMessage: '未识别到语音', lastSessionFailed: true } });
+  push('diag-sessionfailed', { tab: 'models', diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 2, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 1, lastSessionFailed: true } });
+  push('diag-sessionfailed-old', { tab: 'models', diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 2, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 1, lastSessionFailed: true, lastSessionFailedAt: Date.now() - 40 * 86400000 } });   // 40 天前
+  push('diag-sessionfailed-recent', { tab: 'models', diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 2, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 1, lastSessionFailed: true, lastSessionFailedAt: Date.now() - 10 * 60000 } });      // 10 分钟前
+  push('diag-sessionfailed-recovered', { tab: 'models', diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 3, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 1, lastSessionFailed: false } });
+  push('diag-missed', { tab: 'models', diag: { installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 1, endedInFeedback: false, sessionsMissed: 1, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false } });
+  push('diag-disabled', { tab: 'models', diag: { installed: false, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 0, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false } });
+  push('diag-selfcapture', { tab: 'models', diag: { installed: true, abandonReason: '', selfCapture: true, startMissed: 0, sessionsStarted: 0, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false } });
+  push('diag-notready', { tab: 'models', providers: [], status: { ok: true, speech: { available: false, providers: [] } } });
   push('model-test-area', { tab: 'models', testState: { provider: 'deepseek-official', model: 'deepseek-v4-flash', ms: 99999 } });
   push('model-invalid', { tab: 'models', cfg: Object.assign({}, BASE_CFG, { fallback: [{ provider: 'gone', model: 'retired-model-name' }] }) });
   push('model-empty', { tab: 'models', cfg: Object.assign({}, BASE_CFG, { fallback: [] }) });
@@ -203,8 +223,67 @@ function scenarios() {
   push('params-saved', { tab: 'params', save: { phase: 'saved' } });
   push('params-saving', { tab: 'params', save: { phase: 'saving' } });
   push('params-savefailed', { tab: 'params', save: { phase: 'failed' } });
-  push('tab-root', {});
+  push('tab-root', { tab: 'models' });
   return ONLY ? out.filter((s) => s.id === ONLY) : out;
+}
+
+// ── ⭐ 逐场景「测点下限」（2026-10-19 · 装置自检批）────────────────────────
+//   ⚠ 为什么需要：`cmp()` 只比较**两态之间**的差异 ⇒ 若某结构改动让**所有态都测不到**
+//     同一个块（本次病史：语音块移出 models tab ⇒ `chips=0` / `slider=undefined`），
+//     `cmp()` 两边都空 ⇒ 0 条 REAL、判定 PASS —— **测点被清空而判据仍绿**。
+//   ⇒ 本表给每个场景声明它**至少**应命中的控件数（逐场景，⛔ 不是一刀切一个数字）：
+//     · 语音块场景关心 `cards`(≥2：模型卡 + 语音卡) / `chips`(≥3：自动增强/纠错/清口水词) / `slider`(1: 静音时长)
+//     · 模型行场景只关心模型行自己的控件（`cards`=2 含语音卡，⛔ 不声明语音专有探针 —— 它本就不测语音）
+//     · 参数 tab 场景**没有**语音块 ⇒ `cards`/`chips`/`slider` 声明为 0（显式写 0，而不是靠缺省）
+//   ⚠ 未在表里声明的场景 ⇒ **FAIL**（fail-closed：新增场景必须显式声明，⛔ 不许空跑）。
+const PROBE_KEYS = ['rows', 'cards', 'chips', 'slider', 'controls'];
+
+// 语音块六个必需探针（语音/诊断场景共用）：语音块必须真的被测到
+const VOICE_BLOCK = { rows: 9, cards: 2, chips: 3, slider: 1, controls: 9 };
+// 模型行场景：只声明模型行面（cards 仍为 2 —— 语音卡也在 models tab 内；⛔ 不断言 chips/slider）
+const MODEL_ROW = { rows: 9, cards: 2, controls: 9 };
+// 参数 tab 场景：没有语音块（显式 0）
+const PARAMS_TAB = { rows: 9, cards: 0, chips: 0, slider: 0, controls: 10 };
+
+const PROBE_MINS = (() => {
+  const m = {};
+  for (const id of ['voice-vad-off', 'voice-vad-on-1', 'voice-vad-on-5', 'voice-hotkey-set', 'voice-all-on']) m[id] = VOICE_BLOCK;
+  for (const id of ['diag-normal', 'diag-abandon', 'diag-startmissed', 'diag-feedback', 'diag-sessionfailed',
+    'diag-sessionfailed-old', 'diag-sessionfailed-recent', 'diag-sessionfailed-recovered', 'diag-missed',
+    'diag-disabled', 'diag-selfcapture', 'diag-notready']) m[id] = VOICE_BLOCK;
+  for (const id of ['model-test-area', 'model-invalid', 'model-empty', 'model-pending', 'model-loadfail']) m[id] = MODEL_ROW;
+  for (const id of ['params-base', 'params-lite', 'params-standard', 'params-smart', 'params-publish',
+    'params-saved', 'params-saving', 'params-savefailed']) m[id] = PARAMS_TAB;
+  m['params-custom-tpl'] = { rows: 10, cards: 0, chips: 0, slider: 0, controls: 14 };
+  m['tab-root'] = VOICE_BLOCK;
+  return m;
+})();
+
+// ── 测点自检的判定（纯函数 ⇒ 可用内存读数变异自证，test/ 侧亦复用同一份口径）──
+//   输入：驱动产出的读数（`out.probes` 五键，见 scripts/lib/settings-layout-driver.mjs）。
+//   输出：不足条目；每条**点名**场景 / 控件 / 期望下限 / 实得（作业书 §1.2 的硬要求）。
+//   ⚠ 判定范围（**否定性断言的口径**）：本判据只断言「该场景**声明的**探针 ≥ 声明下限」，
+//     ⛔ 不断言「未声明的探针为 0」—— 未声明即**不作判据**（有的场景本就不关心某个控件）。
+//   ⚠ 取数口径：`base`(zh) 态是引用态；`en`/`worst`/`pathological` 三态各自同样受检
+//     （文案变长不得把控件挤没 —— 那同样会让场景变成空跑）。
+function probeDeficits(rep, probeMins) {
+  const out = [];
+  for (const s of rep.scenarios) {
+    const mins = (probeMins || {})[s.id];
+    if (!mins) { out.push({ scen: s.id, variant: '-', probe: '(声明)', min: '≥1', got: '无声明', kind: 'undeclared-scenario' }); continue; }
+    for (const tag of ['base', 'en', 'worst', 'pathological']) {
+      const scn = s[tag];
+      if (!scn) continue;
+      for (const key of Object.keys(mins)) {
+        const want = mins[key];
+        const pr = scn.probes || {};
+        const got = typeof pr[key] === 'number' ? pr[key] : null;
+        if (got === null) { out.push({ scen: s.id, variant: tag, probe: key, min: want, got: '读数缺失', kind: 'probe-read-missing' }); continue; }
+        if (got < want) out.push({ scen: s.id, variant: tag, probe: key, min: want, got: got, kind: 'probe-below-min' });
+      }
+    }
+  }
+  return out;
 }
 
 const IS_WIN = process.platform === 'win32';
@@ -346,16 +425,29 @@ async function main() {
     return 1;
   }
   const { real, path, degen } = cmp(rep);
-  if (JSON_OUT) { fs.writeFileSync(JSON_OUT, JSON.stringify({ raw: rep, real, path, degen }, null, 1)); console.log('JSON → ' + JSON_OUT); }
+  // ⭐ 测点自检（2026-10-19）：场景没测到东西 ⇒ FAIL（不是 PASS）。
+  const probeMin = probeDeficits(rep, PROBE_MINS);
+  if (JSON_OUT) { fs.writeFileSync(JSON_OUT, JSON.stringify({ raw: rep, real, path, degen, probeMin }, null, 1)); console.log('JSON → ' + JSON_OUT); }
   const tally = (arr) => { const m = {}; for (const f of arr) m[f.kind] = (m[f.kind] || 0) + 1; return Object.keys(m).length ? Object.entries(m).map((kv) => kv[0] + '=' + kv[1]).join(' · ') : '无'; };
   console.log('场景 ' + rep.scenarios.length + ' 条 × 4 态（base(zh) / en / worst(最长现实取值) / pathological(200 字)）');
   console.log('REAL（zh/en × 最长现实取值）: ' + real.length + ' 条 → ' + tally(real));
   console.log('PATH（仅病态超长 · 判「控件不得低于自身下限」）: ' + path.length + ' 条 → ' + tally(path));
   console.log('DEGEN（两态行/控件数不一致，单列不混算）: ' + degen.length + ' 条 → ' + tally(degen));
+  // ⭐ 测点自检读数：逐场景命中数（期望/实得）—— 空跑在这里**可见**，不再只藏在 PASS 背后。
+  console.log('PROBE-MIN（逐场景测点下限 · 命中不足即 FAIL）: ' + (probeMin.length ? probeMin.length + ' 条不足' : '全部达标'));
+  for (const d of probeMin.slice(0, 120)) {
+    console.log('  PROBE | ' + d.scen + ' | ' + d.kind + ' | 控件 ' + d.probe + ' 期望 ≥' + d.min + ' 实得 ' + d.got + '｜态 ' + d.variant);
+  }
   for (const f of real.slice(0, 120)) console.log('  REAL | ' + (f.scen || '') + ' | ' + f.kind + ' | ' + JSON.stringify(f));
   for (const f of degen.slice(0, 20)) console.log('  DEGEN | ' + (f.scen || '') + ' | ' + f.kind + ' | ' + JSON.stringify(f));
+  if (probeMin.length) {
+    const named = probeMin.slice(0, 8).map((d) => d.scen + '/' + d.probe + '（期望 ≥' + d.min + ' 实得 ' + d.got + '）').join('；');
+    console.log('FAIL | probe-min | 场景测点命中不足（' + probeMin.length + ' 条）：' + named + (probeMin.length > 8 ? ' …' : ''));
+    return 1;
+  }
   if (real.length) { console.log('FAIL | squeeze-audit | 真实语言态 × 最长现实取值 下存在挤压/溢出（' + real.length + ' 条）'); return 1; }
   console.log('PASS | squeeze-audit | 真实语言态（zh/en）× 最长现实取值：无文本溢出 / 无控件被文案压缩 / 无行高跳变');
+  console.log('PASS | probe-min | ' + rep.scenarios.length + ' 条场景的逐场景测点下限全部达标（⛔ 不是「一刀切一个数字」：每场景各声明自己的下限）');
   if (path.length) console.log('NOTE | 病态 200 字下仍有 ' + path.length + ' 条越界读数（现实中不可能出现，仅作构造保证的观察面，不计缺陷）');
   return 0;
 }

@@ -206,7 +206,10 @@ function browserDriver() {
         React.createElement('p', { className: 'dsh-plg-intro' }, rt.t('secPluginsIntro')),
         React.createElement(rt.api.ModelConfigTab, { t: rt.t }));
     } else {
-      tree = React.createElement(rt.api.ModelPluginsSection, { t: rt.t });
+      // ⚠ 2026-10-19（装置自检批 · fail-closed）：**不再**在无 `tab` 时静默回落到
+      //   `ModelPluginsSection`（缺省 models）—— 正是那个缺省让 voice-* 场景在上一次结构改动后
+      //   空跑却仍报 PASS。现在无 tab ⇒ 直接抛错，场景会以 scenario-error 进 FAIL。
+      throw new Error('场景 ' + scn.id + ' 未声明 tab（models|params）——装置不再回落到缺省 tab');
     }
     render(tree, root);
     void root.offsetWidth;
@@ -322,6 +325,23 @@ function browserDriver() {
     }
     geom.cards = [].slice.call(root.querySelectorAll('.dsh-cfg-sec')).map(function (c, i) { return { idx: i, w: Math.round(c.getBoundingClientRect().width * 100) / 100, box: box(c) }; });
     geom.root = box(root);
+    // ── 测点自检的**探针面**（2026-10-19 · 装置自检批）──
+    //   ⚠ 本文件仍**不判定**：这里只把「该场景到底测到了几个控件」变成**可读读数**；
+    //     判据（逐场景期望 N、命中不足即 FAIL）在 Node 侧 scripts/settings-layout-audit.mjs。
+    //   ⚠ 四类探针必须**覆盖不同渲染面**——只数 rows 抓不到语音块被搬走（模型行的 rows 照样在）：
+    //     · rows     = ROW_SEL 枚举到的行（结构面，最粗）
+    //     · cards    = .dsh-cfg-sec 卡片（语音块与模型卡片各自一张 ⇒ 搬走一块即递减）
+    //     · chips    = row1 里的开关 chip（button.dsh-plg-tgl —— 只存在于语音块）
+    //     · slider   = 静音时长滑块（.dsh-vi-slider —— 只存在于语音块）
+    //     · controls = 全部行内 input/select/textarea/button/mselect 计数（明细面）
+    out.probes = {
+      rows: rows.length,
+      cards: geom.cards.length,
+      chips: (geom.chips || []).length,
+      slider: geom.slider ? 1 : 0,
+      // ⚠ 必须从 out.rows 取（那才是带 controls 的记账行）；rows 是 DOM 节点、没有 controls 字段。
+      controls: out.rows.reduce(function (n, r) { return n + r.controls.length; }, 0),
+    };
     out.geom = geom;
     out.rootOverflow = { scrollW: root.scrollWidth, clientW: root.clientWidth };
     out.visibleText = String(root.innerText || '').replace(/\s+/g, ' ');
