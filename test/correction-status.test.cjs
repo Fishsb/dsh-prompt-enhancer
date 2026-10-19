@@ -32,7 +32,8 @@ function loadCorrection(opts) {
     'voiceCfgState',
     src + '\n;return { correctionState, correctionSnapshot, subscribeCorrection, notifyCorrection,'
     + ' markCorrectionSkipped, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed,'
-    + ' correctionPhaseOf, correctionPhaseView, correctionPhaseKnown, CORRECTION_PHASES };'
+    + ' correctionPhaseOf, correctionPhaseView, correctionPhaseKnown, CORRECTION_PHASES,'
+    + ' correctionFailureTicket, consumeCorrectionFailure };'
   );
   return factory(voiceCfgState);
 }
@@ -413,14 +414,21 @@ function loadButton(opts) {
     'React', 'makeT', 'voiceCfgState', 'configState', 'subscribeCorrection', 'subscribeVoiceConfig',
     'subscribe', 'subscribeConfig', 'storeFor', 'timerSvc', 'host', 'setLastDraft', 'setActiveSession',
     'getActiveSession', 'guardPasses', 'enhance', 'undo', 'modeShortLabel', 'prettifyModel', 'saveConfig',
-    corr + '\n' + eb + '\n;return { EnhanceButton, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed };'
+    corr + '\n' + eb + '\n;return { EnhanceButton, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed,'
+      // ⚠ 本工厂同时用于「当前源码」与「HEAD 原形」⇒ 新符号必须 typeof 兜底：
+      //   否则拿 HEAD 源码求值时这里会抛 ReferenceError，让**整组**变异自证看起来"红了"，
+      //   而实际红的不是判据而是夹具（= 假牙）。
+      + ' correctionSnapshot, correctionPhaseOf,'
+      + ' correctionFailureTicket: (typeof correctionFailureTicket === "function" ? correctionFailureTicket : undefined),'
+      + ' consumeCorrectionFailure: (typeof consumeCorrectionFailure === "function" ? consumeCorrectionFailure : undefined) };'
   );
+  const timers = makeFakeTimers();
   const api = factory(
     mini.React, makeT, voiceCfgState, configState, () => () => {}, () => () => {},
-    () => () => {}, () => () => {}, storeFor, null, { call: () => Promise.reject(new Error('只读')) },
+    () => () => {}, () => () => {}, storeFor, timers.svc, { call: () => Promise.reject(new Error('只读')) },
     () => {}, () => {}, () => null, () => true, () => {}, () => {}, (t, m) => m, (m) => m, () => {}
   );
-  return { api, mini };
+  return { api, mini, timers };
 }
 
 /** 渲染一次按钮并读回可见文本 + 类名。 */
@@ -496,14 +504,27 @@ test('R3-E ⭐ 失败态不静默：短暂提示「纠错失败」后自动复�
 test('R3-F ⭐ 「没跑（开关关）」与「跑了但没改」的区分改由**诊断区**承担（不再靠常驻提示）', () => {
   const vs = decodeChunk('src/client/voice/voice-section.js');
   const i = vs.indexOf('function CorrectionDiag');
-  const diag = vs.slice(i, i + 2200);
+  // ⚠ 2026-10-20 残留治理批：本区间原写死 2200 字符 —— 本批给 CorrectionDiag 补了「最近一次口径」
+  //   的注释与分支（+1500 字符）⇒ 旧窗口会把**尾部**那句 `t('voiceCorrectionOff')` 切在窗口外。
+  //   ⛔ 不得靠「把窗口调大一点」蒙过去（下次再长又会静默截断）；改为**按函数边界切**：
+  //   区间 = `function CorrectionDiag` 到「下一个顶层 function」之间。
+  const nxt = vs.indexOf('\nfunction ', i + 10);
+  const diag = vs.slice(i, nxt > i ? nxt : vs.length);
+  assert.ok(diag.length > 1000, '前置：切出的诊断函数体不得为空（否则本组断言空转）');
   // ① 开关关分支：明文「开关关闭，未纠错」
   assert.ok(/t\('voiceCorrectionOff'\)/.test(diag), '诊断区须有「开关关闭，未纠错」分支');
   // ② 跑了但没改分支：明文「检查过，没有错字」
   assert.ok(/t\('voiceCorrectionNoChange'\)/.test(diag), '诊断区须有「检查过，没有错字」分支');
-  // ③ 两条分支互不覆盖（else-if 链，开关关在前、noChange 在后但都可达）
-  assert.ok(/else if \(!on\)/.test(diag), '开关关分支须独立存在');
-  assert.ok(/else if \(snap\.runs > 0\)/.test(diag), '「跑过但没改」分支须独立存在');
+  // ③ 两条分支互不覆盖。
+  //   ⚠ 2026-10-20 残留治理批订正：本处原锁的是 **else-if 链形态**（`else if (!on)` /
+  //     `else if (snap.runs > 0)`）——那是**实现形态绑定**。本批把口径从「累计计数」改成
+  //     「最近一次结局」后，两条语义分支改由 `snap.phase` 分派（skipped / unchanged），
+  //     ⇒ 形态必然变化。**判据强度不降**：仍要求「两态各自有独立分支 + 键逐字不同 + 渲染不同形」，
+  //     且新增要求在**渲染层**判（见本文件 D3：真实渲染两个夹具，文本必须不等）。
+  //     ⛔ 不得只判「代码里有这个字符串」——D3 才是这条语义现在的牙。
+  assert.ok(/if \(ph === 'skipped'\) return t\('voiceCorrectionSkipped'\)/.test(diag), '跳过分支须独立存在');
+  assert.ok(/if \(ph === 'unchanged'\) return t\('voiceCorrectionNoChange'\)/.test(diag), '「跑了但没改」分支须独立存在');
+  assert.ok(/if \(!on\) return t\('voiceCorrectionOff'\)/.test(diag), 'idle+开关关分支须独立存在');
   // ④ i18n 逐字不同
   const i18n = decodeChunk('src/client/i18n.js');
   const got = new Function(i18n + '; return { ZH: ZH, EN: EN };')();
@@ -628,4 +649,532 @@ test('SCOPE-E ⭐ 端到端（驱动 markCorrection* 的真实调用形态）：
   //   一旦 hotkey 忘了传，owner 恒空 ⇒ 归属闸整体失效 ⇒ 本缺陷复发。
   assert.equal(B.correctionPhaseOf(B.correctionSnapshot(), 'sess-Y'), 'failed',
     '⚠ 记录保守语义：owner 未知时 Y 会看到失败（这正是必须由 hotkey 传归属的原因）');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 渲染层判别力补强（2026-10-19 · 纠错假失败批）：SCOPE-A..E 只判**相位层**，
+// 判不出「渲染层忘了把归属传进去」——本段直接用 EnhanceButton 的**真实渲染树**判。
+// ⚠ 为什么必须补（本席变异自证实测）：把 `correctionPhaseOf(corrSnap, sessionId)`
+//   退回 `correctionPhaseOf(corrSnap)`（= 缺陷原形），SCOPE-A..E **全绿**，而界面照旧
+//   在别的会话闪「纠错失败」⇒ 那组判据在这一形态上**没有牙**。本段补的就是这颗牙。
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** 渲染一次按钮并**跑完 effect + 再渲一次**（setFlash 需一次重渲才落到渲染树，真实 React 同此）。 */
+function renderButtonSettled(h, sessionId) {
+  const props = { sessionId, inputActions: { setDraft() {} }, input: { draft: '有草稿' } };
+  h.mini.begin();
+  h.api.EnhanceButton(props);
+  h.mini.runEffects();
+  h.mini.begin();
+  const tree = h.api.EnhanceButton(props);
+  h.mini.runEffects();
+  return readTree(tree);
+}
+
+test('SCOPE-R1 ⭐ 渲染层：失败发生在 A ⇒ 切到 B 的那个按钮**不得**渲染出「纠错失败」', () => {
+  const h = loadButton({ enhancePhase: 'idle' });
+  // A 会话里真的失败过一次（驱动真实 markCorrection* 调用形态）
+  h.api.markCorrectionStarted('sess-A');
+  h.api.markCorrectionSettled({ ok: false, code: 'TIMEOUT' }, 'x', 'sess-A');
+  const a = renderButtonSettled(h, 'sess-A');
+  const b = renderButtonSettled(h, 'sess-B');
+  assert.ok(a.text.includes('纠错失败'), '前提：失败所在会话 A 自己**必须**可见（不得静默真故障），实得：' + a.text);
+  assert.equal(b.text.includes('纠错失败'), false,
+    '⭐ 切到会话 B 后按钮不得显示上一次会话的纠错失败（用户报障原话），实得：' + b.text);
+  // 负控：B 必须回到默认态（⛔ 不是「把整个文案删掉换一句」），且不得残留错误态类
+  assert.ok(/^✨/.test(b.text), 'B 的按钮必须回到默认态（✨ + 模式短标签），实得：' + b.text);
+  assert.equal(b.classes.some((c) => c.includes('dsh-vi-err')), false, 'B 不得残留错误态样式类');
+});
+
+test('SCOPE-R2 ⭐ 渲染层负控：A 自己也必须仍可见失败（防「一刀切成永不显示」）', () => {
+  const h = loadButton({ enhancePhase: 'idle' });
+  h.api.markCorrectionStarted('sess-A');
+  h.api.markCorrectionSettled({ ok: false, code: 'TIMEOUT' }, 'x', 'sess-A');
+  const a = renderButtonSettled(h, 'sess-A');
+  assert.ok(a.text.includes('纠错失败'), '失败所在会话**必须**当场可见，实得：' + a.text);
+  // 语义一致性（同批）：失败态**走 correctionPhaseView** ⇒ 用错误态类，不是「已完成」语义类
+  assert.ok(a.classes.some((c) => c.includes('dsh-vi-err')), '失败态须用 correctionPhaseView 给的 dsh-vi-err');
+  assert.equal(a.classes.some((c) => c.includes('dsh-enh-btn-result')), false,
+    '⛔ 不得再用 dsh-enh-btn-result（那是「结果/已完成」语义类，与失败相反）');
+});
+
+test('SCOPE-R3 ⭐ 变异自证：按钮不回传归属 ⇒ SCOPE-R1 的判据必红（判据有牙）', () => {
+  const eb = decodeChunk('src/client/components/enhance-button.js');
+  const mutant = eb.replace('correctionPhaseOf(corrSnap, sessionId)', 'correctionPhaseOf(corrSnap)');
+  assert.notEqual(mutant, eb, '前置：变异锚点须命中（否则本条恒绿、没有判别力）');
+  // 变异后：B 观察者拿到的是**全局** phase（= failed）⇒ R1 的核心断言必然失败
+  const corr = decodeChunk('src/client/voice/correction.js');
+  const c = new Function('voiceCfgState', corr + ';return { correctionSnapshot, correctionPhaseOf, markCorrectionStarted, markCorrectionSettled };')({ value: { correction: { enabled: true } } });
+  c.markCorrectionStarted('sess-A');
+  c.markCorrectionSettled({ ok: false, code: 'TIMEOUT' }, 'x', 'sess-A');
+  const snap = c.correctionSnapshot();
+  // 修复形态：带归属 ⇒ B 是 idle
+  assert.equal(c.correctionPhaseOf(snap, 'sess-B'), 'idle', '修复形态下 B 落 idle');
+  // 变异形态：不传归属 ⇒ B 也是 failed（这正是 R1 会抓到的东西）
+  assert.equal(c.correctionPhaseOf(snap), 'failed', '不传归属 ⇒ B 会落 failed（R1 由此必红）');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 残留治理批（2026-10-20）：诊断口径 + 已消费语义
+//
+// 病历（作业书 §1/§2 逐字）：
+//   ① 设置页「纠错失败 ×N」读的是**页面累计** `correctionState.failed`（只在刷新归零）
+//      ⇒ 最近一次是成功/没跑时，诊断行照样自报「纠错失败」（把「历史」当「当下」）。
+//   ② 归属闸只保证「不是我的会话不显示」，相位**没有「已消费」语义**
+//      ⇒ 同一场失败在**每一次**该会话的按钮重渲/切回时都再闪 4 秒。
+//
+// ⚠⚠ 本轮判据纪律（第 1 轮的教训）：**C 组必须落在渲染层**（真实组件渲染树读数），
+//   ⛔ 不得只判 correction.js 的纯函数 —— 纯函数全绿而界面照旧复发，正是上一轮栽的形态。
+//   故 C1/C2/C3 一律经 EnhanceButton 的**真实渲染树**取「按钮可见文本」，
+//   诊断组 D1/D2/D3 一律经 CorrectionDiag 的**真实渲染树**取「诊断行可见文本」。
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** 取 i18n 的中文表（诊断/按钮的可见文本读它，避免判据里复制产品文案）。 */
+function zhDict() {
+  const i18n = decodeChunk('src/client/i18n.js');
+  return new Function(i18n + ';return ZH;')();
+}
+
+/**
+ * 渲染 **CorrectionDiag**（voice-section.js 的**真实 chunk**）并读回可见文本。
+ * @param {object} snap correctionSnapshot() 形状的夹具
+ * @param {boolean} cfgOn 开关真值（voiceCfgState.correction.enabled）
+ * @returns {{text:string, titles:string[]}} 可见文本 + title（原始读数出口）
+ */
+function renderCorrectionDiag(snap, cfgOn) {
+  const src = decodeChunk('src/client/voice/voice-section.js');
+  const zh = zhDict();
+  const hooks = { state: [], effects: [] };
+  let si = 0;
+  const ReactStub = {
+    createElement(type, props) {
+      const kids = Array.prototype.slice.call(arguments, 2).flat(9).filter((k) => k !== null && k !== undefined && k !== false);
+      return { type, props: props || {}, children: kids };
+    },
+    Fragment: 'Fragment',
+    useState(init) { const i = si++; if (!(i in hooks.state)) hooks.state[i] = typeof init === 'function' ? init() : init; return [hooks.state[i], (v) => { hooks.state[i] = v; }]; },
+    useEffect(fn) { hooks.effects.push(fn); },
+    useRef(init) { return { current: init }; },
+  };
+  const voiceCfgState = { value: { correction: { enabled: cfgOn === true } } };
+  const factory = new Function(
+    'React', 'makeT', 'correctionSnapshot', 'subscribeCorrection', 'subscribeVoiceConfig', 'voiceCfgState',
+    src + '\n;return { CorrectionDiag };'
+  );
+  const api = factory(
+    ReactStub, () => (k) => (Object.prototype.hasOwnProperty.call(zh, k) ? zh[k] : k),
+    () => snap, () => () => {}, () => () => {}, voiceCfgState
+  );
+  si = 0; hooks.effects = [];
+  const tree = api.CorrectionDiag({});
+  // 跑一次 effect（订阅 + refresh）后重渲（setSnap 需要一次重渲才落到渲染树）
+  for (const fn of hooks.effects) { try { const d = fn(); if (typeof d === 'function') d(); } catch (e) { /* 订阅桩 */ } }
+  si = 0;
+  const r = readTree(api.CorrectionDiag({}));
+  return { text: r.text, titles: r.titles };
+}
+
+/** 由「给定 chunk 源码」装载 EnhanceButton（变异自证用：不落盘、只换源码）。 */
+function loadButtonFromSrc(eb, corr, opts) {
+  const o = opts || {};
+  const mini = makeRenderReact();
+  const zh = zhDict();
+  const makeT = () => (k) => (Object.prototype.hasOwnProperty.call(zh, k) ? zh[k] : k);
+  const voiceCfgState = { value: { correction: { enabled: o.enabled !== false }, memory: false, mode: 'standard' }, listeners: new Set() };
+  const configState = { value: { memory: false, mode: 'standard', fallback: [] }, listeners: new Set() };
+  const storeFor = () => ({ phase: o.enhancePhase || 'idle', seq: 0, optimized: false });
+  const factory = new Function(
+    'React', 'makeT', 'voiceCfgState', 'configState', 'subscribeCorrection', 'subscribeVoiceConfig',
+    'subscribe', 'subscribeConfig', 'storeFor', 'timerSvc', 'host', 'setLastDraft', 'setActiveSession',
+    'getActiveSession', 'guardPasses', 'enhance', 'undo', 'modeShortLabel', 'prettifyModel', 'saveConfig',
+    corr + '\n' + eb + '\n;return { EnhanceButton, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed,'
+      // ⚠ 本工厂同时用于「当前源码」与「HEAD 原形」⇒ 新符号必须 typeof 兜底：
+      //   否则拿 HEAD 源码求值时这里会抛 ReferenceError，让**整组**变异自证看起来"红了"，
+      //   而实际红的不是判据而是夹具（= 假牙）。
+      + ' correctionSnapshot, correctionPhaseOf,'
+      + ' correctionFailureTicket: (typeof correctionFailureTicket === "function" ? correctionFailureTicket : undefined),'
+      + ' consumeCorrectionFailure: (typeof consumeCorrectionFailure === "function" ? consumeCorrectionFailure : undefined) };'
+  );
+  const timers = makeFakeTimers();
+  const api = factory(
+    mini.React, makeT, voiceCfgState, configState, () => () => {}, () => () => {},
+    () => () => {}, () => () => {}, storeFor, timers.svc, { call: () => Promise.reject(new Error('只读')) },
+    () => {}, () => {}, () => null, () => true, () => {}, () => {}, (t, m) => m, (m) => m, () => {}
+  );
+  return { api, mini, zh, timers };
+}
+
+/**
+ * 可控 timerSvc：把 4 秒闪现的**到期**变成可手动推进（⛔ 不在判据里真等 4 秒）。
+ * 形态与真实 `timerSvc.timeout(fn, ms)` 一致：返回 disposer。
+ */
+function makeFakeTimers() {
+  const pending = [];
+  return {
+    svc: {
+      timeout(fn) {
+        const entry = { fn, live: true };
+        pending.push(entry);
+        return function () { entry.live = false; };
+      },
+      interval() { return function () {}; },
+    },
+    /** 推进到「4 秒到期」：触发所有仍存活的 timeout 回调（一次）。 */
+    expire() {
+      const list = pending.splice(0);
+      for (const e of list) { if (e.live) { e.live = false; try { e.fn(); } catch (err) { /* 用例桩 */ } } }
+    },
+    pendingCount() { return pending.filter((e) => e.live).length; },
+  };
+}
+
+/** 渲染一次按钮（指定会话），跑完 effect + 再渲一次，读可见文本。 */
+function renderFor(h, sessionId) {
+  const props = { sessionId, inputActions: { setDraft() {} }, input: { draft: '有草稿' } };
+  h.mini.begin();
+  h.api.EnhanceButton(props);
+  h.mini.runEffects();
+  h.mini.begin();
+  const tree = h.api.EnhanceButton(props);
+  h.mini.runEffects();
+  return readTree(tree);
+}
+
+/** 一条「期望变红」的自证助手：返回 true 表示断言确实失败了（判据有牙）。 */
+function expectRed(fn) {
+  try { fn(); return false; } catch (e) { return true; }
+}
+
+// ───────────────────────── D 组：诊断行口径 ─────────────────────────
+
+/** D1 的断言体（主用例与变异用例跑**同一份**，确保「判据有牙」不是另写一套）。 */
+function checkD1(renderFn) {
+  const snap = {
+    runs: 5, ok: 4, changed: 1, failed: 3, skipped: 0, checked: 4, inFlight: false,
+    phase: 'changed', lastAt: Date.now() - 60000, lastCode: 'TIMEOUT', lastFailCode: 'TIMEOUT',
+    lastSkipReason: '', lastSkipSource: '', ownerSessionId: '', enabled: true,
+  };
+  const r = renderFn(snap, true);
+  const zh = zhDict();
+  assert.equal(r.text.includes(zh.voiceCorrectionFailed), false,
+    '⭐ 最近一次是「已纠错」时，诊断行不得再报「纠错失败」（累计不是当下），实得：' + r.text);
+  assert.ok(r.text.includes(zh.voiceCorrectionChanged), '应按最近一次口径显示「已纠错」，实得：' + r.text);
+  // 累计读数不得丢：仍在 title 原始读数里
+  assert.ok(r.titles.join('|').includes('failed=3'), '历史累计 failed=3 必须仍在 title 里（读数不丢）');
+  assert.ok(r.titles.join('|').includes('phase=changed'), 'title 须能读出「最近一次相位」');
+}
+test('D1 ⭐ 累计 failed>0 但**最近一次是成功** ⇒ 诊断行不得显示「纠错失败」', () => {
+  checkD1((snap, on) => renderCorrectionDiag(snap, on));
+});
+
+test('D1b ⭐ 累计 failed>0 但**最近一次是因开关跳过** ⇒ 诊断行按跳过口径（不是失败）', () => {
+  const snap = {
+    runs: 2, ok: 1, changed: 0, failed: 2, skipped: 1, checked: 1, inFlight: false,
+    phase: 'skipped', lastAt: Date.now() - 120000, lastCode: 'TIMEOUT', lastFailCode: 'TIMEOUT',
+    lastSkipReason: 'disabled', lastSkipSource: 'disabled', ownerSessionId: '', enabled: false,
+  };
+  const zh = zhDict();
+  const r = renderCorrectionDiag(snap, false);
+  assert.equal(r.text.includes(zh.voiceCorrectionFailed), false, '⛔ 最近一次是跳过 ⇒ 不得显示失败，实得：' + r.text);
+  assert.ok(r.text.includes(zh.voiceCorrectionSkipped), '按最近一次口径显示「开关关闭，已跳过」，实得：' + r.text);
+  assert.ok(/刚刚|前/.test(r.text), '跳过态须给时距（时间可判），实得：' + r.text);
+  assert.equal(/（前）/.test(r.text), false, '⛔ 不得渲染「（前）」这类残句，实得：' + r.text);
+  assert.equal(/刚刚前/.test(r.text), false, '⛔ 不得出现「刚刚前」这种叠词残句，实得：' + r.text);
+});
+
+/** D2 的断言体（同上：主用例与变异用例共用）。 */
+function checkD2(renderFn) {
+  const snap = {
+    runs: 3, ok: 2, changed: 2, failed: 1, skipped: 0, checked: 2, inFlight: false,
+    phase: 'failed', lastAt: Date.now() - 3000, lastCode: 'STREAM_THROW', lastFailCode: 'STREAM_THROW',
+    lastSkipReason: '', lastSkipSource: '', ownerSessionId: '', enabled: true,
+  };
+  const zh = zhDict();
+  const r = renderFn(snap, true);
+  assert.ok(r.text.includes(zh.voiceCorrectionFailed), '⭐ 最近一次真是失败 ⇒ 必须可见（不得静默真故障），实得：' + r.text);
+  assert.ok(r.text.includes('STREAM_THROW'), '失败码须可见（可排查），实得：' + r.text);
+  assert.ok(/刚刚|前/.test(r.text), '失败态须给时距，实得：' + r.text);
+}
+test('D2 ⭐ 负控：**最近一次确实是失败** ⇒ 诊断行必须显示失败（防一刀切成永不报错）', () => {
+  checkD2((snap, on) => renderCorrectionDiag(snap, on));
+});
+
+test('D2b 负控：**开关关着但最近一次是失败** ⇒ 仍须报失败（开关态不得掩蔽真故障）', () => {
+  const snap = {
+    runs: 1, ok: 0, changed: 0, failed: 1, skipped: 0, checked: 0, inFlight: false,
+    phase: 'failed', lastAt: Date.now() - 1000, lastCode: 'NETWORK', lastFailCode: 'NETWORK',
+    lastSkipReason: '', lastSkipSource: '', ownerSessionId: '', enabled: false,
+  };
+  const zh = zhDict();
+  const r = renderCorrectionDiag(snap, false);
+  assert.ok(r.text.includes(zh.voiceCorrectionFailed), '开关关不得把上一场的真实失败吞掉，实得：' + r.text);
+});
+
+/** D3 的断言体（同上：主用例与变异用例共用）。 */
+function checkD3(renderFn) {
+  const base = {
+    runs: 1, ok: 1, changed: 0, failed: 0, skipped: 0, checked: 1, inFlight: false,
+    lastAt: Date.now() - 5000, lastCode: '', lastFailCode: '', lastSkipReason: '', lastSkipSource: '', ownerSessionId: '',
+  };
+  const zh = zhDict();
+  const skipped = renderFn(Object.assign({}, base, { phase: 'skipped', skipped: 1, runs: 0, ok: 0, checked: 0, lastSkipReason: 'disabled', lastSkipSource: 'disabled' }), false);
+  const unchanged = renderFn(Object.assign({}, base, { phase: 'unchanged' }), true);
+  const idleOff = renderFn(Object.assign({}, base, { phase: 'idle', runs: 0, ok: 0, checked: 0 }), false);
+  assert.notEqual(skipped.text, unchanged.text, '⭐「因开关没跑」与「跑了没改动」必须可判不同，实得：' + skipped.text + ' / ' + unchanged.text);
+  assert.ok(skipped.text.includes(zh.voiceCorrectionSkipped), '跳过态文案要落到 skipped 专键，实得：' + skipped.text);
+  assert.ok(unchanged.text.includes(zh.voiceCorrectionNoChange), '无改动态文案要落到 noChange 专键，实得：' + unchanged.text);
+  assert.notEqual(idleOff.text, unchanged.text, '「压根没跑且开关关」也不得与「跑了没改动」同形');
+  assert.ok(idleOff.text.includes(zh.voiceCorrectionOff), 'idle+开关关 ⇒ 落到「开关关闭，未纠错」键，实得：' + idleOff.text);
+  // 三者两两不同（报告 §3 要求的三态读数）
+  assert.equal(new Set([skipped.text, unchanged.text, idleOff.text]).size, 3, '三态文本必须两两不同');
+}
+test('D3 ⭐ 回归锁：诊断行仍能区分「因开关没跑」与「跑了没改动」（两条形态不得同形）', () => {
+  checkD3((snap, on) => renderCorrectionDiag(snap, on));
+});
+
+// ───────────────────────── C 组：渲染层已消费语义 ─────────────────────────
+
+/** C2 的断言体（主用例与变异用例跑**同一份**）。@param loadFn ()=>harness */
+function checkC2(loadFn) {
+  const h = loadFn({ enhancePhase: 'idle' });
+  h.api.markCorrectionStarted('sess-A');
+  h.api.markCorrectionSettled({ ok: false, code: 'TIMEOUT' }, 'x', 'sess-A');
+  const a = renderFor(h, 'sess-A');
+  const zh = zhDict();
+  assert.ok(a.text.includes(zh.voiceCorrectionFailedOnButton),
+    '⭐ 失败发生在 A ⇒ A 的按钮必须当场闪「纠错失败」（真实渲染读数），实得：' + a.text);
+  // ⚠ 本函数**只判「首闪可见」**这一条（作业书 C2 的原文）。计时器数量/到期复原属**新机制**的
+  //   实现细节断言，放在 C2b 里 —— 因为 checkC2 还要拿去跑 HEAD 原形做变异自证，
+  //   而 HEAD 的 effect 会 `return armed`（桩会把 disposer 立即调用）⇒ 那些断言在 HEAD 下
+  //   必假红，红的不是判据而是夹具（= 假牙）。⛔ 不是「放宽判据」，是**把两条判据分开归位**。
+}
+test('C2 ⭐ 负控（首闪）：A 上**第一次**失败必须闪（防「永不显示」）', () => {
+  checkC2((o) => loadButton(o));
+});
+
+test('C2b ⭐ 闪现的两个既有保证没被本批改坏：恰好一个 4 秒计时器 + 到期自动复原', () => {
+  const h = loadButton({ enhancePhase: 'idle' });
+  h.api.markCorrectionStarted('sess-A');
+  h.api.markCorrectionSettled({ ok: false, code: 'TIMEOUT' }, 'x', 'sess-A');
+  const zh = zhDict();
+  assert.ok(renderFor(h, 'sess-A').text.includes(zh.voiceCorrectionFailedOnButton), '前提：首闪成立');
+  assert.equal(h.timers.pendingCount(), 1, '闪现须挂**恰好一个** 4 秒计时器（不得叠加）');
+  h.timers.expire();
+  const after = renderFor(h, 'sess-A');
+  assert.equal(after.text.includes(zh.voiceCorrectionFailedOnButton), false, '4 秒到期后自动复原（不常驻）');
+  assert.equal(h.timers.pendingCount(), 0, '复原后不得留下悬挂计时器');
+});
+
+/** C1 的断言体（主用例与变异用例跑**同一份**）。 */
+function checkC1(loadFn) {
+  const h = loadFn({ enhancePhase: 'idle' });
+  h.api.markCorrectionStarted('sess-A');
+  h.api.markCorrectionSettled({ ok: false, code: 'TIMEOUT' }, 'x', 'sess-A');
+  const zh = zhDict();
+  const a1 = renderFor(h, 'sess-A');
+  assert.ok(a1.text.includes(zh.voiceCorrectionFailedOnButton), '前提：A 首闪必须成立，实得：' + a1.text);
+  const b = renderFor(h, 'sess-B');
+  assert.equal(b.text.includes(zh.voiceCorrectionFailedOnButton), false,
+    '⭐ 切到 B ⇒ B 不得显示 A 的失败（归属闸，R1 已锁，此处守住），实得：' + b.text);
+  // 4 秒到期（模拟真实时间流逝）⇒ 提示应当收起
+  h.timers.expire();
+  const a2 = renderFor(h, 'sess-A');
+  assert.equal(a2.text.includes(zh.voiceCorrectionFailedOnButton), false,
+    '⭐⭐ 切回 A ⇒ **同一场失败不得再闪**（已消费语义；这是本批治的病），实得：' + a2.text);
+  assert.equal(h.timers.pendingCount(), 0, '⛔ 不得为已消费的场次再武装计时器（否则会反复闪）');
+  assert.ok(/^✨/.test(a2.text), 'A 的按钮须回到默认态（✨ + 模式短标签），实得：' + a2.text);
+  // 真故障不得因消费而消失：诊断区仍按「最近一次」口径可见
+  const snap = h.api.correctionSnapshot();
+  const diag = renderCorrectionDiag(snap, true);
+  assert.ok(diag.text.includes(zh.voiceCorrectionFailed), '⛔ 消费 ≠ 失败消失：诊断区仍须可见失败，实得：' + diag.text);
+}
+test('C1 ⭐⭐ 核心：A 闪过后切到 B 再切回 A ⇒ **不再闪**（渲染层判据）', () => {
+  checkC1((o) => loadButton(o));
+});
+
+/** C3 的断言体（主用例与变异用例跑**同一份**）。 */
+function checkC3(loadFn) {
+  const h = loadFn({ enhancePhase: 'idle' });
+  h.api.markCorrectionStarted('sess-A');
+  h.api.markCorrectionSettled({ ok: false, code: 'TIMEOUT' }, 'x', 'sess-A');
+  const a1 = renderFor(h, 'sess-A');
+  const zh = zhDict();
+  assert.ok(a1.text.includes(zh.voiceCorrectionFailedOnButton), '前提：首闪成立');
+  h.timers.expire();
+  const a2 = renderFor(h, 'sess-A');
+  assert.equal(a2.text.includes(zh.voiceCorrectionFailedOnButton), false, '前提：同一场不重复闪');
+  // 第二场**不同**失败（不同 code、不同时刻）
+  h.api.markCorrectionStarted('sess-A');
+  h.api.markCorrectionSettled({ ok: false, code: 'STREAM_THROW' }, 'y', 'sess-A');
+  const a3 = renderFor(h, 'sess-A');
+  assert.ok(a3.text.includes(zh.voiceCorrectionFailedOnButton),
+    '⭐ 第二场失败必须照常闪一次（不得做成整页只闪一次），实得：' + a3.text);
+  h.timers.expire();
+  const a4 = renderFor(h, 'sess-A');
+  assert.equal(a4.text.includes(zh.voiceCorrectionFailedOnButton), false, '第二场同样只闪一次');
+}
+test('C3 ⭐ 负控：A 的**第二场不同失败**仍必须闪（防「整页只闪一次」）', () => {
+  checkC3((o) => loadButton(o));
+});
+
+test('C4 边界：两场失败**不得**被当成同一场（场次号单调，时间戳不参与判等）', () => {
+  const c = loadCorrection({ enabled: true });
+  c.markCorrectionFailed('A1', 'sess-A');
+  const t1 = c.correctionFailureTicket(c.correctionSnapshot(), 'sess-A');
+  c.consumeCorrectionFailure(t1);
+  assert.equal(c.correctionFailureTicket(c.correctionSnapshot(), 'sess-A'), '', '消费后同一场不再出票');
+  // 同一毫秒内发生的第二场（时间戳可能相同）也必须出一个**新**票
+  c.markCorrectionFailed('A2', 'sess-A');
+  const t2 = c.correctionFailureTicket(c.correctionSnapshot(), 'sess-A');
+  assert.notEqual(t2, '', '第二场失败必须出票（不得因时间戳相同被判成同一场）');
+  assert.notEqual(t2, t1, '两场失败的 token 必须不同');
+  // 伪造 token 不得把未来的失败吞掉
+  assert.equal(c.consumeCorrectionFailure('999'), false, '⛔ 超出真实场次的 token 不得消费（防一次吞掉未来失败）');
+  assert.equal(c.correctionFailureTicket(c.correctionSnapshot(), 'sess-A'), t2, '因此第二场仍可闪');
+});
+
+test('C5 边界：消费是**高水位**，只前进不后退，且幂等', () => {
+  const c = loadCorrection({ enabled: true });
+  c.markCorrectionFailed('A1', 'sess-A');
+  const t1 = c.correctionFailureTicket(c.correctionSnapshot(), 'sess-A');
+  assert.equal(c.consumeCorrectionFailure(t1), true, '首次消费成功');
+  assert.equal(c.consumeCorrectionFailure(t1), false, '重复消费幂等（不再改状态）');
+  c.markCorrectionFailed('A2', 'sess-A');
+  const t2 = c.correctionFailureTicket(c.correctionSnapshot(), 'sess-A');
+  assert.equal(c.consumeCorrectionFailure(t2), true, '第二场可消费');
+  assert.equal(c.consumeCorrectionFailure(t1), false, '旧 token 不得把高水位退回去');
+});
+
+// ───────────────────────── 变异自证（每条判据都要有牙）─────────────────────────
+
+const VS_SRC = () => decodeChunk('src/client/voice/voice-section.js');
+const CORR_SRC = () => decodeChunk('src/client/voice/correction.js');
+const EB_SRC = () => decodeChunk('src/client/components/enhance-button.js');
+
+/** 用「改过的 voice-section」渲染诊断行（变异自证用）。 */
+function renderDiagFromSrc(src, snap, cfgOn) {
+  const zh = zhDict();
+  const hooks = { state: [], effects: [] };
+  let si = 0;
+  const ReactStub = {
+    createElement(type, props) {
+      const kids = Array.prototype.slice.call(arguments, 2).flat(9).filter((k) => k !== null && k !== undefined && k !== false);
+      return { type, props: props || {}, children: kids };
+    },
+    Fragment: 'Fragment',
+    useState(init) { const i = si++; if (!(i in hooks.state)) hooks.state[i] = typeof init === 'function' ? init() : init; return [hooks.state[i], (v) => { hooks.state[i] = v; }]; },
+    useEffect(fn) { hooks.effects.push(fn); },
+    useRef(init) { return { current: init }; },
+  };
+  const factory = new Function('React', 'makeT', 'correctionSnapshot', 'subscribeCorrection', 'subscribeVoiceConfig', 'voiceCfgState',
+    src + '\n;return { CorrectionDiag };');
+  const api = factory(ReactStub, () => (k) => (Object.prototype.hasOwnProperty.call(zh, k) ? zh[k] : k),
+    () => snap, () => () => {}, () => () => {}, { value: { correction: { enabled: cfgOn === true } } });
+  si = 0; hooks.effects = [];
+  api.CorrectionDiag({});
+  for (const fn of hooks.effects) { try { const d = fn(); if (typeof d === 'function') d(); } catch (e) { /* 桩 */ } }
+  si = 0;
+  return readTree(api.CorrectionDiag({}));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 变异自证（**真实文件级回退**，不是字符串拼改）
+//
+// ⚠ 为什么这样写（第 1 轮的教训 + 本轮实测）：上一版变异自证是「对当前源码做一次
+//   `.replace()` 再求值」——**形态脆弱**：实现一旦重构（本批正是重构），替换锚点就大面积失配，
+//   变异要么没生效（恒绿，判据失牙）要么直接把源码改坏（抛错，看起来"有牙"其实测的是语法）。
+//   本版改为：**从 git HEAD 取缺陷原形**（= 上一批发布的真实文件），与当前文件跑**同一份断言**：
+//     · 当前文件 ⇒ 必绿（正控）
+//     · HEAD 文件 ⇒ 必红（变异自证 = 判据确实能抓住那个病）
+//   ⇒ 这条自证同时钉住「缺陷形态真实存在于历史」与「判据对它有鉴别力」两件事，
+//     且**不会因为将来重构而静默失效**（它不依赖任何代码字符串锚点）。
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const { spawnSync: spawnSyncV } = require('node:child_process');
+/** 取某个文件在某个 ref 上的**解码后源码**（默认 HEAD = 上一批发布形态）。 */
+function chunkAtRef(rel, ref) {
+  const r = spawnSyncV('git', ['show', (ref || 'HEAD') + ':' + rel], { cwd: ROOT, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error('git show 失败：' + rel + ' @ ' + ref + ' :: ' + String(r.stderr || '').slice(0, 200));
+  const raw = r.stdout;
+  const { decodeChunkText } = require('../scripts/lib/chunk-decode.mjs');
+  return decodeChunkText(raw, rel + '@' + (ref || 'HEAD'));
+}
+
+test('D-V1 ⭐ 真实文件级回退：用 HEAD 的 voice-section.js ⇒ D1/D2/D3 三条断言全红（判据有牙）', () => {
+  const src = chunkAtRef('src/client/voice/voice-section.js');
+  // 前置：HEAD 形态确实是缺陷原形（累计口径在位）
+  assert.ok(src.includes('snap.failed > 0'), '前置：HEAD 的 voice-section 仍是累计口径（缺陷原形）');
+  const renderHead = (snap, on) => renderDiagFromSrc(src, snap, on);
+  for (const [name, check] of [['D1', checkD1], ['D2', checkD2]]) {
+    const red = expectRed(() => check(renderHead));
+    assert.equal(red, true, '⭐ 用 HEAD 形态跑 ' + name + ' ⇒ 必须红（否则 ' + name + ' 对缺陷没有鉴别力）');
+  }
+  // ⚠ D3 **不从 HEAD 取**：它是**回归锁**（改前改后都应绿 —— 改前也确实分得清两态，
+  //   本批的任务是「改口径的同时别把区分弄丢」）。对回归锁的正确自证是**定点变异**：
+  //   把两态合成同一句 ⇒ 它必须红（见 D-V3）。⛔ 若硬拿 HEAD 跑 D3，红不红都说明不了问题。
+  checkD3((a, b) => renderCorrectionDiag(a, b));
+  // 正控：当前实现 D1/D2 同一份断言必绿
+  checkD1((a, b) => renderCorrectionDiag(a, b));
+  checkD2((a, b) => renderCorrectionDiag(a, b));
+});
+
+test('D-V3 ⭐ 定点变异：把「跳过」与「没改动」合成同一句 ⇒ D3 必红（回归锁有牙）', () => {
+  const src = VS_SRC();
+  const mutant = src.replace("if (ph === 'skipped') return t('voiceCorrectionSkipped');",
+    "if (ph === 'skipped') return t('voiceCorrectionNoChange');");
+  assert.notEqual(mutant, src, '前置：变异锚点须命中');
+  assert.equal(expectRed(() => checkD3((snap, on) => renderDiagFromSrc(mutant, snap, on))), true,
+    '⭐ 两态同形 ⇒ D3 必红（否则这条回归锁锁不住「不得合并」）');
+});
+
+test('C-V1 ⭐ 真实文件级回退：用 HEAD 的 enhance-button.js + correction.js ⇒ C1 红、C2 绿（判据有牙且方向正确）', () => {
+  const corr = chunkAtRef('src/client/voice/correction.js');
+  const eb = chunkAtRef('src/client/components/enhance-button.js');
+  // 前置：HEAD 形态没有已消费语义
+  assert.equal(corr.includes('failureSeq'), false, '前置：HEAD 的 correction.js 无场次号（缺陷原形）');
+  assert.equal(eb.includes('correctionFailureTicket'), false, '前置：HEAD 的按钮无出票调用（缺陷原形）');
+  const loadHead = () => loadButtonFromSrc(eb, corr, { enhancePhase: 'idle' });
+  // ⭐ C1：同一场失败切回来会**再闪** ⇒ checkC1 必红
+  assert.equal(expectRed(() => checkC1(loadHead)), true,
+    '⭐ 用 HEAD 形态跑 C1 ⇒ 必须红（这正是本批治的「切回又闪」）');
+  // 负控方向：HEAD 形态下「首闪」本来就成立 ⇒ C2 必须仍绿（⛔ 不是所有断言一起红）
+  checkC2(loadHead);
+  // 正控：当前实现 C1 必绿
+  checkC1((o) => loadButton(o));
+});
+
+test('C-V2 ⭐ 真实文件级回退：用 HEAD 的 enhance-button.js + correction.js ⇒ C3 红（第二场也被当成同一场）', () => {
+  const corr = chunkAtRef('src/client/voice/correction.js');
+  const eb = chunkAtRef('src/client/components/enhance-button.js');
+  const loadHead = () => loadButtonFromSrc(eb, corr, { enhancePhase: 'idle' });
+  // HEAD 形态：不存在消费概念 ⇒ C3 的「前提：同一场不重复闪」这一断言必然先红
+  assert.equal(expectRed(() => checkC3(loadHead)), true, '⭐ 用 HEAD 形态跑 C3 ⇒ 必须红');
+  checkC3((o) => loadButton(o));
+});
+
+test('C-V3 ⭐ 定点变异：把出票做成「消费过就永不再出票」（整页只闪一次）⇒ C3 必红', () => {
+  const corr = CORR_SRC();
+  const mutant = corr.replace("if (seq <= used) return '';", "if (used > 0) return '';");
+  assert.notEqual(mutant, corr, '前置：变异锚点须命中');
+  const loadMut = () => loadButtonFromSrc(EB_SRC(), mutant, { enhancePhase: 'idle' });
+  assert.equal(expectRed(() => checkC3(loadMut)), true,
+    '⭐ 「整页只闪一次」的形态 ⇒ C3 必红（否则 C3 锁不住这条）');
+});
+
+test('C-V4 ⭐ 定点变异：把出票条件做成恒不出票 ⇒ C2 必红（防「永不显示」）', () => {
+  const corr = CORR_SRC();
+  const mutant = corr.replace('return String(seq);', "return '';");
+  assert.notEqual(mutant, corr, '前置：变异锚点须命中');
+  const loadMut = () => loadButtonFromSrc(EB_SRC(), mutant, { enhancePhase: 'idle' });
+  assert.equal(expectRed(() => checkC2(loadMut)), true, '⭐ 恒不出票 ⇒ C2 必红');
+});
+
+test('R-COV 负控：不改任何文件 ⇒ 本段判据全绿（防恒红）', () => {
+  const zh = zhDict();
+  const base = { runs: 1, ok: 1, changed: 1, failed: 0, skipped: 0, checked: 1, inFlight: false,
+    phase: 'changed', lastAt: Date.now(), lastCode: '', lastFailCode: '', lastSkipReason: '', lastSkipSource: '', ownerSessionId: '', enabled: true };
+  assert.ok(renderCorrectionDiag(base, true).text.includes(zh.voiceCorrectionChanged), '正常态诊断行照旧可见');
+  const h = loadButton({ enhancePhase: 'idle' });
+  const r = renderFor(h, 'sess-none');
+  assert.ok(/^✨/.test(r.text), '无失败时按钮为默认态');
 });
