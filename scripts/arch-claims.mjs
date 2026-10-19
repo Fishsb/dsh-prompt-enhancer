@@ -64,6 +64,11 @@ const GOV_EVENTS = process.env.PE_NAV_EVENTS
 //   A194-4/S-2 走实判还是 SKIP）。故投影必须自述「这份读数是在哪种环境下取的」——否则读者
 //   无法分辨「判据变了」与「只是换了个环境跑」，而那正是本会要的可解释性。
 const SNAP_ENV = fs.existsSync(GOV_EVENTS) ? 'gov-readable' : 'gov-unreadable';
+// A-2（2026-10-19）：`--write` 时记下的 HEAD —— **只用于漂移时点名具体文件**。
+//   ⚠⚠ 硬约束：它**不得进入逐字比对区**。HEAD 每提交一次就变，若参与逐字比对，
+//     则**每次 commit 都会把投影判成漂移**（本仓最忌的假红）。故它与指纹行一起被
+//     `stripFp` **两侧对称**剥掉，只在 FAIL 时从档区里读出来用（--check 绿时不打印）。
+let SNAP_HEAD = null;
 
 const abs = (p) => path.join(ROOT, p);
 const exists = (p) => fs.existsSync(abs(p));
@@ -1148,6 +1153,9 @@ function mdTail() {
   //   工程上是刻意的（本表 detail 即判据文本）；必要时应重生成投影，**不要**判这条为假红。
   out.push(`> fingerprint（判据面指纹·跨环境同值）：\`${claimsFingerprint()}\`（${RUN.length} 条断言｜读数快照 env=${SNAP_ENV}｜判据面 = id/kind/detail/claim/tier/target + 计数，**不含**环境派生的期望/实测/判定列）`);
   out.push('');
+  // A-2：`--write` 时把当时的 HEAD 记进投影，供**漂移时点名具体文件**。
+  //   ⚠ 只在 --write（SNAP_HEAD 非空）时出现；⚠ 该行**不进逐字比对区**（见 stripFp 的对称剥行）。
+  if (SNAP_HEAD) out.push(`> 写入 HEAD（--write 时的提交）：\`${SNAP_HEAD}\`（⛔ 不参与判定；仅漂移时用于 \`git diff --name-status\` 点名文件）`);
   out.push(`> 生成：\`node scripts/arch-claims.mjs --md\`（**投影，勿手抄；判定例程不手抄，见 --check**）｜通过 ${passed.length} · 冲突 ${conflicts.length} · SKIP ${skips.length} · 在册未达 ${pendingTargets.length} · 在册缺陷 ${DEFECTS.length}`);
   out.push('');
   out.push('**在册缺陷（非 ADR 面；有处置指向但尚未处置）**');
@@ -1161,6 +1169,9 @@ function mdTail() {
 function mdReport() { return mdTable() + '\n' + mdTail(); }
 
 if (has('--write')) {
+  // A-2：先记下**当时**的 HEAD，再写投影（供漂移时用 `git diff --name-status <HEAD>..HEAD` 点名文件）。
+  //   ⚠ 取不到就留 null（投影里那一行随之缺席，判定侧按「无记录」降级，不编造）。
+  try { SNAP_HEAD = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8', timeout: 20000 }).trim() || null; } catch { SNAP_HEAD = null; }
   if (exists(DOC)) {
     const src = read(DOC);
     const i = src.indexOf(MARK_BEGIN);
@@ -1245,12 +1256,116 @@ function driftAttribution(drift, localFp, localN, snapEnv) {
   return { faceChanged, why, tail };
 }
 
+/** 漂移**逐文件成因**的读取面（A-2 · 2026-10-19 抽成一处可复用，供 drift / stale-readings 两支共用）。
+ *  为什么要有它：S-8 一类「受控件数变了」的漂移，光知道 A≠B 还得自己去猜是哪几个文件——
+ *   `--write` 记下的 HEAD 存在时，`git diff --name-status <记下的HEAD>..HEAD` 能**直接点名**；
+ *   没有记录（旧投影 / 非 git 检出）时逐级降级到工作区未提交差集与 git log，不编造。
+ *  ⚠ 只**读**、只**返回数据**：不判定、不写盘、不改任何通过条件。 */
+function fileAttribution(docRegion, entry, kind = 'drift') {
+  const stale = kind === 'stale-readings';
+  // ⚠ 措辞分流：stale-readings **不是漂移**，正文里不得出现"本漂移"（作业书 §1.1 的坑）。
+  const what = stale ? '本处读数不可比' : '本漂移';
+  const s8 = RUN.find((x) => x.id === 'S-8');
+  const numFrom = (t) => { const m = String(t || '').match(/受控 (\d+) 件/); return m ? Number(m[1]) : null; };
+  const A = numFrom(docRegion);
+  const B = numFrom(s8 && s8.actual);
+  const recorded = String(docRegion || '').match(/^> 写入 HEAD（--write 时的提交）：`([0-9a-f]{7,40})`/m);
+  const head = recorded ? recorded[1] : null;
+  const out = [];
+  out.push('   档内受控件数 A=' + (A === null ? '（无）' : A + ' 件') + '；本次实算 B=' + (B === null ? '（无）' : B + ' 件')
+    + (A !== null && B !== null ? '（相差 ' + (B - A) + ' 件）' : ''));
+  const git = (args) => {
+    try { return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', timeout: 20000 }); } catch { return null; }
+  };
+  // ① 首选：--write 记下的 HEAD → 直接点名「投影生成之后」增删/改名的文件
+  if (head) {
+    const ns = git(['diff', '--name-status', head + '..HEAD']);
+    if (ns === null) {
+      out.push('   投影记录的 HEAD=' + head + '，但 git diff 不可用 ⇒ 逐文件请跑：git status --porcelain / git log --name-status');
+    } else {
+      const rows = String(ns).split('\n').map((l) => l.trim()).filter(Boolean);
+      if (!rows.length) {
+        out.push('   投影记录的 HEAD=' + head + '..HEAD 之间**无提交差异** ⇒ 文件增删改名不是' + what + '的成因'
+          + (stale ? '（成因是本形态与投影的环境标签不同，见下一行）' : '（成因见上行走廊）'));
+      } else {
+        out.push(stale
+          ? '   投影生成之后的提交差集（git diff --name-status ' + head + '..HEAD）——**仅说明这期间动过什么**；'
+            + '本处读数不可比**不是**它们造成的（成因见下面的环境标签行）：'
+          : '   投影记录的 HEAD=' + head + ' → 当前 HEAD 之间的文件差集（git diff --name-status ' + head + '..HEAD）——受控件数就是被这些条目改的：');
+        for (const l of rows.slice(0, 40)) out.push('     ' + l);
+        if (rows.length > 40) out.push('     …另有 ' + (rows.length - 40) + ' 条，跑 git diff --name-status ' + head + '..HEAD 看全');
+      }
+    }
+  } else {
+    out.push('   ⚠ 档内**无** HEAD 记录（该投影由旧版 --write 写出）⇒ 无法用 git diff 点名文件；先按下面次序重生成，下次即可点名：');
+  }
+  // ② 工作区未提交差集（--write 之后又有改动时的形态）
+  const st = git(['status', '--porcelain']);
+  const wl = String(st || '').split('\n').filter((l) => l.trim());
+  if (wl.length) {
+    out.push('   另有工作区未提交改动（git status --porcelain）——它们尚未进 HEAD，同样会改受控件数：');
+    for (const l of wl.slice(0, 40)) out.push('     ' + l);
+    if (wl.length > 40) out.push('     …另有 ' + (wl.length - 40) + ' 条，跑 git status 看全');
+  } else if (!head) {
+    out.push('   工作区干净 ⇒ 差异来自**档生成之后**的提交；逐文件用：git log --oneline --name-status -20');
+  }
+  if (A !== null && B !== null && A === B) {
+    out.push('   ⚠ 受控件数未变（A=B）⇒ ' + what + '不是"文件增删"造成的'
+      + (entry ? '；成因见上行走廊：' + entry : (stale ? '；成因见下一行的环境标签差异' : '')));
+  }
+  return out;
+}
+
+/** 漂移/陈旧读数时的**自解释输出**（A-1 · 2026-10-19：抽成一处可复用，两支共用三件事）。
+ *
+ *  三件事（每支都打印，⛔ 不是只给 drift）：
+ *    ① 可复制的修复命令；② A vs B 差额 + 逐文件成因；③ 「读数须在提交之后取」。
+ *
+ *  ⚠⚠ **两分支的措辞必须分开**（作业书 §1.1 点名的坑）：
+ *    · `drift`           = 判据表与投影**不一致**（判据面变了 / 同环境读数变了）⇒ 投影**确实过期**；
+ *    · `stale-readings`  = 投影本身仍与判据表一致，只是**读数取自另一种环境** ⇒ 它**不是漂移**，
+ *      是「换环境导致读数不可比」。若把两者写成同一句话，读的人下次就会把"换环境"当成
+ *      "判据演化"去改判据面 —— 那正是本环历史上假红的来源（2026-09-27 实测）。
+ *
+ *  ⚠ 硬边界（红线）：只**打印**，⛔ 不改通过条件、不改三态语义、不改指纹、不自动 --write。 */
+function printSelfExplain(kind, attr, docRegion) {
+  const stale = kind === 'stale-readings';
+  console.log('');
+  console.log(stale
+    ? '=== 自解释（读数快照陈旧 —— ⚠ 这不是"漂移"）==='
+    : '=== 自解释（本环红了要你做什么）===');
+  if (stale) {
+    console.log('   口径：投影的表体与判据面**与本形态一致**，差异只在环境派生列（期望/实测/判定）——');
+    console.log('   即「换了一种环境取读数 ⇒ 两边的读数不可比」，**判据表一个字都没变**，不记冲突。');
+  }
+  console.log(stale
+    ? '① 刷新命令（可直接复制；⚠ 须在**本形态**里跑，否则下次仍不可比）——'
+    : '① 修复命令（可直接复制）——');
+  console.log('   node scripts/arch-claims.mjs --write');
+  console.log(stale
+    ? '② 本次「不可比」的读数来源与文件面 ——'
+    : '② 本次漂移的逐文件成因 ——');
+  for (const l of fileAttribution(docRegion, stale ? null : (attr && attr.why), kind)) console.log(l);
+  if (stale) {
+    console.log('   本形态 env=' + SNAP_ENV + ' ← 投影取自 env=' + (docRegion && (String(docRegion).match(/读数快照 env=([a-z-]+)/) || [])[1] || '?')
+      + ' ⇒ 两边**环境标签不同**；要可比就统一形态再 --write（⛔ 不要为此改判据面）。');
+  }
+  console.log('③ ⚠ 读数须在**提交之后**取 —— --write 写进去的是「当前工作区读数」；');
+  console.log('   若还有未提交改动（新增/删除/改行尾），投影会在下次提交后**立刻再漂移/再不可比**。');
+  console.log(stale
+    ? '   正确顺序：先 commit ⇒ 再 --write ⇒ 再 commit 那次投影刷新（且 --write 与 --check 须同一环境形态）。'
+    : '   正确顺序：先 commit ⇒ 再 --write ⇒ 再 commit 那次投影刷新。');
+}
+
 if (has('--check')) {
   // 判定例程（**不手抄**）：把指纹行从**两侧**都剥掉，只比其余部分。
   //   ⚠ 两侧必须用**同一个**剥行函数（对称）——--write 写进档里的投影是**含**指纹行的，
   //     只剥实算侧就永远比不齐、还会把"环境一致"误报成"读数快照陈旧"（2026-09-27 实测踩到）。
   //   ⚠ 必须自底向上重算，不得引用投影里那行 fingerprint——否则"改档里的指纹"能绕过门禁。
+  //   ⚠ A-2（2026-10-19）：写入 HEAD 那行**必须同样剥掉**（两侧对称）。它每提交一次就变，
+  //     若留在逐字比对面里，**每次 commit 都会把投影判成漂移** —— 那正是 A-2 的陷阱本身。
   const stripFp = (t) => String(t).split('\n').filter((l, i, a) => !/^> fingerprint（/.test(l)
+    && !/^> 写入 HEAD（/.test(l)
     // 剥行后空行塌缩，按同样规则归一：丢弃"生成："行**之后**的第一个空行
     && !(i > 0 && /^> 生成：/.test(a[i - 1]) && l === '')).join('\n').trim();
   const stampedMd = () => stripFp(mdReport());
@@ -1286,6 +1401,12 @@ if (has('--check')) {
     //   而判据表其实一个字都没变）。
     console.log(`⤫ 读数快照陈旧（非判据面漂移）：投影表体与判据面一致，仅环境派生列（期望/实测/判定）取自`
       + ` env=${drift.docEnv || '?'} 而本次是 env=${SNAP_ENV}——跑 --write 可刷新，本条不记 PASS 也不记冲突｜${fpLine}`);
+    // ── A-1（2026-10-19）：自解释块扩到本支 ──────────────────────────────────
+    //   病历：同一族「换环境导致读数不可比」的提示此前只有一句，不说**拿什么命令修 / 是哪几个
+    //   文件 / 读数须在提交之后取**；而 drift 支已有那三件事 ⇒ 形状不对称，读的人仍要自己拼。
+    //   ⚠ 措辞由 printSelfExplain 按 kind 分流：本支**不是漂移**，⛔ 不得与 drift 支混为一谈。
+    //   ⚠ 硬边界：只**打印**，⛔ 不改通过条件、不改三态语义、不自动 --write。
+    printSelfExplain('stale-readings', null, docRegion);
   } else if (drift.kind === 'drift') {
     // 归因另一支：**点名具体是哪条腿失效**——笼统写「指纹 A vs B」会把'指纹相同但表体缺行'
     //   也叙述成指纹不同（实测踩到）。⚠ 措辞由 driftAttribution 统一出，面未变时**不得**说「已过期」。
@@ -1321,39 +1442,10 @@ if (has('--check')) {
     //   以及最要命的一条——**读数必须在提交之后取**（提交前写进去的投影下次提交后立刻再漂）。
     //   ⇒ 本段只在**真漂移**时打印，逐条补齐这三件事。
     //   ⚠ 硬边界（红线）：只**打印**，⛔ 不改通过条件、不改三态语义、不改指纹、不自动 --write。
-    {
-      const s8 = RUN.find((x) => x.id === 'S-8');
-      // 档内记的受控件数（S-8 的 actual 里那段「受控 N 件」）vs 本次实算
-      const numFrom = (t) => { const m = String(t || '').match(/受控 (\d+) 件/); return m ? Number(m[1]) : null; };
-      const A = numFrom(docRegion);
-      const B = numFrom(s8 && s8.actual);
-      console.log('');
-      console.log('=== 自解释（本环红了要你做什么）===');
-      console.log('① 修复命令（可直接复制）——');
-      console.log('   node scripts/arch-claims.mjs --write');
-      console.log('② 本次漂移的逐文件成因 ——');
-      if (A !== null && B !== null && A !== B) {
-        console.log('   档内受控件数 A=' + A + ' 件；本次实算 B=' + B + ' 件（相差 ' + (B - A) + ' 件）');
-        let st = '';
-        try { st = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8', timeout: 20000 }); } catch { /* git 不可用则略 */ }
-        const lines = String(st).split('\n').filter((l) => l.trim());
-        if (lines.length) {
-          console.log('   工作区未提交差集（git status --porcelain）——受控件数就是被这些条目改的：');
-          for (const l of lines.slice(0, 40)) console.log('     ' + l);
-          if (lines.length > 40) console.log('     …另有 ' + (lines.length - 40) + ' 条，跑 git status 看全');
-        } else {
-          console.log('   工作区干净 ⇒ 差异来自**档生成之后**的提交；逐文件用：');
-          console.log('     git log --oneline --name-status -20');
-        }
-      } else if (A !== null && B !== null) {
-        console.log('   受控件数未变（A=B=' + A + ' 件）⇒ 本漂移不是"文件增删"造成的；成因见上行走廊：' + attr.why);
-      } else {
-        console.log('   未能从档内/实算里解析出受控件数（判定信息见上一行）⇒ 逐文件请跑：git status --porcelain / git log --name-status');
-      }
-      console.log('③ ⚠ 读数须在**提交之后**取 —— --write 写进去的是「当前工作区读数」；');
-      console.log('   若还有未提交改动（新增/删除/改行尾），投影会在下次提交后**立刻再漂**。');
-      console.log('   正确顺序：先 commit ⇒ 再 --write ⇒ 再 commit 那次投影刷新。');
-    }
+    //   A-1（2026-10-19）：原内联块抽成 printSelfExplain —— 与 stale-readings 支共用**同一处输出**，
+    //   但措辞按 kind 分流（⛔ 两支文案不得混为一谈）。逐文件成因多了 `--write` 记下的 HEAD
+    //   这一级（A-2）：可直接 `git diff --name-status <记下的 HEAD>..HEAD` 点名文件。
+    printSelfExplain('drift', attr, docRegion);
     emitRingState('arch-claims', ringState[0], ringState[1]);
     process.exit(1);
   }

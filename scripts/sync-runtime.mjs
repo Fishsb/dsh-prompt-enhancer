@@ -65,6 +65,26 @@ function stripBomIfPresent(p) {
 }
 const TEXT_DEPLOY_EXT = /\.(json|cjs|js|mjs|md|ya?ml|cmd)$/;
 
+// ── 0/4 host 面快照（条件化打印的**判据**）──────────────────────────────────────
+// 病历（CHG-213 起的队列项）：收尾原**无条件**打印「① 重启 DSH ② Ctrl+F5」——
+//   于是「只改了 client（效果 = 一次页面刷新）」也被要求重启，把"重启"这个真成本通胀成了
+//   噪音；而真正的判据从来不是「这次有没有跑同步」，是**host 面字节有没有变**。
+// 判据口径（逐条）：host 面 = plugin-host.js + lib/*.cjs **除 client.cjs**（client 半部的生效界
+//   是页面刷新，不构成重启理由；lib/client.cjs 由宿主投递、Ctrl+F5 即得新产物）。
+//   ⚠ 必须在**构建之前**取这份快照，「前后比」才有意义（构建之后取就成了自己跟自己比）。
+//   ⚠ 目录枚举用 readdirSync 而非手写清单（与第 4 步 md5 清单同口径，防手写清单随 lib 增删漂移）。
+const HOST_FACE = ['plugin-host.js'].concat(
+  readdirSync(join(root, 'lib')).filter((n) => n.endsWith('.cjs') && n !== 'client.cjs').map((n) => 'lib/' + n));
+const hostFaceMd5 = (base) => {
+  const m = {};
+  for (const f of HOST_FACE) {
+    const fp = join(base, f);
+    m[f] = existsSync(fp) ? md5(fp) : null;
+  }
+  return m;
+};
+const hostBefore = hostFaceMd5(root);
+
 // 1. 构建（版本不经产物：见头注订正 —— 运行时直读 package.json）
 console.log('== 1/4 构建 host + client ==');
 run('build-host.mjs', []);
@@ -194,4 +214,22 @@ console.log('');
 console.log('✅ 运行环境已部署（' + deployTargets.length + ' 个 profile）：');
 for (const rt of deployTargets) console.log('   - ' + rt);
 console.log('   版本：' + require('../package.json').version);
-console.log('   生效要求：① 重启对应 DSH 实例（加载新 host/执行器）；② 浏览器 Ctrl+F5 强制刷新页面（加载新 client）。');
+// ── 收尾：按 **host 面是否变化** 条件化打印（CHG-213 队列项）────────────────────
+//   判据不是「有没有同步动作」（每次都会同步），而是 host 面 md5 前后比的结果：
+//     · host 面**变了** ⇒ 必须重启（新 host 只在进程启动时装载）；且 client 也可能变了 ⇒ 再提 Ctrl+F5
+//     · host 面**未变** ⇒ 重启换不到任何东西 ⇒ **只提 Ctrl+F5**（client 半部的生效界 = 页面刷新）
+//   ⚠ 这里只改提示文案，⛔ 不改同步面清单、不改 md5 校验与退出码（部署语义逐字未动）。
+{
+  const hostAfter = hostFaceMd5(root);
+  const hostChanged = HOST_FACE.filter((f) => hostAfter[f] !== hostBefore[f]);
+  const hostChangedLabel = hostChanged.join(', ');
+  if (hostChanged.length) {
+    console.log('   生效要求（host 面有变化 ' + hostChanged.length + ' 件：' + hostChangedLabel + '）：');
+    console.log('     ① 重启对应 DSH 实例（加载新 host：host 半部只在进程启动时装载，不重启跑的还是旧字节）');
+    console.log('     ② 浏览器 Ctrl+F5 强制刷新页面（加载新 client）');
+  } else {
+    console.log('   生效要求（host 面无变化：' + HOST_FACE.length + ' 件 md5 前后一致）：');
+    console.log('     只 浏览器 Ctrl+F5 强制刷新页面即可 —— 本次没有 host 侧改动，**不需要重启** DSH。');
+    console.log('     （⚠ 若你上次部署后还没重启过 DSH，那次部署的 host 仍待重启——本条只判本次同步的 host 面差异。）');
+  }
+}
