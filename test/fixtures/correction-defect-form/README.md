@@ -24,7 +24,7 @@
 | `enhance-button.js` | `src/client/components/enhance-button.js` | `b620871862b3bff62f7c098dff5f65b5` |
 
 ⚠ 上述 md5 **同时**是「夹具是否被手改过」的判据 —— 变异自证里有一处「这三件与来源提交逐字节一致」的核对
-（`chunkAtRef` → `fixtureAt` 的等价性由 md5 锁住，见 `test/correction-status.test.cjs` 的 `FIX-SRC` 断言）。
+（`chunkAtRef`（已删）→ `defectFormAt` 的等价性由 md5 锁住，见 `test/correction-status.test.cjs` 的 `FIX-SRC` 断言）。
 
 ## 为什么是冻结副本，而不是「钉一个提交 sha」（2026-10-20 决定）
 
