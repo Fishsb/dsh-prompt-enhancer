@@ -1083,33 +1083,87 @@ function renderDiagFromSrc(src, snap, cfgOn) {
 // ⚠ 为什么这样写（第 1 轮的教训 + 本轮实测）：上一版变异自证是「对当前源码做一次
 //   `.replace()` 再求值」——**形态脆弱**：实现一旦重构（本批正是重构），替换锚点就大面积失配，
 //   变异要么没生效（恒绿，判据失牙）要么直接把源码改坏（抛错，看起来"有牙"其实测的是语法）。
-//   本版改为：**从 git HEAD 取缺陷原形**（= 上一批发布的真实文件），与当前文件跑**同一份断言**：
+//   本版改为：**取缺陷原形**（= 修复前的真实文件），与当前文件跑**同一份断言**：
 //     · 当前文件 ⇒ 必绿（正控）
-//     · HEAD 文件 ⇒ 必红（变异自证 = 判据确实能抓住那个病）
-//   ⇒ 这条自证同时钉住「缺陷形态真实存在于历史」与「判据对它有鉴别力」两件事，
-//     且**不会因为将来重构而静默失效**（它不依赖任何代码字符串锚点）。
+//     · 缺陷原形 ⇒ 必红（变异自证 = 判据确实能抓住那个病）
+//   ⇒ 这条自证同时钉住「缺陷形态真实存在」与「判据对它有鉴别力」两件事。
+//
+// ⚠⚠ 2026-10-20 订正（`CHG-273`）：上一版取法是 `git show HEAD:<path>` —— **基准是浮动的 `HEAD`**。
+//   而 `3b71581` 本身就是那次的**修复提交** ⇒ `HEAD` 已是**修好**形态 ⇒ 前置断言先破 ⇒
+//   **三条自证恒红**（`npm test` 实测 `fail 3` / `EXIT=1`，与 CHANGELOG 自述的 fail 0 不符）。
+//   ⇒ **基准改为「冻结的缺陷原形副本」**：`test/fixtures/correction-defect-form/` 三件，
+//     逐字节取自 `a78ca71`（= `3b71581~1`，真正的缺陷原形），来历与 md5 见该目录 `README.md`。
+//   ⚠ 为什么不用「钉一个常量 sha」：CI 的 `actions/checkout@v4` **未设 `fetch-depth`**（默认 1，
+//     shallow clone）⇒ 历史里那个提交不在 ⇒ 配上「取不到必须 fail-closed」⇒ **CI 永远红**。
+//     冻结副本不依赖 clone 深度与 history 是否被改写 ⇒ 取它。
+//   ⛔ **基准不得再是浮动的 `HEAD`**（本仓 `甲-7`：「变异自证基准不得是本次修复所在提交」）。
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const { spawnSync: spawnSyncV } = require('node:child_process');
-/** 取某个文件在某个 ref 上的**解码后源码**（默认 HEAD = 上一批发布形态）。 */
-function chunkAtRef(rel, ref) {
-  const r = spawnSyncV('git', ['show', (ref || 'HEAD') + ':' + rel], { cwd: ROOT, encoding: 'utf8' });
-  if (r.status !== 0) throw new Error('git show 失败：' + rel + ' @ ' + ref + ' :: ' + String(r.stderr || '').slice(0, 200));
-  const raw = r.stdout;
+const DEFECT_FORM_DIR = path.join(__dirname, 'fixtures', 'correction-defect-form');
+
+/**
+ * 取**冻结的缺陷原形**源码（解码后）。
+ *
+ * ⚠ **fail-closed（本函数的核心纪律）**：夹具缺失 / 读不出 / 解码失败 ⇒ **抛错**，
+ *   ⛔ **绝不**"找不到就返回空串然后判绿" —— 那正是 `甲-7` 禁止的「找不到就算过」。
+ *   抛错会让测试**变红并点名具体夹具路径**，与「基准取不到必须红」一致。
+ *
+ * @param {string} name 夹具文件名（如 `voice-section.js`）
+ */
+function defectFormAt(name) {
+  const full = path.join(DEFECT_FORM_DIR, name);
+  let raw;
+  try {
+    raw = fs.readFileSync(full, 'utf8');
+  } catch (e) {
+    throw new Error('缺陷原形夹具取不到（fail-closed ⇒ 本判据不得判绿）：' + full + ' :: ' + String(e && e.message));
+  }
+  if (!raw || !raw.trim()) throw new Error('缺陷原形夹具为空（fail-closed ⇒ 不得判绿）：' + full);
   const { decodeChunkText } = require('../scripts/lib/chunk-decode.mjs');
-  return decodeChunkText(raw, rel + '@' + (ref || 'HEAD'));
+  return decodeChunkText(raw, 'fixtures/correction-defect-form/' + name);
 }
 
-test('D-V1 ⭐ 真实文件级回退：用 HEAD 的 voice-section.js ⇒ D1/D2/D3 三条断言全红（判据有牙）', () => {
-  const src = chunkAtRef('src/client/voice/voice-section.js');
-  // 前置：HEAD 形态确实是缺陷原形（累计口径在位）
-  assert.ok(src.includes('snap.failed > 0'), '前置：HEAD 的 voice-section 仍是累计口径（缺陷原形）');
-  const renderHead = (snap, on) => renderDiagFromSrc(src, snap, on);
-  for (const [name, check] of [['D1', checkD1], ['D2', checkD2]]) {
-    const red = expectRed(() => check(renderHead));
-    assert.equal(red, true, '⭐ 用 HEAD 形态跑 ' + name + ' ⇒ 必须红（否则 ' + name + ' 对缺陷没有鉴别力）');
+// ⚠ 夹具「确实是缺陷原形」的指纹锁（`CHG-273`）。
+//   为什么需要它：冻结副本一旦被**手改**（例如"顺手把旧代码修一下"），它就不再是缺陷原形，
+//   而上游三条自证会因为"原形不像原形"而以**另一种方式**失牙（前置断言先破 ⇒ 看起来红，
+//   但那红证明的是"夹具坏了"，不是"判据有牙"）。⇒ 用字节指纹把三件钉死。
+//   ⚠ 指纹取自 `a78ca71`（= `3b71581~1`）的**原始字节**，来历见夹具目录 `README.md`。
+//   ⛔ 修改本表 = 修改「什么是缺陷原形」，属方案语义变更 ⇒ 必须留下依据，不得为了"变绿"而动。
+const DEFECT_FORM_MD5 = {
+  'voice-section.js': 'e7ecfc3235c4f462c93cecb144d94172',
+  'correction.js': '517089334406b1549a4db897318299a5',
+  'enhance-button.js': 'b620871862b3bff62f7c098dff5f65b5',
+};
+
+test('FIX-SRC ⭐ 夹具指纹锁：三件冻结副本逐字节等于缺陷原形（被手改 ⇒ 必红并点名）', () => {
+  const crypto = require('node:crypto');
+  for (const [name, want] of Object.entries(DEFECT_FORM_MD5)) {
+    const full = path.join(DEFECT_FORM_DIR, name);
+    let buf;
+    try {
+      buf = fs.readFileSync(full);
+    } catch (e) {
+      // fail-closed：夹具缺失 ⇒ 红并点名（⛔ 不是跳过、不是判绿）
+      assert.fail('缺陷原形夹具缺失（不得判绿）：' + full + ' :: ' + String(e && e.message));
+    }
+    const got = crypto.createHash('md5').update(buf).digest('hex');
+    assert.equal(got, want,
+      '⭐ 夹具 ' + name + ' 已偏离缺陷原形（手改过？）⇒ 变异自证的基准被破坏。' +
+      '若确需更换原形，须改 `DEFECT_FORM_MD5` 并留下依据（属方案语义变更）。实测=' + got + ' 期望=' + want);
   }
-  // ⚠ D3 **不从 HEAD 取**：它是**回归锁**（改前改后都应绿 —— 改前也确实分得清两态，
+});
+
+test('D-V1 ⭐ 真实文件级回退：用缺陷原形(voice-section.js) ⇒ D1/D2 全红（判据有牙）', () => {
+  const src = defectFormAt('voice-section.js');
+  // 前置：冻结的缺陷原形确实是累计口径（判定语必须是**真实代码**，⛔ 不能被注释骗过）
+  assert.ok(/if\s*\(\s*snap\.failed\s*>\s*0\s*\)\s*text\s*=/.test(src),
+    '前置：缺陷原形的 voice-section 仍以累计口径判定可见文案（缺陷原形校验）');
+  const renderDefect = (snap, on) => renderDiagFromSrc(src, snap, on);
+  for (const [name, check] of [['D1', checkD1], ['D2', checkD2]]) {
+    const red = expectRed(() => check(renderDefect));
+    assert.equal(red, true, '⭐ 用缺陷原形跑 ' + name + ' ⇒ 必须红（否则 ' + name + ' 对缺陷没有鉴别力）');
+  }
+  // ⚠ D3 **不从缺陷原形取**：它是**回归锁**（改前改后都应绿 —— 改前也确实分得清两态，
   //   本批的任务是「改口径的同时别把区分弄丢」）。对回归锁的正确自证是**定点变异**：
   //   把两态合成同一句 ⇒ 它必须红（见 D-V3）。⛔ 若硬拿 HEAD 跑 D3，红不红都说明不了问题。
   checkD3((a, b) => renderCorrectionDiag(a, b));
@@ -1127,28 +1181,28 @@ test('D-V3 ⭐ 定点变异：把「跳过」与「没改动」合成同一句 �
     '⭐ 两态同形 ⇒ D3 必红（否则这条回归锁锁不住「不得合并」）');
 });
 
-test('C-V1 ⭐ 真实文件级回退：用 HEAD 的 enhance-button.js + correction.js ⇒ C1 红、C2 绿（判据有牙且方向正确）', () => {
-  const corr = chunkAtRef('src/client/voice/correction.js');
-  const eb = chunkAtRef('src/client/components/enhance-button.js');
-  // 前置：HEAD 形态没有已消费语义
-  assert.equal(corr.includes('failureSeq'), false, '前置：HEAD 的 correction.js 无场次号（缺陷原形）');
-  assert.equal(eb.includes('correctionFailureTicket'), false, '前置：HEAD 的按钮无出票调用（缺陷原形）');
-  const loadHead = () => loadButtonFromSrc(eb, corr, { enhancePhase: 'idle' });
+test('C-V1 ⭐ 真实文件级回退：用缺陷原形(enhance-button.js+correction.js) ⇒ C1 红、C2 绿（判据有牙且方向正确）', () => {
+  const corr = defectFormAt('correction.js');
+  const eb = defectFormAt('enhance-button.js');
+  // 前置：缺陷原形没有已消费语义
+  assert.equal(corr.includes('failureSeq'), false, '前置：缺陷原形的 correction.js 无场次号');
+  assert.equal(eb.includes('correctionFailureTicket'), false, '前置：缺陷原形的按钮无出票调用');
+  const loadDefect = () => loadButtonFromSrc(eb, corr, { enhancePhase: 'idle' });
   // ⭐ C1：同一场失败切回来会**再闪** ⇒ checkC1 必红
-  assert.equal(expectRed(() => checkC1(loadHead)), true,
-    '⭐ 用 HEAD 形态跑 C1 ⇒ 必须红（这正是本批治的「切回又闪」）');
-  // 负控方向：HEAD 形态下「首闪」本来就成立 ⇒ C2 必须仍绿（⛔ 不是所有断言一起红）
-  checkC2(loadHead);
+  assert.equal(expectRed(() => checkC1(loadDefect)), true,
+    '⭐ 用缺陷原形跑 C1 ⇒ 必须红（这正是本批治的「切回又闪」）');
+  // 负控方向：缺陷原形下「首闪」本来就成立 ⇒ C2 必须仍绿（⛔ 不是所有断言一起红）
+  checkC2(loadDefect);
   // 正控：当前实现 C1 必绿
   checkC1((o) => loadButton(o));
 });
 
-test('C-V2 ⭐ 真实文件级回退：用 HEAD 的 enhance-button.js + correction.js ⇒ C3 红（第二场也被当成同一场）', () => {
-  const corr = chunkAtRef('src/client/voice/correction.js');
-  const eb = chunkAtRef('src/client/components/enhance-button.js');
-  const loadHead = () => loadButtonFromSrc(eb, corr, { enhancePhase: 'idle' });
-  // HEAD 形态：不存在消费概念 ⇒ C3 的「前提：同一场不重复闪」这一断言必然先红
-  assert.equal(expectRed(() => checkC3(loadHead)), true, '⭐ 用 HEAD 形态跑 C3 ⇒ 必须红');
+test('C-V2 ⭐ 真实文件级回退：用缺陷原形(enhance-button.js+correction.js) ⇒ C3 红（第二场也被当成同一场）', () => {
+  const corr = defectFormAt('correction.js');
+  const eb = defectFormAt('enhance-button.js');
+  const loadDefect = () => loadButtonFromSrc(eb, corr, { enhancePhase: 'idle' });
+  // 缺陷原形：不存在消费概念 ⇒ C3 的「前提：同一场不重复闪」这一断言必然先红
+  assert.equal(expectRed(() => checkC3(loadDefect)), true, '⭐ 用缺陷原形跑 C3 ⇒ 必须红');
   checkC3((o) => loadButton(o));
 });
 
