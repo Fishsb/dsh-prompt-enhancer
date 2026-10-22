@@ -207,6 +207,10 @@ const GATE_RINGS = [
   { id: 'prompts', script: 'scripts/sync-prompts.mjs', why: '提示词生成区不漂移' },
   { id: 'arch-claims', script: 'scripts/arch-claims.mjs', why: '本判据表自身（ADR-234）' },
   { id: 'cards', script: 'scripts/card-arch-consistency.mjs', why: '知识卡 ↔ 架构档一致性（册 A · 2026-09-25 接入）' },
+  // ⭐ CHG-301：拆包前置两道 cross 环（第 6、7 环）。⚠ 本表与 gate.mjs 的 RINGS 是**双向锁**，
+  //   必须同批同序增删；只改一侧 ⇒ B234-1 的 `extra` / `lost` 腿必红。
+  { id: 'pkg-identity', script: 'scripts/split-identity.mjs', why: '两包 identity 不撞（撞了宿主静默 `warns= []`，只能仓内机检拦）' },
+  { id: 'shared-fns', script: 'scripts/split-shared-fns.mjs', why: '两包各一份的 7 个共享 host 函数逐字节相等（漂移 = 同一输入两种结果）' },
 ];
 
 /** 从命令串摘出 `node scripts/xxx.mjs [args]`，顺序即链序 */

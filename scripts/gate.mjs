@@ -84,6 +84,15 @@ const RINGS = [
   // ⚠ P5：selfReport 字段已**删除**——各环统一走 RING-STATE 契约行，
   //   不再需要「哪一环该走哪套正则」的登记（那正是补丁史的来源）。
   { id: 'cards', script: 'scripts/card-arch-consistency.mjs', args: ['--check'] },
+  // ⭐ CHG-301：拆包前置的两道 cross 环接成第 6、7 环（追加在末尾，不打乱既有相对序）。
+  //   · `pkg-identity`：两包 identity 不得撞（loader entry id / client 模块 id / RPC 前缀 / RPC 方法名）。
+  //     ⚠ 为什么必须在 gate 里：撞了宿主 `composeEntries` **不报错不告警**（`warns= []`），
+  //     而 `git mv` 会重排全部路径 —— 正是它最该拦的时刻。
+  //   · `shared-fns`：两包各自的 7 个共享 host 函数必须逐字节相等。
+  //   ⚠ 环 id **不带冒号**：scripts/lib/ring-state.mjs:53 的 id 正则是 `/^[A-Za-z0-9_.-]+$/`，
+  //     冒号不在闭集内 ⇒ formatRingState 直接 throw（V3 的依据就是这行原文）。
+  { id: 'pkg-identity', script: 'scripts/split-identity.mjs', args: ['--check'] },
+  { id: 'shared-fns', script: 'scripts/split-shared-fns.mjs', args: ['--check'] },
 ];
 
 /** 摘要/摘录/裁决全部在 ring-state.mjs —— 本文件**不做任何文本匹配**（P5）。 */

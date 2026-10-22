@@ -98,11 +98,17 @@ function makeVariableConcatEntry(dir) {
   return entry;
 }
 
-test('GCAT-1 正常态仍绿：编排器形态下探成功 → 5 环、exit 0、读数不含「0 环」', { skip: !hasGit && 'git 不可用' }, () => {
+test('GCAT-1 正常态仍绿：编排器形态下探成功 → 环数 == 声明环数、exit 0、读数不含「0 环」', { skip: !hasGit && 'git 不可用' }, () => {
   const { code, out } = withFixture(null, runClaims);
   const row = readingRow(out);
   assert.equal(code, 0, '正常态应 exit 0（冲突 0）：\n' + out);
-  assert.match(row, /链 5 环/, '正常态读数应是 5 环');
+  // ⭐ CHG-301：**判关系不判绝对数** —— 旧写法 `assert.match(row, /链 5 环/)` 把环数**写死**，
+  //   每次接环都会假红（本仓 S-8「受控文件数」同族病）。改为从 gate.mjs 的 RINGS 现读分母，
+  //   再断言读数与它一致：既保留「下探成功」的判别力（下探失败会报 0 环），又不再锁死历史数字。
+  const gateSrc = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'gate.mjs'), 'utf8');
+  const declared = (gateSrc.match(/\{ id: '[^']+', script: 'scripts\//g) || []).length;
+  assert.ok(declared > 0, 'gate.mjs 应声明至少一环（读到 ' + declared + '）');
+  assert.match(row, new RegExp('链 ' + declared + ' 环'), '正常态读数环数应等于 gate.mjs 声明数（' + declared + '）：' + row);
   assert.doesNotMatch(row, /链 0 环/, '正常态不得出现零环措辞');
 });
 

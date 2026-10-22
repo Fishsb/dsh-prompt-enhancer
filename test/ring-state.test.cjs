@@ -37,9 +37,13 @@ const RINGS = [
   ['prompts', 'scripts/sync-prompts.mjs', ['--check']],
   ['arch-claims', 'scripts/arch-claims.mjs', ['--check']],
   ['cards', 'scripts/card-arch-consistency.mjs', ['--check']],
+  // ⭐ CHG-301：拆包前置的两道 cross 环（第 6、7 环）。
+  //   ⚠ 本常量是 gate.mjs `RINGS` 的**测试侧镜像**，增删环必须同批改这里（GCAT-1/P5-* 都按它取分母）。
+  ['pkg-identity', 'scripts/split-identity.mjs', ['--check']],
+  ['shared-fns', 'scripts/split-shared-fns.mjs', ['--check']],
 ];
 
-test('P5-01 五个环各自输出恰一条 RING-STATE 契约行（行首锚定 + 三态闭集）', async () => {
+test('P5-01 每个环各自输出恰一条 RING-STATE 契约行（行首锚定 + 三态闭集）', async () => {
   const { parseRingState } = await lib();
   for (const [id, script, args] of RINGS) {
     const r = run(script, args);
@@ -146,18 +150,22 @@ test('P5-06 位置无关（N2 复发防线）：契约行后跟 50 行噪声仍�
   assert.equal(v.state, 'SKIP', '尾部噪声不得影响读取（旧实现按末 4 行窗口找会滑出窗口）');
 });
 
-test('P5-07 恒红不短路：环上限压到 1ms ⇒ 五环全部出读数、全 FAIL、退出码 1', () => {
+test('P5-07 恒红不短路：环上限压到 1ms ⇒ 每环都出读数、全 FAIL、退出码 1', () => {
   const r = run(GATE, ['--quiet'], { GATE_RING_TIMEOUT_MS: '1' });
   const ringLines = r.out.split(NL).filter((l) => /^RING /.test(l));
-  assert.equal(ringLines.length, 5, '五个环都必须留下读数（不得因超时短路），实得 ' + ringLines.length);
+  // ⭐ CHG-301：**判关系不判绝对数** —— 分母取测试侧镜像 `RINGS.length`（与 gate.mjs 同批维护），
+  //   ⛔ 不写死 5/7：环数是**会变的事实**，写死它就会在每次接环时假红（本仓 S-8 受控文件数同族病）。
+  //   本断言要证明的是「**每环都留下读数、无一短路**」，与"恰好几环"无关。
+  assert.equal(ringLines.length, RINGS.length, '每环都必须留下读数（不得因超时短路），实得 ' + ringLines.length + ' / 期望 ' + RINGS.length);
   assert.equal(r.code, 1, '全 FAIL 时退出码应为 1');
   for (const l of ringLines) assert.ok(/ FAIL /.test(l), '超时环应记 FAIL：' + l);
 });
 
-test('P5-08 五环可见：默认形态下 5 条 RING 行，逐环 id 齐全', () => {
+test('P5-08 环可见：默认形态下每环一条 RING 行，逐环 id 齐全', () => {
   const r = run(GATE, ['--quiet']);
   const ringLines = r.out.split(NL).filter((l) => /^RING /.test(l));
-  assert.equal(ringLines.length, 5, 'RING 行应恰 5 条');
+  // ⭐ CHG-301：判关系不判绝对数（同 P5-07）。真正的判据是「**声明了几环就有几行**」。
+  assert.equal(ringLines.length, RINGS.length, 'RING 行数应 == 声明环数（实得 ' + ringLines.length + ' / 期望 ' + RINGS.length + '）');
   for (const [id] of RINGS) assert.ok(ringLines.some((l) => l.startsWith('RING ' + id + ' ')), id + ' 应有自己的 RING 行');
   // ⚠ 对齐 T3/N3 三态裁定（2026-09-27 用户裁定 A）：无 FAIL 但有 SKIP ⇒ 退出码 2（未判全）。
   //   但**「有没有 SKIP」本身是环境的函数**，不是判据（2026-10-12 本批发现并修正）：
@@ -557,11 +565,16 @@ test('P5-11 【行为判据】措辞免疫端到端：诱饵取自**真环真实
     ['prompts', 'FAIL', 1],
     ['arch-claims', 'SKIP', 0],
     ['cards', 'PASS', 0],
+    // ⭐ CHG-301：两道 cross 环的夹具席位（顺序须与 `RINGS` 前 7 项一一对应）
+    ['pkg-identity', 'PASS', 0],
+    ['shared-fns', 'PASS', 0],
+    // 以下三条是「同措辞诱饵」席位（追加在链末，不参与 RINGS 路径替换）
     ['same-wording-pass', 'PASS', 0],
     ['same-wording-skip', 'SKIP', 0],
     ['same-wording-fail', 'FAIL', 1],
   ];
-  for (const [id, state, failCode] of SPEC) {
+  // ⚠ 前 RINGS.length 项与被替换的真实环一一对应；其后为追加的诱饵席位（无对应真实脚本）。
+  assert.equal(SPEC.length, RINGS.length + 3, 'SPEC 必须 = 真实环数 + 3 个诱饵席位（当前 ' + SPEC.length + ' vs ' + (RINGS.length + 3) + '）');  for (const [id, state, failCode] of SPEC) {
     const body = [
       'console.log(' + JSON.stringify(DECOYS.join(NL)) + ');',
       'process.stderr.write("RING-STATE ' + id + ' ' + state + ' 契约行（正文措辞为反向诱导）' + String.fromCharCode(92) + 'n");',
@@ -570,9 +583,12 @@ test('P5-11 【行为判据】措辞免疫端到端：诱饵取自**真环真实
     fs.writeFileSync(path.join(tmp, 'scripts', '_fx-' + id + '.mjs'), body, 'utf8');
   }
   let g = fs.readFileSync(path.join(tmp, 'scripts', 'gate.mjs'), 'utf8');
-  const paths = ['scripts/dead-code-gate.mjs', 'scripts/rpc-manifest.mjs', 'scripts/sync-prompts.mjs', 'scripts/arch-claims.mjs', 'scripts/card-arch-consistency.mjs'];
+  // ⭐ CHG-301：**判关系不判绝对数** —— 替换面取测试侧镜像 `RINGS`（而非手写 5 条路径），
+  //   ⇒ 接第 6/7 环时本夹具**自动跟上**，不必再手改（旧写法漏替换 ⇒ 新环跑真脚本 ⇒ 假红）。
+  const paths = RINGS.map(([, script]) => script);
   for (let i = 0; i < paths.length; i += 1) g = g.split(paths[i]).join('scripts/_fx-' + SPEC[i][0] + '.mjs');
-  const extra = SPEC.slice(5).map(([id]) => "  { id: '" + id + "', script: 'scripts/_fx-" + id + ".mjs', args: [] },").join(NL);
+  // ⚠ 只有**诱饵席位**要追加进链尾；真实环的位置已由上面的路径替换占据 ⇒ 从 RINGS.length 起切。
+  const extra = SPEC.slice(RINGS.length).map(([id]) => "  { id: '" + id + "', script: 'scripts/_fx-" + id + ".mjs', args: [] },").join(NL);
   g = g.replace(NL + '];' + NL, NL + extra + NL + '];' + NL);
   assert.ok(g.includes('_fx-same-wording-skip'), '同措辞席位应已注入（否则判别力缺失）');
   fs.writeFileSync(path.join(tmp, 'scripts', 'gate.mjs'), g, 'utf8');
