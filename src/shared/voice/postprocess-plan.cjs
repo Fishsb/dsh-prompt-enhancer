@@ -50,10 +50,6 @@ function voicePostprocessNext(plan, fromIndex) {
   return index < steps.length ? steps[index] : null;
 }
 
-module.exports = {
-  VOICE_POSTPROCESS_STEPS,
-  VOICE_POSTPROCESS_STEP_ORDER,
-  planVoicePostprocess,
-  voicePostprocessHas,
-  voicePostprocessNext,
-};
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { VOICE_POSTPROCESS_STEPS, VOICE_POSTPROCESS_STEP_ORDER, planVoicePostprocess, voicePostprocessHas, voicePostprocessNext };
+}

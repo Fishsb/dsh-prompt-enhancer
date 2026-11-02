@@ -60,7 +60,7 @@ function buildClient() {
   // lived between EnhanceBar and UpdaterCard), so a single pass would leave
   // nested markers unexpanded.
   const injections = [
-    ['// @dsh-client-voice-postprocess-inject\\n', voicePostprocessChunk],
+    ['// @dsh-client-voice-postprocess-inject\n', voicePostprocessChunk],
     ['// @dsh-client-i18n-inject', i18nChunk],
     ['// @dsh-client-constants-inject', constantsChunk],
     ['// @dsh-client-state-inject', stateChunk],

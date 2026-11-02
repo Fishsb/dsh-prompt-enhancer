@@ -69,3 +69,12 @@ test('POSTPLAN-07 步骤游标：next 只按计划返回，越界返回 null', (
   assert.equal(plan.voicePostprocessNext(p, 2), null);
   assert.equal(plan.voicePostprocessNext(null, 0), null);
 });
+test('POSTPLAN-08 产物面：共享计划必须真正注入 lib/client.cjs（有定义、无外部 require）', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'lib', 'client.cjs'), 'utf8');
+  assert.ok(client.includes('function planVoicePostprocess'), '产物缺计划函数定义（只有调用 = 运行期 ReferenceError）');
+  assert.ok(client.includes('function voicePostprocessHas'), '产物缺步骤判定函数定义');
+  assert.ok(client.includes('VOICE_POSTPROCESS_STEPS'), '产物缺步骤常量');
+  assert.equal(client.includes("require('../src/shared/voice/postprocess-plan.cjs')"), false, '产物不得保留外部 require');
+});
