@@ -87,23 +87,10 @@ function streamOf(chunks) {
 // ---------------------------------------------------------------------------
 // P0-e：collectStream 显式处理 finish.kind === 'max-tokens'
 // （判据 P0-5：可区分 kind / 真实文案 / 6 消费点行为一致）
-// 直接从产物 PURE 区段切片求值，验证的就是被发布的同一份 collectStream。
+// 目标模式：直接求值普通 CommonJS 纯函数模块（构建期由打包器注入产物）。
 // ---------------------------------------------------------------------------
-const src = BODY;
-const begin = src.indexOf('// ==PURE-BEGIN==');
-const end = src.indexOf('// ==PURE-END==');
-assert.ok(begin !== -1 && end > begin, 'PURE markers not found in plugin-host.js');
-const pureText = src.slice(begin, end);
-const grabConst = (name) => {
-  const m = src.match(new RegExp('const\\s+' + name + '\\s*=\\s*([^;]+);'));
-  if (!m) throw new Error('const ' + name + ' not found');
-  return name + ' = ' + m[1] + ';';
-};
-const defaultsBlock = [grabConst('DEFAULT_TIMEOUT_MS'), grabConst('DEFAULT_MAX_TOKENS'), grabConst('DEFAULT_OUTPUT_LIMIT')].join('\n');
-const pureFn = new Function(defaultsBlock + '\n' + pureText + `
-  ;return { collectStream, friendlyMessage, computeBackoffDelayMs, isRetryableFailure,
-    resolveEnhanceTimeoutMs, resolvePrepareBudgetMs, WATCHDOG_TIMEOUT_MS, WATCHDOG_TTFT_MAX_MEASURED_MS, PROBE_CACHE_TTL_MS };
-`);
+const { loadPureModule } = require('./helpers/host-pure-module.cjs');
+const pureFn = () => loadPureModule();
 const {
   collectStream, friendlyMessage, computeBackoffDelayMs, isRetryableFailure,
   resolveEnhanceTimeoutMs, resolvePrepareBudgetMs, WATCHDOG_TIMEOUT_MS, WATCHDOG_TTFT_MAX_MEASURED_MS, PROBE_CACHE_TTL_MS,
@@ -128,13 +115,13 @@ test('P0-5② friendlyMessage 对截断给出真实文案（不再是 empty resp
 
 test('P0-5③ 6 个消费点行为一致：主生成采纳截断文本 / 5 个辅助点显式降级（不静默沿用旧兜底）', async () => {
   // 站点清单（产物行号，2026-10-12 实测）：2616 / 3729 / 3769 / 3927 / 3965 / 4227
-  const sites = src.match(/collectStream\(/g) || [];
+  const sites = BODY.match(/collectStream\(/g) || [];
   assert.ok(sites.length >= 6, '至少 6 个 collectStream 调用点，实际 ' + sites.length);
   // 5 个辅助点必须显式声明截断（'maxtokens' 分支或 -truncated 降级键），
   // 主生成点必须显式识别 maxtokens 并给出 OUTPUT_TRUNCATED 兜底。
-  assert.ok(src.includes("result.kind === 'maxtokens'"), '主生成点缺 maxtokens 显式分支');
-  assert.ok(src.includes("code: 'OUTPUT_TRUNCATED'"), '主生成点缺 OUTPUT_TRUNCATED 兜底码');
-  const truncatedKeys = src.match(/-truncated'/g) || [];
+  assert.ok(BODY.includes("result.kind === 'maxtokens'"), '主生成点缺 maxtokens 显式分支');
+  assert.ok(BODY.includes("code: 'OUTPUT_TRUNCATED'"), '主生成点缺 OUTPUT_TRUNCATED 兜底码');
+  const truncatedKeys = BODY.match(/-truncated'/g) || [];
   assert.ok(truncatedKeys.length >= 4, '辅助点须显式声明截断降级（-truncated），实际 ' + truncatedKeys.length);
   // 主生成点：截断但有文本 → 采纳为结果（truncated: true）
   const llm = {
@@ -297,8 +284,8 @@ test('P0-c 看门狗阈值可按实测 TTFT 复算（≥实测上界×2，且 < 
 });
 
 test('P0-c 探针已短化：不再要求真写 ~800 词长文', () => {
-  assert.ok(!src.includes('about 800 words'), '探针提示词不得再要求 800 词长文（成本反噬源）');
-  assert.ok(src.includes('Reply with the single word OK'), '须改为短探针（TTFT 即结论）');
+  assert.ok(!BODY.includes('about 800 words'), '探针提示词不得再要求 800 词长文（成本反噬源）');
+  assert.ok(BODY.includes('Reply with the single word OK'), '须改为短探针（TTFT 即结论）');
 });
 
 // ---------------------------------------------------------------------------
@@ -358,39 +345,39 @@ test('P0-d client 出口存在：enhance/progress 返回 degraded 字段 + 产�
   const client = fs.readFileSync(path.join(__dirname, '..', 'lib', 'client.cjs'), 'utf8');
   assert.ok(client.includes('degradedPrefix'), 'client 产物缺降级提示键');
   assert.ok(client.includes('errOUTPUT_TRUNCATED'), 'client 产物缺截断真实文案键');
-  assert.ok(src.includes('degraded: Array.isArray(rec.degraded)'), 'host enhance/progress 须暴露 degraded');
+  assert.ok(BODY.includes('degraded: Array.isArray(rec.degraded)'), 'host enhance/progress 须暴露 degraded');
 });
 
 // ---------------------------------------------------------------------------
 // P0-b：主超时预算覆盖准备阶段（计时器在 analyze 之前挂）
 // ---------------------------------------------------------------------------
 test('P0-b 主超时计时器上移到准备阶段之前，且生成额度不被准备阶段侵蚀（独立复核 high 的回归锁）', () => {
-  const iGen = src.indexOf('const genTimeoutMs = resolveEnhanceTimeoutMs(');
-  const iPrep = src.indexOf('const prepareBudgetMs = resolvePrepareBudgetMs(');
-  const iTotal = src.indexOf('const totalBudgetMs = genTimeoutMs > 0 ? genTimeoutMs + prepareBudgetMs : 0;');
-  const iTimer = src.indexOf('const timeoutDisposer = totalBudgetMs > 0 ? ctx.timer.timeout(');
-  const iAnalyze = src.indexOf("await runEnhanceStages('analyze', state)");
+  const iGen = BODY.indexOf('const genTimeoutMs = resolveEnhanceTimeoutMs(');
+  const iPrep = BODY.indexOf('const prepareBudgetMs = resolvePrepareBudgetMs(');
+  const iTotal = BODY.indexOf('const totalBudgetMs = genTimeoutMs > 0 ? genTimeoutMs + prepareBudgetMs : 0;');
+  const iTimer = BODY.indexOf('const timeoutDisposer = totalBudgetMs > 0 ? ctx.timer.timeout(');
+  const iAnalyze = BODY.indexOf("await runEnhanceStages('analyze', state)");
   assert.ok(iGen > 0 && iPrep > 0 && iTotal > 0 && iTimer > 0 && iAnalyze > 0, '五处锚点须都在产物中');
   assert.ok(iGen < iTimer && iPrep < iTimer, '预算计算须在计时器之前');
   assert.ok(iTimer < iAnalyze, '计时器须在 analyze（准备阶段）**之前**挂上——这是本条的核心判据');
   // 关键：总预算 = 生成额度 + 准备额度 —— 准备阶段有界，但生成阶段仍拿满原 timeoutMs
   // （复核实测过「prepare 2s + generation 5s / timeout 6s」在旧实现下被拆东墙判超时）
-  assert.ok(src.includes('state.budgetMs = genTimeoutMs;'), '生成额度须与 log/语义分离保存');
-  assert.ok(src.includes('state.budgetDeadline = totalBudgetMs > 0 ? Date.now() + totalBudgetMs : null;'), '预算截止须用总预算');
-  assert.ok(src.includes('function resolvePrepareBudgetMs(row, sources, T)'), '缺准备预算纯函数');
+  assert.ok(BODY.includes('state.budgetMs = genTimeoutMs;'), '生成额度须与 log/语义分离保存');
+  assert.ok(BODY.includes('state.budgetDeadline = totalBudgetMs > 0 ? Date.now() + totalBudgetMs : null;'), '预算截止须用总预算');
+  assert.ok(BODY.includes('function resolvePrepareBudgetMs(row, sources, T)'), '缺准备预算纯函数');
   // 预算公式单一事实源：analyze 与 handler 共用 resolveEnhanceTimeoutMs
-  assert.ok(src.includes('function resolveEnhanceTimeoutMs(cfg, chain)'), '缺预算公式纯函数');
-  assert.equal(src.split('resolveEnhanceTimeoutMs(').length - 1 >= 3, true, '预算公式须被 analyze 与 handler 共用');
+  assert.ok(BODY.includes('function resolveEnhanceTimeoutMs(cfg, chain)'), '缺预算公式纯函数');
+  assert.equal(BODY.split('resolveEnhanceTimeoutMs(').length - 1 >= 3, true, '预算公式须被 analyze 与 handler 共用');
 });
 
 test('P0-b prepare 预算纯函数：可复算且不引用未初始化的 const（TDZ 回归锁）', () => {
   // 复核实测过的致命形态：RELEVANCE_TIMEOUT_MS 定义在 PURE 区段内较后位置，
   // 若 resolvePrepareBudgetMs 直接引用它 → const 暂时性死区 → enhance 请求挂起。
   // 判据一：函数体不得直接出现常量名，超时表一律由入参 T 提供。
-  const start = src.indexOf('function resolvePrepareBudgetMs(row, sources, T)');
-  const end = src.indexOf('function resolveEnhanceTimeoutMs(cfg, chain)');
+  const start = BODY.indexOf('function resolvePrepareBudgetMs(row, sources, T)');
+  const end = BODY.indexOf('function resolveEnhanceTimeoutMs(cfg, chain)');
   assert.ok(start > 0 && end > start, 'resolvePrepareBudgetMs 须存在且在 resolveEnhanceTimeoutMs 之前');
-  const fnSrc = src.slice(start, end);
+  const fnSrc = BODY.slice(start, end);
   for (const c of ['RELEVANCE_TIMEOUT_MS', 'V2_SEARCH_EVENTS_TIMEOUT_MS', 'V2_WORKSPACE_TIMEOUT_MS', 'V2_PROGRESS_TIMEOUT_MS', 'WEB_PLAN_TIMEOUT_MS', 'WEB_SEARCH_TIMEOUT_MS', 'WEB_SEARCH_MAX_RESULTS']) {
     assert.ok(fnSrc.indexOf(c) === -1, 'resolvePrepareBudgetMs 不得直接引用 ' + c + '（TDZ 风险）');
   }
@@ -405,20 +392,20 @@ test('P0-b prepare 预算纯函数：可复算且不引用未初始化的 const�
 
 test('P0-b 辅助调用并入同一预算 + 超时真中断（钳到剩余预算 + 超预算跳过记降级）', () => {
   for (const marker of ['function helperTimeoutMs(state, baseMs)', 'function budgetExhausted(state)', 'function markDegraded(state, kind)']) {
-    assert.ok(src.includes(marker), '缺预算/降级基建：' + marker);
+    assert.ok(BODY.includes(marker), '缺预算/降级基建：' + marker);
   }
   // P0-b 修正：辅助超时须**真中断**（startHelperAbort 同时把超时钳到剩余预算）
-  assert.ok(src.includes('function startHelperAbort(state, baseMs)'), '缺辅助真中断基建 startHelperAbort');
-  assert.ok(src.includes('startHelperAbort(state, RELEVANCE_TIMEOUT_MS)'), 'judgeRelevance 超时须钳到剩余预算');
-  assert.ok(src.includes('startHelperAbort(state, WEB_PLAN_TIMEOUT_MS)'), 'planWebSearch 超时须钳到剩余预算');
+  assert.ok(BODY.includes('function startHelperAbort(state, baseMs)'), '缺辅助真中断基建 startHelperAbort');
+  assert.ok(BODY.includes('startHelperAbort(state, RELEVANCE_TIMEOUT_MS)'), 'judgeRelevance 超时须钳到剩余预算');
+  assert.ok(BODY.includes('startHelperAbort(state, WEB_PLAN_TIMEOUT_MS)'), 'planWebSearch 超时须钳到剩余预算');
   // 每处须以 race 结算（不得 await 流自然结束）
-  assert.ok(src.includes('abortCtl.race('), '辅助须以 race 结算，不得 await 流自然结束');
+  assert.ok(BODY.includes('abortCtl.race('), '辅助须以 race 结算，不得 await 流自然结束');
   // 5 处辅助调用点都须带 state（才能并入预算）
-  assert.ok(src.includes('judgeRelevance(winText, text, chain0, state)'), 'judgeRelevance 调用点未并入预算');
-  assert.ok(src.includes('judgeDevIntent(text, state.v2Block || \'\', chain0, state)'), 'judgeDevIntent 调用点未并入预算');
-  assert.ok(src.includes('analyzeDocsRelevance(docsText, text, state.v2Block || \'\', chain0, state)'), 'analyzeDocsRelevance 调用点未并入预算');
-  assert.ok(src.includes('planWebSearch(text, memoText, state.scenario, chain0, state)'), 'planWebSearch 调用点未并入预算');
-  assert.ok(src.includes('budgetDeadline: state.budgetDeadline'), 'publish v2 管道未接预算截止时刻');
+  assert.ok(BODY.includes('judgeRelevance(winText, text, chain0, state)'), 'judgeRelevance 调用点未并入预算');
+  assert.ok(BODY.includes('judgeDevIntent(text, state.v2Block || \'\', chain0, state)'), 'judgeDevIntent 调用点未并入预算');
+  assert.ok(BODY.includes('analyzeDocsRelevance(docsText, text, state.v2Block || \'\', chain0, state)'), 'analyzeDocsRelevance 调用点未并入预算');
+  assert.ok(BODY.includes('planWebSearch(text, memoText, state.scenario, chain0, state)'), 'planWebSearch 调用点未并入预算');
+  assert.ok(BODY.includes('budgetDeadline: state.budgetDeadline'), 'publish v2 管道未接预算截止时刻');
 });
 
 test('P0-b 预算公式与旧实现语义一致（含 reasoningEffort 放宽 / 0=无限制）', () => {
@@ -472,12 +459,12 @@ test('复核 high·P0-e：截断文本若仍带未闭合的指令包装，不得
 
 test('复核 medium·P0-d：第 5 个辅助点 v2ResolveProgress 的失败也经 UI 暴露（不再只写 hlog）', () => {
   // 判据：v2ResolveProgress 必须有 degrade 出口，且 handler 把 onDegrade 接进 services。
-  assert.ok(src.includes('const degrade = (kind) => {'), 'v2ResolveProgress 缺 degrade 出口');
-  assert.ok(src.includes("onDegrade: (kind) => { markDegraded(state, kind); }"), 'handler 未把 onDegrade 接进 services');
+  assert.ok(BODY.includes('const degrade = (kind) => {'), 'v2ResolveProgress 缺 degrade 出口');
+  assert.ok(BODY.includes("onDegrade: (kind) => { markDegraded(state, kind); }"), 'handler 未把 onDegrade 接进 services');
   // 出口形态含括号表达式（degrade(timedOut ? ...)），故按函数体内的 degrade( 调用计数
-  const fnStart = src.indexOf('async function v2ResolveProgress');
-  const fnEnd = src.indexOf('// 阶段 B：工作区文件检索', fnStart);
-  const fnBody = src.slice(fnStart, fnEnd);
+  const fnStart = BODY.indexOf('async function v2ResolveProgress');
+  const fnEnd = BODY.indexOf('// 阶段 B：工作区文件检索', fnStart);
+  const fnBody = BODY.slice(fnStart, fnEnd);
   // 定义处是 `const degrade = (kind)`（不含 `degrade(`），故 3 次 `degrade(` 即 3 个调用出口
   const calls = (fnBody.match(/degrade\(/g) || []).length;
   assert.ok(calls >= 3, 'v2ResolveProgress 至少 3 个降级出口（bad-json/timeout-or-truncated/failed），实际 ' + calls);
@@ -499,10 +486,10 @@ test('复核 medium·死键：truncated 与 degradedHint 均有**位置正确**�
 });
 
 test('复核 medium·P0-a：always + timeoutMs=0（无限制）仍有安全上限，不依赖预算中断', () => {
-  assert.ok(src.includes('const RETRY_ALWAYS_SAFETY_CAP = 5;'), '缺 always 安全上限');
-  assert.ok(src.includes('? RETRY_ALWAYS_SAFETY_CAP'), 'always 分支未使用安全上限');
+  assert.ok(BODY.includes('const RETRY_ALWAYS_SAFETY_CAP = 5;'), '缺 always 安全上限');
+  assert.ok(BODY.includes('? RETRY_ALWAYS_SAFETY_CAP'), 'always 分支未使用安全上限');
   // 原 1024 上限在 timeoutMs=0 下最坏 ~2.8 小时（复核实测推算）——不得回退到它
-  assert.ok(!/mode === 'always' \? 1024/.test(src), 'always 不得回退到 1024 次上限');
+  assert.ok(!/mode === 'always' \? 1024/.test(BODY), 'always 不得回退到 1024 次上限');
 });
 
 test('复审 medium·重试不得混进降级通道（重试后成功 ≠ 上下文降级）', async () => {

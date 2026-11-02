@@ -1,0 +1,1664 @@
+// ==PURE-BEGIN==  (unit-testable pure functions; keep free of ctx/harness/pending/module-state)
+
+// 目标模式：原 PURE 区段依赖的三个上游常量由 models 模块注入；
+// 迁移为普通模块后改为显式依赖，不再复制常量、也不再靠构建切片注入。
+const { DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TOKENS, DEFAULT_OUTPUT_LIMIT } = require('./models-constants.cjs');
+
+// ================= v2.2 模式体系 · 常量层与行为表（表驱动，单测切片求值） =================
+// 方案「提示词优化方案.md」§4/§6：4 模式 + 记忆独立开关（memoryOn，扩散到所有模式）；
+// 记忆模式已删除——记忆块作为叠加模块注入（shouldInjectMemory）。
+// v3.1.7（用户需求·上下文预算无限制）：新增 16000 档（最大扫描/注入预算）
+// v3.1.8（用户需求·预算真正生效 + 每模式独立档位）：扩展 32000 档；BUDGET_OPTIONS 为全局候选池，
+//   每模式可选档位见 MODE_BUDGET_OPTIONS（client 下拉按此渲染、validateConfig 按此校验），
+//   默认值见 MODE_BUDGET_DEFAULT（修复旧行为：base/lite 默认被 DEFAULT_BUDGET=4000 覆盖）。
+const BUDGET_OPTIONS = [0, 2000, 4000, 8000, 16000, 32000];
+// 每模式可用档位（子集；base 无上下文检索 → 仅 0）
+const MODE_BUDGET_OPTIONS = {
+  base: [0],
+  lite: [0, 2000, 4000],
+  standard: [0, 2000, 4000, 8000],
+  smart: [0, 2000, 4000, 8000, 16000],
+  publish: [0, 4000, 8000, 16000, 32000],
+};
+// 每模式默认预算（base 0 = 无上下文检索；lite 2000 = 默认启用最近 1 轮会话参考（最小检索档，
+// 0 = 显式关闭）；standard/smart/publish 默认 4000 = 中等检索）
+const MODE_BUDGET_DEFAULT = { base: 0, lite: 2000, standard: 4000, smart: 4000, publish: 4000 };
+// v3.1.8（实测驱动·用户指令）：每模式默认 params（超时/Token/字符 = 实测标准档）。
+// 2026-08-18 实测（4 模式 × 3 次，默认模板 T1、不带思考，短提示词）：
+//   base avg 2.6s / lite 5.7s / standard 2.2s / smart 6.7s（最大 9.8s）；输出 156–336 字符（≈40–85 token）。
+// 标准档 = 实测 × 余量（覆盖真实长输入与慢模型）+ 模板语义保真上限（简单 ≤800 字符、复杂可超出）；
+// smart 管道含检索/判定/工作区调用 → 标准档更高。
+const MODE_PARAMS_DEFAULT = {
+  base: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
+  lite: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
+  standard: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
+  smart: { timeoutMs: 60000, maxTokens: 4000, outputLimit: 16000 },
+  publish: { timeoutMs: 60000, maxTokens: 4000, outputLimit: 16000 }, // 2026-08-18 实测：默认模板 avg 44.3s max 51.1s / 输出 4348–8593 字符（host 硬覆盖不设限，此值仅结构默认/UI 语义）
+};
+// 预算 → 扫描上限查表（仅 scanLimit:'by-budget' 模式消费；maxFiles = 注入 Top-N 上限）
+const BUDGET_WORKSPACE_TABLE = [
+  { budget: 0, maxFiles: 2, depth: 1 },
+  { budget: 2000, maxFiles: 2, depth: 1 },
+  { budget: 4000, maxFiles: 3, depth: 2 },
+  { budget: 8000, maxFiles: 6, depth: 3 },
+  { budget: 16000, maxFiles: 10, depth: 4 },
+  { budget: 32000, maxFiles: 14, depth: 5 },
+];
+// 阶段 A/B/C 与默认预算；budgetDefault 仅默认值，运行时以 config.budgetChars 为准
+const MODE_TABLE = {
+  base: { phaseA: 'none', phaseB: 'none', phaseC: 'none', budgetDefault: 0, scanLimit: 'fixed' },
+  lite: { phaseA: 'rule', phaseB: 'none', phaseC: 'none', budgetDefault: 0, scanLimit: 'fixed' },
+  standard: { phaseA: 'rule', phaseB: 'file+event', phaseC: 'inject', budgetDefault: 4000, scanLimit: 'fixed' },
+  smart: { phaseA: 'llm', phaseB: 'file+event', phaseC: 'inject', budgetDefault: 4000, scanLimit: 'by-budget' },
+  // v2.7.0（一键发布）：项目/游戏开发规格生成——完整检索（任务理解+工作区/会话）
+  // + 网络检索（依据草稿与改动方向检索同类项目结构参考）+ 专用九章规格 system
+  publish: { phaseA: 'llm', phaseB: 'file+event', phaseC: 'inject', budgetDefault: 4000, scanLimit: 'by-budget' },
+};
+const MODE_KEYS = Object.keys(MODE_TABLE);
+const DEFAULT_MODE = 'base';
+const DEFAULT_BUDGET = 4000;
+// 记忆开关默认（§6.4：缺省 false，行为零变化）
+const DEFAULT_MEMORY = false;
+// 模式 → 扫描上限（fixed 模式固定值）
+const FIXED_SCAN_LIMIT = { maxFiles: 3, depth: 2 };
+// V2 阶段超时/上限/截断
+const V2_PROGRESS_TIMEOUT_MS = 15000;
+const V2_PROGRESS_MAX_TOKENS = 400;
+const V2_PROGRESS_OUTPUT_LIMIT = 2000;
+const V2_HISTORY_MAX_CHARS = 8000;
+const V2_HISTORY_LIMIT = 12;
+const V2_MSG_SEQ_SCAN = 16;
+// v3.1.3（用户需求·仅结论参考 / 轮次覆盖修正）：结论提取按轮数扫描上限（1 = 最近一轮，
+// 对齐 standard 最深窗口 [6,10]；旧 16 事件上限在会话 >8 轮时令 [6,10] 静默滑向旧轮）
+const V2_ROUNDS_SCAN_MAX = 10;
+// v3.1.3（看门狗 + 延迟连通性预检）：模型响应看门狗阈值 / 单次连通探测超时 / 探测结果缓存 TTL
+// v3.3.3（2026-08-27 用户实测·增强易断链修复）：实测链上模型 TTFT——
+// 链1 completions/deepseek-v4-flash 2.8s、链2 responses-proxy/muse-spark 9.3s；
+// 旧值 5s 看门狗 + 3s 探测会把「慢但健康」模型误判不可达并冻结 30s（增强直调
+// llm.stream 无宿主 retryPolicy(always) 兜底）——本组放宽对齐实测；
+// 探测失败缓存缩至 5s 免整链冻僵。
+// P0-c（2026-10-12 · 看门狗按实测 TTFT 重算 + 探针短化）：
+// 读数依据（本文件上方 v3.3.3 注释自载，本机实测）：链1 completions/deepseek-v4-flash TTFT 2.8s、
+// 链2 responses-proxy/muse-spark TTFT 9.3s ⇒ 首字延迟上界 ≈ 9.3s。
+// 取值规则（可复算，非手感）：WATCHDOG_TIMEOUT_MS = 实测 TTFT 上界 × 2（抖动/排队余量），进位到秒。
+//   = 9300ms × 2 = 18.6s → 19s。原 15s 仅在 1.6× 上界，慢模型仍有误杀面；
+//   而 3×（27.9s）会撞上默认主预算 30s，使看门狗永远来不及先于预算触发（= 看门狗失效）——
+//   故 2× 是本约束下的可取值。
+// ⚠ 放宽不得掩盖真挂死：调用点另按「距总预算剩余时间」钳制（watchMs = min(本值, 剩余预算)），
+//   故真无响应仍会在总超时处被砍（详见 enhance-handlers 的 watchMs 计算）。
+const WATCHDOG_TTFT_MAX_MEASURED_MS = 9300;
+const WATCHDOG_MARGIN = 2;
+const WATCHDOG_TIMEOUT_MS = Math.ceil((WATCHDOG_TTFT_MAX_MEASURED_MS * WATCHDOG_MARGIN) / 1000) * 1000;
+// 探针超时仍按同一实测上界留余量：短探针的耗时 ≈ TTFT（不再等 800 词长文），12s 覆盖 9.3s 上界。
+const PROBE_TIMEOUT_MS = 12000;
+// P0-c：探针结果缓存 TTL 5s → 30s——短探针虽已廉价，但同一路由的通/不通不会在 30s 内翻转，
+// 延长 TTL 减少重复探测（旧值让整链在同一轮内被反复重探）。
+const PROBE_CACHE_TTL_MS = 30000;
+// 2026-08-18（用户需求）：会话历史显式内容提取上限 1200 → 2400（覆盖长回复/表格，避免截断显式内容）
+const V2_MSG_TEXT_MAX = 2400;
+const V2_WORKSPACE_TIMEOUT_MS = 2000;
+const SCAN_FILE_LIST_MAX = 2000;
+// v2.7.0（检索质量修复）：名称匹配 0 命中时的内容兜底扫描文件数上限
+const CONTENT_FALLBACK_SCAN = 5;
+// v2.7.0（一键发布 · 网络检索）：超时/条数/注入预算
+const WEB_SEARCH_TIMEOUT_MS = 10000;
+const WEB_SEARCH_MAX_RESULTS = 3;
+const WEB_REF_MAX = 1600;
+// v3.0p（publish 多步检索）：检索主题规划调用预算 + 跨轮要点记忆上限
+const WEB_PLAN_TIMEOUT_MS = 10000;
+const WEB_PLAN_MAX_TOKENS = 400;
+const WEB_PLAN_OUTPUT_LIMIT = 800;
+const WEB_MEMO_MAX = 600;
+const WEB_MEMO_TOPICS_MAX = 12;
+// v3.0p 审查（超时/耗时匹配）：会话事件/历史提取超时保护
+const V2_SEARCH_EVENTS_TIMEOUT_MS = 10000;
+const KEYWORD_LIMIT = 8;
+const SNIPPET_BUDGET = 800;
+const CONTEXT_PROGRESS_MAX = 800;
+const CONTEXT_EVENT_DIVISOR = 4;
+const CONTEXT_FILE_COUNT = 3;
+// v2.6.1（记忆链）：发送前多轮迭代记忆——rounds 链（≤MEMORY_ROUNDS_MAX 轮）经
+// buildChatMessages 作为真多轮消息注入（user/assistant 交替），每轮输入/输出按预算
+// 等分截断；本轮修改摘要（computeEditDelta → buildMemoryDeltaHint）附加到最终 user 消息；
+// buildMemoryChainBlock 为文本块构建（回退/日志口径），两者共用预算规则。
+const MEMORY_ROUNDS_MAX = 4;            // 记忆链最多保留轮数（client 写入侧同样截断）
+const MEMORY_CHAIN_BUDGET_MAX = 2400;   // 记忆链总预算上限（记忆优先占用，模式块用剩余）
+const MEMORY_DELTA_MAX = 300;           // 本轮修改摘要字符上限
+const MEMORY_DELTA_LINES_MAX = 6;       // 修改摘要增/删各最多展示行数
+const MEMORY_CHAIN_HEADER = '【记忆】发送前的多轮优化记录，仅供参考，禁止回显';
+const MEMORY_ROUND_TEMPLATE = '【第{n}轮】原始输入：{prevInput}\n优化输出：{prevOutput}';
+// v2.3（§7.3）：优化阶段常量——enhance 请求生命周期 stage 标记（progress RPC 读取）
+const STAGE_PREPARE = 'prepare';
+const STAGE_HISTORY = 'history';
+const STAGE_ANALYZE = 'analyze';
+const STAGE_FILES = 'files';
+const STAGE_EVENTS = 'events';
+const STAGE_CONTEXT = 'context';
+const STAGE_LLM = 'llm';
+const STAGE_DONE = 'done';
+const STAGE_SEQUENCE = [STAGE_PREPARE, STAGE_HISTORY, STAGE_ANALYZE, STAGE_FILES, STAGE_EVENTS, STAGE_CONTEXT, STAGE_LLM, STAGE_DONE];
+// stage → 文案映射（单测 U24 断言键一致；client 侧 i18n 同键名独立维护）
+const STAGE_LABELS = {
+  prepare: { zh: '准备中…', en: 'Preparing…' },
+  history: { zh: '读取会话…', en: 'Reading history…' },
+  analyze: { zh: '分析任务…', en: 'Analyzing task…' },
+  files: { zh: '检索文件…', en: 'Searching files…' },
+  events: { zh: '检索会话…', en: 'Searching events…' },
+  context: { zh: '组装上下文…', en: 'Assembling context…' },
+  llm: { zh: 'LLM 优化中…', en: 'Optimizing…' },
+  done: { zh: '✓', en: '✓' },
+};
+
+// 模式解析（表驱动）：显式 mode 白名单（4 模式）；旧 engine/context.mode 迁移；缺省/非法 → base
+// v2.2：记忆模式已删除——'memory' 值由 validateConfig 迁移为 lite + memory:true（此处落到 base 兜底）
+function parseMode(mode, engine, legacyMode) {
+  if (typeof mode === 'string' && MODE_KEYS.includes(mode)) return mode;
+  if (engine === 'v2') {
+    if (legacyMode === 'basic') return 'standard';
+    if (legacyMode === 'smart') return 'smart';
+  }
+  return DEFAULT_MODE; // engine v1 / 缺省 / 非法 → base（行为零变化）
+}
+
+// 记忆开关解析（v2.2 §6.4）：优先级 memory = (mode==='memory') || autoMemory===true；缺省 false
+function parseMemory(mode, autoMemory) {
+  return mode === 'memory' || autoMemory === true;
+}
+
+// 记忆注入判定（v2.2 §6.5）：开关开 + 有记忆 + 预算>0 → 注入记忆块（叠加模块，所有模式适用）
+function shouldInjectMemory(memoryOn, hasMemory, budgetChars) {
+  return memoryOn === true && hasMemory === true && typeof budgetChars === 'number' && budgetChars > 0;
+}
+
+// 预算白名单校验（缺省 → 该模式默认值）：v3.1.8 起按模式档位（MODE_BUDGET_OPTIONS）校验——
+// 非法/越界值回退模式默认（MODE_BUDGET_DEFAULT），修复旧行为（base/lite 被全局 4000 覆盖）。
+function parseBudgetChars(value, mode) {
+  const opts = MODE_BUDGET_OPTIONS[mode] || MODE_BUDGET_OPTIONS[DEFAULT_MODE];
+  if (opts.includes(value)) return value;
+  const dflt = MODE_BUDGET_DEFAULT[mode];
+  return typeof dflt === 'number' ? dflt : DEFAULT_BUDGET;
+}
+
+// 扫描上限解析：by-budget 查联动表（取不超过预算的最大档），fixed 用固定值
+function resolveScanLimit(mode, budgetChars) {
+  const row = MODE_TABLE[mode] || MODE_TABLE[DEFAULT_MODE];
+  if (row.scanLimit === 'by-budget') {
+    let pick = BUDGET_WORKSPACE_TABLE[0];
+    for (const entry of BUDGET_WORKSPACE_TABLE) {
+      if (entry.budget <= budgetChars) pick = entry;
+    }
+    return pick;
+  }
+  return FIXED_SCAN_LIMIT;
+}
+
+// v3.1.8（用户需求·预算真正生效）：rounds 模式（lite/standard/smart）预算 → 检索注入参数——
+// roundsChars = 会话窗口参考注入字符上限（0 = 不注入）；smart 工作区规模（文档数/深度/文档与代码内容上限）。
+// 与 BUDGET_WORKSPACE_TABLE 同档位体系（publish 走 v2 管道消费该表）。
+const BUDGET_RETRIEVE_TABLE = [
+  { budget: 0, roundsChars: 0, smartDocs: 0, smartDepth: 0, smartChars: 0, smartCodeChars: 0 },
+  { budget: 2000, roundsChars: 1200, smartDocs: 2, smartDepth: 2, smartChars: 1500, smartCodeChars: 1200 },
+  { budget: 4000, roundsChars: 2400, smartDocs: 3, smartDepth: 2, smartChars: 3000, smartCodeChars: 2400 },
+  { budget: 8000, roundsChars: 4800, smartDocs: 5, smartDepth: 3, smartChars: 5000, smartCodeChars: 4800 },
+  { budget: 16000, roundsChars: 9600, smartDocs: 8, smartDepth: 4, smartChars: 8000, smartCodeChars: 8000 },
+  { budget: 32000, roundsChars: 16000, smartDocs: 12, smartDepth: 5, smartChars: 12000, smartCodeChars: 12000 },
+];
+// 预算 → rounds 检索参数（取不超过预算的最大档；budget 0 → 全 0 = 不注入；base 无检索）
+function resolveRetrieveBudget(mode, budgetChars) {
+  if (mode === 'base') return BUDGET_RETRIEVE_TABLE[0];
+  let pick = BUDGET_RETRIEVE_TABLE[0];
+  for (const e of BUDGET_RETRIEVE_TABLE) {
+    if (e.budget <= budgetChars) pick = e;
+  }
+  return pick;
+}
+
+// ================= v2.6.1 记忆链 · 纯函数族（PURE，单测切片求值） =================
+
+// 记忆链文本块构建（回退方案/日志口径；主路径为真多轮消息 buildChatMessages）：
+// rounds 按时间序 [{input, output}]，最多取最近 MEMORY_ROUNDS_MAX 轮；总预算 =
+// min(budget, MEMORY_CHAIN_BUDGET_MAX) 按轮等分，每轮输入 1/3、输出 2/3 截断
+// （slice 字符级，不撕裂）；无轮次 / 预算 0 / 轮预算为 0 → 空串。
+function buildMemoryChainBlock(rounds, budgetChars) {
+  const budget = typeof budgetChars === 'number' && budgetChars > 0 ? budgetChars : 0;
+  if (budget <= 0) return '';
+  const list = Array.isArray(rounds) ? rounds.filter((r) => r && (r.input || r.output)) : [];
+  if (list.length === 0) return '';
+  const used = list.slice(-MEMORY_ROUNDS_MAX);
+  const total = Math.min(budget, MEMORY_CHAIN_BUDGET_MAX);
+  const perRound = Math.floor(total / used.length);
+  if (perRound <= 0) return '';
+  const inputBudget = Math.floor(perRound / 3);
+  const outputBudget = perRound - inputBudget;
+  const lines = [MEMORY_CHAIN_HEADER];
+  used.forEach((r, i) => {
+    const pi = String(r.input || '').slice(0, inputBudget);
+    const po = String(r.output || '').slice(0, outputBudget);
+    lines.push(MEMORY_ROUND_TEMPLATE.replace('{n}', String(i + 1)).replace('{prevInput}', pi).replace('{prevOutput}', po));
+  });
+  return lines.join('\n');
+}
+
+// 本轮修改摘要（行级 diff）：剥离公共前缀/后缀行后取中段差异，返回 { added, removed }
+// （各 ≤ MEMORY_DELTA_LINES_MAX 行）。上一轮输出为空或与当前原文相同 → 空差异。
+function computeEditDelta(prevOutput, text) {
+  const prev = String(prevOutput || '');
+  const cur = String(text || '');
+  if (!prev || prev === cur) return { added: [], removed: [] };
+  const prevLines = prev.split('\n');
+  const curLines = cur.split('\n');
+  let start = 0;
+  while (start < prevLines.length && start < curLines.length && prevLines[start] === curLines[start]) start++;
+  let endPrev = prevLines.length;
+  let endCur = curLines.length;
+  while (endPrev > start && endCur > start && prevLines[endPrev - 1] === curLines[endCur - 1]) { endPrev--; endCur--; }
+  return {
+    added: curLines.slice(start, endCur).slice(0, MEMORY_DELTA_LINES_MAX),
+    removed: prevLines.slice(start, endPrev).slice(0, MEMORY_DELTA_LINES_MAX),
+  };
+}
+
+// v2.8.0（一键发布 · 实测修正）：publish 多轮为「补充式」输入——行级 diff 的 removed 侧
+// = 上一轮完整规格（用户未复述即全算删除，恰为章节标题），实测曾把「-删除：一、目标概述」
+// 喂给模型导致幻觉「用户要求删除该章」。publish 的改动方向由 added 侧（用户本轮文本）承载，
+// removed 侧清零（非 publish 模式原样返回，行为不变）。
+function filterDeltaForPublish(delta, mode) {
+  if (mode !== 'publish' || !delta || !Array.isArray(delta.added)) return delta;
+  return { added: delta.added, removed: [] };
+}
+
+// 修改摘要格式化：`【本轮修改】相对上一轮优化结果：\n+新增：…\n-删除：…`；
+// 单侧为空只列一侧；合计 ≤ MEMORY_DELTA_MAX 字符（字符级截断）；无差异 → 空串。
+function buildMemoryDeltaHint(delta) {
+  if (!delta || !delta.added || !delta.removed) return '';
+  if (delta.added.length === 0 && delta.removed.length === 0) return '';
+  const parts = [];
+  if (delta.added.length > 0) parts.push('+新增：' + delta.added.join('；'));
+  if (delta.removed.length > 0) parts.push('-删除：' + delta.removed.join('；'));
+  let hint = '【本轮修改】相对上一轮优化结果：\n' + parts.join('\n');
+  if (hint.length > MEMORY_DELTA_MAX) hint = hint.slice(0, MEMORY_DELTA_MAX);
+  return hint;
+}
+
+// 记忆链 → 真多轮 messages（llm.stream 消息数组）：
+// 历史轮次按 role 交替（user 输入 → assistant 输出，时间序），文本按预算等分截断
+// （规则同 buildMemoryChainBlock）；finalText 为已组装的最终 user 消息文本（含 delta
+// 提示 + 模式块 + 原文包裹）。rounds 空 / 预算 0 → 仅最终 user 消息（与旧单消息一致）。
+// 返回 { messages, memChars }（memChars = 注入的历史文本总字符数，供日志）。
+function buildChatMessages(rounds, finalText, idPrefix, budgetChars) {
+  const prefix = typeof idPrefix === 'string' && idPrefix !== '' ? idPrefix : 'enhance';
+  const messages = [];
+  const list = Array.isArray(rounds) ? rounds.filter((r) => r && (r.input || r.output)) : [];
+  const used = list.slice(-MEMORY_ROUNDS_MAX);
+  let memChars = 0;
+  if (used.length > 0 && typeof budgetChars === 'number' && budgetChars > 0) {
+    const total = Math.min(budgetChars, MEMORY_CHAIN_BUDGET_MAX);
+    const perRound = Math.floor(total / used.length);
+    if (perRound > 0) {
+      const inputBudget = Math.floor(perRound / 3);
+      const outputBudget = perRound - inputBudget;
+      used.forEach((r, i) => {
+        const uText = String(r.input || '').slice(0, inputBudget);
+        const aText = String(r.output || '').slice(0, outputBudget);
+        memChars += uText.length + aText.length;
+        messages.push({ id: prefix + '-m' + (i * 2), role: 'user', content: [{ type: 'text', text: uText }], source: { kind: 'user' } });
+        messages.push({ id: prefix + '-m' + (i * 2 + 1), role: 'assistant', content: [{ type: 'text', text: aText }], source: { kind: 'assistant' } });
+      });
+    }
+  }
+  messages.push({ id: prefix + '-final', role: 'user', content: [{ type: 'text', text: String(finalText || '') }], source: { kind: 'user' } });
+  return { messages, memChars };
+}
+
+function wrapUserText(text) {
+  return '请优化以下提示词：\n\n"""\n' + text + '\n"""';
+}
+
+// v2.8.0（一键发布 · 实测修正）：publish 专用用户输入包装——中性框架（不沿用
+// 优化模式的「请优化以下提示词」措辞，避免模型把输入误读为提示词优化任务）。
+function wrapPublishText(text) {
+  return '【用户输入】\n"""\n' + text + '\n"""';
+}
+
+function cleanOutput(raw, originalText) {
+  let s = String(raw == null ? '' : raw).trim();
+  // v3.2.18（用户反馈「优化结果带出发给模型的提示词」）：循环剥离直至稳定（≤3 轮）。
+  // 模型把发给它的完整指令（「请优化以下提示词：\n\"\"\"\n<原文>\n\"\"\"」或 publish「【用户输入】…」）
+  // 整段复述进输出时，旧逻辑只剥开头、残留原文在结果里。现按「完整回显」语义处理：
+  //   有后续正文 → 取正文；仅回显无正文 → 取包装内原文（剥离包装返回原文，而非把指令原样带出）。
+  const LEAD_OUTPUT_PREFIX = [
+    '以下是优化后的提示词：', '以下是优化后的提示词:',
+    '以下是优化后的内容：', '以下是优化后的内容:',
+    '以下是优化后的版本：', '以下是优化后的版本:',
+    '优化后的提示词如下：', '优化后的提示词如下:',
+    '优化后的内容如下：', '优化后的内容如下:',
+    '优化结果如下：', '优化结果如下:',
+    '修改后的提示词：', '修改后的提示词:',
+    '最终结果：', '最终结果:',
+    '结果如下：', '结果如下:',
+    '输出如下：', '输出如下:',
+  ];
+  const TAIL_NOTES = [
+    '以上是优化后的提示词', '以上就是优化后的提示词', '以上为优化后的提示词',
+    '以上是优化后的内容', '以上是修改后的提示词', '以上是优化结果',
+  ];
+  for (let round = 0; round < 3; round++) {
+    const before = s;
+    const echo = /^((?:请优化以下提示词[：:]\s*|优化以下提示词[：:]\s*|【用户输入】\s*\n?)\s*\"\"\"(?:\r?\n)?)([\s\S]*?)(?:\n\"\"\"\s*)([\s\S]*)$/.exec(s);
+    if (echo) {
+      const inner = (echo[2] || '').trim();
+      const after = (echo[3] || '').trim();
+      if (after !== '') s = after;
+      else if (inner !== '') s = inner;
+    }
+            // v3.2.19-fix（用户实测：模型只回显「请优化以下提示词：」前缀、无闭合包装时残留）：
+    // 孤立前缀剥离——输出以指令前缀开头即视为回显，剥掉前缀行；
+    // 传 originalText（用户原文）时精确剥离「原文回显段」（结果更长才剥，结果=原文不误伤）。
+    const lonePrefix = /^(?:请优化以下提示词[：:]\s*\n?|优化以下提示词[：:]\s*\n?|【用户输入】\s*\n?)/;
+    if (lonePrefix.test(s)) {
+      const stripped = s.replace(lonePrefix, '').trim();
+      if (stripped !== '') s = stripped;
+    }
+    if (typeof originalText === 'string' && originalText.trim() !== '') {
+      const ot = originalText.trim();
+      if (s.startsWith(ot) && s.length > ot.length) {
+        s = s.slice(ot.length).replace(/^[，。！？!?\s、]+/, '').trim();
+      }
+    }
+        for (const pf of LEAD_OUTPUT_PREFIX) {
+      if (s.startsWith(pf)) { s = s.slice(pf.length).trim(); break; }
+    }
+    for (const tn of TAIL_NOTES) {
+      if (s.endsWith(tn)) { s = s.slice(0, -tn.length).trim(); break; }
+    }
+    if (s === before) break;
+  }
+  const pairs = [
+    ['\"\"\"', '\"\"\"'],
+    ['```', '```'],
+    ['"', '"'],
+    ["'", "'"],
+    ['“', '”'],
+    ['‘', '’'],
+    ['「', '」'],
+    ['『', '』'],
+    ['（', '）'],
+    ['(', ')'],
+    ['【', '】'],
+  ];
+  for (let i = 0; i < pairs.length; i++) {
+    const open = pairs[i][0];
+    const close = pairs[i][1];
+    if (s.length > open.length + close.length && s.startsWith(open) && s.endsWith(close)) {
+      s = s.slice(open.length, s.length - close.length).trim();
+      break;
+    }
+  }
+  return s;
+}
+
+// ============================================================================
+// 纠错解套批（2026-10-20 · `CHG-291` · M1）：纠错路径**不许吃用户的字**
+//
+// 病历（`CHG-290` 铁证）：`voice/correct` 收尾处直接调 `cleanOutput(result.text, text)`
+//   ⇒ 把「模型**原样回显**原文」的串喂进去，**模型一个字没改也照被剥**：
+//     `「请把这段代码格式化一下。」` → `请把这段代码格式化一下。`（引号被吃）
+//     ```\nconst a = 1;\n``` → `const a = 1;`（代码块围栏被吃）
+//     `他说：以上是优化结果` → `他说：`（尾部提示词被吃）
+//     `以下是优化后的提示词：把日志导出来` → `把日志导出来`（首部前缀被吃）
+//   ⇒ 根因：`cleanOutput` 是为「**模型把发给它的指令包装回显出来**」设计的（增强管线有包装），
+//     而纠错路径**没有包装**（user 消息就是原文本身）⇒ 同一把刀用在了不需要它的地方。
+//
+// 判据（M1 原文）：**只能剥掉输入里不存在的包装**；凡**剥掉的字符在用户原文里存在，就不许剥**。
+//   ⇒ 实现 = 「先照旧算一份 cleaned，再用『被剪掉的那两段原文片段』做否决」：
+//     若任一非空片段出现在 originalText 中 ⇒ 这次剥离是在吃用户的字 ⇒ **整体回退到 raw**。
+//   ⚠ 为什么不干脆整段不调 `cleanOutput`（见报告 §"两处要你判断"）：模型**真的**加了前缀时
+//     （提示词禁止但模型可能发生），完全不剥会把 `以下是优化后的提示词：…` 原样写进用户草稿
+//     —— 那是「让用户手动删」换「少吃几个引号」，代价更大。条件剥两头都保住。
+//
+// 诚实边界：本判据**只否决、不发明**。它不保证「被剥的字一定不是用户原文」——只保证
+//   「**在能找到对应片段、且该片段确实出现在原文里**时否决」。找不到片段（indexOf<0）⇒ 退回旧行为。
+// ============================================================================
+
+/** `cleaned` 相对 `rawS` 被剪掉的两段（前段 + 后段）。`cleaned` 不是 `rawS` 的子串 ⇒ null。 */
+function correctionStripFragments(rawS, cleaned) {
+  const idx = String(rawS).indexOf(String(cleaned));
+  if (idx < 0) return null;
+  const r = String(rawS);
+  const c = String(cleaned);
+  return [r.slice(0, idx), r.slice(idx + c.length)];
+}
+
+/**
+ * 这次剥离是否**允许**（M1 判据的唯一实现处）。
+ * @returns {boolean} true = 剥掉的东西确实不在原文里 ⇒ 允许；false = 在吃用户的字 ⇒ 否决
+ */
+function correctionStripAllowed(rawS, cleaned, originalText) {
+  const frags = correctionStripFragments(rawS, cleaned);
+  if (!frags) return false;                       // 对不上 ⇒ 不认这次剥离（保守）
+  const orig = typeof originalText === 'string' ? originalText : '';
+  if (orig.trim() === '') return true;            // 无原文可比 ⇒ 沿用旧行为（不新增限制）
+  for (const f of frags) {
+    // ⚠ 空片段不算「吃字」：那是纯 trim，不是剥包装。
+    // ⚠ 非空片段（哪怕只有空白）出现在原文里 ⇒ 否决（首尾空格也属于用户的字）。
+    if (f !== '' && orig.includes(f)) return false;
+  }
+  return true;
+}
+
+/**
+ * ⭐ 纠错路径**专用**输出清洗（`voice/correct` 的唯一调用入口）。
+ *
+ * 与 `cleanOutput` 的分工：`cleanOutput` = 增强管线（有包装，按旧语义不变）；
+ * 本函数 = 纠错（无包装，按 M1 判据）。
+ *
+ * 三条行为（逐条可测）：
+ *   ① **逐字回显 ⇒ 一个字都不动**（`raw === originalText` 时不进入任何剥离，连 trim 都不做）；
+ *   ② 允许剥离时返回 cleaned，**否决时整体回退 raw**（不是"少剥一点"——半剥会把文本剪碎）；
+ *   ③ 空/纯空白输入原样返回（不 trim，避免把用户的首尾空格算成"改动"）。
+ */
+function cleanCorrectionOutput(raw, originalText) {
+  const r = String(raw == null ? '' : raw);
+  if (r.trim() === '') return r;
+  const orig = typeof originalText === 'string' ? originalText : '';
+  // ① 原文逐字回显：模型什么都没改 ⇒ 一个字符都不许动（M1 门槛 + M5 changed 语义的地基）
+  if (orig !== '' && r === orig) return r;
+  const cleaned = cleanOutput(r, originalText);
+  if (cleaned === r) return r;
+  // ② 条件剥：吃用户的字 ⇒ 整体退回
+  return correctionStripAllowed(r, cleaned, originalText) ? cleaned : r;
+}
+// P0-b（2026-10-12 · 超时预算错位）：主超时预算的**单一事实源**——此前该公式只长在
+// enhanceStageAnalyze 里（state.timeoutMs 在 analyze 之后才可知，故计时器只能挂在准备阶段之后，
+// 准备阶段的 5 处辅助调用不受预算保护）。抽出后 handler 可在 runEnhanceStages('analyze') 之前
+// 先算出预算并挂计时器，prepare 因此纳入同一预算。
+// 语义与旧实现逐项一致：timeoutMs<=0（用户设置无限制）→ 0；链含 reasoningEffort → 放宽至 ≥120s。
+// P0-a（2026-10-12 · 补退避重试）：退避延迟纯计算——算法与官方 dsh-llm-retry `localDelay`
+// 逐式一致（exponential = min(initial * 2^(retry-1), max)；jitter = 1 - j + 2*j*rand；
+// delay = min(exponential * jitter, max)）。
+// ⚠ 结构口径（2026-10-12 独立复核 blocker 修正）：官方 `providerRetryPolicy(provider)` 返回的是
+// **平铺**的 ResolvedRetryPolicy——实测 `resolveRetryPolicy(undefined)` →
+// `{mode,maxRetries,retryableCodes,initialDelayMs:500,maxDelayMs:10000,jitterRatio:0.1}`，**没有 backoff 子对象**。
+// 旧实现读 policy.backoff.* 恒取 undefined ⇒ 恒落下方兜底常量（等于「硬编码」，与主机文要求相悖）；
+// 现直接读平铺字段。兜底仅用于**策略字段缺失**的防御（正常路径全部来自官方已解析策略）。
+// 纯函数（注入 random），PURE 区段契约不变。
+function computeBackoffDelayMs(policy, retry, random) {
+  const b = policy && typeof policy === 'object' ? policy : {};
+  const initial = typeof b.initialDelayMs === 'number' && Number.isFinite(b.initialDelayMs) && b.initialDelayMs > 0 ? b.initialDelayMs : 500;
+  const max = typeof b.maxDelayMs === 'number' && Number.isFinite(b.maxDelayMs) && b.maxDelayMs > 0 ? b.maxDelayMs : 10000;
+  const jitterRatio = typeof b.jitterRatio === 'number' && Number.isFinite(b.jitterRatio) ? Math.max(0, Math.min(1, b.jitterRatio)) : 0.1;
+  const rand = typeof random === 'function' ? random() : Math.random();
+  const exponent = Math.min(Math.max(1, retry) - 1, 1024);
+  const exponential = Math.min(initial * Math.pow(2, exponent), max);
+  const jitter = 1 - jitterRatio + 2 * jitterRatio * rand;
+  return Math.min(exponential * jitter, max);
+}
+
+// P0-a：该 failure 是否属于策略声明的可重试码（码集同样**从策略取**，不照抄常量）。
+// mode='always' 视为一律可重试（官方语义）。
+function isRetryableFailure(policy, failure) {
+  if (!policy || typeof policy !== 'object') return false;
+  if (policy.mode === 'always') return true;
+  if (policy.mode !== 'normal') return false;
+  const code = failure && failure.code ? String(failure.code) : '';
+  if (code === '') return false;
+  return Array.isArray(policy.retryableCodes) && policy.retryableCodes.includes(code);
+}
+
+// P0-b 修正（2026-10-12 · 独立复核 high）：准备阶段纳入预算，但**生成额度不得被侵蚀**。
+// 口径：总预算 = 生成额度（resolveEnhanceTimeoutMs，语义与旧实现逐项一致）＋ 准备额度（本函数）。
+// 准备额度 = 该模式下**可能串行发生**的辅助调用超时之和的上限（即主机文要求的
+// 「辅助调用的独立超时并入同一预算」——把各自的独立超时合成一个上限，而非让它们各自在预算外叠加）。
+// 由此：① 准备阶段首次被真正限界（旧实现完全不受主预算约束）；② 生成阶段仍拿满原来的 timeoutMs
+//（准备最多吃掉自己的额度）⇒ 「原来能过的慢模型/长草稿」不会因本项变成过不去。
+// 纯函数（入参皆为声明数据，不读 manifest/module 状态）。
+// ⚠ 超时表由**调用方传入**（不在此直接引用常量）：RELEVANCE_TIMEOUT_MS 在 PURE 区段内定义于
+// 本函数之后，直接引用会触发 const 暂时性死区（实测 ReferenceError → enhance 请求挂起）。
+function resolvePrepareBudgetMs(row, sources, T) {
+  const src = Array.isArray(sources) ? sources : [];
+  const kind = row && typeof row.kind === 'string' ? row.kind : 'none';
+  const windows = row && Array.isArray(row.windows) ? row.windows.length : 0;
+  const t = T && typeof T === 'object' ? T : {};
+  const rel = typeof t.relevanceMs === 'number' ? t.relevanceMs : 0;
+  const eventsMs = typeof t.eventsMs === 'number' ? t.eventsMs : 0;
+  const wsMs = typeof t.workspaceMs === 'number' ? t.workspaceMs : 0;
+  const progressMs = typeof t.progressMs === 'number' ? t.progressMs : 0;
+  const webPlanMs = typeof t.webPlanMs === 'number' ? t.webPlanMs : 0;
+  const webSearchMs = typeof t.webSearchMs === 'number' ? t.webSearchMs : 0;
+  const webMax = typeof t.webSearchMaxResults === 'number' ? t.webSearchMaxResults : 0;
+  if (kind === 'rounds') {
+    let ms = eventsMs;                       // fetchSessionHistory（会话历史提取）
+    ms += windows * rel;                     // 逐窗口 judgeRelevance（命中即停，此为上限）
+    if (src.indexOf('workspace') !== -1) {
+      ms += rel;                             // judgeDevIntent（开发意向判定）
+      ms += rel;                             // analyzeDocsRelevance（文档/项目地图分析）
+      ms += wsMs * 2;                        // 文档 / 代码两次工作区扫描
+    }
+    return ms;
+  }
+  if (kind === 'v2') {
+    let ms = progressMs;                     // 阶段 A 任务分析（v2ResolveProgress）
+    ms += eventsMs;                          // 会话事件检索
+    ms += webPlanMs;                         // planWebSearch（检索主题规划）
+    ms += webSearchMs * webMax;              // 逐主题网络检索
+    ms += wsMs;                              // 工作区扫描
+    return ms;
+  }
+  return 0;                                  // base/none：准备阶段无辅助 LLM 调用
+}
+
+function resolveEnhanceTimeoutMs(cfg, chain) {
+  const base = cfg && typeof cfg.timeoutMs === 'number' ? cfg.timeoutMs : 0;
+  if (base <= 0) return 0;
+  const hasEffort = Array.isArray(chain) && chain.some((e) => e && e.reasoningEffort);
+  return hasEffort ? Math.max(base, 120000) : base;
+}
+
+function friendlyMessage(failure) {
+  const code = failure && failure.code ? failure.code : 'LLM_FAILED';
+  switch (code) {
+    case 'UNKNOWN_MODEL': return 'optimize model unavailable (not in catalog)';
+    case 'NO_ADAPTER': return 'LLM provider not enabled';
+    case 'INVALID_CREDENTIAL': return 'invalid or missing API key';
+    case 'QUOTA': return 'model quota exceeded';
+    case 'CONTEXT_WINDOW_EXCEEDED': return 'input exceeds context window';
+    case 'EMPTY_RESPONSE': return 'model returned an empty response';
+    case 'OUTPUT_TOO_LONG': return 'optimization exceeds length limit';
+    // P0-e（2026-10-12）：max-tokens 截断的真实文案（旧实现落 EMPTY_RESPONSE，文案不符）
+    case 'OUTPUT_TRUNCATED': return 'output reached the length limit and was truncated';
+    case 'TIMEOUT': return 'request timed out, original text restored';
+    case 'ABORTED': return 'request cancelled';
+    case 'NO_MODEL': return 'no model configured, add models in settings';
+    case 'ALL_MODELS_UNAVAILABLE': return 'all models unavailable, check model config and retry';
+    // 2026-10-17（纠错服务端守卫批）：`voice/correct` 的**开关跳过**码 —— 与「跑了没事」可判（不得静默失效）。
+    case 'CORRECTION_DISABLED': return 'voice correction is off (voice.correction.enabled=false), skipped';
+    default: return failure && failure.message ? failure.message : 'optimize failed';
+  }
+}
+
+function validateConfig(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  // v18：v2 结构（fallback/customModels/order/params/template）；兼容 v1 平铺字段
+  // 2026-08-18（用户指令）：main 死配置字段删除（不维护老用户迁移）——host 只用 fallback 模型链
+  const p = src.params && typeof src.params === 'object' ? src.params : src;
+  const t = src.template && typeof src.template === 'object' ? src.template : src;
+  const out = {
+    fallback: [],
+    customModels: [],
+    order: [],
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    maxTokens: DEFAULT_MAX_TOKENS,
+    outputLimit: DEFAULT_OUTPUT_LIMIT,
+    templateMode: 'builtin',
+    templateText: '',
+    // v2.4.7（每模式独立自定义模板）：4 模式各一份；缺省空串（enhance 按模式回退内置）
+    templateTexts: { base: '', lite: '', standard: '', smart: '' },
+    // 模板体系扩展（2026-08-17）：每模式选中模板键 + 多自定义模板列表（解析见 validateConfig）
+    templatePick: { base: 'default', lite: 'default', standard: 'default', smart: 'default', publish: 'default' },
+    templateCustom: { base: [], lite: [], standard: [], smart: [], publish: [] },
+    // v2.2（§6.4）：4 模式 + 记忆开关（缺省 false，行为零变化）
+    mode: DEFAULT_MODE,
+    context: { mode: 'smart', budgetChars: DEFAULT_BUDGET, workspace: { maxFiles: 3, depth: 2 } },
+    memory: DEFAULT_MEMORY,
+  };
+  // fallback 条目 reasoning effort 提取（条目级，非 main）
+  const effortOf = (obj) => (obj && typeof obj === 'object' && obj.enabled === true && typeof obj.effort === 'string' && obj.effort.trim() !== '' && obj.effort.trim().length <= 32) ? obj.effort.trim() : '';
+  // fallback（独立配置项；数组顺序 = 尝试顺序；每条可带 reasoning）
+  if (Array.isArray(src.fallback)) {
+    for (const item of src.fallback.slice(0, 8)) {
+      if (!item || typeof item !== 'object') continue;
+      if (typeof item.provider !== 'string' || typeof item.model !== 'string') continue;
+      const provider = item.provider.trim();
+      const model = item.model.trim();
+      if (!provider || !model) continue;
+      if (out.fallback.some((x) => x.provider === provider && x.model === model)) continue;
+      const entry = { provider, model };
+      const effort = effortOf(item.reasoning);
+      if (effort) entry.reasoningEffort = effort;
+      out.fallback.push(entry);
+    }
+  }
+  // customModels（自定义条目：provider/model/name；仅已有 provider 路由下的模型 ID）
+  if (Array.isArray(src.customModels)) {
+    for (const item of src.customModels.slice(0, 20)) {
+      if (!item || typeof item !== 'object') continue;
+      if (typeof item.provider !== 'string' || typeof item.model !== 'string') continue;
+      const provider = item.provider.trim();
+      const model = item.model.trim();
+      if (!provider || !model) continue;
+      out.customModels.push({
+        provider,
+        model,
+        name: typeof item.name === 'string' && item.name.trim() !== '' ? item.name.trim().slice(0, 40) : model,
+      });
+    }
+  }
+  // order（仅约束展示顺序）
+  if (Array.isArray(src.order)) {
+    for (const key of src.order.slice(0, 50)) {
+      if (typeof key === 'string' && key.trim() !== '') {
+        const k = key.trim();
+        if (!out.order.includes(k)) out.order.push(k);
+      }
+    }
+  }
+  // v3.1.7（用户需求·参数无限制）：timeoutMs/maxTokens/outputLimit = 0 → 无限制
+  // （不设超时 / provider 默认上限 / collectStream 不截断）；其余范围校验不变
+  if ((p.timeoutMs === 0) || (Number.isInteger(p.timeoutMs) && p.timeoutMs >= 1000 && p.timeoutMs <= 300000)) out.timeoutMs = p.timeoutMs;
+  if ((p.maxTokens === 0) || (Number.isInteger(p.maxTokens) && p.maxTokens >= 100 && p.maxTokens <= 16000)) out.maxTokens = p.maxTokens;
+  if ((p.outputLimit === 0) || (Number.isInteger(p.outputLimit) && p.outputLimit >= 500 && p.outputLimit <= 50000)) out.outputLimit = p.outputLimit;
+  // template 解析：v2 结构（template.mode/text/texts）与 v1 平铺（templateMode/templateText）双兼容。
+  // v2.4.7 修复：此前只读 v1 平铺字段，v2 结构下自定义模板实际从未生效（templateMode 恒为缺省）。
+  const templateMode = typeof t.templateMode === 'string' ? t.templateMode : t.mode;
+  const templateText = typeof t.templateText === 'string' ? t.templateText : (typeof t.text === 'string' ? t.text : '');
+  if (templateMode === 'custom' || templateMode === 'builtin') out.templateMode = templateMode;
+  if (templateText.length <= 4000) out.templateText = templateText;
+  // v2.4.7（每模式独立自定义模板）：
+  // ① 新结构 texts（4 模式键白名单，各 ≤4000）优先（v2 对象内 t.texts；v1 平铺无此字段）；
+  // ② 无 texts 时旧全局 templateText 迁移到全部 4 模式（保持"全局一份"语义不丢内容）；
+  // ③ 缺省全空 → enhance 按模式回退内置 SYSTEM_PROMPT。
+  const textsSrc = t.texts && typeof t.texts === 'object' ? t.texts : null;
+  if (textsSrc) {
+    for (const key of MODE_KEYS) {
+      const v = textsSrc[key];
+      if (typeof v === 'string' && v.length <= 4000) out.templateTexts[key] = v;
+    }
+  } else if (out.templateText !== '') {
+    for (const key of MODE_KEYS) out.templateTexts[key] = out.templateText;
+  }
+  // 模板体系扩展（2026-08-18 修订）：每模式 2 个内置模板（default=默认模板·只清晰化重述 /
+  // increment=增量模板·保守补充未说的大逻辑/信息）+ 每模式多自定义模板（custom[mode]=[{name,text}]，各 ≤4000，≤10 条）；
+  // 选中键 pick[mode] = default | increment | custom:<index>（缺省 default）。
+  // 迁移：旧配置（无 pick 字段）且 templateMode==='custom' 时，texts[mode] 非空 → 迁为
+  // custom[mode]=[{name:'自定义模板', text}] 且 pick[mode]='custom:0'（行为等价旧全局自定义）；
+  // 旧内置键 supplement/dev（2026-08-17 每模式 3 模板时期）→ 统一迁为 increment。
+  const hasNewPick = t.pick && typeof t.pick === 'object';
+  const customSrc = t.custom && typeof t.custom === 'object' ? t.custom : null;
+  for (const key of MODE_KEYS) {
+    const list = Array.isArray(customSrc && customSrc[key]) ? customSrc[key] : [];
+    for (const item of list.slice(0, TEMPLATE_CUSTOM_MAX)) {
+      if (item && typeof item === 'object' && typeof item.text === 'string' && item.text.trim() !== '' && item.text.length <= TEMPLATE_TEXT_MAX) {
+        out.templateCustom[key].push({
+          name: typeof item.name === 'string' && item.name.trim() !== '' ? item.name.trim().slice(0, TEMPLATE_NAME_MAX) : '自定义模板 ' + (out.templateCustom[key].length + 1),
+          text: item.text,
+        });
+      }
+    }
+  }
+  if (!hasNewPick && out.templateMode === 'custom') {
+    for (const key of MODE_KEYS) {
+      const legacy = out.templateTexts[key];
+      if (typeof legacy === 'string' && legacy.trim() !== '' && out.templateCustom[key].length === 0) {
+        out.templateCustom[key].push({ name: '自定义模板', text: legacy });
+        out.templatePick[key] = 'custom:0';
+      }
+    }
+  } else if (hasNewPick) {
+    for (const key of MODE_KEYS) {
+      const p = typeof t.pick[key] === 'string' ? t.pick[key] : '';
+      if (p === 'increment' || p === 'supplement' || p === 'dev') out.templatePick[key] = 'increment';
+      else if (p.indexOf('custom:') === 0) {
+        const idx = parseInt(p.slice(7), 10);
+        if (Number.isInteger(idx) && idx >= 0 && idx < out.templateCustom[key].length) out.templatePick[key] = 'custom:' + idx;
+      }
+    }
+  }
+  // v2.2（§6.4）：mode 解析（4 模式白名单；'memory' 历史值 → lite + memory:true）
+  const rawMode = src.mode === 'memory' ? 'lite' : src.mode;
+  out.mode = parseMode(rawMode, src.engine, src.context && src.context.mode);
+  // v3.1.8（实测驱动·用户指令）：模式默认 params（标准档）——仅当用户未显式设置该项时生效；
+  // 显式设置（含 0 无限制）优先（上面 params 校验已覆盖，此处只补缺省）。
+  const pModeDefault = MODE_PARAMS_DEFAULT[out.mode] || MODE_PARAMS_DEFAULT[DEFAULT_MODE];
+  if (p.timeoutMs === undefined) out.timeoutMs = pModeDefault.timeoutMs;
+  if (p.maxTokens === undefined) out.maxTokens = pModeDefault.maxTokens;
+  if (p.outputLimit === undefined) out.outputLimit = pModeDefault.outputLimit;
+  const ctxCfg = src.context && typeof src.context === 'object' ? src.context : {};
+  out.context.budgetChars = parseBudgetChars(ctxCfg.budgetChars, out.mode);
+  // 旧 workspace 字段仅作上限兼容（不超联动值），不再单独生效（§0.2）
+  if (ctxCfg.workspace && typeof ctxCfg.workspace === 'object') {
+    const lim = resolveScanLimit(out.mode, out.context.budgetChars);
+    if (Number.isInteger(ctxCfg.workspace.maxFiles) && ctxCfg.workspace.maxFiles >= 1 && ctxCfg.workspace.maxFiles <= lim.maxFiles) out.context.workspace.maxFiles = ctxCfg.workspace.maxFiles;
+    if (Number.isInteger(ctxCfg.workspace.depth) && ctxCfg.workspace.depth >= 1 && ctxCfg.workspace.depth <= lim.depth) out.context.workspace.depth = ctxCfg.workspace.depth;
+  }
+  // v2.2（§6.4）：记忆开关——显式 memory 字段（client config.memory）最高优先（含 false 关闭）；
+  // 无 memory 字段时回退 mode='memory' / autoMemory 历史值；缺省 false
+  out.memory = src.memory === true ? true : (src.memory === false ? false : parseMemory(src.mode, src.autoMemory));
+  // v2.8.2 曾一键发布记忆强制开启（host 兜底）；2026-08-18（用户指令）取消——记忆跟随开关，publish 不例外
+  return out;
+}
+
+// 模板体系扩展（2026-08-18 修订）：模板容量与名称上限常量
+const TEMPLATE_CUSTOM_MAX = 10;
+const TEMPLATE_TEXT_MAX = 4000;
+const TEMPLATE_NAME_MAX = 40;
+
+// 模板体系扩展（2026-08-18 修订）：每模式选中模板解析——pick key（default/increment/custom:<index>）
+// → 内置模板或自定义列表条目；旧内置键 supplement/dev（2026-08-17 时期）按 increment 处理（list[1]）；
+// 旧配置（无 pick）→ legacy 兼容（custom 且 texts[mode] 非空用该文本）；
+// 非法 pick / 越界索引 / 空文本一律回退内置默认（T1），保证不空白、不报错。
+// builtins = { mode: [T1, T2] }（调用方按模式提供内置模板数组；T2=增量模板）。
+function resolveTemplateSystem(cfg, mode, builtins) {
+  const list = builtins && builtins[mode];
+  if (!Array.isArray(list) || list.length === 0) return '';
+  const pick = cfg && cfg.templatePick && typeof cfg.templatePick === 'object' ? cfg.templatePick[mode] : '';
+  if (typeof pick === 'string' && pick !== '') {
+    if (pick === 'increment' || pick === 'supplement' || pick === 'dev') return list[1] || list[0];
+    if (pick.indexOf('custom:') === 0) {
+      const idx = parseInt(pick.slice(7), 10);
+      const custom = cfg && cfg.templateCustom && typeof cfg.templateCustom === 'object' ? cfg.templateCustom[mode] : null;
+      if (Number.isInteger(idx) && idx >= 0 && Array.isArray(custom) && idx < custom.length) {
+        const item = custom[idx];
+        const text = item && typeof item === 'object' ? item.text : '';
+        if (typeof text === 'string' && text.trim() !== '') return text.trim();
+      }
+      return list[0];
+    }
+    return list[0];
+  }
+  // legacy：无 pick 的旧配置——custom 且当前模式 texts 非空 → 用该模式文本
+  if (cfg && cfg.templateMode === 'custom') {
+    const perMode = cfg.templateTexts && typeof cfg.templateTexts === 'object' ? cfg.templateTexts[mode] : '';
+    if (typeof perMode === 'string' && perMode.trim() !== '') return perMode.trim();
+  }
+  return list[0];
+}
+
+async function collectStream(iterator, outputLimit, onFirst) {
+  let text = '';
+  let sawDelta = false;
+  const blockTexts = [];
+  let finish = null;
+  let sawAny = false;
+  try {
+    while (true) {
+      const next = await iterator.next();
+      if (next.done) break;
+      const chunk = next.value;
+      if (!sawAny) {
+        sawAny = true;
+        if (typeof onFirst === 'function') onFirst(chunk);
+      }
+      if (chunk.type === 'text-delta') {
+        // v2.7.0（publish 一键发布）：outputLimit <= 0 表示不限制（规格长文不截断）
+        if (outputLimit > 0 && text.length + chunk.text.length > outputLimit) return { kind: 'toolong' };
+        sawDelta = true;
+        text += chunk.text;
+      } else if (chunk.type === 'block-end' && chunk.block.type === 'text') {
+        blockTexts.push(chunk.block.text);
+      } else if (chunk.type === 'finish') {
+        finish = chunk.reason;
+        break;
+      }
+    }
+  } catch (e) {
+    return { kind: 'cancelled' };
+  }
+  if (!finish) return { kind: 'cancelled' };
+  if (finish.kind === 'stop') {
+    return { kind: 'ok', text: sawDelta ? text : blockTexts.join('') };
+  }
+  if (finish.kind === 'aborted' || finish.kind === 'error' && finish.failure && finish.failure.code === 'ABORTED') {
+    return { kind: 'aborted' };
+  }
+  if (finish.kind === 'error') {
+    return { kind: 'error', failure: finish.failure };
+  }
+  // P0-e（2026-10-12·长草稿失败主因，结论已复核）：max-tokens 是官方合法 finish kind
+  // （@deepseek-ai/dsh-llm types.d.ts FinishReasonMap: 'max-tokens'）；旧实现无此分支，
+  // 落到下方兜底 → 误报 EMPTY_RESPONSE，报错文案与真实原因完全不符。
+  // 返回**可区分** kind（maxtokens）+ 真实 failure 码（OUTPUT_TRUNCATED），并保留已收文本。
+  if (finish.kind === 'max-tokens') {
+    return { kind: 'maxtokens', text: sawDelta ? text : blockTexts.join(''), failure: { code: 'OUTPUT_TRUNCATED', message: 'output reached the length limit and was truncated' } };
+  }
+  return { kind: 'error', failure: { code: 'EMPTY_RESPONSE', message: 'stream ended without a finish chunk' } };
+}
+
+// v23（D6）：模型链构建——按 cfg.fallback 顺序逐一尝试（去重）；
+// 链为空时才用自适应/内置链补足；不再有 main 优先概念。
+// 2026-08-18（用户需求·删内置兜底链）：模型链完全按用户配置顺序；配置为空 → 空链
+//（不再 adaptive/BUILTIN 补足），enhance 报无模型
+function buildTryChain(fallback) {
+  const chain = [];
+  for (const item of fallback || []) {
+    if (!item || typeof item !== 'object') continue;
+    if (typeof item.provider !== 'string' || typeof item.model !== 'string') continue;
+    const provider = item.provider.trim();
+    const model = item.model.trim();
+    if (!provider || !model) continue;
+    if (chain.some((e) => e.provider === provider && e.model === model)) continue;
+    const entry = { provider, model };
+    if (item.reasoningEffort) entry.reasoningEffort = item.reasoningEffort;
+    chain.push(entry);
+  }
+  return chain;
+}
+
+// ================= V2 上下文感知优化 · 纯函数族 =================
+// （v2.0.0 方案 §3：阶段 A 规则提取 / 阶段 B 检索排序与摘要 / 阶段 C 预算组装）
+
+// V2 分支判定（表驱动 §4.1）：phaseC 非 none 且预算 > 0 才走注入路径
+
+
+// 事件 → 文本消息列表（过滤噪音；**从尾部反向遍历**取最近 limit 条——DSH 日志可能达百万级）
+// DSH 事件类型形如 'user/message'、'assistant/message'、'assistant/chunk'、'tool/call'；
+// 只认 role/kind 前缀为 user|assistant 且 kind 非 chunk 的文本消息；
+// 文本在 text/content/payload/message/data 容器（DSH 实际为 ev.data.content[].text）。
+function extractHistory(events, limit) {
+  const arr = Array.isArray(events) ? events : [];
+  const out = [];
+  // 候选文本容器（顺序优先；第一个能取出非空文本的胜出）
+  const pickText = (container) => {
+    if (!container || typeof container !== 'object') return '';
+    if (typeof container.text === 'string') return container.text;
+    if (Array.isArray(container.content)) {
+      return container.content.map((b) => (b && typeof b === 'object' && typeof b.text === 'string') ? b.text : '').join(' ');
+    }
+    return '';
+  };
+  for (let i = arr.length - 1; i >= 0 && out.length < limit; i--) {
+    const ev = arr[i];
+    if (!ev || typeof ev !== 'object') continue;
+    const type = String(ev.type || ev.kind || '').toLowerCase();
+    let role = ev.role || (ev.payload && ev.payload.role) || (ev.message && ev.message.role) || (ev.data && ev.data.role) || (ev.content && typeof ev.content === 'object' && ev.content.role);
+    const slash = type.indexOf('/');
+    const typeRole = slash > 0 ? type.slice(0, slash) : type;
+    if (typeRole === 'user' || typeRole === 'assistant') {
+      if (slash > 0 && type.slice(slash + 1) === 'chunk') continue; // 流片段噪音
+      if (role !== 'user' && role !== 'assistant') role = typeRole;
+    }
+    if (role !== 'user' && role !== 'assistant') continue;
+    let text = '';
+    if (typeof ev.text === 'string') text = ev.text;
+    else text = pickText(ev.content) || pickText(ev.payload) || pickText(ev.message) || pickText(ev.data);
+    text = text.trim();
+    if (!text) continue;
+    if (text.startsWith('/')) continue;
+    if (/^(\[工具|tool|function call)/i.test(text)) continue;
+    out.push({ type: role, text: text.slice(0, V2_MSG_TEXT_MAX) });
+  }
+  return out.reverse();
+}
+
+// v3.1.3（用户需求·仅结论参考）：块级「结论提取」——入参为 sessionQuery.readSurface 的
+// 原始事件（保留 content 块结构；listEvents 记录无文本、filterEvents 文档文本为预拼接
+// 语义文本，二者都无法做块级过滤）。只取 user/assistant 消息的 text 块（显式结论/正文），
+// 丢弃 reasoning（思考过程）、tool-call（工具名+参数 JSON）、tool-result（工具输出）块，
+// 并丢弃 user 消息内 <system-reminder> 系统注入块；输出形状与 extractHistory 一致
+// （[{type:'user'|'assistant', text}]，时间序），下游 splitHistoryRounds/judge 零改动。
+// 轮次覆盖：按 V2_ROUNDS_SCAN_MAX（10）轮向后扫描，覆盖 standard 最深窗口 [6,10]；
+// 每条目 ≤V2_MSG_TEXT_MAX 截断；超出历史 → 窗口判定自然 miss（不注入）。
+function extractHistoryConclusions(events) {
+  const arr = Array.isArray(events) ? events : [];
+  const out = [];
+  const isInjection = (b) => /^<system-reminder>/i.test(String((b && b.text) || '').trim());
+  const textOf = (blocks) => {
+    const parts = [];
+    for (const b of blocks || []) {
+      if (!b || typeof b !== 'object') continue;
+      if (b.type !== 'text') continue;          // 丢弃 reasoning/tool-call/tool-result 等
+      if (isInjection(b)) continue;             // 丢弃系统注入块
+      const t = String(b.text || '').trim();
+      if (t !== '') parts.push(t);
+    }
+    return parts.join('\n');
+  };
+  let userSeen = 0;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const ev = arr[i];
+    if (!ev || typeof ev !== 'object') continue;
+    const type = String(ev.type || '').toLowerCase();
+    if (type === 'user/message') {
+      if (userSeen >= V2_ROUNDS_SCAN_MAX) break;
+      userSeen++;
+    } else if (type !== 'assistant/message') {
+      continue;
+    } else if (userSeen >= V2_ROUNDS_SCAN_MAX) {
+      break;
+    }
+    const content = type === 'user/message'
+      ? (ev.data && ev.data.content)
+      : (ev.data && ev.data.message && ev.data.message.content);
+    const text = textOf(content).trim();
+    if (text === '') continue;
+    if (text.startsWith('/')) continue;
+    out.push({ type: type === 'user/message' ? 'user' : 'assistant', text: text.slice(0, V2_MSG_TEXT_MAX) });
+  }
+  return out.reverse();
+}
+
+// v3.1.3（看门狗 + 延迟连通性预检）：探测结果缓存纯读写（注入 Map，单测友好；
+// LRU 上限 50，超限驱逐最早插入条目；TTL 过期即失效并删除）
+function probeCacheGet(cache, key, now) {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (now - hit.at >= PROBE_CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return hit;
+}
+function probeCacheSet(cache, key, value, now) {
+  if (cache.size >= 50) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(key, { ok: value.ok === true, code: value.code || '', at: now });
+}
+// 纯选择：entries 与 results 对齐，返回首个 ok 下标（无 → -1）
+function pickReachableIndex(entries, results) {
+  for (let i = 0; i < entries.length; i++) {
+    const r = results[i];
+    if (r && r.ok === true) return i;
+  }
+  return -1;
+}
+
+// 中文主题词切分（v2.7.0 检索质量修复）：连续中文按连接/虚词切段——
+// 旧实现 [\u4e00-\u9fa5]{2,8} 按 8 字窗口截断，产生「项目的构建与发布」式碎片，
+// 无法命中文件名/内容（V2 文档「遗留观察」中文检索噪音的根因）。
+function splitCnSegments(s) {
+  const out = [];
+  for (const m of String(s || '').matchAll(/[\u4e00-\u9fa5]+/g)) {
+    const seg = m[0];
+    // 非捕获组切分，分隔符不进入结果
+    const tokens = seg.split(/(?:以及|或者|并且|然后|因为|所以|如果|但是|没有|就是|不是|对于|关于|通过|根据|按照|一个|一份|一种|一些|输出|提供|包含|包括|进行|使用|需要|希望|想要|可以|能够|和|与|并|或|及|为|了|在|中|请|对|把|将|等|它|其|这|那|个|是|有|要|让|帮|我|你|他|她|的)/).filter(Boolean);
+    for (const t of tokens) out.push(t);
+  }
+  return out;
+}
+
+// 规则版任务焦点提取（basic 模式）：代码/路径/扩展名 token + 中文主题词
+function inferFocusRules(historyText) {
+  const focus = [];
+  const seen = new Set();
+  const add = (w) => {
+    if (!w || seen.has(w) || w.length < 2) return;
+    seen.add(w);
+    focus.push(w);
+  };
+  const s = String(historyText || '');
+  // 路径与文件名 token（src/xxx.py、foo_bar.ts、package.json 等）
+  // 注意：长扩展名（json/tsx/jsx/yaml）必须在短前缀（js/ts/ya）之前，避免交替误匹配
+  for (const m of s.matchAll(/[A-Za-z0-9_\-./\\]+\.(?:json|yaml|yml|tsx|jsx|toml|svelte|python|html|css|typescript|javascript|py|ts|js|md|txt|go|rs|java|cpp|c|h|sh|sql|vue)/g)) {
+    const path = m[0];
+    const base = path.split(/[\\/]/).pop();
+    add(base);
+    add(base.replace(/\.[^.]+$/, ''));
+  }
+  // 中文主题词（v2.7.0：连接虚词切分，避免 8 字窗口碎片化）
+  for (const w of splitCnSegments(s)) add(w);
+  // 英文主题词（驼峰与下划线词）
+  for (const m of s.matchAll(/[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+/g)) add(m[0]);
+  for (const m of s.matchAll(/\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b/g)) add(m[0]);
+  // 去除常见停用词（含连接虚词切分残留与动作词）
+  const stop = new Set(['这个', '那个', '我们', '你们', '他们', '可以', '能够', '需要', '希望', '想要', '进行', '使用', '一个', '一份', '一种', '一些', '什么', '怎么', '如何', '如果', '因为', '所以', '但是', '然后', '并且', '或者', '以及', '还是', '没有', '就是', '不是', '对于', '关于', '通过', '根据', '按照', '项目', '文件', '功能', '实现', '添加', '修改', '删除', '创建', '优化', '提示', '词优', '分析', '检查', '输出', '提供', '包含', '包括', '写', '生成', '编写', '设计', '帮助', '我的', '一种', '的', '与', '和', '并', '或', '及', '为', '了', '在', '中', '请', '对', '把', '将', '等', '它', '其', '这', '那', '个', '是', '有', '要', '让', '帮', '我', '你', '他', '她', '用户', '助手', 'the', 'and', 'for', 'with', 'this', 'that', 'from', 'into']);
+  const filtered = focus.filter((w) => !stop.has(w.toLowerCase()));
+  return filtered.slice(0, KEYWORD_LIMIT);
+}
+
+// v2.4.4（lite 规则引擎落地）：prompt 工程要素检查——目标/约束/输出格式/示例 四项缺失检测。
+// lite 模式此前 phaseA:'rule' 空转（buildV2ContextBlock 仅 phaseC==='inject' 时执行阶段 A），
+// 与 base 行为完全相同；本函数让「本地规则分析」真正生效：零 LLM 成本、零外部上下文，
+// 仅依据输入文本检测要素缺失，产出供 system 附加的强化指令。
+// v2.4.5（语义保真修正）：suggestions 改为保守措辞——只提示「若可合理推断才明确化」，
+// 严禁诱导模型添加原文未提及的新要求（此前"请在优化结果中补充合理约束（如长度上限…）"
+// 会引导模型臆造内容，与「语义保真」冲突）。
+// 返回 { missing: [{key,label}], suggestions: string[] }；全部具备时 suggestions 为空。
+
+
+// 主题词提取：提示词关键词 ∪ focus（5–8 词）
+function extractKeywords(text, focus) {
+  const kw = inferFocusRules(text);
+  const seen = new Set();
+  const out = [];
+  const add = (w) => {
+    if (!w || seen.has(w) || w.length < 2) return;
+    seen.add(w);
+    out.push(w);
+  };
+  for (const w of kw) add(w);
+  for (const w of (focus || [])) add(w);
+  return out.slice(0, KEYWORD_LIMIT);
+}
+
+// 敏感文件硬过滤（防密钥/凭据注入外发）：.env/密钥/凭据/日志 等
+function shouldIgnoreFile(name) {
+  const n = String(name || '').toLowerCase();
+  if (n.includes('.env')) return true;
+  if (/(\.pem|\.key|\.p12|\.pfx|\.jks|\.keystore|\.crt|\.cer)$/.test(n)) return true;
+  // 路径任意段命中凭据/密钥类文件名（含目录段，如 config/credentials.json）
+  if (/(^|[\\/.])(credentials|secret|secrets|token|id_rsa|id_ed25519|id_ecdsa|\.npmrc|\.pypirc|\.netrc|\.htpasswd)([\\/.]|$)/.test(n)) return true;
+  if (/\.log(\.|$)/.test(n)) return true;
+  if (/^(node_modules|\.git|dist|build|\.venv|venv|__pycache__|\.next|\.cache|coverage)/.test(n)) return true;
+  return false;
+}
+
+// 文件排序：名称/路径命中关键词计分（路径深度浅加分）→ Top-K
+function rankFiles(files, keywords, topK) {
+  const kws = (keywords || []).filter((k) => typeof k === 'string' && k.length >= 2);
+  if (kws.length === 0 || !Array.isArray(files)) return [];
+  const scored = [];
+  for (const f of files) {
+    const name = String(f || '');
+    if (shouldIgnoreFile(name)) continue;
+    const lower = name.toLowerCase();
+    let score = 0;
+    for (const k of kws) {
+      const kl = k.toLowerCase();
+      if (lower.includes(kl)) score += 2;          // 名称/路径命中
+      const base = lower.split(/[\\/]/).pop();
+      if (base.includes(kl)) score += 3;           // 文件名命中权重更高
+    }
+    if (score > 0) {
+      const depth = name.split(/[\\/]/).length - 1;
+      scored.push({ path: name, score: score - depth * 0.1 });  // 浅路径优先
+    }
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, topK || 3);
+}
+
+// 行摘要：命中行 ±2 上下文；无命中取头部 40 行；≤预算字符
+function snippetFromLines(lines, keywords, budget) {
+  const arr = Array.isArray(lines) ? lines : [];
+  const b = typeof budget === 'number' && budget > 0 ? budget : SNIPPET_BUDGET;
+  const kws = (keywords || []).filter((k) => typeof k === 'string' && k.length >= 2);
+  const hits = [];
+  if (kws.length > 0) {
+    for (let i = 0; i < arr.length; i++) {
+      const ln = String(arr[i] || '');
+      if (kws.some((k) => ln.toLowerCase().includes(k.toLowerCase()))) {
+        hits.push(i);
+        if (hits.length >= 8) break;
+      }
+    }
+  }
+  let out = [];
+  if (hits.length > 0) {
+    const picked = new Set();
+    for (const h of hits) {
+      for (let i = Math.max(0, h - 2); i <= Math.min(arr.length - 1, h + 2); i++) picked.add(i);
+    }
+    out = [...picked].sort((a, b) => a - b).map((i) => String(arr[i] || ''));
+  } else {
+    out = arr.slice(0, 40);
+  }
+  let text = out.join('\n');
+  if (text.length > b) text = text.slice(0, b);
+  return text;
+}
+
+// v2.7.0（一键发布 · 网络检索词构造）：草稿主题词 ∪ delta 增删实词。
+// 每次改动后 text 关键词自然变化（基础代入检索条件）；记忆链 delta 显式并入
+// （改动方向代入——新增/删除的内容决定下一轮检索方向）。
+function buildWebQuery(text, keywords, delta) {
+  const parts = [];
+  const seen = new Set();
+  const add = (w) => {
+    if (!w || seen.has(w)) return;
+    seen.add(w);
+    parts.push(w);
+  };
+  for (const k of (keywords || [])) add(k);
+  const deltas = (delta && Array.isArray(delta.added) ? delta.added : [])
+    .concat(delta && Array.isArray(delta.removed) ? delta.removed : []);
+  for (const d of deltas) for (const w of splitCnSegments(String(d))) add(w);
+  if (parts.length === 0) {
+    for (const w of splitCnSegments(String(text || ''))) { add(w); if (parts.length >= 6) break; }
+  }
+  return parts.slice(0, 8).join(' ');
+}
+
+// v2.8.0（一键发布 · 场景路由）：场景判定词表（分级加权：强特征 ×2 / 泛词 ×1 / 英文强 ×1）。
+// 中英文词表互不重叠（同一 token 只计一次，避免双计）；英文词匹配前统一小写。
+const SCENARIO_WORDS = {
+  gameStrong: ['卡牌', '塔防', '肉鸽', '副本', '抽卡', '回合', '射击', '放置', '解谜', '成就', '装备', '技能', '关卡', '战斗'],
+  gameWeak: ['游戏', '玩法', '角色', '剧情', '地图', '等级'],
+  gameEn: ['game', 'card', 'roguelike', 'level', 'battle', 'boss'],
+  softwareStrong: ['数据库', '微服务', '后端', '前端', '权限', '登录', '部署', '中间件', '缓存', '并发'],
+  softwareWeak: ['软件', '应用', '系统', '平台', 'saas', '网站', '工具', '管理', '协作', '自动化', '脚本', '插件', '客户端', '移动端', '桌面'],
+  softwareEn: ['app', 'website', 'web', 'api', 'database', 'dashboard', 'crm'],
+};
+
+// v2.8.0（一键发布 · 场景路由）：依据输入判定项目场景（game/software/generic）。
+// 计分制：加权求和、多者胜；平局/双零 → generic。keywords 可选（缺省等价空数组）。
+function detectScenario(text, keywords) {
+  const joined = String(text || '').toLowerCase() + ' ' +
+    String(Array.isArray(keywords) ? keywords.join(' ') : '').toLowerCase();
+  let game = 0;
+  let software = 0;
+  const count = (list, weight, side) => {
+    for (const w of list) {
+      if (joined.indexOf(w) !== -1) {
+        if (side === 'g') game += weight; else software += weight;
+      }
+    }
+  };
+  count(SCENARIO_WORDS.gameStrong, 2, 'g');
+  count(SCENARIO_WORDS.gameWeak, 1, 'g');
+  count(SCENARIO_WORDS.gameEn, 1, 'g');
+  count(SCENARIO_WORDS.softwareStrong, 2, 's');
+  count(SCENARIO_WORDS.softwareWeak, 1, 's');
+  count(SCENARIO_WORDS.softwareEn, 1, 's');
+  if (game === software) return 'generic';
+  return game > software ? 'game' : 'software';
+}
+
+// v2.8.0（一键发布 · 实测修正）：剥离输出首部的【场景判定】回显行——模型常复述
+// system 注入的判定行（完整行或截断行两种形态）；指令式「请勿复述」约束不可靠，
+// 改用确定性剥离（仅剥离首部一行 + 跟随空行，正文不受影响）。
+function stripScenarioEcho(text) {
+  const s = String(text || '');
+  const re = /^【场景判定】本次场景判定：(?:game|software)[^\n]*\n?/;
+  return s.replace(re, '').replace(/^\n+/, '');
+}
+
+// 上下文块组装：任务进度(≤800) + 文件(≤3×800) + 事件(≤800)；
+// 截断优先级：进度 > 文件 > 事件 > 原文完整（原文由调用方保证不截断）
+function buildContextBlock(progress, files, events, budgetChars) {
+  const budget = typeof budgetChars === 'number' && budgetChars > 0 ? budgetChars : 0;
+  if (budget <= 0) return '';
+  const MAX_PROGRESS = Math.min(CONTEXT_PROGRESS_MAX, budget);
+  const MAX_EVENT = Math.min(CONTEXT_PROGRESS_MAX, Math.floor(budget / CONTEXT_EVENT_DIVISOR));
+  const MAX_FILE = budget > CONTEXT_PROGRESS_MAX ? Math.min(CONTEXT_PROGRESS_MAX, Math.floor((budget - Math.min(CONTEXT_PROGRESS_MAX, MAX_PROGRESS) - MAX_EVENT) / CONTEXT_FILE_COUNT)) : 0;
+  const parts = [];
+  let used = 0;
+  // 1) 任务进度（最高优先级）
+  if (progress && (progress.task || progress.currentStep || (progress.completed && progress.completed.length))) {
+    const lines = [];
+    if (progress.task) lines.push('任务：' + progress.task);
+    if (progress.currentStep) lines.push('当前步骤：' + progress.currentStep);
+    if (Array.isArray(progress.completed) && progress.completed.length) lines.push('已完成：' + progress.completed.join('；'));
+    const text = lines.join('\n').slice(0, MAX_PROGRESS);
+    if (text) {
+      parts.push('【任务进度】\n' + text);
+      used += text.length + 20;
+    }
+  }
+  // 2) 相关文件（其次）
+  if (MAX_FILE > 0 && Array.isArray(files) && files.length) {
+    const segs = [];
+    for (const f of files.slice(0, 3)) {
+      if (!f || typeof f !== 'object') continue;
+      const snip = String(f.snippet || '').slice(0, MAX_FILE);
+      if (snip) segs.push('📄 ' + (f.path || '?') + '\n' + snip);
+    }
+    if (segs.length) {
+      const text = segs.join('\n\n').slice(0, Math.max(0, budget - used));
+      if (text) {
+        parts.push('【相关项目文件】\n' + text);
+        used += text.length + 20;
+      }
+    }
+  }
+  // 3) 相关会话片段（最后，预算余量）
+  if (Array.isArray(events) && events.length) {
+    const text = String(events.slice(0, 3).map((e) => typeof e === 'string' ? e : '').join('\n'))
+      .slice(0, Math.max(0, Math.min(MAX_EVENT, budget - used)));
+    if (text) parts.push('【相关会话片段】\n' + text);
+  }
+  return parts.join('\n\n');
+}
+
+// smart 模式 JSON 容错解析（剥离 ```json 代码块与前后缀噪音）
+function parseTaskProgress(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  s = s.slice(start, end + 1);
+  let obj;
+  try {
+    obj = JSON.parse(s);
+  } catch (e) {
+    return null;
+  }
+  if (!obj || typeof obj !== 'object') return null;
+  const out = {};
+  if (typeof obj.task === 'string' && obj.task.trim()) out.task = obj.task.trim().slice(0, 200);
+  if (typeof obj.currentStep === 'string' && obj.currentStep.trim()) out.currentStep = obj.currentStep.trim().slice(0, 200);
+  if (Array.isArray(obj.completed)) {
+    out.completed = obj.completed.filter((c) => typeof c === 'string' && c.trim()).map((c) => c.trim().slice(0, 120)).slice(0, 5);
+  }
+  if (Array.isArray(obj.focus)) {
+    out.focus = obj.focus.filter((f) => typeof f === 'string' && f.trim()).map((f) => f.trim().slice(0, 40)).slice(0, 4);
+  }
+  if (!out.task && !out.currentStep && !out.completed) return null;
+  return out;
+}
+// ================= V2 纯函数族结束 =================
+
+// v17.3：长文连通性探测（实测 TTFT + 吞吐；usage 优先，缺失按字符/4 估算）
+// v3.1.7（方案 2 · 用户确认）：探测从「short 200-token」改为「长文 ~1200-token」——
+// 此前 prompt 要求 short + maxTokens=200，模型只吐几个 token、decode 窗口仅 ~2ms，
+// tps = token/极短时间 被数学放大（实测虚高到 4500 tok/s，真实量级 75–267）。
+// 现要求写长文，decode 窗口拉到秒级，tps 才有意义；探测默认不传 reasoningEffort
+// （未开思考，TTFT 不含思考时间、更贴近纯生成速度）。
+async function pingStream(llmService, entry, ref) {
+  const startedAt = Date.now();
+  let ttftMs = -1;
+  let sawFirst = false;
+  let firstTokenAt = null;
+  let finishedAt = null;
+  let outputChars = 0;
+  let usageOutputTokens = null;
+  let stream;
+  try {
+    stream = llmService.stream({
+      provider: entry.provider,
+      model: entry.model,
+      ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
+      // P0-c（2026-10-12 · 探针反噬修复）：原探针要求真写 ~800 词长文（maxTokens 1200），
+      // 每条 12s、成本极高且失败会反噬整链。探测目标是**可达性**，只需观察到 TTFT；
+      // 改短探针（单个词 + maxTokens 16）：TTFT 即结论，成本 ~1/60。
+      maxTokens: 16,
+      system: 'You are a connectivity probe. Reply with the single word OK and nothing else.',
+      messages: [{
+        id: 'enhance-ping',
+        role: 'user',
+        content: [{ type: 'text', text: 'Reply with the single word OK.' }],
+        source: { kind: 'user' },
+      }],
+    });
+  } catch (e) {
+    return { ok: false, code: e && e.code ? String(e.code) : 'LLM_FAILED', message: String(e && e.message ? e.message : e) };
+  }
+  const iterator = stream[Symbol.asyncIterator]();
+  if (ref) ref.current = iterator;
+  let finish = null;
+  try {
+    while (true) {
+      const next = await iterator.next();
+      if (next.done) break;
+      const chunk = next.value;
+      if (chunk.type === 'text-delta') {
+        if (!sawFirst) {
+          sawFirst = true;
+          ttftMs = Date.now() - startedAt;
+          firstTokenAt = Date.now();
+        }
+        outputChars += typeof chunk.text === 'string' ? chunk.text.length : 0;
+      } else if (!sawFirst && chunk.type === 'block-end' && chunk.block && chunk.block.type === 'text') {
+        sawFirst = true;
+        ttftMs = Date.now() - startedAt;
+        firstTokenAt = Date.now();
+      }
+      if (chunk.type === 'usage' && chunk.usage && typeof chunk.usage.outputTokens === 'number') {
+        usageOutputTokens = chunk.usage.outputTokens;
+      }
+      if (chunk.type === 'finish') {
+        finish = chunk.reason;
+        finishedAt = Date.now();
+        break;
+      }
+    }
+  } catch (e) {
+    return { ok: false, code: 'ABORTED', message: 'probe aborted' };
+  }
+  const endAt = finishedAt || Date.now();
+  const latencyMs = endAt - startedAt;
+  const decodeMs = sawFirst ? Math.max(0, endAt - firstTokenAt) : null;
+  const outputTokens = usageOutputTokens != null ? usageOutputTokens : Math.round(outputChars / 4);
+  const tokensPerSecond = decodeMs != null && decodeMs > 0 ? outputTokens / (decodeMs / 1000) : null;
+  const base = {
+    ok: true,
+    latencyMs,
+    ttftMs: sawFirst ? ttftMs : latencyMs,
+    model: entry.model,
+    outputChars,
+    outputTokens,
+    decodeMs,
+    tokensPerSecond,
+  };
+  // 容错：部分网关对极短请求直接结束流不发 finish——收到过文本即视为连通
+  if (!finish) {
+    if (sawFirst) return base;
+    return { ok: false, code: 'EMPTY_RESPONSE', message: 'probe returned no output' };
+  }
+  if (finish.kind === 'stop') {
+    return base;
+  }
+  if (finish.kind === 'aborted' || (finish.kind === 'error' && finish.failure && finish.failure.code === 'ABORTED')) {
+    return { ok: false, code: 'ABORTED', message: 'probe aborted' };
+  }
+  if (finish.kind === 'error') {
+    const code = finish.failure && finish.failure.code ? String(finish.failure.code) : 'LLM_FAILED';
+    return { ok: false, code, message: friendlyMessage(finish.failure) };
+  }
+  // v17.2：其余 finish（length/content-filter/tool-calls 等）——端点已响应即视为连通（探测目标是可达性）
+  return base;
+}
+
+
+
+// ================= 模型历史统计聚合（2026-08-17 · 连通性测试预计耗时） =================
+// 从会话原始日志提取最后出现的 provider/model 路由（request/header 或 request/context）。
+function extractModelRouteFromEvents(events) {
+  let route = null;
+  if (!Array.isArray(events)) return route;
+  for (const ev of events) {
+    if (!ev || typeof ev !== 'object') continue;
+    if (ev.type === 'request/header' && ev.data && ev.data.header && ev.data.header.config) {
+      const c = ev.data.header.config;
+      if (c && typeof c.provider === 'string' && c.provider && typeof c.model === 'string' && c.model) {
+        route = { provider: c.provider, model: c.model };
+      }
+    } else if (ev.type === 'request/context' && ev.data && ev.data.provider && ev.data.model) {
+      route = { provider: String(ev.data.provider), model: String(ev.data.model) };
+    }
+  }
+  return route;
+}
+
+// 累加一个会话的 sessionStats/tokenUsage 投影值（缺失/异常字段按 0 跳过）。
+function accumulateProjectionStats(acc, projectionSnapshot) {
+  const values = projectionSnapshot && projectionSnapshot.values ? projectionSnapshot.values : {};
+  const s = values.sessionStats;
+  if (!s || typeof s !== 'object') return;
+  acc.ttftMs += Number(s.ttftMs) || 0;
+  acc.ttftSteps += Number(s.ttftSteps) || 0;
+  acc.decodeMs += Number(s.decodeMs) || 0;
+  acc.decodeTokens += Number(s.decodeTokens) || 0;
+  acc.sessions += 1;
+}
+
+// 聚合结果 → 平均 TTFT 与解码吞吐；无样本时对应字段为 null。
+function summarizeModelStats(acc) {
+  return {
+    sessions: acc.sessions,
+    ttftMs: acc.ttftSteps > 0 ? acc.ttftMs / acc.ttftSteps : null,
+    tokensPerSecond: acc.decodeMs > 0 ? acc.decodeTokens / (acc.decodeMs / 1000) : null,
+  };
+}
+
+// 基础模式默认模板预计耗时：输出 token 按输入字符数 /4 动态估算，最低 200 token。
+const BASE_EST_CHARS_PER_TOKEN = 4;
+const BASE_EST_MIN_OUTPUT_TOKENS = 200;
+function estimateBaseModeSeconds(ttftMs, tokensPerSecond, inputChars) {
+  if (typeof ttftMs !== 'number' || !Number.isFinite(ttftMs) ||
+      typeof tokensPerSecond !== 'number' || !Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) {
+    return null;
+  }
+  const chars = Number.isFinite(inputChars) && inputChars > 0 ? inputChars : 0;
+  const outputTokens = Math.max(BASE_EST_MIN_OUTPUT_TOKENS, Math.ceil(chars / BASE_EST_CHARS_PER_TOKEN));
+  return (ttftMs / 1000) + (outputTokens / tokensPerSecond);
+}
+
+// 轻量模式预计耗时（v3.1.6 口径修正）：v3.0 模式重构后 lite = rounds 检索——
+// 读取最近 1 轮会话 + LLM 关联判定（RELEVANCE 调用，输出预算 RELEVANCE_MAX_TOKENS=400），
+// 命中则注入参考。因此相对基础模式**多一次关联判定 LLM 调用**（自身 TTFT + 判定输出吞吐），
+// 预计耗时更长；不再是 v3.1.5 的「输出更短→更快」错误口径。
+function estimateLiteModeSeconds(ttftMs, tokensPerSecond, inputChars) {
+  const base = estimateBaseModeSeconds(ttftMs, tokensPerSecond, inputChars);
+  if (base === null) return null;
+  const judgeSeconds = (ttftMs / 1000) + (RELEVANCE_MAX_TOKENS / tokensPerSecond);
+  return base + judgeSeconds;
+}
+
+// ================= v2.4.0 版本检测与一键更新 · 纯函数族（P1 余账批 · 已退役）=================
+// 该族（UPDATE_MANIFEST / UPDATE_CACHE_TTL_MS / parseVersion / compareVersions / versionStatus /
+// normalizeRepo / isValidTag / pickMaxTag / defaultDirFor / parseTagsPayload / validateManifestFiles）
+// 的唯一调用者 `update/*` RPC 已随 P1-c 执行器退役一并删除 ⇒ 零活消费者，整体移除。
+// ⚠ 保留 PLUGIN_VERSION（由 build-host 注入，lib/index.cjs 仍读）。
+
+// ================= v2.5.0 一键更新并重启 · 纯函数族 =================
+// 方案「一键更新并重启方案.md」：命令构造与探测计划保持 PURE（可单测、单一事实源）。
+// ⚠ P3-2b（2026-10-14）：mergeEnvPath 已改为 lib/sys.cjs 原生实现（单一事实源），本区段已不被切片取用；勿在此重建同名副本（会形成双实现漂移）。
+// ctx/harness/module 状态。
+
+// ================= v3.0 模式重构 · 会话轮次窗口与关联判定 =================
+
+// 会话轮次窗口切分：events 时间序（extractHistory 输出 [{type:'user'|'assistant', text}]），
+// 以 user 消息为轮锚点（轮 = 一个 user 消息及其后的 assistant 回复）；fromRound/toRound
+// 1-based（1 = 最近一轮）。返回窗口内消息文本（[用户]/[助手] 前缀）；窗口越界/无锚点
+// 时按可用轮数 clamp，不可用 → []。
+function splitHistoryRounds(events, fromRound, toRound) {
+  const list = Array.isArray(events) ? events.filter((e) => e && typeof e.text === 'string') : [];
+  if (list.length === 0) return [];
+  const from = Number.isInteger(fromRound) && fromRound >= 1 ? fromRound : 1;
+  const to = Number.isInteger(toRound) && toRound >= from ? toRound : from;
+  const anchors = [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].type === 'user') anchors.push(i);
+  }
+  const fmt = (e) => (e.type === 'user' ? '[用户] ' : '[助手] ') + e.text;
+  if (anchors.length === 0) {
+    const start = Math.max(0, list.length - to);
+    const end = Math.max(start, list.length - from + 1);
+    return list.slice(start, end).map(fmt);
+  }
+  if (from > anchors.length) return [];
+  const toEff = Math.min(to, anchors.length);
+  const startIdx = anchors[toEff - 1];
+  const endIdx = from === 1 ? list.length : anchors[from - 2];
+  if (endIdx <= startIdx) return [];
+  return list.slice(startIdx, endIdx).map(fmt);
+}
+
+// 关联判定 JSON 容错解析（{related, reason}）——剥离 json 代码块与前后缀噪音，
+// related 归一化（true/'true'/1 → true）；不可解析 → null（调用方按不相关降级）。
+function parseRelevance(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  s = s.slice(start, end + 1);
+  let obj;
+  try { obj = JSON.parse(s); } catch (e) { return null; }
+  if (!obj || typeof obj !== 'object') return null;
+  const related = obj.related === true || obj.related === 'true' || obj.related === 1 || obj.related === '1';
+  return { related, reason: typeof obj.reason === 'string' ? obj.reason.slice(0, 80) : '' };
+}
+
+// ================= v3.0 模式重构 · 检索策略表 =================
+// kind: none（不检索）/ rounds（会话轮次窗口 LLM 关联判定，命中即停）/ v2（旧管道：文件/事件/网络）
+// windows: [from, to] 1-based 轮次窗口（1 = 最近一轮；轮 = user 消息锚点及其回复）
+// v3.2.23（提示词集合化）：检索策略声明事实源已迁移到 prompts/enhance/*/PACKAGE.md frontmatter
+// （SKILL_MANIFEST 生成，enhance-handlers 已改读 SKILL_MANIFEST）；此处保留仅供 PURE 区段
+// 单测切片 + U40c 一致性断言防漂移——改检索策略请改 PACKAGE.md，勿在此手改。
+const RETRIEVE_TABLE = {
+  base: { kind: 'none', windows: [] },
+  lite: { kind: 'rounds', windows: [[1, 1]] },
+  standard: { kind: 'rounds', windows: [[1, 2], [3, 5], [6, 10]] },
+  smart: { kind: 'rounds', windows: [[1, 1], [2, 3]] },
+  publish: { kind: 'v2', windows: [] },
+};
+// v3.0：关联判定调用预算（独立小调用，失败降级不阻断主流程）
+const RELEVANCE_TIMEOUT_MS = 10000;
+const RELEVANCE_MAX_TOKENS = 400;
+const RELEVANCE_OUTPUT_LIMIT = 800;
+
+// v3.0（模式重构 S3）：开发环境判定 JSON 容错解析（{isDevEnv, reason}）——同 parseRelevance 模式。
+// v3.0v2（修订）：提示词开发意向判定 JSON 容错解析（{isDevIntent, reason}）。
+function parseIntent(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  s = s.slice(start, end + 1);
+  let obj;
+  try { obj = JSON.parse(s); } catch (e) { return null; }
+  if (!obj || typeof obj !== 'object') return null;
+  const isDevIntent = obj.isDevIntent === true || obj.isDevIntent === 'true' || obj.isDevIntent === 1 || obj.isDevIntent === '1';
+  return { isDevIntent, reason: typeof obj.reason === 'string' ? obj.reason.slice(0, 80) : '' };
+}
+
+// v3.0v2（修订）：文档检索/项目地图合并分析 JSON 容错解析
+// （{relatedDocs:[{path,excerpt}], hasProjectMap, codePaths:[], reason}）。
+function parseDocsAnalysis(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  s = s.slice(start, end + 1);
+  let obj;
+  try { obj = JSON.parse(s); } catch (e) { return null; }
+  if (!obj || typeof obj !== 'object') return null;
+  const relatedDocs = Array.isArray(obj.relatedDocs) ? obj.relatedDocs.slice(0, 3).map((d) => ({
+    path: String(d && d.path || '').slice(0, 200),
+    excerpt: String(d && d.excerpt || '').slice(0, 240),
+  })).filter((d) => d.path !== '') : [];
+  const codePaths = Array.isArray(obj.codePaths) ? obj.codePaths.map((p) => String(p || '').replace(/^\/+|\/+$/g, '')).filter((p) => p !== '').slice(0, 5) : [];
+  const hasProjectMap = obj.hasProjectMap === true || obj.hasProjectMap === 'true' || obj.hasProjectMap === 1 || obj.hasProjectMap === '1';
+  return { relatedDocs, hasProjectMap, codePaths, reason: typeof obj.reason === 'string' ? obj.reason.slice(0, 100) : '' };
+}
+
+// v3.0p（publish 多步检索）：检索主题规划 JSON 容错解析
+// （{topics:[{query,note}]}，2~3 个差异化检索主题）——同 parseDocsAnalysis 模式。
+function parseSearchPlan(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  s = s.slice(start, end + 1);
+  let obj;
+  try { obj = JSON.parse(s); } catch (e) { return null; }
+  if (!obj || typeof obj !== 'object') return null;
+  const topics = Array.isArray(obj.topics) ? obj.topics.map((t) => ({
+    query: String(t && t.query || '').trim().slice(0, 40),
+    note: String(t && t.note || '').slice(0, 120),
+  })).filter((t) => t.query !== '') : [];
+  if (topics.length === 0) return null;
+  return { topics: topics.slice(0, 3) };
+}
+// ==PURE-END==
+
+// 目标模式：PURE 区段以普通 CommonJS 模块承载；导出面与旧 chunk 的顶层声明逐项一致。
+module.exports = {
+  parseMode,
+  parseMemory,
+  shouldInjectMemory,
+  parseBudgetChars,
+  resolveScanLimit,
+  resolveRetrieveBudget,
+  buildMemoryChainBlock,
+  computeEditDelta,
+  filterDeltaForPublish,
+  buildMemoryDeltaHint,
+  buildChatMessages,
+  wrapUserText,
+  wrapPublishText,
+  cleanOutput,
+  correctionStripFragments,
+  correctionStripAllowed,
+  cleanCorrectionOutput,
+  computeBackoffDelayMs,
+  isRetryableFailure,
+  resolvePrepareBudgetMs,
+  resolveEnhanceTimeoutMs,
+  friendlyMessage,
+  validateConfig,
+  resolveTemplateSystem,
+  collectStream,
+  buildTryChain,
+  extractHistory,
+  extractHistoryConclusions,
+  probeCacheGet,
+  probeCacheSet,
+  pickReachableIndex,
+  splitCnSegments,
+  inferFocusRules,
+  extractKeywords,
+  shouldIgnoreFile,
+  rankFiles,
+  snippetFromLines,
+  buildWebQuery,
+  detectScenario,
+  stripScenarioEcho,
+  buildContextBlock,
+  parseTaskProgress,
+  pingStream,
+  extractModelRouteFromEvents,
+  accumulateProjectionStats,
+  summarizeModelStats,
+  estimateBaseModeSeconds,
+  estimateLiteModeSeconds,
+  splitHistoryRounds,
+  parseRelevance,
+  parseIntent,
+  parseDocsAnalysis,
+  parseSearchPlan,
+  BUDGET_OPTIONS,
+  MODE_BUDGET_OPTIONS,
+  MODE_BUDGET_DEFAULT,
+  MODE_PARAMS_DEFAULT,
+  BUDGET_WORKSPACE_TABLE,
+  MODE_TABLE,
+  MODE_KEYS,
+  DEFAULT_MODE,
+  DEFAULT_BUDGET,
+  DEFAULT_MEMORY,
+  FIXED_SCAN_LIMIT,
+  V2_PROGRESS_TIMEOUT_MS,
+  V2_PROGRESS_MAX_TOKENS,
+  V2_PROGRESS_OUTPUT_LIMIT,
+  V2_HISTORY_MAX_CHARS,
+  V2_HISTORY_LIMIT,
+  V2_MSG_SEQ_SCAN,
+  V2_ROUNDS_SCAN_MAX,
+  WATCHDOG_TTFT_MAX_MEASURED_MS,
+  WATCHDOG_MARGIN,
+  WATCHDOG_TIMEOUT_MS,
+  PROBE_TIMEOUT_MS,
+  PROBE_CACHE_TTL_MS,
+  V2_MSG_TEXT_MAX,
+  V2_WORKSPACE_TIMEOUT_MS,
+  SCAN_FILE_LIST_MAX,
+  CONTENT_FALLBACK_SCAN,
+  WEB_SEARCH_TIMEOUT_MS,
+  WEB_SEARCH_MAX_RESULTS,
+  WEB_REF_MAX,
+  WEB_PLAN_TIMEOUT_MS,
+  WEB_PLAN_MAX_TOKENS,
+  WEB_PLAN_OUTPUT_LIMIT,
+  WEB_MEMO_MAX,
+  WEB_MEMO_TOPICS_MAX,
+  V2_SEARCH_EVENTS_TIMEOUT_MS,
+  KEYWORD_LIMIT,
+  SNIPPET_BUDGET,
+  CONTEXT_PROGRESS_MAX,
+  CONTEXT_EVENT_DIVISOR,
+  CONTEXT_FILE_COUNT,
+  MEMORY_ROUNDS_MAX,
+  MEMORY_CHAIN_BUDGET_MAX,
+  MEMORY_DELTA_MAX,
+  MEMORY_DELTA_LINES_MAX,
+  MEMORY_CHAIN_HEADER,
+  MEMORY_ROUND_TEMPLATE,
+  STAGE_PREPARE,
+  STAGE_HISTORY,
+  STAGE_ANALYZE,
+  STAGE_FILES,
+  STAGE_EVENTS,
+  STAGE_CONTEXT,
+  STAGE_LLM,
+  STAGE_DONE,
+  STAGE_SEQUENCE,
+  STAGE_LABELS,
+  BUDGET_RETRIEVE_TABLE,
+  TEMPLATE_CUSTOM_MAX,
+  TEMPLATE_TEXT_MAX,
+  TEMPLATE_NAME_MAX,
+  SCENARIO_WORDS,
+  BASE_EST_CHARS_PER_TOKEN,
+  BASE_EST_MIN_OUTPUT_TOKENS,
+  RETRIEVE_TABLE,
+  RELEVANCE_TIMEOUT_MS,
+  RELEVANCE_MAX_TOKENS,
+  RELEVANCE_OUTPUT_LIMIT,
+};

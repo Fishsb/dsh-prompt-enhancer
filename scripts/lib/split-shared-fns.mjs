@@ -176,6 +176,11 @@ function skipRegex(s, i) {
  */
 export function extractShared(raw, label) {
   const src = decodeChunkText(raw, label);
+  return extractSharedSource(src, label);
+}
+
+/** 从**已解出的源码**里抽取共享函数（chunk 与普通模块共用同一判据）。 */
+export function extractSharedSource(src, label) {
   const functions = {};
   const missing = [];
   for (const name of SHARED_FUNCTIONS) {
@@ -245,13 +250,19 @@ export function compareCopies(copies) {
 export function splitSharedSources(root) {
   const base = root || REPO_ROOT;
   const out = [];
-  const rel = 'src/host/pure.js';
-  if (fs.existsSync(path.join(base, rel))) out.push(rel);
+  // 目标模式：PURE 区段可由两种载体提供——
+  //   ① 旧 chunk `src/host/pure.js`（字符串包裹，拆包前历史形态）
+  //   ② 普通模块 `src/host/pure-module.cjs`（目标形态，源码直接可读）
+  // 二者不得并存（R4 等值集），本函数按实际存在的那个纳入。
+  const rels = ['src/host/pure.js', 'src/host/pure-module.cjs'];
+  for (const rel of rels) if (fs.existsSync(path.join(base, rel))) out.push(rel);
   const pkgDir = path.join(base, 'packages');
   if (fs.existsSync(pkgDir)) {
     for (const pkg of fs.readdirSync(pkgDir).sort()) {
-      const candidate = path.join('packages', pkg, rel);
-      if (fs.existsSync(path.join(base, candidate))) out.push(candidate.split(path.sep).join('/'));
+      for (const rel of rels) {
+        const candidate = path.join('packages', pkg, rel);
+        if (fs.existsSync(path.join(base, candidate))) out.push(candidate.split(path.sep).join('/'));
+      }
     }
   }
   return out;
@@ -261,8 +272,10 @@ export function splitSharedSources(root) {
 export function loadCopy(root, rel) {
   const abs = path.resolve(root || REPO_ROOT, rel);
   const raw = fs.readFileSync(abs, 'utf8');
-  if (chunkWrapperLiteral(raw) === null) throw new Error('chunk wrapper mismatch: ' + rel);
+  // 普通模块（目标形态）没有 chunk 包裹，直接以源码作为抽取面。
+  if (chunkWrapperLiteral(raw) === null && !rel.endsWith('.cjs')) throw new Error('chunk wrapper mismatch: ' + rel);
+  if (rel.endsWith('.cjs')) return extractSharedSource(raw, rel);
   return extractShared(raw, rel);
 }
 
-export default { SHARED_FUNCTIONS, extractFunction, extractShared, compareCopies, splitSharedSources, loadCopy, REPO_ROOT };
+export default { SHARED_FUNCTIONS, extractFunction, extractShared, extractSharedSource, compareCopies, splitSharedSources, loadCopy, REPO_ROOT };

@@ -203,7 +203,7 @@ test('SPLIT-FN-5 提取粒度：7 个函数都取到，且不是"吞整份文件
 
 test('SPLIT-FN-6 正向：真实仓 —— 判定绿、条目 7、发现面非空', () => {
   const sources = shared.splitSharedSources(ROOT);
-  assert.ok(sources.length >= 1, '发现面不得为空（拆包前应命中 src/host/pure.js）');
+  assert.ok(sources.length >= 1, '发现面不得为空（应命中纯函数载体：pure.js 或 pure-module.cjs）');
   const copies = sources.map((s) => shared.loadCopy(ROOT, s));
   const r = shared.compareCopies(copies);
   assert.equal(r.ok, true, r.reason);

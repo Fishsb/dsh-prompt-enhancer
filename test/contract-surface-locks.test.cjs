@@ -90,7 +90,8 @@ test('CS-02 host 门变异自证：任一 host chunk 改回裸 JS ⇒ **必红**
     assert.equal(r.code, 1, 'host chunk 契约违反必须 exit 1（若为 0 则该门是恒真判据 = 假绿）');
     // 点名 marker（本例 = models 的注入标记）与**实得类型**
     assert.match(r.out, /@dsh-models-inject/, '门必须点名违规 chunk 的 marker');
-    assert.match(r.out, /src\/host\/models\.js/, '门必须点名违规 chunk 的文件');
+    // Windows 下 path.relative 产出反斜杠；点名判据须兼容两种分隔符。
+    assert.match(r.out, /src[\\/]host[\\/]models\.js/, '门必须点名违规 chunk 的文件');
     assert.match(r.out, /实得 object/, '门必须给出实得类型（不是只说"违反了"）');
   });
 });
@@ -120,7 +121,7 @@ test('CS-05 两门对拍：同一变异形态下，client 门与 host 门**都�
     assert.match(r.out, /chunk 契约违反/, 'client 门仍须给出契约裁决');
   });
   // host 侧（本批补的门）：同一形态 ⇒ 同样判红
-  withFixture((dir) => unwrapToBareJs(dir, path.join('src', 'host', 'pure.js')), (dir) => {
+  withFixture((dir) => unwrapToBareJs(dir, path.join('src', 'host', 'diagnostics.js')), (dir) => {
     const r = runScript(dir, path.join('scripts', 'build-host.mjs'), ['--check']);
     assert.equal(r.code, 1, 'host 门必须与 client 门同形判红');
     assert.match(r.out, /chunk 契约违反/, 'host 门须给出与 client 同形的契约裁决');
@@ -186,7 +187,12 @@ test('CS-08 判别力**只升不降**：旧 `client-enhance-flow` 正则的覆�
 
 test('CS-09 取值等价：共享解码器与旧实现口径在**全部** chunk 上逐字同值', () => {
   const chunks = [...listChunks(ROOT, path.join('src', 'client')), ...listChunks(ROOT, path.join('src', 'host'))];
-  assert.ok(chunks.length >= 29, '扫描面应含 client+host 全部 chunk（实测 29 件），实得 ' + chunks.length);
+  // 分母按当前真实文件集派生（目标模式下 host 纯函数已迁为 .cjs，不再计入 chunk）。
+  const clientChunks = listChunks(ROOT, path.join('src', 'client'));
+  const hostChunks = listChunks(ROOT, path.join('src', 'host'));
+  assert.equal(chunks.length, clientChunks.length + hostChunks.length,
+    '扫描面必须等于 client+host 的实际 chunk 文件集（不得写死件数）');
+  assert.ok(chunks.length > 0, '扫描面不得为空');
   const OLD_LOOSE = /module\.exports\s*=\s*"([\s\S]*)";?\s*$/;
   for (const rel of chunks) {
     const raw = fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -212,7 +218,7 @@ test('CS-11 负控：真实工作区不动 ⇒ 两个构建门与全部受影响
     assert.equal(r.code, 0, s + ' --check 在未改动的真实工作区必须绿：' + r.out);
   }
   // 共享解码器在真实仓上可用（真值非空）
-  const real = decodeChunkText(fs.readFileSync(path.join(ROOT, 'src', 'host', 'pure.js'), 'utf8'), 'src/host/pure.js');
+  const real = decodeChunkText(fs.readFileSync(path.join(ROOT, 'src', 'host', 'diagnostics.js'), 'utf8'), 'src/host/diagnostics.js');
   assert.ok(real.length > 0, '真实仓的 host chunk 必须可解出');
 });
 

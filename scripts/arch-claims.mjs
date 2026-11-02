@@ -426,13 +426,14 @@ const CLAIMS = [
     adr: 'ADR-194', anchor: 'module:prompt-enhancer', at: '2026-09-12', level: '部分兑现',
     promise: '判定「需要架构重构，分期执行、不推倒重写」：①P0 死层退役 + 协议事实源由注册面派生；②P1 host 半部改原生模块；③P2 规范收敛；④P3 待验证',
     assertions: [
-      // P1-c（2026-10-13）：src/host 再收缩 7 件/33 行 → **5 件/18 行**（`plugins.js` 与 `update.js`
-      //   随「设置第三 tab 退役 + 更新执行器退役」一并删除）⇒ 事实同步。
-      //   P1 余账批再 +1 行（pure.js 的退役说明注释）⇒ 实测 5 件 / **24 物理行**；判据强度不变（仍为严格等号）。
-      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '5 件 / 24 物理行', () => {
+      // 目标模式（CHG-312）：PURE 区段由 chunk 迁为普通模块 `pure-module.cjs`，旧 `pure.js` 退役；
+      // 新增 `models-constants.cjs`。`src/host` 现为 **6 件**；件数闸由 R4 等值集承担，
+      // 本条保留「旧 pure.js 不得复活」的反向守卫。
+      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '6 件（含纯函数普通模块；旧 pure.js 不得复活）', () => {
         const files = list('src/host');
         const n = files.reduce((a, f) => a + lines(`src/host/${f}`), 0);
-        return assert(files.length === 5 && n === 24, `${files.length} 件 / ${n} 行`);
+        const legacyGone = !files.includes('pure.js');
+        return assert(files.length === 6 && legacyGone, `${files.length} 件 / ${n} 行｜旧 pure.js ${legacyGone ? '已退役' : '仍存在'}`);
       }),
       A('A194-2', '结构', '①协议事实源改由注册面派生（废除 protocol.js）', 'src/protocol.js 不存在且 scripts/rpc-manifest.mjs 存在', () => {
         const gone = !exists('src/protocol.js');

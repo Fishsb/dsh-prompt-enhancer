@@ -1,41 +1,15 @@
 // host 纯函数单测（node:test，零依赖）
-// 从 plugin-host.js 的 ==PURE-BEGIN== .. ==PURE-END== 区段切片并求值，
-// 保证测试的即是被发布代码的同一份实现（单一事实源，不复制）。
+// 目标模式：PURE 区段已是普通 CommonJS 模块（src/host/pure-module.cjs），
+// 直接求值该模块；与冻结基线逐字等价的锁在 test/host-pure-module.test.cjs。
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { loadPureModule } = require('./helpers/host-pure-module.cjs');
 
 const src = readFileSync(join(__dirname, '..', 'plugin-host.js'), 'utf8');
-const begin = src.indexOf('// ==PURE-BEGIN==');
-const end = src.indexOf('// ==PURE-END==');
-assert.ok(begin !== -1 && end > begin, 'PURE markers not found in plugin-host.js');
-
-const pureText = src.slice(begin, end);
-// validateConfig 引用了三个默认常量（定义在 PURE 区段之前）；从源码实际取值注入，
-// 保持单一事实源（不硬编码，常量变更无需改测试）。
-const grabConst = (name) => {
-  const re = new RegExp('const\\s+' + name + '\\s*=\\s*([^;]+);');
-  const m = src.match(re);
-  if (!m) throw new Error('const ' + name + ' not found in plugin-host.js');
-  return name + ' = ' + m[1] + ';';
-};
-const defaultsBlock = [grabConst('DEFAULT_TIMEOUT_MS'), grabConst('DEFAULT_MAX_TOKENS'), grabConst('DEFAULT_OUTPUT_LIMIT')].join('\n');
-const pureFn = new Function(defaultsBlock + '\n' + pureText + `
-  ;return { wrapUserText, wrapPublishText, stripScenarioEcho, cleanOutput, friendlyMessage, validateConfig, resolveTemplateSystem, collectStream, buildTryChain,
-    extractHistory, extractHistoryConclusions, inferFocusRules, extractKeywords, splitCnSegments, shouldIgnoreFile,
-    pickReachableIndex, probeCacheGet, probeCacheSet, WATCHDOG_TIMEOUT_MS, PROBE_TIMEOUT_MS, PROBE_CACHE_TTL_MS,
-    extractModelRouteFromEvents, accumulateProjectionStats, summarizeModelStats, estimateBaseModeSeconds, estimateLiteModeSeconds,
-    rankFiles, snippetFromLines, buildContextBlock, parseTaskProgress, buildWebQuery, detectScenario,
-    splitHistoryRounds, parseRelevance, parseIntent, parseDocsAnalysis, parseSearchPlan,
-    parseMode, parseMemory, shouldInjectMemory, parseBudgetChars, resolveScanLimit,
-    buildMemoryChainBlock, computeEditDelta, buildMemoryDeltaHint, buildChatMessages, filterDeltaForPublish,
-    MEMORY_ROUNDS_MAX, MEMORY_CHAIN_BUDGET_MAX, MEMORY_DELTA_MAX,
-    TEMPLATE_CUSTOM_MAX, TEMPLATE_TEXT_MAX, TEMPLATE_NAME_MAX,
-    MODE_TABLE, BUDGET_OPTIONS, BUDGET_WORKSPACE_TABLE, RETRIEVE_TABLE,
-    MODE_BUDGET_OPTIONS, MODE_BUDGET_DEFAULT, BUDGET_RETRIEVE_TABLE, resolveRetrieveBudget,
-    STAGE_SEQUENCE, STAGE_LABELS };
-`);
+assert.ok(src.includes('// ==PURE-BEGIN==') && src.includes('// ==PURE-END=='), 'PURE markers not found in plugin-host.js');
+const pureFn = () => loadPureModule();
 const {
   wrapUserText,
   cleanOutput,
@@ -235,9 +209,10 @@ test('collectStream 无 finish → cancelled', async () => {
 });
 
 // ---- v21（P1-4）模型能力解析缓存单测 ----
-// resolveModelInfoCached 在 PURE 区段之前（模块级），独立提取求值。
+// resolveModelInfoCached 位于 host 模块级区段（PURE 之前）；目标模式后由普通模块求值。
+// 从产物文本切取该模块级区段（仅此一处，不涉及 PURE）。
 const cacheStart = src.indexOf('const modelInfoCache = new Map();');
-const cacheEnd = src.indexOf('function wrapUserText');
+const cacheEnd = src.indexOf('async function resolveAdaptiveChain', cacheStart);
 assert.ok(cacheStart !== -1 && cacheEnd > cacheStart, 'cache region not found in plugin-host.js');
 const cacheText = src.slice(cacheStart, cacheEnd);
 const cacheFn = new Function(cacheText + `
@@ -815,9 +790,10 @@ test('U13 既有用例回归计数', () => {
 
 test('U39 SYSTEM_PROMPT 语义保真契约（v2.4.5）', () => {
   // —— 从源码提取 SYSTEM_PROMPT 数组并求值 ——
-  const m = src.match(/const SYSTEM_PROMPT = \[([\s\S]*?)\n\];/);
-  assert.ok(m, 'SYSTEM_PROMPT array not found');
-  const systemText = new Function('return [' + m[1] + '].join(\'\\n\');')();
+  // 生成区位于 plugin-host.js（产物已是真实换行；旧 JSON 转义形态不再假设）。
+  const raw = src.match(/const SYSTEM_PROMPT = \[([\s\S]*?)\n\]\.join\('\\n'\);/);
+  assert.ok(raw, 'SYSTEM_PROMPT array not found');
+  const systemText = new Function('return [' + raw[1].replace(/,\s*$/, '') + '].join(\'\\n\');')();
   // 语义保真核心契约
   assert.ok(systemText.includes('理解原文（第一优先'), '应含「理解原文（第一优先）」阶段');
   assert.ok(systemText.includes('语义等价是底线'), '应含「语义等价是底线」');
@@ -831,9 +807,9 @@ test('U39 SYSTEM_PROMPT 语义保真契约（v2.4.5）', () => {
   // 长度新表述与主体语言规则
   assert.ok(systemText.includes('长度服从语义保真'), '应含「长度服从语义保真」');
   // v3.2.24（规则落点 L0）：语言规则已从模板去重归入纪律层——改查 DISCIPLINE_PROMPT
-  const dm = src.match(/const DISCIPLINE_PROMPT = \[([\s\S]*?)\n\];/);
+  const dm = src.match(/const DISCIPLINE_PROMPT = \[([\s\S]*?)\n\]\.join\('\\n'\);/);
   assert.ok(dm, 'DISCIPLINE_PROMPT array not found');
-  const discText = new Function('return [' + dm[1] + '].join(String.fromCharCode(10));')();
+  const discText = new Function('return [' + dm[1].replace(/,\s*$/, '') + '].join(String.fromCharCode(10));')();
   assert.ok(discText.includes('主体语言跟随输入'), 'L0 纪律应含「主体语言」语言规则（v3.2.24 落点优化）');
 });
 
@@ -843,11 +819,13 @@ test('U39 SYSTEM_PROMPT 语义保真契约（v2.4.5）', () => {
 test('U40 prompts 外置一致性（v2.4.6）：生成区 = prompts/*.md 逐行求值', () => {
   const { readFileSync } = require('node:fs');
   const { join } = require('node:path');
+  // 生成区在产物内：与 U39 同一取法。
   // 生成区三常量的提取（与脚本 SOURCES 顺序一致）
   const extractConst = (name) => {
-    const m = src.match(new RegExp('const\\s+' + name + '\\s*=\\s*\\[([\\s\\S]*?)\\n\\];'));
+    const raw = src.match(new RegExp('const\\s+' + name + '\\s*=\\s*\\[([\\s\\S]*?)\\n\\]\\.join\\(\'\\\\n\'\\);'));
+    const m = raw ? [null, raw[1]] : null;
     assert.ok(m, name + ' array not found in generated block');
-    return new Function('return [' + m[1] + '].join(\'\\n\');')();
+    return new Function('return [' + m[1].replace(/,\s*$/, '') + '].join(\'\\n\');')();
   };
   const mdOf = (file) => {
     // v3.2.23（提示词集合化）：事实源迁移到 prompts/enhance/（按相对路径）
@@ -926,9 +904,9 @@ test('U39b 模式专属默认模板契约（v3.1.8）', () => {
   const { join } = require('node:path');
   const readPrompt = (file) => readFileSync(join(__dirname, '..', 'prompts', file), 'utf8');
   const extractConst = (name) => {
-    const m = src.match(new RegExp('const\\s+' + name + '\\s*=\\s*\\[([\\s\\S]*?)\\n\\];'));
+    const m = src.match(new RegExp('const\\s+' + name + '\\s*=\\s*\\[([\\s\\S]*?)\\n\\]\\.join\\(\'\\\\n\'\\);'));
     assert.ok(m, name + ' array not found in generated block');
-    return new Function('return [' + m[1] + '].join(\'\\n\');')();
+    return new Function('return [' + m[1].replace(/,\s*$/, '') + '].join(\'\\n\');')();
   };
   const lite = extractConst('SYSTEM_LITE_PROMPT');
   const standard = extractConst('SYSTEM_STANDARD_PROMPT');
@@ -1162,7 +1140,7 @@ test('U44 mergeEnvPath 已随 probeEnv 链退役（P3-2c · 判据对象整体�
   assert.equal(sys.mergeEnvPath, undefined, 'mergeEnvPath 必须已从 lib/sys.cjs 导出面退役');
   assert.equal(sys.mergedEnv, undefined, 'mergedEnv 必须已退役（它是 mergeEnvPath 的唯一消费者）');
   // 单一事实源：PURE 区不得再持有同名副本（双实现漂移即红）
-  const pureSrc = readFileSync(join(__dirname, '..', 'src', 'host', 'pure.js'), 'utf8');
+  const pureSrc = readFileSync(join(__dirname, '..', 'src', 'host', 'pure-module.cjs'), 'utf8');
   assert.ok(!pureSrc.includes('function mergeEnvPath'), 'PURE 区不得重建 mergeEnvPath 副本');
 });
 

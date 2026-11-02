@@ -27,21 +27,10 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const HOST = fs.readFileSync(path.join(ROOT, 'plugin-host.js'), 'utf8');
 
-/** 真求值 PURE 区段（与 test/lib.test.cjs 同一机制；不复制实现）。 */
+/** 真求值 PURE 模块（与 test/lib.test.cjs 同一入口；不复制实现）。 */
 function loadPure() {
-  const begin = HOST.indexOf('// ==PURE-BEGIN==');
-  const end = HOST.indexOf('// ==PURE-END==');
-  assert.ok(begin !== -1 && end > begin, 'PURE 标记必须存在');
-  const pureText = HOST.slice(begin, end);
-  const grab = (name) => {
-    const m = HOST.match(new RegExp('const\\s+' + name + '\\s*=\\s*([^;]+);'));
-    assert.ok(m, 'const ' + name + ' 必须存在');
-    return name + ' = ' + m[1] + ';';
-  };
-  const defs = ['DEFAULT_TIMEOUT_MS', 'DEFAULT_MAX_TOKENS', 'DEFAULT_OUTPUT_LIMIT'].map(grab).join('\n');
-  return new Function(defs + '\n' + pureText + `
-    ;return { cleanOutput, cleanCorrectionOutput, correctionStripAllowed, correctionStripFragments };
-  `)();
+  const { loadPureModule } = require('./helpers/host-pure-module.cjs');
+  return loadPureModule();
 }
 
 const P = loadPure();

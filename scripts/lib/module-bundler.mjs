@@ -108,13 +108,13 @@ function transformModule(parsed, id, resolvedDeps) {
   };
   for (const binding of parsed.importBindings) {
     const target = depId(binding.spec);
-    if (binding.kind === 'side') header.push('__require(' + JSON.stringify(target) + ');');
-    else if (binding.kind === 'namespace') header.push('const ' + binding.local + ' = __require(' + JSON.stringify(target) + ');');
-    else if (binding.kind === 'default') header.push('const ' + binding.local + ' = __require(' + JSON.stringify(target) + ').default;');
+    if (binding.kind === 'side') header.push('__load(' + JSON.stringify(target) + ');');
+    else if (binding.kind === 'namespace') header.push('const ' + binding.local + ' = __load(' + JSON.stringify(target) + ');');
+    else if (binding.kind === 'default') header.push('const ' + binding.local + ' = __load(' + JSON.stringify(target) + ').default;');
     else if (binding.kind === 'named') {
       for (const name of binding.names) {
         const [orig, alias] = name.split(/\s+as\s+/).map((x) => x.trim());
-        header.push('const ' + (alias || orig) + ' = __require(' + JSON.stringify(target) + ').' + (orig || alias) + ';');
+        header.push('const ' + (alias || orig) + ' = __load(' + JSON.stringify(target) + ').' + (orig || alias) + ';');
       }
     }
   }
@@ -126,16 +126,16 @@ function transformModule(parsed, id, resolvedDeps) {
     .replace(EXPORT_STAR_RE, '')
     .replace(EXPORT_DECL_RE, (all) => all.replace(/^\s*export\s+/, ''))
     .replace(EXPORT_LIST_RE, '')
-    .replace(REQUIRE_RE, (all, spec) => '__require(' + JSON.stringify(depId(spec)) + ')');
+    .replace(REQUIRE_RE, (all, spec) => '__load(' + JSON.stringify(depId(spec)) + ')');
   if (parsed.hasDefault) {
     code = code.replace(/^\s*export\s+default\s+/m, 'const __default__ = ');
     exportsFooter.push('exports.default = __default__;');
   }
   for (const name of parsed.namedExports) exportsFooter.push('exports.' + name + ' = ' + name + ';');
   if (parsed.isCjs) {
-    return 'function (exports, module, __require) {\n' + header.join('\n') + '\n' + code + '\nreturn module.exports;\n}';
+    return 'function (exports, module, __load) {\n' + header.join('\n') + '\n' + code + '\nreturn module.exports;\n}';
   }
-  return 'function (exports, module, __require) {\n' + header.join('\n') + '\n' + code + '\n' + exportsFooter.join('\n') + '\nreturn exports;\n}';
+  return 'function (exports, module, __load) {\n' + header.join('\n') + '\n' + code + '\n' + exportsFooter.join('\n') + '\nreturn exports;\n}';
 }
 
 function collectGraph(root, entries) {
@@ -181,7 +181,9 @@ export function bundleModules({ root, entry, externals = [] }) {
     '  const __modules = {',
     factories.join(',\n'),
     '  };',
-    '  function __require(id) {',
+    // ⚠ 内部装配函数名刻意避开宿主载体约束里的 `require(` 形态：产物必须能被
+    // ADR-230 的「plugin-host.js 内无模块系统」判据机械识别为无外部 require。
+    '  function __load(id) {',
     '    if (__cache[id]) return __cache[id];',
     '    const factory = __modules[id];',
     '    if (!factory) {',
@@ -191,11 +193,11 @@ export function bundleModules({ root, entry, externals = [] }) {
     '    const exports = {};',
     '    const module = { exports };',
     '    __cache[id] = exports;',
-    '    const out = factory(exports, module, __require);',
+    '    const out = factory(exports, module, __load);',
     '    __cache[id] = out || module.exports || exports;',
     '    return __cache[id];',
     '  }',
-    '  return __require(' + JSON.stringify(moduleId(root, absEntry)) + ');',
+    '  return __load(' + JSON.stringify(moduleId(root, absEntry)) + ');',
     '})()',
     '',
   ].join('\n');
