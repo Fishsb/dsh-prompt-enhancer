@@ -72,12 +72,24 @@ function buildClient() {
   if (!clientSharedRuntime.modules.includes('src/client/voice/filler-module.cjs')) {
     throw new Error('[build-client] 客户端共享运行时打包不完整：缺少清口水词模块');
   }
+  if (!clientSharedRuntime.modules.includes('src/client/voice/correction-state-module.cjs')) {
+    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少纠错状态模块');
+  }
   const sharedRuntimeChunk = 'const __DSH_SHARED__ = ' + sharedContractsRuntime.code
     + ';\nconst __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'
     + '\nconst planVoicePostprocess = __DSH_SHARED__.planVoicePostprocess;'
     + '\nconst voicePostprocessHas = __DSH_SHARED__.voicePostprocessHas;\n'
     + '\nconst __DSH_CLIENT_SHARED__ = ' + clientSharedRuntime.code
-    + ';\nconst {\n' + Object.keys(require('../src/client/shared-runtime.cjs')).map((k) => '  ' + k + ',').join('\n')
+    + ';\nconst __DSH_CORRECTION_STATE__ = { CORRECTION_PHASES: __DSH_CLIENT_SHARED__.CORRECTION_PHASES,'
+    + ' correctionPhaseKnown: __DSH_CLIENT_SHARED__.correctionPhaseKnown,'
+    + ' correctionPhaseOf: __DSH_CLIENT_SHARED__.correctionPhaseOf,'
+    + ' correctionFailureTicket: __DSH_CLIENT_SHARED__.correctionFailureTicket,'
+    + ' correctionFailureConsume: __DSH_CLIENT_SHARED__.correctionFailureConsume }'
+    // ⚠ 纠错状态符号只经 __DSH_CORRECTION_STATE__ 访问；若在此处再解构同名符号，
+    //   会与 correction.js 内的函数/常量声明在同一作用域重复声明（R7 实测）。
+    + ';\nconst {\n' + Object.keys(require('../src/client/shared-runtime.cjs'))
+      .filter((k) => !['CORRECTION_PHASES', 'correctionPhaseKnown', 'correctionPhaseOf', 'correctionFailureTicket', 'correctionFailureConsume'].includes(k))
+      .map((k) => '  ' + k + ',').join('\n')
     + '\n} = __DSH_CLIENT_SHARED__;\n';
   // Inject all chunks, looping until no marker remains: component chunks may
   // themselves contain other injection markers (e.g. the updater constants

@@ -22,6 +22,8 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+// 目标模式：correction.js 消费构建期注入的纠错状态模块；测试沙箱必须提供同一符号。
+const CORRECTION_STATE = require('../src/client/voice/correction-state-module.cjs');
 
 /** 求值 correction.js chunk，注入一个可控的 voiceCfgState（开关真值）。 */
 function loadCorrection(opts) {
@@ -29,13 +31,13 @@ function loadCorrection(opts) {
   const src = decodeChunk('src/client/voice/correction.js');
   const voiceCfgState = { value: { correction: { enabled: o.enabled === true } } };
   const factory = new Function(
-    'voiceCfgState',
+    'voiceCfgState', '__DSH_CORRECTION_STATE__',
     src + '\n;return { correctionState, correctionSnapshot, subscribeCorrection, notifyCorrection,'
     + ' markCorrectionSkipped, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed,'
     + ' correctionPhaseOf, correctionPhaseView, correctionPhaseKnown, CORRECTION_PHASES,'
     + ' correctionFailureTicket, consumeCorrectionFailure };'
   );
-  return factory(voiceCfgState);
+  return factory(voiceCfgState, CORRECTION_STATE);
 }
 
 // ───────────────────────── ① 未执行（idle） ─────────────────────────
@@ -288,8 +290,8 @@ test('CHG184-S17 变异自证：把 UNCHANGED 与 SKIPPED 合并成一个相位 
     "    if (changed) {\n      correctionState.changed += 1;\n      correctionState.phase = CORRECTION_PHASES.CHANGED;\n    } else {\n      correctionState.phase = CORRECTION_PHASES.SKIPPED;\n    }"
   );
   assert.notEqual(mutated, src, '变异必须真的改到了目标行（否则本用例空转）');
-  const factory = new Function('voiceCfgState', mutated + '\n;return { correctionSnapshot, markCorrectionSettled, markCorrectionStarted, correctionPhaseView, correctionPhaseOf };');
-  const c = factory({ value: { correction: { enabled: true } } });
+  const factory = new Function('voiceCfgState', '__DSH_CORRECTION_STATE__', mutated + '\n;return { correctionSnapshot, markCorrectionSettled, markCorrectionStarted, correctionPhaseView, correctionPhaseOf };');
+  const c = factory({ value: { correction: { enabled: true } } }, CORRECTION_STATE);
   c.markCorrectionStarted();
   c.markCorrectionSettled({ ok: true, text: '一样' }, '一样');
   assert.equal(c.correctionSnapshot().phase, 'skipped', '变异后相位变成 skipped（证明判据咬得住）');
@@ -411,7 +413,7 @@ function loadButton(opts) {
   const configState = { value: { memory: false, mode: 'standard', fallback: [] }, listeners: new Set() };
   const storeFor = () => ({ phase: o.enhancePhase || 'idle', seq: 0, optimized: false });
   const factory = new Function(
-    'React', 'makeT', 'voiceCfgState', 'configState', 'subscribeCorrection', 'subscribeVoiceConfig',
+    'React', 'makeT', 'voiceCfgState', 'configState', 'subscribeCorrection', 'subscribeVoiceConfig', '__DSH_CORRECTION_STATE__',
     'subscribe', 'subscribeConfig', 'storeFor', 'timerSvc', 'host', 'setLastDraft', 'setActiveSession',
     'getActiveSession', 'guardPasses', 'enhance', 'undo', 'modeShortLabel', 'prettifyModel', 'saveConfig',
     corr + '\n' + eb + '\n;return { EnhanceButton, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed,'
@@ -424,7 +426,7 @@ function loadButton(opts) {
   );
   const timers = makeFakeTimers();
   const api = factory(
-    mini.React, makeT, voiceCfgState, configState, () => () => {}, () => () => {},
+    mini.React, makeT, voiceCfgState, configState, () => () => {}, () => () => {}, CORRECTION_STATE,
     () => () => {}, () => () => {}, storeFor, timers.svc, { call: () => Promise.reject(new Error('只读')) },
     () => {}, () => {}, () => null, () => true, () => {}, () => {}, (t, m) => m, (m) => m, () => {}
   );
@@ -704,7 +706,7 @@ test('SCOPE-R3 ⭐ 变异自证：按钮不回传归属 ⇒ SCOPE-R1 的判据�
   assert.notEqual(mutant, eb, '前置：变异锚点须命中（否则本条恒绿、没有判别力）');
   // 变异后：B 观察者拿到的是**全局** phase（= failed）⇒ R1 的核心断言必然失败
   const corr = decodeChunk('src/client/voice/correction.js');
-  const c = new Function('voiceCfgState', corr + ';return { correctionSnapshot, correctionPhaseOf, markCorrectionStarted, markCorrectionSettled };')({ value: { correction: { enabled: true } } });
+  const c = new Function('voiceCfgState', '__DSH_CORRECTION_STATE__', corr + ';return { correctionSnapshot, correctionPhaseOf, markCorrectionStarted, markCorrectionSettled };')({ value: { correction: { enabled: true } } }, CORRECTION_STATE);
   c.markCorrectionStarted('sess-A');
   c.markCorrectionSettled({ ok: false, code: 'TIMEOUT' }, 'x', 'sess-A');
   const snap = c.correctionSnapshot();
@@ -784,7 +786,7 @@ function loadButtonFromSrc(eb, corr, opts) {
   const configState = { value: { memory: false, mode: 'standard', fallback: [] }, listeners: new Set() };
   const storeFor = () => ({ phase: o.enhancePhase || 'idle', seq: 0, optimized: false });
   const factory = new Function(
-    'React', 'makeT', 'voiceCfgState', 'configState', 'subscribeCorrection', 'subscribeVoiceConfig',
+    'React', 'makeT', 'voiceCfgState', 'configState', 'subscribeCorrection', 'subscribeVoiceConfig', '__DSH_CORRECTION_STATE__',
     'subscribe', 'subscribeConfig', 'storeFor', 'timerSvc', 'host', 'setLastDraft', 'setActiveSession',
     'getActiveSession', 'guardPasses', 'enhance', 'undo', 'modeShortLabel', 'prettifyModel', 'saveConfig',
     corr + '\n' + eb + '\n;return { EnhanceButton, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed,'
@@ -797,7 +799,7 @@ function loadButtonFromSrc(eb, corr, opts) {
   );
   const timers = makeFakeTimers();
   const api = factory(
-    mini.React, makeT, voiceCfgState, configState, () => () => {}, () => () => {},
+    mini.React, makeT, voiceCfgState, configState, () => () => {}, () => () => {}, CORRECTION_STATE,
     () => () => {}, () => () => {}, storeFor, timers.svc, { call: () => Promise.reject(new Error('只读')) },
     () => {}, () => {}, () => null, () => true, () => {}, () => {}, (t, m) => m, (m) => m, () => {}
   );
@@ -1208,7 +1210,10 @@ test('C-V2 ⭐ 真实文件级回退：用缺陷原形(enhance-button.js+correct
 
 test('C-V3 ⭐ 定点变异：把出票做成「消费过就永不再出票」（整页只闪一次）⇒ C3 必红', () => {
   const corr = CORR_SRC();
-  const mutant = corr.replace("if (seq <= used) return '';", "if (used > 0) return '';");
+  const mutant = corr.replace(
+    'return __DSH_CORRECTION_STATE__.correctionFailureTicket(snap, sessionId);',
+    "return (snap && snap.consumedSeq > 0) ? '' : __DSH_CORRECTION_STATE__.correctionFailureTicket(snap, sessionId);"
+  );
   assert.notEqual(mutant, corr, '前置：变异锚点须命中');
   const loadMut = () => loadButtonFromSrc(EB_SRC(), mutant, { enhancePhase: 'idle' });
   assert.equal(expectRed(() => checkC3(loadMut)), true,
@@ -1217,7 +1222,10 @@ test('C-V3 ⭐ 定点变异：把出票做成「消费过就永不再出票」�
 
 test('C-V4 ⭐ 定点变异：把出票条件做成恒不出票 ⇒ C2 必红（防「永不显示」）', () => {
   const corr = CORR_SRC();
-  const mutant = corr.replace('return String(seq);', "return '';");
+  const mutant = corr.replace(
+    'return __DSH_CORRECTION_STATE__.correctionFailureTicket(snap, sessionId);',
+    "return '';"
+  );
   assert.notEqual(mutant, corr, '前置：变异锚点须命中');
   const loadMut = () => loadButtonFromSrc(EB_SRC(), mutant, { enhancePhase: 'idle' });
   assert.equal(expectRed(() => checkC2(loadMut)), true, '⭐ 恒不出票 ⇒ C2 必红');
