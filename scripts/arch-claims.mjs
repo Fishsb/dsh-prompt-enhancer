@@ -429,12 +429,13 @@ const CLAIMS = [
       // 目标模式（CHG-312）：PURE 区段由 chunk 迁为普通模块 `pure-module.cjs`，旧 `pure.js` 退役；
       // 新增 `models-constants.cjs`。`src/host` 现为 **6 件**；件数闸由 R4 等值集承担，
       // 本条保留「旧 pure.js 不得复活」的反向守卫。
-      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '7 件（含纯函数与阶段执行器普通模块；旧 pure.js 不得复活）', () => {
+      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '8 件（含纯函数、阶段执行器与纠错开关普通模块；旧 pure.js 不得复活）', () => {
         const files = list('src/host');
         const n = files.reduce((a, f) => a + lines(`src/host/${f}`), 0);
         const legacyGone = !files.includes('pure.js');
         const pipelineBorn = files.includes('enhance-pipeline.cjs');
-        return assert(files.length === 7 && legacyGone && pipelineBorn, `${files.length} 件 / ${n} 行｜旧 pure.js ${legacyGone ? '已退役' : '仍存在'}｜阶段执行器 ${pipelineBorn ? '在位' : '缺失'}`);
+        const correctionBorn = files.includes('correction-switch.cjs');
+        return assert(files.length === 8 && legacyGone && pipelineBorn && correctionBorn, `${files.length} 件 / ${n} 行｜旧 pure.js ${legacyGone ? '已退役' : '仍存在'}｜阶段执行器 ${pipelineBorn ? '在位' : '缺失'}｜纠错开关 ${correctionBorn ? '在位' : '缺失'}`);
       }),
       A('A194-2', '结构', '①协议事实源改由注册面派生（废除 protocol.js）', 'src/protocol.js 不存在且 scripts/rpc-manifest.mjs 存在', () => {
         const gone = !exists('src/protocol.js');

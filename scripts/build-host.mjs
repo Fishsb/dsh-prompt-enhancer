@@ -61,6 +61,13 @@ function buildHost() {
   const pipelineChunk = 'const __DSH_ENHANCE_PIPELINE__ = ' + pipelineBundle.code
     + ';\nconst {\n' + Object.keys(require('../src/host/enhance-pipeline.cjs')).map((k) => '  ' + k + ',').join('\n')
     + '\n} = __DSH_ENHANCE_PIPELINE__;\n';
+  // 目标模式：纠错开关解析迁为普通模块；产物仍内联，RPC 契约不变。
+  const correctionSwitchBundle = bundleModules({ root, entry: 'src/host/correction-switch.cjs' });
+  if (!correctionSwitchBundle.modules.includes('src/host/correction-switch.cjs')) {
+    throw new Error('[build-host] 纠错开关模块未进入打包图');
+  }
+  const correctionSwitchChunk = 'const __DSH_CORRECTION_SWITCH__ = ' + correctionSwitchBundle.code
+    + ';\nconst CORRECTION_SWITCH = __DSH_CORRECTION_SWITCH__;\n';
   const enhanceChunk = require('../src/host/enhance-handlers.js');
 
   // Inject all chunks, looping until no marker remains (same policy as
@@ -71,6 +78,7 @@ function buildHost() {
     ['// @dsh-models-inject', modelsChunk],
     ['// @dsh-pure-inject', pureChunk],
     ['// @dsh-enhance-pipeline-inject', pipelineChunk],
+    ['// @dsh-correction-switch-inject', correctionSwitchChunk],
     ['// @dsh-enhance-inject', enhanceChunk],
   ];
 

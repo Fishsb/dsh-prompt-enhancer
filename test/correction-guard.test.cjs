@@ -315,16 +315,19 @@ test('GUARD-V1 ⭐ 变异自证①：去掉守卫（内存变异真实 bundle）
 //     这里按 `!== false` 的**完整语义**做变异 = 缺省/非法一律读成开（与真实误写同形）。
 test('GUARD-V2 ⭐ 变异自证②：取形改 `!== false` ⇒ 缺省态**必调模型**（判据必红）', async () => {
   const ORIG = BODY;
-  const FROM = `      const top = c.correction;
-      if (top && typeof top === 'object') return top.enabled === true;
-      const v = c.voice;
-      if (v && typeof v === 'object' && v.correction && typeof v.correction === 'object') return v.correction.enabled === true;
-      return false;                               // 缺省 = 关（与两侧白名单同口径）`;
-  const TO = `      const top = c.correction;
-      if (top && typeof top === 'object') return top.enabled !== false;   // [MUTANT-V2] !== false
-      const v = c.voice;
-      if (v && typeof v === 'object' && v.correction && typeof v.correction === 'object') return v.correction.enabled !== false;   // [MUTANT-V2]
-      return true;                                // [MUTANT-V2] 缺省被读成开`;
+  // 目标模式：取形已迁入普通模块（打包器内联），变异锚点随之迁移到模块正文。
+  const FROM = `  if (!c) return false;
+  const top = c.correction;
+  if (top && typeof top === 'object') return top.enabled === true;
+  const v = c.voice;
+  if (v && typeof v === 'object' && v.correction && typeof v.correction === 'object') return v.correction.enabled === true;
+  return false;`;
+  const TO = `  if (!c) return true;                          // [MUTANT-V2] 缺省被读成开
+  const top = c.correction;
+  if (top && typeof top === 'object') return top.enabled !== false;   // [MUTANT-V2] !== false
+  const v = c.voice;
+  if (v && typeof v === 'object' && v.correction && typeof v.correction === 'object') return v.correction.enabled !== false;   // [MUTANT-V2]
+  return true;                                  // [MUTANT-V2] 缺省被读成开`;
   assert.ok(ORIG.indexOf(FROM) > 0, '变异锚点必须在 bundle 内（否则变异无效 ⇒ 本自证无判别力）');
   const mutated = ORIG.replace(FROM, TO);
   assert.notEqual(mutated, ORIG, '变异必须生效');
