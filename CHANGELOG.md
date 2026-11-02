@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+- **目标模式状态层：统一结果状态纯函数（架构/测试 · 2026-11-02 · [PE-F02]）**：新增 `src/shared/contracts/result.cjs`（changed / unchanged / skipped / failed 的统一映射，无证据时保守判 unchanged）与 `test/result-status.test.cjs`（7 条）。本批只建立共享语义，**不先改线上返回结构**；后续再由增强、纠错与诊断分别消费。用户可见文案、RPC、配置键未改。
+
 - **目标模式第 1 批骨架：源码模块化打包器（架构/构建 · 2026-11-02 · [PE-F01]）**：新增 `scripts/lib/module-bundler.mjs`（确定性、无第三方依赖；支持 ESM/CommonJS 相对依赖、循环依赖、失败点名）与 `test/module-bundler.test.cjs`（6 条，含现有共享模块集成）。**尚未切换正式构建入口**：当前 `build-host.mjs` / `build-client.mjs` 仍产出既有自包含产物，新打包器只进入验证面，下一步再做逐字等价与切换。用户可见文案、RPC、配置键与安装形态未改。
 
 - **目标模式第二批：语音后处理计划抽成共享领域模块（架构/测试 · 2026-11-02 · [PE-F02]）**：新增 `src/shared/voice/postprocess-plan.cjs`，把「清口水词 → 识别纠错 → 自动整理」的开关矩阵与顺序收敛为纯函数；`src/client/voice/hotkey.js` 的识别完成调度口改读同一计划，清口水词与纠错/增强不再各写一份组合分支。构建器把共享源码作为字符串注入 client 产物，仍自包含、无 `require`。用户可见名称、RPC 名、配置键与默认值未改。**已实测**：`test/voice-postprocess-plan.test.cjs` 7/7；`test/correction-step.test.cjs` 17/17；`test/filler.test.cjs` 20/20；入口/bundle/chunk 契约/计划合计 58/58；`build-client --check` 与 `build-host --check` 一致；`rpc-manifest --check` 15/15。
