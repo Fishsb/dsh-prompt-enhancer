@@ -367,7 +367,7 @@ test('S-9 负控：不动任何东西 ⇒ S-9 PASS 且 R5/R6 覆盖面为基线�
 // ══════════════════════════════════════════════════════════════════════════════
 
 test('D-10(a)：行注释里的块注释起点符号不得吞掉其后真实代码（三处消费者同源）', async () => {
-  const { codeOnly } = await import(path.join(ROOT, 'scripts', 'lib', 'code-only.mjs'));
+  const { codeOnly } = await import(require('node:url').pathToFileURL(path.join(ROOT, 'scripts', 'lib', 'code-only.mjs')).href);
   // ⚠ 夹具的**判别力**来自「其后存在一个真的块注释结束符」——
   //   旧实现会把「行注释里的起点符号」当作块注释开头，一路吞到那个结束符（含中间真实代码）；
   //   若夹具里没有结束符，旧实现同样不吞 ⇒ 用例无牙（本批首版即此坑，见报告 §④）。
@@ -394,7 +394,7 @@ test('D-10(a)：行注释里的块注释起点符号不得吞掉其后真实代�
 });
 
 test('R-1(d1)：单行内闭合的块注释（含其中含 //）不得吞掉其后真实代码', async () => {
-  const { codeOnly } = await import(path.join(ROOT, 'scripts', 'lib', 'code-only.mjs'));
+  const { codeOnly } = await import(require('node:url').pathToFileURL(path.join(ROOT, 'scripts', 'lib', 'code-only.mjs')).href);
   // ⚠ 夹具的**判别力**来自 R-1 的失效机制，须同时具备四个要素（D-14 病历：缺一即假锁）：
   //   ① 一个**单行内闭合**的块注释；② 其中含 `//`；③ 其后**紧跟真实代码**；
   //   ④ 再后面**另有一个真块注释**（提供后续块结束符 —— 缺它则"先逐行后块"顺序同样不吞 ⇒ 用例无牙）。
@@ -419,7 +419,7 @@ test('R-1(d1)：单行内闭合的块注释（含其中含 //）不得吞掉其�
 });
 
 test('R-1(b2)：跨行块注释的“行注释符与闭合符同行”不得吞掉其后真实代码', async () => {
-  const { codeOnly } = await import(path.join(ROOT, 'scripts', 'lib', 'code-only.mjs'));
+  const { codeOnly } = await import(require('node:url').pathToFileURL(path.join(ROOT, 'scripts', 'lib', 'code-only.mjs')).href);
   // ⚠ 本形态是选用「单趟扫描」而非「先同行块 → 再行注释 → 再跨行块」三步顺序的**依据**：
   //   三步顺序在第一步「同行闭合块」匹配不到本形态（块**跨行**），随后第二步把 `// */ const REAL`
   //   连同**闭合符**一起剥掉 ⇒ 留下未闭合 `/*` ⇒ 第三步一路吞到下一个结束符。
@@ -443,7 +443,7 @@ test('R-1(b2)：跨行块注释的“行注释符与闭合符同行”不得吞�
 });
 
 test('D-10(b)：真正的跨行 /* … */ 块注释仍须被剥离（防修 (a) 时漏剥块注释）', async () => {
-  const { codeOnly } = await import(path.join(ROOT, 'scripts', 'lib', 'code-only.mjs'));
+  const { codeOnly } = await import(require('node:url').pathToFileURL(path.join(ROOT, 'scripts', 'lib', 'code-only.mjs')).href);
   const src = [
     '/*',
     ' 多行块注释',
@@ -548,7 +548,8 @@ test('R7 fail-closed：产物缺位 / chunk 目录缺位 ⇒ FAIL，不得静默
 test('R2 fail-closed（H2 活例修复）：读不出包裹的 chunk 不得再静默回退到原文而报 PASS', () => {
   // 病历：原实现 `strip(mm ? JSON.parse(…) : raw)` ⇒ 裸 JS chunk 被当成 chunk 源码正常扫描
   //   ⇒ 照常打 `PASS | 24 个 client chunk …`（读者 grep PASS 得到假读数）。
-  const rel = 'src/client/voice/' + 'filler' + '.js';
+  // 目标模式（CHG-313）：filler 已迁为普通模块，变异目标改用仍在位的 client chunk。
+  const rel = 'src/client/voice/' + 'correction' + '.js';
   withFixture((dir) => unwrapChunkToBareJs(dir, rel), (dir) => {
     const r = runGate(dir);
     assert.equal(r.code, 1, '契约违反必须 exit 1');
@@ -559,9 +560,10 @@ test('R2 fail-closed（H2 活例修复）：读不出包裹的 chunk 不得再�
 });
 
 test('R7 覆盖面（host 面同族）：src/host 的 chunk 也在契约门内 ⇒ 改回裸 JS 必红', () => {
-  // ⚠ host 面**实读为同族**：5 个 chunk 全部写 `module.exports = "…"` 同一契约，
+  // ⚠ host 面**实读为同族**：现存字符串 chunk 全部写 `module.exports = "…"` 同一契约，
   //   且 build-host.mjs 用同一 `body.replace(marker, chunk)` 注入 ⇒ 一并纳入。
-  const rel = 'src/host/' + 'diagnostics' + '.js'; // 运行时拼接（同既有纪律）
+  //   目标模式（CHG-320）：diagnostics 已迁为普通模块，变异目标改用仍在位的 chunk。
+  const rel = 'src/host/' + 'enhance-handlers' + '.js'; // 运行时拼接（同既有纪律）
   withFixture((dir) => {
     const abs = path.join(dir, rel);
     // ⚠ 第 8 处同契约副本（本批收敛）：改用共享解码器，取值不变（本批实测 29 chunk 上
@@ -570,6 +572,7 @@ test('R7 覆盖面（host 面同族）：src/host 的 chunk 也在契约门内 �
   }, (dir) => {
     const r = runGate(dir);
     assert.equal(r.code, 1, 'host chunk 契约违反必须 exit 1（不得只盯 client）');
-    assert.match(r.out, /FAIL \| R7 \|[^\n]*src\/host\/diagnostics\.js/, 'R7 必须点名 host 违规 chunk');
+    assert.match(r.out, /FAIL \| R7 \|[^\n]*src[\\/]host[\\/]enhance-handlers\.js/, 'R7 必须点名 host 违规 chunk');
+    assert.match(r.out, /载入失败|导出形态违反/, 'R7 必须给出契约裁决');
   });
 });

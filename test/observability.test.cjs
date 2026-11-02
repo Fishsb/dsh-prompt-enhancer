@@ -9,6 +9,8 @@ const path = require('node:path');
 //（该测试守的是从不接线的骨架，意图已由 ADR-194/197 承载）。
 // integrity 的活副本是 lib/integrity.cjs（原 src/host/integrity.js 为死层，已删）→ 守卫改挂活副本。
 const { sha256File, verifySha256 } = require('../lib/integrity.cjs');
+// 目标模式（CHG-320）：诊断日志已迁为普通模块，测试直接加载真实模块并注入假 console。
+const { createDiagnostics, LOG_RING_MAX } = require('../src/host/diagnostics-module.cjs');
 
 test('OBS-02 sha256File and verifySha256', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-obs-'));
@@ -23,19 +25,13 @@ test('OBS-02 sha256File and verifySha256', async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('OBS-03 批次D hlog/herr 行带 ISO 时间戳前缀且保留原文案（chunk eval 手法）', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'host', 'diagnostics.js'), 'utf8');
-  const m = /^module\.exports = ("[\s\S]*");?\s*$/m.exec(src);
-  assert.ok(m, 'diagnostics chunk payload 可解析');
-  const payload = JSON.parse(m[1]);
-  // 隔离 console 注入：payload 体内裸 console 解析到参数
+test('OBS-03 批次D hlog/herr 行带 ISO 时间戳前缀且保留原文案（普通模块 + 假 console）', () => {
   const captured = [];
   const fakeConsole = {
     log: (...a) => captured.push(['log', a.join(' ')]),
     error: (...a) => captured.push(['error', a.join(' ')]),
   };
-  // eslint-disable-next-line no-new-func
-  const api = new Function('console', payload + '\n;return { hlog, herr, LOG_RING };')(fakeConsole);
+  const api = createDiagnostics(fakeConsole);
   assert.equal(typeof api.hlog, 'function');
   assert.equal(typeof api.herr, 'function');
 
@@ -54,4 +50,5 @@ test('OBS-03 批次D hlog/herr 行带 ISO 时间戳前缀且保留原文案（ch
   assert.equal(api.LOG_RING.length, 2, '环形缓冲仍收录两行');
   assert.match(api.LOG_RING[0], /^\[20\d{2}-/, 'LOG_RING 内容含时间戳前缀（logs/last 消费方可见）');
   assert.ok(api.LOG_RING[0].includes('[enhance] update/envcheck ok'), '关键 token 原样保留（grep 兼容，D-1）');
+  assert.equal(LOG_RING_MAX, 300, '环形缓冲上限保持 300 行');
 });
