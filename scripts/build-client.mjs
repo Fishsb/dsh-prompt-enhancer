@@ -45,7 +45,8 @@ function buildClient() {
   // CHG-117（2026-10-16 · 规整改造批）：清口水词 —— 本地纯规则清理器（不调模型）
   // CHG-143（纠错语音独立步批）：语音纠错的可见性状态 chunk（照 filler.js 既有模式）
   const voiceCorrectionChunk = require('../src/client/voice/correction.js');
-  const voiceFillerChunk = require('../src/client/voice/filler.js');
+  // 目标模式：清口水词已迁为普通 CommonJS 模块，由共享运行时统一打包。
+  const voiceFillerChunk = null;
   const voiceStateChunk = require('../src/client/voice/state.js');
   const voiceRecorderChunk = require('../src/client/voice/recorder.js');
   // P2-补做（2026-10-13 · CHG-011 / §4.6.2.6 · UD-0014 选 B）：官方录音路径增值桥
@@ -56,18 +57,28 @@ function buildClient() {
   // 目标模式：共享契约与语音后处理计划是**普通 CommonJS 模块**，由打包器在构建期
   // 打成自包含表达式。产物内没有模块系统、没有外部 require；源码侧仍可正常
   // require/import 相对依赖（这是与旧 chunk 注入的分界点）。
-  const sharedClientRuntime = bundleModules({
+  const sharedContractsRuntime = bundleModules({
     root,
     entry: 'src/shared/contracts/client-runtime.cjs',
   });
-  if (!sharedClientRuntime.modules.includes('src/shared/contracts/voice-config.cjs')
-    || !sharedClientRuntime.modules.includes('src/shared/voice/postprocess-plan.cjs')) {
+  if (!sharedContractsRuntime.modules.includes('src/shared/contracts/voice-config.cjs')
+    || !sharedContractsRuntime.modules.includes('src/shared/voice/postprocess-plan.cjs')) {
     throw new Error('[build-client] 共享运行时打包不完整：缺少契约或后处理计划模块');
   }
-  const sharedRuntimeChunk = 'const __DSH_SHARED__ = ' + sharedClientRuntime.code
+  const clientSharedRuntime = bundleModules({
+    root,
+    entry: 'src/client/shared-runtime.cjs',
+  });
+  if (!clientSharedRuntime.modules.includes('src/client/voice/filler-module.cjs')) {
+    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少清口水词模块');
+  }
+  const sharedRuntimeChunk = 'const __DSH_SHARED__ = ' + sharedContractsRuntime.code
     + ';\nconst __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'
     + '\nconst planVoicePostprocess = __DSH_SHARED__.planVoicePostprocess;'
-    + '\nconst voicePostprocessHas = __DSH_SHARED__.voicePostprocessHas;\n';
+    + '\nconst voicePostprocessHas = __DSH_SHARED__.voicePostprocessHas;\n'
+    + '\nconst __DSH_CLIENT_SHARED__ = ' + clientSharedRuntime.code
+    + ';\nconst {\n' + Object.keys(require('../src/client/shared-runtime.cjs')).map((k) => '  ' + k + ',').join('\n')
+    + '\n} = __DSH_CLIENT_SHARED__;\n';
   // Inject all chunks, looping until no marker remains: component chunks may
   // themselves contain other injection markers (e.g. the updater constants
   // lived between EnhanceBar and UpdaterCard), so a single pass would leave
@@ -91,7 +102,7 @@ function buildClient() {
     ['// @dsh-client-comp-params-tab-inject\n', paramsTabChunk],
     ['// @dsh-client-comp-model-plugins-section-inject\n', modelPluginsSectionChunk],
     ['// @dsh-client-voice-correction-inject\n', voiceCorrectionChunk],
-    ['// @dsh-client-voice-filler-inject\n', voiceFillerChunk],
+    ['// @dsh-client-voice-filler-inject\n', ''],
     ['// @dsh-client-voice-state-inject\n', voiceStateChunk],
     ['// @dsh-client-voice-recorder-inject\n', voiceRecorderChunk],
     ['// @dsh-client-voice-official-bridge-inject\n', voiceOfficialBridgeChunk],

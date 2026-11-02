@@ -16,10 +16,10 @@ const ROOT = join(__dirname, '..');
 //   （本批实测复现）。共享解码器 fail-closed、出错**点名声**。
 //   ⚠ 取具名成员（解构）：`require()` 一个 ESM 模块拿到的是**命名空间对象**（不可调用），
 //     整体赋给 `decodeChunk` 会在调用点抛 `TypeError: decodeChunk is not a function`（实测）。
-const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const { fillerBaselineText } = require('./helpers/client-filler-module.cjs');
 
 function loadFiller(src) {
-  const code = src || decodeChunk('src/client/voice/filler.js');
+  const code = src || fillerBaselineText();
   const api = new Function(code + '\n;return { stripFillers, runFiller, fillerSnapshot, subscribeFiller, FILLER_CHARS, FILLER_CHARS_GUARDED, FILLER_PHRASES, FILLER_PHRASES_HARD, FILLER_PROTECTED, FILLER_REDUP_SAFE };')();
   return api;
 }
@@ -178,7 +178,7 @@ test('FILLER-40 ⭐CHG-121 加固：儿化音白名单逐条在位 + 现行不�
 });
 
 test('FILLER-40V ⭐变异自证·加固有牙：摘掉加固块 ⇒ 词表扩张变异下必被改坏', () => {
-  const base = decodeChunk('src/client/voice/filler.js');
+  const base = fillerBaselineText();
   // ① 正例：有加固块 ⇒ 同一变异下**全部不得**被改坏
   const withFix = loadFiller(addErToGuarded(base));
   const broke = ERHUA_HARDENED.filter((w) => withFix.stripFillers(w).text !== w);
@@ -209,7 +209,7 @@ const addErToList = (src) => {
   return src.replace(anchor, anchor + "'儿', ");
 };
 test('FILLER-V01 ⭐变异自证·位置保护承重（双因子：列「儿」入表 + 关位置保护）', () => {
-  const base = decodeChunk('src/client/voice/filler.js');
+  const base = fillerBaselineText();
   const SAMPLE = '那个儿化音要注意';
   // ① 只把「儿」列进表、**保留**位置保护 ⇒ 仍安全（位置保护挡住了）
   const withGuard = loadFiller(addErToList(base));
@@ -222,7 +222,7 @@ test('FILLER-V01 ⭐变异自证·位置保护承重（双因子：列「儿」�
 });
 
 test('FILLER-V02 变异自证·白名单仍有牙：清空白名单 ⇒ 阿姨/哎呀 必被改坏', () => {
-  const src = decodeChunk('src/client/voice/filler.js')
+  const src = fillerBaselineText()
     .replace(/var FILLER_PROTECTED = \[[\s\S]*?\];/, 'var FILLER_PROTECTED = [];');
   const M = loadFiller(src);
   const hurt = ['阿姨你好', '哎呀，这个真好看'].filter((s) => M.stripFillers(s).text !== s);
@@ -231,7 +231,7 @@ test('FILLER-V02 变异自证·白名单仍有牙：清空白名单 ⇒ 阿姨/�
 
 test('FILLER-V03 负控·正常句在两种变异下仍不得被改坏', () => {
   for (const kind of ['pos', 'white']) {
-    const src = decodeChunk('src/client/voice/filler.js');
+    const src = fillerBaselineText();
     const code = kind === 'pos' ? mutateDropPositionGuard(addErToList(src))
       : src.replace(/var FILLER_PROTECTED = \[[\s\S]*?\];/, 'var FILLER_PROTECTED = [];');
     const M = loadFiller(code);
