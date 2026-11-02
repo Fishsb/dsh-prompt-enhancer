@@ -23,11 +23,12 @@ const CHUNK = 'src/client/voice/official-bridge.js';
 //   fail-closed 与「报错点名声」两条语义逐字保留。⚠ 取具名成员解构 —— `require()` 一个
 //   ESM 模块拿到的是命名空间对象，不可直接调用（实测）。
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const { voiceStateChunkWithDefaults } = require('./helpers/voice-state-chunk.cjs');
 
 // §7.4 起：official-bridge 依赖 state.js 的单一事实源（vadSilenceMsOf / vadRequiredQuiet / voiceCfgState）。
 // 测试注入**真实的 state.js**（而非桩），以保证「两条入口共用同一值」在测试里也是同一份实现。
 function loadStateForBridge(env) {
-  const src = decodeChunk('src/client/voice/state.js');
+  const src = voiceStateChunkWithDefaults();
   const factory = new Function(
     'localStorage', 'host',
     src + '\n;return { vadSilenceMsOf, vadRequiredQuiet, voiceCfgState };'

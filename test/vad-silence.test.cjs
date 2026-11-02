@@ -20,10 +20,11 @@ const ROOT = path.resolve(__dirname, '..');
 //   （`scripts/lib/chunk-decode.mjs`，fail-closed 且报错点名声）。取具名成员解构 ——
 //   `require()` 一个 ESM 模块拿到的是命名空间对象，不可直接调用（实测）。
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const { voiceStateChunkWithDefaults } = require('./helpers/voice-state-chunk.cjs');
 
 // 求值 state.js：得到归一化 / 帧数派生（§7.4 的单一事实源）
 function loadState() {
-  const src = decodeChunk('src/client/voice/state.js');
+  const src = voiceStateChunkWithDefaults();
   const lsBacking = new Map();
   const localStorageStub = {
     getItem: (k) => (lsBacking.has(k) ? lsBacking.get(k) : null),
@@ -495,11 +496,16 @@ test('VADSIL-P16 VAD_POLL_MS 未被暴露为可调项（§7.4 明确：不暴露
 // ───────────── 变异自证 ─────────────
 // 变异名运行时拼接；正例必红、负控必绿。
 function mutate(src, kind) {
-  const A = 'const' + ' VAD_SILENCE_MS_DEFAULT = 2000;';
+  // 目标模式：默认值来自共享契约注入（`__VOICE_CONFIG_DEFAULTS__`），不再是 state.js 里的字面量。
+  // 变异仍打在「默认值」这一个事实上，只是位置随事实源迁移。
+  const contractDefaults = require('../src/shared/contracts/voice-config.cjs').VOICE_CONFIG_DEFAULTS;
+  const A = 'const __VOICE_CONFIG_DEFAULTS__ = ' + JSON.stringify(contractDefaults) + ';\n';
   if (kind === 'kill-default') {
     // 默认值被改 → 默认行为双读数必红
     assert.ok(src.includes(A), '变异锚点须存在');
-    return src.replace(A, 'const VAD_SILENCE_MS_DEFAULT = 3000;');
+    const mutated = JSON.parse(JSON.stringify(contractDefaults));
+    mutated.vad.silenceMs = 3000;
+    return src.replace(A, 'const __VOICE_CONFIG_DEFAULTS__ = ' + JSON.stringify(mutated) + ';');
   }
   if (kind === 'freeze-frames') {
     // 帧数退回固定常量派生（不再动态）→ P03 必须红
@@ -513,7 +519,7 @@ function mutate(src, kind) {
 }
 
 function loadMutantState(kind) {
-  const src = mutate(decodeChunk('src/client/voice/state.js'), kind);
+  const src = mutate(voiceStateChunkWithDefaults(), kind);
   const lsBacking = new Map();
   const localStorageStub = { getItem: (k) => (lsBacking.has(k) ? lsBacking.get(k) : null), setItem: (k, v) => lsBacking.set(k, String(v)), removeItem: (k) => lsBacking.delete(k) };
   const factory = new Function('localStorage', 'host', src + '\n;return { normalizeVadSilenceMs, vadRequiredQuiet };');

@@ -20,6 +20,7 @@ const asr = require('../lib/asr.cjs');
 //   现收敛到共享单一事实源（fail-closed、点名声）。⚠ 取具名成员解构 —— `require()` 一个
 //   ESM 模块拿到命名空间对象，不可直接调用（实测）。
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const { voiceStateChunkWithDefaults } = require('./helpers/voice-state-chunk.cjs');
 
 /** 解出 i18n chunk 源码原文（本文件三处解码点的单一落点；再往下分 ZH/EN 两段）。 */
 function decodeI18nBody() {
@@ -210,7 +211,7 @@ test('VOICE-P19 hotkey 配置白名单 + 产物含快捷键/双触发逻辑', ()
 // ---- 13. v3.2.17 语音识别完自动触发增强（autoEnhance）----
 // 沙箱求值 client state.js chunk（mock localStorage/host，隔离模块级状态）
 function makeVoiceSandbox(store) {
-  const src = require('../src/client/voice/state.js');
+  const src = voiceStateChunkWithDefaults();
   const localStorage = {
     getItem: (k) => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null),
     setItem: (k, v) => { store[k] = String(v); },
@@ -309,7 +310,7 @@ test('VOICE-P24 产物含 autoEnhance 触发链路 + i18n 键平衡（v3.2.17 +3
 // 在沙箱里求值真实 state.js，host 返回给定的磁盘配置
 function evalStateWithDisk(diskConfig, opts) {
   const o = opts || {};
-  let src = require('../src/client/voice/state.js');
+  let src = voiceStateChunkWithDefaults();
   if (o.dropModuleSync) {
     const anchor = '\nsyncVoiceFromHost();\n';
     if (!src.includes(anchor)) throw new Error('变异锚点须存在（模块级同步调用）');
@@ -426,7 +427,7 @@ test('VOICE-G5-V02 变异自证·负控必绿：同一变异下，**显式**调�
 // 可注入 timerSvc 的沙箱（用于确定性驱动重试），host 按给定脚本逐次响应
 function evalStateWithRetry(script, opts) {
   const o = opts || {};
-  let src = require('../src/client/voice/state.js');
+  let src = voiceStateChunkWithDefaults();
   if (o.dropRetry) {
     // 变异：把重试计数上限压成 1 ⇒ 等价于「只试一次」（不改判定逻辑，只改上限）
     src = src.replace('const VOICE_HOST_SYNC_MAX_ATTEMPTS = 10;', 'const VOICE_HOST_SYNC_MAX_ATTEMPTS = 1;');
@@ -539,7 +540,7 @@ test('VOICE-G6-V03 负控：已关的开关在重试路径下**仍不得生效**
       : Promise.resolve({ ok: true, config: { version: 2, voice: { hotkey: { enabled: false, combo: '' }, vad: { enabled: true }, autoEnhance: false, refine: { enabled: false } } } });
   } };
   const timerSvc = { timeout: (fn) => { pending.push(fn); return 1; }, interval: (fn) => { pending.push(fn); return 1; } };
-  const src = require('../src/client/voice/state.js');
+  const src = voiceStateChunkWithDefaults();
   const api = new Function('localStorage', 'host', 'timerSvc', src + '\nreturn { voiceCfgState };')(localStorage, host, timerSvc);
   await settle3();
   pending.shift()(); await settle3();

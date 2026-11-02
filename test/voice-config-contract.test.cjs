@@ -2,11 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 const { VOICE_CONFIG_KEYS, VOICE_CONFIG_DEFAULTS, cloneVoiceConfigDefaults } = require('../src/shared/contracts/voice-config.cjs');
+const { voiceStateChunkWithDefaults } = require('./helpers/voice-state-chunk.cjs');
 
 function loadVoiceState() {
-  const src = decodeChunk('src/client/voice/state.js');
+  const src = voiceStateChunkWithDefaults();
   const ls = new Map();
   const localStorage = { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: (k) => ls.delete(k) };
   const factory = new Function('localStorage', 'host', src + '\n;return { VOICE_CFG_DEFAULTS };');
@@ -33,4 +33,18 @@ test('VCONF-03 clone 返回独立副本，修改不污染事实源', () => {
 test('VCONF-04 事实源冻结', () => {
   assert.equal(Object.isFrozen(VOICE_CONFIG_KEYS), true);
   assert.equal(Object.isFrozen(VOICE_CONFIG_DEFAULTS), true);
+});
+
+test('VCONF-05 产物面：共享默认值已注入且只注入一次（state.js 不再自带第二份）', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'lib', 'client.cjs'), 'utf8');
+  assert.ok(client.includes('const __VOICE_CONFIG_DEFAULTS__ = Object.freeze('),
+    '产物缺共享默认值注入（state.js 会读不到该全局）');
+  assert.equal((client.match(/const __VOICE_CONFIG_DEFAULTS__ = Object\.freeze\(/g) || []).length, 1,
+    '共享默认值只应注入一次');
+  assert.equal(client.includes('const VOICE_CFG_DEFAULTS = {\n'), false,
+    'state.js 不得再内联第二份默认值对象（单一事实源）');
+  assert.equal(client.includes("require('../src/shared/contracts/voice-config.cjs')"), false,
+    '产物不得保留外部 require');
 });

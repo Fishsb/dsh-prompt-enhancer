@@ -323,7 +323,11 @@ test('CHG143-M3 ⭐ 手动增强路径（helpers.enhance）与语音纠错在源
 
 test('CHG143-S1 新开关默认**关闭**：client 默认值 + mergeVoice 白名单取形', () => {
   const state = decodeChunk('src/client/voice/state.js');
-  assert.ok(/correction:\s*\{\s*enabled:\s*false\s*\}/.test(state), 'VOICE_CFG_DEFAULTS.correction.enabled 须为 false');
+  // 目标模式：默认值已迁到共享契约，state.js 只消费注入值。
+  // 这里直接对照事实源，而不是在 chunk 源码里找旧的内联字面量。
+  const defaults = require('../src/shared/contracts/voice-config.cjs').VOICE_CONFIG_DEFAULTS;
+  assert.equal(defaults.correction.enabled, false, 'VOICE_CFG_DEFAULTS.correction.enabled 须为 false');
+  assert.ok(state.includes('__VOICE_CONFIG_DEFAULTS__'), 'state.js 须消费共享契约默认值');
   assert.ok(/correction:\s*\{\s*enabled:\s*\(v && v\.correction && v\.correction\.enabled === true\)/.test(state),
     'mergeVoice 取形须逐字对齐 autoEnhance（=== true ⇒ 缺省/非法回退 false）');
 });
