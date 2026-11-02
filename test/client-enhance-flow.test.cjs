@@ -32,10 +32,12 @@ function loadHelpers() {
     },
   };
   const factory = new Function(
-    'host', 'configState', 'localStorage', 'MEMORY_ROUNDS_MAX', 'SEEN_KEY_PREFIX',
+    'host', 'configState', 'localStorage', 'MEMORY_ROUNDS_MAX', 'SEEN_KEY_PREFIX', '__DSH_SHARED__',
     src + '\n;return { enhance, undo, cancelEnhance, guardPasses, setActiveSession, getActiveSession, storeFor, isEnhancing };'
   );
-  const api = factory(hostStub, { value: { memory: false } }, localStorageStub, 4, 'dsh-enh-seen:');
+  const api = factory(hostStub, { value: { memory: false } }, localStorageStub, 4, 'dsh-enh-seen:', {
+    resultStatusOf: require('../src/shared/contracts/result.cjs').resultStatusOf,
+  });
   return { api, hostStub, lsBacking };
 }
 
@@ -58,6 +60,7 @@ test('ENH-FLOW stay: 活动会话内完成 → 草稿写回 + result 态 + 结�
   assert.equal(s.phase, 'result');
   assert.equal(s.backup, '原文ABC');
   assert.ok(lsBacking.has(RK(sid)), 'localStorage 必须持久化结果');
+  assert.equal(s.resultStatus, 'changed', '统一结果状态必须为 changed');
 });
 
 test('ENH-FLOW away: 已切走 → 只暂存不写草稿（防串会话）', async () => {
@@ -92,6 +95,20 @@ test('ENH-FLOW edited: 留在会话但用户已编辑 → 丢弃且清持久化'
   assert.equal(s.enhanced, '');
   assert.equal(writes.includes('迟到结果'), false, '丢弃路径不得写回');
   assert.equal(lsBacking.has(RK(sid)), false, '丢弃必须清理持久化');
+});
+
+test('ENH-FLOW unchanged: 模型原样返回 ⇒ result 态且 resultStatus=unchanged', async () => {
+  const { api, hostStub } = loadHelpers();
+  const sid = 'sess-same';
+  api.setActiveSession(sid);
+  const inputActions = { setDraft() {} };
+  const draftRef = { current: '原文同' };
+  hostStub.respond = () => ({ ok: true, text: '原文同' });
+  api.enhance(sid, '原文同', inputActions, draftRef);
+  await flush();
+  const s = api.storeFor(sid);
+  assert.equal(s.phase, 'result');
+  assert.equal(s.resultStatus, 'unchanged', '同一文本必须判 unchanged');
 });
 
 // ---------- 行为级：失败与取消 ----------

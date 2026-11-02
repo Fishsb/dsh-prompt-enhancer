@@ -4,6 +4,7 @@
 // 只聚合无环境依赖的纯数据与纯函数；不得 require 浏览器或宿主模块。
 const voiceConfig = require('./voice-config.cjs');
 const postprocessPlan = require('../voice/postprocess-plan.cjs');
+const result = require('./result.cjs');
 
 module.exports = {
   VOICE_CONFIG_KEYS: voiceConfig.VOICE_CONFIG_KEYS,
@@ -14,4 +15,7 @@ module.exports = {
   planVoicePostprocess: postprocessPlan.planVoicePostprocess,
   voicePostprocessHas: postprocessPlan.voicePostprocessHas,
   voicePostprocessNext: postprocessPlan.voicePostprocessNext,
+  RESULT_STATUS: result.RESULT_STATUS,
+  resultStatusOf: result.resultStatusOf,
+  resultIsTerminal: result.resultIsTerminal,
 };
