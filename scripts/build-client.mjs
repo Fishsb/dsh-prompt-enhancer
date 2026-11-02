@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { bundleModules } from './lib/module-bundler.mjs';
 
 const require = createRequire(import.meta.url);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -52,25 +53,30 @@ function buildClient() {
   const voiceOfficialBridgeChunk = require('../src/client/voice/official-bridge.js');
   const voiceHotkeyChunk = require('../src/client/voice/hotkey.js');
   const voiceSectionChunk = require('../src/client/voice/voice-section.js');
-  // 目标模式第二批：语音后处理的**纯计划**（共享领域模块，无 require、无环境依赖）。
-  // 注入为源码文本，产物仍自包含；不得在 chunk 内引入 require。
-  const voicePostprocessChunk = readFileSync(join(root, 'src', 'shared', 'voice', 'postprocess-plan.cjs'), 'utf8').replace(/\\r\\n/g, '\\n');
-  // 目标模式：语音配置默认值同样来自共享契约。这里只注入**数据**（JSON），
-  // 不注入契约源码 —— 契约模块带 module.exports，直接拼进 client 工厂会与工厂自身的
-  // module 冲突（CHG-303 补正踩过）。
-  const voiceConfigDefaultsLiteral = 'Object.freeze('
-    + JSON.stringify(require('../src/shared/contracts/voice-config.cjs').VOICE_CONFIG_DEFAULTS)
-    + ');';
+  // 目标模式：共享契约与语音后处理计划是**普通 CommonJS 模块**，由打包器在构建期
+  // 打成自包含表达式。产物内没有模块系统、没有外部 require；源码侧仍可正常
+  // require/import 相对依赖（这是与旧 chunk 注入的分界点）。
+  const sharedClientRuntime = bundleModules({
+    root,
+    entry: 'src/shared/contracts/client-runtime.cjs',
+  });
+  if (!sharedClientRuntime.modules.includes('src/shared/contracts/voice-config.cjs')
+    || !sharedClientRuntime.modules.includes('src/shared/voice/postprocess-plan.cjs')) {
+    throw new Error('[build-client] 共享运行时打包不完整：缺少契约或后处理计划模块');
+  }
+  const sharedRuntimeChunk = 'const __DSH_SHARED__ = ' + sharedClientRuntime.code
+    + ';\nconst __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'
+    + '\nconst planVoicePostprocess = __DSH_SHARED__.planVoicePostprocess;'
+    + '\nconst voicePostprocessHas = __DSH_SHARED__.voicePostprocessHas;\n';
   // Inject all chunks, looping until no marker remains: component chunks may
   // themselves contain other injection markers (e.g. the updater constants
   // lived between EnhanceBar and UpdaterCard), so a single pass would leave
   // nested markers unexpanded.
   const injections = [
-    // 共享默认值必须先于 state chunk 注入（state 的顶层 `const` 在求值时读取它；
+    // 共享运行时必须先于 state chunk 注入（state 的顶层 `const` 在求值时读取默认值；
     // 放到 postprocess 注入位会落成 TDZ：`Cannot access '__VOICE_CONFIG_DEFAULTS__' before initialization`）。
-    ['// @dsh-client-constants-inject', constantsChunk
-      + '\nconst __VOICE_CONFIG_DEFAULTS__ = ' + voiceConfigDefaultsLiteral + '\n'],
-    ['// @dsh-client-voice-postprocess-inject\n', voicePostprocessChunk],
+    ['// @dsh-client-constants-inject', constantsChunk + '\n' + sharedRuntimeChunk],
+    ['// @dsh-client-voice-postprocess-inject\n', ''],
     ['// @dsh-client-i18n-inject', i18nChunk],
     ['// @dsh-client-state-inject', stateChunk],
     ['// @dsh-client-helpers-inject', helpersChunk],

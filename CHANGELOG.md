@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+- **目标模式：构建器换代第一切片——正式 build-client 接入打包器（架构/构建 · 2026-11-03 · [PE-F01]）**：新增普通 CommonJS 共享入口 `src/shared/contracts/client-runtime.cjs`，把语音配置契约与语音后处理计划作为**真实模块依赖**交给 `scripts/lib/module-bundler.mjs` 打包；`scripts/build-client.mjs` 不再以源码字符串直接注入共享计划/默认值，而是注入打包后的自包含共享运行时。产物仍无外部依赖、无模块系统，`lib/client.cjs` 工厂契约与用户可见行为不变。新增 `MB-07` 锁：正式构建入口必须使用打包器、必须以内联方式产出共享运行时；`VCONF-05` 随新形态更新为验证共享运行时完整性与唯一性。**已实测**：module-bundler / voice-config / postprocess-plan 13/13；构建与语音相关 222/222；`build-client --check` 与 `build-host --check` 一致；dead-code R1–R7 全过。未 bump/tag/发布/安装/重启。
+
 - **目标模式：语音配置默认值接入运行期（架构/构建 · 2026-11-03 · [PE-F04]）**：把 `src/shared/contracts/voice-config.cjs` 从“只冻结契约”推进为**运行期事实源**——`src/client/voice/state.js` 不再内联第二份默认值，改为消费构建期注入的 `__VOICE_CONFIG_DEFAULTS__`；`build-client.mjs` 只注入契约默认值数据（不注入带 `module.exports` 的契约源码，避免与 client 工厂自身的 `module` 冲突），且注入位先于 state chunk（规避 TDZ）。新增 `test/helpers/voice-state-chunk.cjs` 统一测试沙箱注入链，并加 `VCONF-05` 锁：产物必须含且只含一次共享默认值注入、state.js 不得再内联默认值对象、产物不得保留外部 require。变异自证随事实源迁移改打共享注入值（VADSIL-V01/V02）。用户可见名称、RPC、配置键与默认值均未改。**已实测**：voice-config-contract 5/5；vad-silence 32/32；voice-config+vad 36/36；voice-persist/official-bridge/correction-step/voice-postprocess-plan/chunk-contract 182/182；契约与元判据 40/40；主链与语音相关测试 235/235；`build-client --check` / `build-host --check` / `sync-prompts --check` 一致；`rpc-manifest --check` 15/15；dead-code R1–R7 全过；`arch-claims --check` 37 通过 / 0 冲突 / 2 SKIP（治理档缺位）；`gate` 除 cards 的基线 SKIP 外 6 环 PASS。未 bump/tag/发布/安装/重启。
 
 - **目标模式语音配置契约（架构/测试 · 2026-11-03 · [PE-F04]）**：新增 `src/shared/contracts/voice-config.cjs` 与 `test/voice-config-contract.test.cjs`（4 条），把语音配置的 5 个内部键与默认值冻结，并直接对照 `src/client/voice/state.js` 的现有事实源。**尚未让运行期消费**：现有配置同步与白名单保持原样，避免本批引入双读源。
