@@ -426,10 +426,10 @@ const CLAIMS = [
     adr: 'ADR-194', anchor: 'module:prompt-enhancer', at: '2026-09-12', level: '部分兑现',
     promise: '判定「需要架构重构，分期执行、不推倒重写」：①P0 死层退役 + 协议事实源由注册面派生；②P1 host 半部改原生模块；③P2 规范收敛；④P3 待验证',
     assertions: [
-      // 目标模式（CHG-312/320）：PURE、模型域、阶段执行器、纠错开关、结果归一与诊断日志
-      // 均已迁为普通模块；`src/host` 现为 **9 件**。件数闸由 R4 等值集承担，
+      // 目标模式（CHG-312/321）：PURE、模型域、阶段执行器、纠错开关、结果归一、诊断日志
+      // 与纠错执行域均已迁为普通模块；`src/host` 现为 **10 件**。件数闸由 R4 等值集承担，
       // 本条保留「旧 pure.js / diagnostics.js 不得复活」的反向守卫。
-      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '9 件（含纯函数、阶段执行器、纠错开关、结果归一与诊断日志普通模块；旧 pure.js / diagnostics.js 不得复活）', () => {
+      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '10 件（含纯函数、阶段执行器、纠错开关、结果归一、诊断日志与纠错执行域普通模块；旧 pure.js / diagnostics.js 不得复活）', () => {
         const files = list('src/host');
         const n = files.reduce((a, f) => a + lines(`src/host/${f}`), 0);
         const legacyGone = !files.includes('pure.js') && !files.includes('diagnostics.js');
@@ -437,7 +437,8 @@ const CLAIMS = [
         const correctionBorn = files.includes('correction-switch.cjs');
         const resultBorn = files.includes('enhance-result-module.cjs');
         const diagnosticsBorn = files.includes('diagnostics-module.cjs');
-        return assert(files.length === 9 && legacyGone && pipelineBorn && correctionBorn && resultBorn && diagnosticsBorn, `${files.length} 件 / ${n} 行｜旧 pure.js/diagnostics.js ${legacyGone ? '已退役' : '仍存在'}｜阶段执行器 ${pipelineBorn ? '在位' : '缺失'}｜纠错开关 ${correctionBorn ? '在位' : '缺失'}｜结果归一 ${resultBorn ? '在位' : '缺失'}｜诊断日志 ${diagnosticsBorn ? '在位' : '缺失'}`);
+        const runnerBorn = files.includes('correction-runner.cjs');
+        return assert(files.length === 10 && legacyGone && pipelineBorn && correctionBorn && resultBorn && diagnosticsBorn && runnerBorn, `${files.length} 件 / ${n} 行｜旧 pure.js/diagnostics.js ${legacyGone ? '已退役' : '仍存在'}｜阶段执行器 ${pipelineBorn ? '在位' : '缺失'}｜纠错开关 ${correctionBorn ? '在位' : '缺失'}｜结果归一 ${resultBorn ? '在位' : '缺失'}｜诊断日志 ${diagnosticsBorn ? '在位' : '缺失'}｜纠错执行域 ${runnerBorn ? '在位' : '缺失'}`);
       }),
       A('A194-2', '结构', '①协议事实源改由注册面派生（废除 protocol.js）', 'src/protocol.js 不存在且 scripts/rpc-manifest.mjs 存在', () => {
         const gone = !exists('src/protocol.js');

@@ -112,10 +112,11 @@ test('CHG291-M1f 真纠错不受影响：只换一个字的订正必须原样返
 // 接线层：纠错路径**确实**用 cleanCorrectionOutput，且**不再**用裸 cleanOutput
 // ════════════════════════════════════════════════════════════════════════════
 test('CHG291-W1 接线：`runCorrection` 内不得再出现裸 `cleanOutput(` 调用', () => {
-  const start = HOST.indexOf('async function runCorrection(args)');
-  assert.ok(start > 0, 'runCorrection 必须存在');
-  const end = HOST.indexOf("harness.handle('voice/correct'", start);
-  assert.ok(end > start, 'runCorrection 的边界必须可定位');
+  // 目标模式（CHG-321）：执行域已迁为普通模块，接线锁改读模块正文（RPC 注册仍在 chunk）。
+  const start = HOST.indexOf('function createCorrectionRunner(deps)');
+  assert.ok(start > 0, 'createCorrectionRunner 必须存在');
+  const end = HOST.indexOf('return { runCorrection, fetchCorrectionHistory };', start);
+  assert.ok(end > start, 'createCorrectionRunner 的边界必须可定位');
   const body = HOST.slice(start, end);
   assert.equal(/[^a-zA-Z]cleanOutput\s*\(/.test(body), false,
     'M1 违反：runCorrection 内仍有裸 cleanOutput(...) 调用（纠错路径没有包装，不许整体套用）');

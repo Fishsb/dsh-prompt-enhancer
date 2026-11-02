@@ -36,6 +36,10 @@ function boot(opts) {
   const handlers = new Map();
   const harness = {
     handle(method, fn) { if (typeof method === 'string' && typeof fn === 'function') handlers.set(method, fn); },
+    // 目标模式：纠错执行域优先读 host 归一化面；夹具显式提供该面（与产品 harness 同形）。
+    // 目标模式（CHG-321）：执行域优先读 host 归一化面。默认按「无磁盘面」回退，
+    // 需要验证产品形态的用例显式传 voiceConfig（GUARD-R1/R2/R3）。
+    readVoiceConfig: () => (Object.prototype.hasOwnProperty.call(o, 'voiceConfig') ? o.voiceConfig : null),
   };
   const ctx = {
     get: (name) => {
@@ -46,7 +50,11 @@ function boot(opts) {
     timer: o.timer || { timeout: () => () => {} },
   };
   const plugin = new Function('harness', BODY)(harness);
-  plugin.apply(ctx);
+  try {
+    plugin.apply(ctx);
+  } catch (e) {
+    throw new Error('bundle apply failed: ' + (e && e.stack ? e.stack : e));
+  }
   return { handlers };
 }
 
@@ -89,7 +97,7 @@ const CORR_TEXT = '这各功能很好用，我门明天在说。';
 // ───────────── ① 核心：开关关闭 ⇒ 零模型调用 + 可见跳过码 ─────────────
 test('GUARD-C1 ⭐ 开关关闭 ⇒ **零**模型调用，且返回可判的跳过码（不是 changed:false）', async () => {
   const seen = [];
-  const { handlers } = boot({ llm: mockLlm(seen) });
+  const { handlers } = boot({ llm: mockLlm(seen), voiceConfig: null });
   const out = await handlers.get('voice/correct')({
     sessionId: 's1', text: CORR_TEXT, config: cfgWith({ enabled: false }),
   });
@@ -282,10 +290,11 @@ test('GUARD-R4 ⭐ 装配面自洽：harness.readVoiceConfig 复用既有 readCo
 test('GUARD-V1 ⭐ 变异自证①：去掉守卫（内存变异真实 bundle）⇒ 关闭态**必调模型**（判据必红）', async () => {
   const GUARDED = BODY;
   // 变异：删掉守卫那一段（从 `if (correctionEnabledOf(...` 到其 `}` 结束的分支）
-  const startMark = '      const corrSwitch = resolveCorrectionSwitch(args && args.config);';
+  // 目标模式：守卫已迁入普通模块，变异锚点随之迁移到模块正文。
+  const startMark = '    const corrSwitch = resolveCorrectionSwitch(args && args.config, harness && typeof harness.readVoiceConfig === \'function\' ? harness : null);';
   const i = GUARDED.indexOf(startMark);
   assert.ok(i > 0, '变异锚点必须在 bundle 内（否则变异无效 ⇒ 本自证无判别力）');
-  const endMark = '\n      }\n      const chain = buildTryChain(cfg.fallback);';
+  const endMark = '\n    }\n    const chain = buildTryChain(cfg.fallback);';
   const j = GUARDED.indexOf(endMark, i);
   assert.ok(j > i, '变异锚点结束位置必须找到');
   const mutated = GUARDED.slice(0, i) + '      // [MUTANT-V1] 守卫已删除（不判开关）' + GUARDED.slice(j + 2);
@@ -293,7 +302,7 @@ test('GUARD-V1 ⭐ 变异自证①：去掉守卫（内存变异真实 bundle）
   const run = async (body) => {
     const seen = [];
     const handlers = new Map();
-    const harness = { handle: (m, f) => { if (typeof m === 'string' && typeof f === 'function') handlers.set(m, f); } };
+    const harness = { handle: (m, f) => { if (typeof m === 'string' && typeof f === 'function') handlers.set(m, f); }, readVoiceConfig: () => null };
     const ctx = { get: (n) => (n === 'llm' ? mockLlm(seen) : undefined), effect: () => {}, timer: { timeout: () => () => {} } };
     new Function('harness', body)(harness).apply(ctx);
     const out = await handlers.get('voice/correct')({ sessionId: 'v1', text: CORR_TEXT, config: cfgWith({ enabled: false }) });
@@ -316,6 +325,7 @@ test('GUARD-V1 ⭐ 变异自证①：去掉守卫（内存变异真实 bundle）
 test('GUARD-V2 ⭐ 变异自证②：取形改 `!== false` ⇒ 缺省态**必调模型**（判据必红）', async () => {
   const ORIG = BODY;
   // 目标模式：取形已迁入普通模块（打包器内联），变异锚点随之迁移到模块正文。
+  // 目标模式（CHG-321）：取形仍由 correction-switch 模块提供；变异必须同时覆盖 runner 的调用分支。
   const FROM = `  if (!c) return false;
   const top = c.correction;
   if (top && typeof top === 'object') return top.enabled === true;
@@ -329,13 +339,17 @@ test('GUARD-V2 ⭐ 变异自证②：取形改 `!== false` ⇒ 缺省态**必调
   if (v && typeof v === 'object' && v.correction && typeof v.correction === 'object') return v.correction.enabled !== false;   // [MUTANT-V2]
   return true;                                  // [MUTANT-V2] 缺省被读成开`;
   assert.ok(ORIG.indexOf(FROM) > 0, '变异锚点必须在 bundle 内（否则变异无效 ⇒ 本自证无判别力）');
-  const mutated = ORIG.replace(FROM, TO);
+  let mutated = ORIG.replace(FROM, TO);
+  // 目标模式（CHG-321）：执行域在模块内调用 resolveCorrectionSwitch；
+  // 仅改模块正文不足以让内存变异生效，必须把 runner 的导入绑定也指向变异实现。
+  mutated = mutated.replace('const { resolveCorrectionSwitch, CORRECTION_DISABLED_CODE, CORRECTION_ENABLED_REASON } = __load("src/host/correction-switch.cjs");',
+    'const { CORRECTION_DISABLED_CODE, CORRECTION_ENABLED_REASON } = __load("src/host/correction-switch.cjs");\nconst resolveCorrectionSwitch = (cfg) => ({ on: true, from: \'request-config\' });');
   assert.notEqual(mutated, ORIG, '变异必须生效');
 
   const run = async (body, cfg) => {
     const seen = [];
     const handlers = new Map();
-    const harness = { handle: (m, f) => { if (typeof m === 'string' && typeof f === 'function') handlers.set(m, f); } };
+    const harness = { handle: (m, f) => { if (typeof m === 'string' && typeof f === 'function') handlers.set(m, f); }, readVoiceConfig: () => null };
     const ctx = { get: (n) => (n === 'llm' ? mockLlm(seen) : undefined), effect: () => {}, timer: { timeout: () => () => {} } };
     new Function('harness', body)(harness).apply(ctx);
     const out = await handlers.get('voice/correct')({ sessionId: 'v2', text: CORR_TEXT, config: cfg });

@@ -95,6 +95,15 @@ function buildHost() {
   const enhanceResultChunk = 'const __DSH_ENHANCE_RESULT__ = ' + enhanceResultBundle.code
     + ';\nconst {\n' + Object.keys(require('../src/host/enhance-result-module.cjs')).map((k) => '  ' + k + ',').join('\n')
     + '\n} = __DSH_ENHANCE_RESULT__;\n';
+  // 目标模式：语音纠错执行域迁为普通模块；RPC 注册仍在 chunk 内，返回值不变。
+  const correctionRunnerBundle = bundleModules({ root, entry: 'src/host/correction-runner.cjs' });
+  if (!correctionRunnerBundle.modules.includes('src/host/correction-runner.cjs')
+    || !correctionRunnerBundle.modules.includes('src/host/correction-switch.cjs')) {
+    throw new Error('[build-host] 纠错执行域模块打包不完整');
+  }
+  const correctionRunnerChunk = 'const __DSH_CORRECTION_RUNNER__ = ' + correctionRunnerBundle.code
+    + ';\nconst {\n' + Object.keys(require('../src/host/correction-runner.cjs')).map((k) => '  ' + k + ',').join('\n')
+    + '\n} = __DSH_CORRECTION_RUNNER__;\n';
   const enhanceChunk = loadChunk('src/host/enhance-handlers.js');
 
   // Inject all chunks, looping until no marker remains (same policy as
@@ -107,6 +116,7 @@ function buildHost() {
     ['// @dsh-enhance-pipeline-inject', pipelineChunk],
     ['// @dsh-correction-switch-inject', correctionSwitchChunk],
     ['// @dsh-enhance-result-inject', enhanceResultChunk],
+    ['// @dsh-correction-runner-inject', correctionRunnerChunk],
     ['// @dsh-enhance-inject', enhanceChunk],
   ];
 
