@@ -52,6 +52,15 @@ function buildHost() {
   const modelsChunk = 'const __DSH_MODELS__ = ' + modelsBundle.code
     + ';\nconst {\n' + Object.keys(require('../src/host/models-module.cjs')).map((k) => '  ' + k + ',').join('\n')
     + '\n} = __DSH_MODELS__;\n';
+  // 目标模式：增强阶段执行器迁为普通模块，由打包器内联；阶段顺序仍来自共享契约。
+  const pipelineBundle = bundleModules({ root, entry: 'src/host/enhance-pipeline.cjs' });
+  if (!pipelineBundle.modules.includes('src/host/enhance-pipeline.cjs')
+    || !pipelineBundle.modules.includes('src/shared/contracts/enhance-stages.cjs')) {
+    throw new Error('[build-host] 增强阶段模块打包不完整');
+  }
+  const pipelineChunk = 'const __DSH_ENHANCE_PIPELINE__ = ' + pipelineBundle.code
+    + ';\nconst {\n' + Object.keys(require('../src/host/enhance-pipeline.cjs')).map((k) => '  ' + k + ',').join('\n')
+    + '\n} = __DSH_ENHANCE_PIPELINE__;\n';
   const enhanceChunk = require('../src/host/enhance-handlers.js');
 
   // Inject all chunks, looping until no marker remains (same policy as
@@ -61,6 +70,7 @@ function buildHost() {
     ['// @dsh-diagnostics-inject', diagnosticsChunk],
     ['// @dsh-models-inject', modelsChunk],
     ['// @dsh-pure-inject', pureChunk],
+    ['// @dsh-enhance-pipeline-inject', pipelineChunk],
     ['// @dsh-enhance-inject', enhanceChunk],
   ];
 

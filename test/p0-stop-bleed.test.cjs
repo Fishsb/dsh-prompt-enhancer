@@ -356,10 +356,14 @@ test('P0-b 主超时计时器上移到准备阶段之前，且生成额度不被
   const iPrep = BODY.indexOf('const prepareBudgetMs = resolvePrepareBudgetMs(');
   const iTotal = BODY.indexOf('const totalBudgetMs = genTimeoutMs > 0 ? genTimeoutMs + prepareBudgetMs : 0;');
   const iTimer = BODY.indexOf('const timeoutDisposer = totalBudgetMs > 0 ? ctx.timer.timeout(');
-  const iAnalyze = BODY.indexOf("await runEnhanceStages('analyze', state)");
+  // 目标模式：四个阶段由共享执行器按契约顺序统一运行（不再在 handler 里逐条写死）。
+  // 本锁的核心语义不变：主超时计时器必须在**任何准备阶段之前**挂上。
+  const iAnalyze = BODY.indexOf('await runEnhancePipeline(state);');
   assert.ok(iGen > 0 && iPrep > 0 && iTotal > 0 && iTimer > 0 && iAnalyze > 0, '五处锚点须都在产物中');
   assert.ok(iGen < iTimer && iPrep < iTimer, '预算计算须在计时器之前');
-  assert.ok(iTimer < iAnalyze, '计时器须在 analyze（准备阶段）**之前**挂上——这是本条的核心判据');
+  assert.ok(iTimer < iAnalyze, '计时器须在准备阶段执行器**之前**挂上——这是本条的核心判据');
+  assert.ok(BODY.includes("registerEnhanceStage('analyze'"), 'analyze 阶段仍须注册');
+  assert.ok(BODY.includes("registerEnhanceStage('llm'"), 'llm 阶段仍须注册');
   // 关键：总预算 = 生成额度 + 准备额度 —— 准备阶段有界，但生成阶段仍拿满原 timeoutMs
   // （复核实测过「prepare 2s + generation 5s / timeout 6s」在旧实现下被拆东墙判超时）
   assert.ok(BODY.includes('state.budgetMs = genTimeoutMs;'), '生成额度须与 log/语义分离保存');

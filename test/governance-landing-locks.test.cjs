@@ -13,6 +13,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
@@ -129,7 +130,13 @@ function skeletonValues(v) {
   ].join('\n');
 }
 
-const TRUTH = { indexLines: 114, hostFiles: 5, hostLines: 24, rpcLive: 15, rpcBundled: 12, rpcNative: 3, libFiles: 12, templates: 10, chunks: 29, whitelist: 5 };
+// 目标模式：src/host 件数/行数由真实派生注入；本锁只验证对照器能识别差异，
+// 不把当前快照当成永久事实（否则每次合法增删模块都会误红）。
+const HOST_DIR = path.join(ROOT, 'src', 'host');
+const hostFilesOnDisk = fs.readdirSync(HOST_DIR).filter((f) => f.endsWith('.js')).length;
+const hostLinesOnDisk = fs.readdirSync(HOST_DIR).filter((f) => f.endsWith('.js'))
+  .reduce((sum, f) => sum + fs.readFileSync(path.join(HOST_DIR, f), 'utf8').split('\n').length, 0);
+const TRUTH = { indexLines: 114, hostFiles: hostFilesOnDisk, hostLines: hostLinesOnDisk, rpcLive: 15, rpcBundled: 12, rpcNative: 3, libFiles: 12, templates: 10, chunks: 29, whitelist: 5 };
 
 /** 与真实派生同形的替身 —— **不触碰真实工作区**，值由调用方给定。 */
 const depsFrom = (v) => ({
@@ -174,7 +181,7 @@ test('GL-11 D 变异②：工作区件数变化 ⇒ 必红（判据对**事实�
   const d2 = r.rows.find((x) => x.id === 'D-2');
   assert.equal(d2.verdict, 'differ');
   assert.deepEqual(d2.said, ['6', '27']);
-  assert.deepEqual(d2.got, ['5', '24']);
+  assert.deepEqual(d2.got, [String(TRUTH.hostFiles), String(TRUTH.hostLines)]);
 });
 
 test('GL-12 D fail-closed：正本读不到 / 为空 / 不给路径 ⇒ 一律判红（⛔ 不得判绿）', () => {
