@@ -29,6 +29,7 @@ const ROOT = path.join(__dirname, '..');
  *  assertion 文案；共享解码器在**读取期**即 `throw`，错误**点名 chunk 文件**。
  *  ⚠ 取具名成员解构（`require()` 一个 ESM 模块拿到命名空间对象，不可直接调用 —— 实测）。 */
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const plan = require('../src/shared/voice/postprocess-plan.cjs');
 
 // 极简 React 桩（ref/state 跨渲染持久；effect 每次渲染后执行）——照抄 official-bridge.test.cjs
 function makeMiniReact() {
@@ -131,6 +132,7 @@ function buildHost(env, bridge, o) {
     'isVoiceRecording', 'insertVoiceText', 'notify', 'enhance', 'timerSvc', 'officialVoiceBridge', 'makeT', 'ZH',
     'MarqueeSelect', 'CollapsibleSection', 'setInterval', 'clearInterval', 'setTimeout', 'navigator', 'window',
     'configState', 'markCorrectionSkipped', 'notifyCorrection', 'correctionState',
+    'planVoicePostprocess', 'voicePostprocessHas',
     src + '\n;return { VoiceHotkeyHost };'
   );
   const api = factory(
@@ -141,7 +143,8 @@ function buildHost(env, bridge, o) {
     (...a) => { timeline.push('enhance'); enhanceCalls.push(a); },
     timerSvcLocal, bridge, (p) => (k) => k, {}, null, null,
     setInterval, clearInterval, setTimeout, env.navigator, env.window,
-    { value: {} }, () => {}, () => {}, { runs: 0, skipped: 0, ok: 0, changed: 0, failed: 0, lastAt: 0, lastCode: '', lastSkipReason: '' }
+    { value: {} }, () => {}, () => {}, { runs: 0, skipped: 0, ok: 0, changed: 0, failed: 0, lastAt: 0, lastCode: '', lastSkipReason: '' },
+    plan.planVoicePostprocess, plan.voicePostprocessHas
   );
   const props = { sessionId: o.sessionId || 'sess-combo', inputActions: { setDraft() {} }, input: { draft: o.draft0 || '' } };
   const render = (draft) => { if (draft !== undefined) props.input = { draft }; mini.begin(); api.VoiceHotkeyHost(props); mini.runEffects(); };

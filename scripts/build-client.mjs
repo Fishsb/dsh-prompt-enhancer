@@ -52,11 +52,15 @@ function buildClient() {
   const voiceOfficialBridgeChunk = require('../src/client/voice/official-bridge.js');
   const voiceHotkeyChunk = require('../src/client/voice/hotkey.js');
   const voiceSectionChunk = require('../src/client/voice/voice-section.js');
+  // 目标模式第二批：语音后处理的**纯计划**（共享领域模块，无 require、无环境依赖）。
+  // 注入为源码文本，产物仍自包含；不得在 chunk 内引入 require。
+  const voicePostprocessChunk = readFileSync(join(root, 'src', 'shared', 'voice', 'postprocess-plan.cjs'), 'utf8').replace(/\\r\\n/g, '\\n');
   // Inject all chunks, looping until no marker remains: component chunks may
   // themselves contain other injection markers (e.g. the updater constants
   // lived between EnhanceBar and UpdaterCard), so a single pass would leave
   // nested markers unexpanded.
   const injections = [
+    ['// @dsh-client-voice-postprocess-inject\\n', voicePostprocessChunk],
     ['// @dsh-client-i18n-inject', i18nChunk],
     ['// @dsh-client-constants-inject', constantsChunk],
     ['// @dsh-client-state-inject', stateChunk],

@@ -1,0 +1,38 @@
+{
+  "methods": [
+    "enhance",
+    "enhance/progress",
+    "cancel",
+    "models/list",
+    "models/current",
+    "models/resolve",
+    "models/test",
+    "models/stats",
+    "models/autochain",
+    "template/default",
+    "logs/last",
+    "config/get",
+    "config/set",
+    "voice/status",
+    "voice/correct"
+  ],
+  "configKeys": [
+    "version",
+    "fallback",
+    "customModels",
+    "order",
+    "params",
+    "template",
+    "mode",
+    "context",
+    "memory",
+    "updater",
+    "voice"
+  ],
+  "status": [
+    "changed",
+    "unchanged",
+    "skipped",
+    "failed"
+  ]
+}

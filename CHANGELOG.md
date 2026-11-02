@@ -17,6 +17,11 @@
 
 ## [Unreleased]
 
+- **目标模式第二批：语音后处理计划抽成共享领域模块（架构/测试 · 2026-11-02 · [PE-F02]）**：新增 `src/shared/voice/postprocess-plan.cjs`，把「清口水词 → 识别纠错 → 自动整理」的开关矩阵与顺序收敛为纯函数；`src/client/voice/hotkey.js` 的识别完成调度口改读同一计划，清口水词与纠错/增强不再各写一份组合分支。构建器把共享源码作为字符串注入 client 产物，仍自包含、无 `require`。用户可见名称、RPC 名、配置键与默认值未改。**已实测**：`test/voice-postprocess-plan.test.cjs` 7/7；`test/correction-step.test.cjs` 17/17；`test/filler.test.cjs` 20/20；入口/bundle/chunk 契约/计划合计 58/58；`build-client --check` 与 `build-host --check` 一致；`rpc-manifest --check` 15/15。
+
+- **目标模式第一批：契约快照 + 用户可见文案冻结（架构/测试 · 2026-11-02 · [PE-F01]）**：新增 src/shared/contracts（15 条线上 RPC / 11 个配置键 / 4 个结果状态）与 test/contracts.test.cjs，契约直接与 scripts/rpc-manifest.mjs --json 的实时注册面逐项比对；新增 test/ui-freeze.test.cjs 与 test/fixtures/ui-freeze/i18n.source.txt，把当前中文/英文界面源码快照冻结，任何用户可见名称或文案变化都会红。两项测试已登记进 npm test。**本轮不改运行行为、不改任何界面文案、不改 RPC/配置键。已实测**：node --test test/contracts.test.cjs test/ui-freeze.test.cjs 3/3 通过；node scripts/rpc-manifest.mjs --check exit 0（15/15 一致）；node scripts/dead-code-gate.mjs R1–R7 全过；双产物 --check 一致。⚠ 聚合 npm test 本轮出现输出停止后不退出，未取得全量完成读数，后续按逐文件隔离验证补齐。
+
+
 - **门禁 5 环 → 7 环：两道「拆包前置」cross 环接进 `gate`（治理/门禁 · 2026-10-21 · [PE-F01]（flow: 装配与门禁））**：`CHG-293` 审计判出「两道环只在 `npm test` 上、没装到门禁上」⇒ 本轮接成 **第 6、7 环**。
   **① `pkg-identity`**（`scripts/split-identity.mjs`）：拦「**两包 identity 撞车**」——loader entry id / client 模块 id / RPC 路由前缀 / RPC 方法名四面，任一撞即红。**为什么必须进 gate**：撞了宿主 `composeEntries` **不报错不告警**（实测 `warns= []`），而 `git mv` 会重排全部路径，正是它最该拦的时刻。
   **② `shared-fns`**（`scripts/split-shared-fns.mjs`）：拦「**两包各一份的 7 个共享 host 函数漂移**」——逐字节相等，任一处不同即红并点名函数。漂移的后果是同一输入在两个包给出两种结果。
