@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+- **目标模式语音配置契约（架构/测试 · 2026-11-03 · [PE-F04]）**：新增 `src/shared/contracts/voice-config.cjs` 与 `test/voice-config-contract.test.cjs`（4 条），把语音配置的 5 个内部键与默认值冻结，并直接对照 `src/client/voice/state.js` 的现有事实源。**尚未让运行期消费**：现有配置同步与白名单保持原样，避免本批引入双读源。
+
 - **目标模式 Client 可见状态映射（架构/测试 · 2026-11-03 · [PE-F04]）**：新增 `src/shared/contracts/ui-state.cjs` 与 `test/ui-state.test.cjs`（4 条），把纠错六态固定为六个互不相同的展示键；未知相位回退 idle。**尚未接入渲染层**：现有 `correctionPhaseView` 保持原样，本模块只作为后续 client 域拆分的契约面。用户可见文案未改。
 
 - **目标模式增强阶段契约（架构/测试 · 2026-11-02 · [PE-F02]）**：新增 `src/shared/contracts/enhance-stages.cjs` 与 `test/enhance-stages.test.cjs`（4 条），把增强阶段顺序固定为现有线上真名 `analyze → retrieve → assemble → llm`。**尚未切换 host Pipeline**：现有内联阶段注册保持原样，契约只供后续逐字段对照与迁移。
