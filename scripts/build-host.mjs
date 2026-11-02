@@ -104,6 +104,14 @@ function buildHost() {
   const correctionRunnerChunk = 'const __DSH_CORRECTION_RUNNER__ = ' + correctionRunnerBundle.code
     + ';\nconst {\n' + Object.keys(require('../src/host/correction-runner.cjs')).map((k) => '  ' + k + ',').join('\n')
     + '\n} = __DSH_CORRECTION_RUNNER__;\n';
+  // 目标模式：增强运行时辅助域（降级/预算/可中断闸/重试策略/进度）迁为普通模块。
+  const enhanceRuntimeBundle = bundleModules({ root, entry: 'src/host/enhance-runtime.cjs' });
+  if (!enhanceRuntimeBundle.modules.includes('src/host/enhance-runtime.cjs')) {
+    throw new Error('[build-host] 增强运行时模块未进入打包图');
+  }
+  const enhanceRuntimeChunk = 'const __DSH_ENHANCE_RUNTIME__ = ' + enhanceRuntimeBundle.code
+    + ';\nconst {\n' + Object.keys(require('../src/host/enhance-runtime.cjs')).map((k) => '  ' + k + ',').join('\n')
+    + '\n} = __DSH_ENHANCE_RUNTIME__;\n';
   const enhanceChunk = loadChunk('src/host/enhance-handlers.js');
 
   // Inject all chunks, looping until no marker remains (same policy as
@@ -117,6 +125,7 @@ function buildHost() {
     ['// @dsh-correction-switch-inject', correctionSwitchChunk],
     ['// @dsh-enhance-result-inject', enhanceResultChunk],
     ['// @dsh-correction-runner-inject', correctionRunnerChunk],
+    ['// @dsh-enhance-runtime-inject', enhanceRuntimeChunk],
     ['// @dsh-enhance-inject', enhanceChunk],
   ];
 
