@@ -112,6 +112,14 @@ function buildHost() {
   const enhanceRuntimeChunk = 'const __DSH_ENHANCE_RUNTIME__ = ' + enhanceRuntimeBundle.code
     + ';\nconst {\n' + Object.keys(require('../src/host/enhance-runtime.cjs')).map((k) => '  ' + k + ',').join('\n')
     + '\n} = __DSH_ENHANCE_RUNTIME__;\n';
+  // 目标模式：增强 analyze 阶段迁为普通模块（配置/模板/记忆/场景）。
+  const enhanceAnalyzeBundle = bundleModules({ root, entry: 'src/host/enhance-analyze.cjs' });
+  if (!enhanceAnalyzeBundle.modules.includes('src/host/enhance-analyze.cjs')) {
+    throw new Error('[build-host] 增强 analyze 模块未进入打包图');
+  }
+  const enhanceAnalyzeChunk = 'const __DSH_ENHANCE_ANALYZE__ = ' + enhanceAnalyzeBundle.code
+    + ';\nconst {\n' + Object.keys(require('../src/host/enhance-analyze.cjs')).map((k) => '  ' + k + ',').join('\n')
+    + '\n} = __DSH_ENHANCE_ANALYZE__;\n';
   const enhanceChunk = loadChunk('src/host/enhance-handlers.js');
 
   // Inject all chunks, looping until no marker remains (same policy as
@@ -126,6 +134,7 @@ function buildHost() {
     ['// @dsh-enhance-result-inject', enhanceResultChunk],
     ['// @dsh-correction-runner-inject', correctionRunnerChunk],
     ['// @dsh-enhance-runtime-inject', enhanceRuntimeChunk],
+    ['// @dsh-enhance-analyze-inject', enhanceAnalyzeChunk],
     ['// @dsh-enhance-inject', enhanceChunk],
   ];
 

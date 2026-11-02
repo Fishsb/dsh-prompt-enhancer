@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+- **目标模式：增强 analyze 阶段迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：新增 `src/host/enhance-analyze.cjs`，把配置解析、模型链建立、模板/纪律组装、记忆轮次准备、publish 场景缓存与 `state` 字段写入从 `enhance-handlers.js` 迁为普通 CommonJS 模块；`build-host.mjs` 由打包器内联并解构导出，`registerEnhanceStage('analyze', …)` 与四阶段顺序不变。新增 `test/host-enhance-analyze.test.cjs`（4 条）。**已实测**：analyze + bundle + 阶段 + P0 59/59；`build-host --check` 一致；host 产物外部 require 0。未 bump/tag/发布/安装/重启。
+
 - **目标模式：增强运行时辅助域迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：新增 `src/host/enhance-runtime.cjs`，把增强主链的降级登记、主预算剩余量与辅助超时钳制、可中断辅助闸、重试策略读取、安全上限、退避睡眠与进度写入从 `enhance-handlers.js` 迁为普通 CommonJS 模块；`build-host.mjs` 由打包器内联并解构导出，四阶段函数与 `enhance/progress` 字段不变。新增 `test/host-enhance-runtime.test.cjs`（6 条）。**已实测**：运行时 + P0 + bundle + 阶段 + 纠错域 66/66；`build-host --check` 一致；dead-code R1–R7 全过（client chunk 23 / host chunk 2 / 总 25）。未 bump/tag/发布/安装/重启。
 
 - **目标模式：语音纠错执行域迁为普通模块（架构/构建 · 2026-11-03 · [PE-F04]）**：新增 `src/host/correction-runner.cjs`，把 `voice/correct` 的开关守卫、历史参考、模型链与结果清洗从 `enhance-handlers.js` 字符串 chunk 迁为普通 CommonJS 模块；`build-host.mjs` 由打包器内联并解构导出，`runCorrection` 保留为薄包装，`voice/correct` RPC 注册仍在。RPC 名称、参数、返回字段（`ok/text/provider/model/historyChars/changed/fallbackUsed`、`skipped/skippedBy/switchFrom/code`）与错误码逐项不变；`changed` 仍以 `out !== text` 为唯一判据。新增 `test/host-correction-runner.test.cjs`（5 条）并登记 `npm test`；`correction-guard` 的夹具与 V1/V2 变异锚点随执行域迁移更新，`correction-misfire` 的接线锁改读模块正文。**已实测**：纠错组合 184/188（余 4 项为清单漏登记，已修复）；清单 + 守卫 + HCR 复跑 31/31；`build-host --check` 一致；dead-code R1–R7 全过（client chunk 23 / host chunk 2 / 总 25）。未 bump/tag/发布/安装/重启。
