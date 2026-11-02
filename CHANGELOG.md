@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+- **目标模式增强结果提交（纯映射，架构/测试 · 2026-11-02 · [PE-F02]）**：新增 `src/shared/contracts/enhance-result.cjs` 与 `test/enhance-result.test.cjs`（7 条），覆盖成功/无改动/截断/超长/取消超时/空值。**尚未接入线上增强返回**：现有返回还含 `fallbackUsed/degraded` 条件字段，必须在逐字段对照后切换。
+
 - **目标模式状态层：统一结果状态纯函数（架构/测试 · 2026-11-02 · [PE-F02]）**：新增 `src/shared/contracts/result.cjs`（changed / unchanged / skipped / failed 的统一映射，无证据时保守判 unchanged）与 `test/result-status.test.cjs`（7 条）。本批只建立共享语义，**不先改线上返回结构**；后续再由增强、纠错与诊断分别消费。用户可见文案、RPC、配置键未改。
 
 - **目标模式第 1 批骨架：源码模块化打包器（架构/构建 · 2026-11-02 · [PE-F01]）**：新增 `scripts/lib/module-bundler.mjs`（确定性、无第三方依赖；支持 ESM/CommonJS 相对依赖、循环依赖、失败点名）与 `test/module-bundler.test.cjs`（6 条，含现有共享模块集成）。**尚未切换正式构建入口**：当前 `build-host.mjs` / `build-client.mjs` 仍产出既有自包含产物，新打包器只进入验证面，下一步再做逐字等价与切换。用户可见文案、RPC、配置键与安装形态未改。
