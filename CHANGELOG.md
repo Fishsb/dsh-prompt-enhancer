@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+- **目标模式增强阶段契约（架构/测试 · 2026-11-02 · [PE-F02]）**：新增 `src/shared/contracts/enhance-stages.cjs` 与 `test/enhance-stages.test.cjs`（4 条），把增强阶段顺序固定为现有线上真名 `analyze → retrieve → assemble → llm`。**尚未切换 host Pipeline**：现有内联阶段注册保持原样，契约只供后续逐字段对照与迁移。
+
 - **目标模式增强结果提交（纯映射，架构/测试 · 2026-11-02 · [PE-F02]）**：新增 `src/shared/contracts/enhance-result.cjs` 与 `test/enhance-result.test.cjs`（7 条），覆盖成功/无改动/截断/超长/取消超时/空值。**尚未接入线上增强返回**：现有返回还含 `fallbackUsed/degraded` 条件字段，必须在逐字段对照后切换。
 
 - **目标模式状态层：统一结果状态纯函数（架构/测试 · 2026-11-02 · [PE-F02]）**：新增 `src/shared/contracts/result.cjs`（changed / unchanged / skipped / failed 的统一映射，无证据时保守判 unchanged）与 `test/result-status.test.cjs`（7 条）。本批只建立共享语义，**不先改线上返回结构**；后续再由增强、纠错与诊断分别消费。用户可见文案、RPC、配置键未改。
