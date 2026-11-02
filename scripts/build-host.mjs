@@ -68,6 +68,15 @@ function buildHost() {
   }
   const correctionSwitchChunk = 'const __DSH_CORRECTION_SWITCH__ = ' + correctionSwitchBundle.code
     + ';\nconst CORRECTION_SWITCH = __DSH_CORRECTION_SWITCH__;\n';
+  // 目标模式：增强结果归一迁为普通模块；只附加可选 status，既有 RPC 字段不变。
+  const enhanceResultBundle = bundleModules({ root, entry: 'src/host/enhance-result-module.cjs' });
+  if (!enhanceResultBundle.modules.includes('src/host/enhance-result-module.cjs')
+    || !enhanceResultBundle.modules.includes('src/shared/contracts/result.cjs')) {
+    throw new Error('[build-host] 增强结果模块打包不完整');
+  }
+  const enhanceResultChunk = 'const __DSH_ENHANCE_RESULT__ = ' + enhanceResultBundle.code
+    + ';\nconst {\n' + Object.keys(require('../src/host/enhance-result-module.cjs')).map((k) => '  ' + k + ',').join('\n')
+    + '\n} = __DSH_ENHANCE_RESULT__;\n';
   const enhanceChunk = require('../src/host/enhance-handlers.js');
 
   // Inject all chunks, looping until no marker remains (same policy as
@@ -79,6 +88,7 @@ function buildHost() {
     ['// @dsh-pure-inject', pureChunk],
     ['// @dsh-enhance-pipeline-inject', pipelineChunk],
     ['// @dsh-correction-switch-inject', correctionSwitchChunk],
+    ['// @dsh-enhance-result-inject', enhanceResultChunk],
     ['// @dsh-enhance-inject', enhanceChunk],
   ];
 
