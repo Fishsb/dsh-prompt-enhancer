@@ -44,7 +44,14 @@ function buildHost() {
     + ';\nconst {\n' + Object.keys(require('../src/host/pure-module.cjs')).map((k) => '  ' + k + ',').join('\n')
     + '\n} = __DSH_PURE__;\n// ==PURE-END==\n';
   const diagnosticsChunk = require('../src/host/diagnostics.js');
-  const modelsChunk = require('../src/host/models.js');
+  // 目标模式：模型域纯逻辑已迁为普通 CommonJS 模块，由打包器内联。
+  const modelsBundle = bundleModules({ root, entry: 'src/host/models-module.cjs' });
+  if (!modelsBundle.modules.includes('src/host/models-module.cjs')) {
+    throw new Error('[build-host] 模型域模块未进入打包图');
+  }
+  const modelsChunk = 'const __DSH_MODELS__ = ' + modelsBundle.code
+    + ';\nconst {\n' + Object.keys(require('../src/host/models-module.cjs')).map((k) => '  ' + k + ',').join('\n')
+    + '\n} = __DSH_MODELS__;\n';
   const enhanceChunk = require('../src/host/enhance-handlers.js');
 
   // Inject all chunks, looping until no marker remains (same policy as

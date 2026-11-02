@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+- **目标模式：host 模型域迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：把原 `src/host/models.js` 迁移为普通 CommonJS 模块 `src/host/models-module.cjs`，由 `build-host.mjs` 的打包器内联为 `__DSH_MODELS__`；旧 chunk 退役。模型链、能力目录缓存、自适应链与探测逻辑的正文与冻结基线逐字一致，导出面 10 项同名同型。新增 `test/host-models-module.test.cjs`（4 条等价锁）；host 门变异测试改用仍在位的 `diagnostics.js` 作为对象。用户可见文案、RPC、配置键与模型行为未改。**已实测**：模型域与 host 相关 89/89；门禁面 16/16；`build-host --check` / `build-client --check` 一致；dead-code R1–R7 全过（src/host 4→3 件 / chunk 27→26）。未 bump/tag/发布/安装/重启。
+
 - **目标模式：client 清口水词迁为普通模块（架构/构建 · 2026-11-03 · [PE-F04]）**：把原 `src/client/voice/filler.js`（`module.exports = "<源码字符串>"`）迁移为普通 CommonJS 模块 `src/client/voice/filler-module.cjs`，并新增 `src/client/shared-runtime.cjs` 作为客户端共享运行时入口；`build-client.mjs` 通过同一打包器生成 `__DSH_CLIENT_SHARED__` 并注入，旧 filler chunk 退役。新增 `test/client-filler-module.test.cjs`（4 条：旧 chunk 退役 / 正文与冻结基线逐字等价 / 23 项导出面同名同型 / 产物内联且无外部 require）；`test/filler.test.cjs` 改为直接求值冻结基线。死代码门禁 R2 的显式全局白名单登记打包运行时注入的 13 个符号，保持“未声明标识符必须点名”的强度。用户可见文案、RPC、配置键与清口水词行为未改。**已实测**：filler + chunk 契约 + 测试清单 37/37；语音相关跨模块 262/262；`build-client --check` / `build-host --check` / `sync-prompts --check` 一致；dead-code R1–R7 全过（client chunk 24→23）。未 bump/tag/发布/安装/重启。
 
 - **打包器内部装配函数改为 `__load`（修载体约束回归 · 2026-11-03 · [PE-F01]）**：`scripts/lib/module-bundler.mjs` 的内部加载函数从 `__require` 改名为 `__load`。产物语义不变；原因是 ADR-230 的载体判据按 `require(` 字面量计数，旧命名会让 `plugin-host.js` 被误判为“含模块系统”。**已实测**：`plugin-host.js` 的 `require(` 计数为 0；module-bundler / voice-config / host-pure-module 16/16；双产物 `--check` 一致。

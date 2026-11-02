@@ -85,13 +85,13 @@ test('CS-01 host 构建期契约门**在位**：源码面形态锁（两个半�
 });
 
 test('CS-02 host 门变异自证：任一 host chunk 改回裸 JS ⇒ **必红**且点名 marker', () => {
-  withFixture((dir) => unwrapToBareJs(dir, path.join('src', 'host', 'models.js')), (dir) => {
+  withFixture((dir) => unwrapToBareJs(dir, path.join('src', 'host', 'diagnostics.js')), (dir) => {
     const r = runScript(dir, path.join('scripts', 'build-host.mjs'), ['--check']);
     assert.equal(r.code, 1, 'host chunk 契约违反必须 exit 1（若为 0 则该门是恒真判据 = 假绿）');
     // 点名 marker（本例 = models 的注入标记）与**实得类型**
-    assert.match(r.out, /@dsh-models-inject/, '门必须点名违规 chunk 的 marker');
+    assert.match(r.out, /@dsh-diagnostics-inject/, '门必须点名违规 chunk 的 marker');
     // Windows 下 path.relative 产出反斜杠；点名判据须兼容两种分隔符。
-    assert.match(r.out, /src[\\/]host[\\/]models\.js/, '门必须点名违规 chunk 的文件');
+    assert.match(r.out, /src[\\/]host[\\/]diagnostics\.js/, '门必须点名违规 chunk 的文件');
     assert.match(r.out, /实得 object/, '门必须给出实得类型（不是只说"违反了"）');
   });
 });
