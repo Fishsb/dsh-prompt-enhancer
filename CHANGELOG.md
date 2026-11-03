@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+- **目标模式：client 配置与会话状态迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：新增 `src/client/state-module.cjs`，把 `configState`、配置迁移/校验、保存状态机、host 双向同步与草稿读写从 `state.js` chunk 迁出；`host` 显式注入，跨 chunk timer 改为 `timerRef` 并由 app 在 apply 时同步。旧 chunk 退役，client chunk 数由 21 降至 20。`config-persist` 的 P0 静态判据改读普通模块正文。新增 `test/client-state-module.test.cjs`（5 条）。**已实测**：状态 + 常量 + 候选 + client 组合 + 清单 31/31；config 持久化 12/12；bundle smoke 22/22；dead-code R1–R7 全过（client chunk 20 / host chunk 2 / 总 22）；`build-client --check` / `node --check lib/client.cjs` 一致。未 bump/tag/发布/安装/重启。
+
 - **目标模式：client 常量与配置默认值迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：新增 `src/client/constants-module.cjs`，把 `constants.js` 的 21 项纯常量、配置默认值、模式档位和标签辅助函数迁出并纳入客户端共享运行时；旧 chunk 退役，client chunk 数由 22 降至 21。`settings-layout-audit`/浏览器驱动、R2 白名单与共享运行时完整性门同步。新增 `test/client-constants-module.test.cjs`（4 条）。**已实测**：常量 + 候选 + client 组合 + 布局 + 清单 50/50；bundle smoke 22/22；dead-code R1–R7 全过（client chunk 21 / host chunk 2 / 总 23）；`build-client --check` / `node --check lib/client.cjs` 一致。未 bump/tag/发布/安装/重启。
 
 - **目标模式：client 模型候选函数迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：新增 `src/client/model-helpers-module.cjs` 并纳入客户端共享运行时，`buildCandidates` 从 `model-helpers.js` 字符串 chunk 迁出；旧 chunk 退役，client chunk 数由 23 降至 22。`settings-layout-audit`/浏览器驱动同步读取普通模块源码，保持布局量测同源；R2 白名单显式登记共享运行时注入的 `buildCandidates`。新增 `test/client-model-helpers-module.test.cjs`（4 条）。**已实测**：候选模块 + client 组合 + 清单 22/22；布局几何/chunk 契约通过；bundle smoke 22/22；dead-code R1–R7 全过；`build-client --check` / `node --check lib/client.cjs` 一致。未 bump/tag/发布/安装/重启。
