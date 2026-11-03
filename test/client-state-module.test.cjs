@@ -53,11 +53,11 @@ test('CSTATE-04 host 启动同步成功后写入 sanitize 结果并解除 fresh'
 
 test('CSTATE-05 产物内联状态模块，app 同步 timerRef', () => {
   const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/shared-runtime.cjs'), 'utf8');
-  const app = fs.readFileSync(path.join(REPO_ROOT, 'src/client/app.js'), 'utf8');
+  const app = fs.readFileSync(path.join(REPO_ROOT, 'src/client/app-module.cjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
   assert.ok(shared.includes("require('./state-module.cjs')"));
   assert.ok(app.includes('timerRef.value = timerSvc'));
   assert.ok(client.includes('src/client/state-module.cjs'));
-  assert.ok(client.includes('createClientState({ host })'));
+  assert.ok(client.includes('createClientState({ host, timerRef: __DSH_TIMER_REF__ })'));
   assert.ok(client.includes('timerRef.value = timerSvc'));
 });

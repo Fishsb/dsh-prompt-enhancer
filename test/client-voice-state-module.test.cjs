@@ -161,7 +161,7 @@ test('CVSTATE-06 产物内联状态模块，共享运行时暴露 fillerState，
   assert.ok(build.includes("'// @dsh-client-voice-recorder-inject\\n', ''"));
   assert.ok(shared.includes('fillerState: filler.fillerState'));
   assert.ok(client.includes('src/client/voice/state-module.cjs'));
-  assert.ok(client.includes('__DSH_VOICE_STATE__.createVoiceState'));
+  assert.ok(client.includes('__DSH_VOICE_RUNTIME__.createVoiceState'));
   assert.equal(client.includes('src/client/voice/state.js'), false);
   assert.equal(client.includes('src/client/voice/recorder.js'), false);
   assert.equal((client.match(/require\(['"]\.\.?\//g) || []).length, 0);

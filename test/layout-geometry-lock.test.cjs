@@ -20,11 +20,12 @@ const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const voiceModules = require('./helpers/client-voice-modules.cjs');
 const { ZH, EN } = require('./helpers/client-i18n.cjs');
 const { stylesBody } = require('./helpers/client-styles.cjs');
 
 function voiceSrc() {
-  return decodeChunk('src/client/voice/voice-section.js');
+  return voiceModules.voiceSectionSource();
 }
 function styleSrc() {
   return stylesBody();
@@ -327,7 +328,7 @@ test('GEOLOCK-A4 VoiceSection 全 client chunk 只挂载**一处**，且该处�
   // 目标模式会持续把 chunk 迁为普通模块，因此不能把当前剩余数量写成前置阈值。
   // 只锁“枚举非空 + 关键挂载点文件在扫描面内”，防止空枚举导致后面的否定断言空转。
   assert.ok(clients.length > 0, '前置：client chunk 枚举须非空（实得 ' + clients.length + '）');
-  assert.ok(clients.includes('src/client/voice/voice-section.js'),
+  assert.ok(clients.includes('src/client/voice/voice-section-module.cjs'),
     '前置：VoiceSection 的合法挂载点须在扫描面内');
   assert.ok(clients.includes('src/client/components/model-config-tab-module.cjs'),
     '前置：ModelConfigTab 的合法挂载点须在扫描面内');

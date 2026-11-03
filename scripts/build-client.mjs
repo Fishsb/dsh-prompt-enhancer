@@ -16,26 +16,35 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 function buildClient() {
   // The bundle skeleton (header comments + all injection markers) lives in
   // src/client/skeleton.js; every chunk is injected below.
-  let body = require('../src/client/skeleton.js');
+  // 骨架自身也走同一导出契约：裸 JS / 对象导出必须在替换前给出可归因的裁决，
+  // 不得让 `body.replace is not a function` 这类未归因异常先冒出来。
+  const skeletonChunk = require('../src/client/skeleton.js');
+  if (typeof skeletonChunk !== 'string') {
+    throw new Error('chunk 契约违反: src/client/skeleton.js 未导出字符串（实得 ' + typeof skeletonChunk + '）');
+  }
+  let body = skeletonChunk;
 
   // Normalize line endings BEFORE marker matching: source files may carry CRLF
   // (e.g. after a git checkout with core.autocrlf), which would break the
   // LF-based marker lookups. Chunks are normalized again at the end so the
   // committed artifacts stay byte-stable (LF).
   body = body.replace(/\r\n/g, '\n');
-  const appChunk = require('../src/client/app.js');
   // P1-a（2026-10-13 缩批）：RecordRTC vendor chunk 已退役（采集改浏览器原生 MediaRecorder）；
-  // mic-button / voice-insert 已退役（按钮 UI 交官方；热键与填入逻辑搬入 hotkey.js）。
+  // mic-button / voice-insert 已退役（按钮 UI 交官方；热键与填入逻辑搬入 hotkey 模块）。
   // CHG-117（2026-10-16 · 规整改造批）：清口水词 —— 本地纯规则清理器（不调模型）
   // CHG-143（纠错语音独立步批）：语音纠错的可见性状态 chunk（照 filler.js 既有模式）
-  const voiceCorrectionChunk = require('../src/client/voice/correction.js');
   // 目标模式：清口水词已迁为普通 CommonJS 模块，由共享运行时统一打包。
   const voiceFillerChunk = null;
   // P2-补做（2026-10-13 · CHG-011 / §4.6.2.6 · UD-0014 选 B）：官方录音路径增值桥
   // （包装标准 API 只观测；静音监测 + 自动增强挂到官方路径 ⇒ 两条入口能力一致）
-  const voiceOfficialBridgeChunk = require('../src/client/voice/official-bridge.js');
-  const voiceHotkeyChunk = require('../src/client/voice/hotkey.js');
-  const voiceSectionChunk = require('../src/client/voice/voice-section.js');
+  const voiceRuntime = bundleModules({
+    root,
+    entry: 'src/client/voice/runtime.cjs',
+  });
+  const appRuntime = bundleModules({
+    root,
+    entry: 'src/client/app-module.cjs',
+  });
   // 目标模式：共享契约与语音后处理计划是**普通 CommonJS 模块**，由打包器在构建期
   // 打成自包含表达式。产物内没有模块系统、没有外部 require；源码侧仍可正常
   // require/import 相对依赖（这是与旧 chunk 注入的分界点）。
@@ -127,6 +136,62 @@ function buildClient() {
   if (!settingsShellRuntime.modules.includes('src/client/components/model-plugins-section-module.cjs')) {
     throw new Error('[build-client] 设置页容器运行时打包不完整');
   }
+  for (const required of [
+    'src/client/voice/state-module.cjs',
+    'src/client/voice/correction-module.cjs',
+    'src/client/voice/official-bridge-module.cjs',
+    'src/client/voice/hotkey-module.cjs',
+    'src/client/voice/voice-section-module.cjs',
+  ]) {
+    if (!voiceRuntime.modules.includes(required)) {
+      throw new Error('[build-client] 语音运行时打包不完整：缺少 ' + required);
+    }
+  }
+  if (!appRuntime.modules.includes('src/client/app-module.cjs')) {
+    throw new Error('[build-client] 客户端装配入口打包不完整');
+  }
+  const voiceStateChunk = 'const __DSH_VOICE_RUNTIME__ = ' + voiceRuntime.code + ';'
+    // timerSvc 在 app.apply 之前就可能被组件工厂捕获；用可变代理保证服务晚到仍然生效。
+    + '\nconst __DSH_TIMER_REF__ = { value: null };'
+    + '\nconst timerSvc = {'
+    + '\n  timeout(fn, ms) {'
+    + '\n    const t = __DSH_TIMER_REF__.value;'
+    + '\n    if (t && typeof t.timeout === "function") return t.timeout(fn, ms);'
+    + '\n    if (typeof setTimeout === "function") { const id = setTimeout(fn, ms); return () => { try { clearTimeout(id); } catch (e) {} }; }'
+    + '\n    return () => {};'
+    + '\n  },'
+    + '\n  interval(fn, ms) {'
+    + '\n    const t = __DSH_TIMER_REF__.value;'
+    + '\n    if (t && typeof t.interval === "function") return t.interval(fn, ms);'
+    + '\n    if (typeof setInterval === "function") { const id = setInterval(fn, ms); return () => { try { clearInterval(id); } catch (e) {} }; }'
+    + '\n    return () => {};'
+    + '\n  },'
+    + '\n};'
+    + '\nconst __DSH_VOICE_STATE__ = __DSH_VOICE_RUNTIME__.createVoiceState({\n'
+    + '  host,\n'
+    + '  storage: typeof localStorage !== "undefined" ? localStorage : null,\n'
+    + '  timerSvc,\n'
+    + '  fillerState,\n'
+    + '  defaults: __VOICE_CONFIG_DEFAULTS__,\n'
+    + '  console: typeof console !== "undefined" ? console : null,\n'
+    + '});\nconst {\n'
+    + '  VOICE_CFG_KEY, VOICE_CFG_DEFAULTS, normalizeVadSilenceMs, vadSilenceMsOf, vadRequiredQuiet,\n'
+    + '  voiceCfgState, mergeVoice, saveVoiceCfg, subscribeVoiceConfig, syncVoiceFromHost,\n'
+    + '} = __DSH_VOICE_STATE__;\n'
+    + 'const __DSH_CORRECTION__ = __DSH_VOICE_RUNTIME__.createCorrectionState({\n'
+    + '  voiceCfgState, correctionStateCore: __DSH_CORRECTION_STATE__,\n'
+    + '});\nconst {\n  CORRECTION_PHASES, correctionState, notifyCorrection, subscribeCorrection,\n'
+    + '  markCorrectionSkipped, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed,\n'
+    + '  correctionPhaseOf, correctionPhaseKnown, correctionPhaseView, correctionSnapshot,\n'
+    + '  correctionFailureTicket, consumeCorrectionFailure,\n'
+    + '} = __DSH_CORRECTION__;\n'
+    + 'const officialVoiceBridge = __DSH_VOICE_RUNTIME__.createOfficialVoiceBridge({\n'
+    + '  window: typeof window !== "undefined" ? window : null,\n'
+    + '  document: typeof document !== "undefined" ? document : null,\n'
+    + '  navigator: typeof navigator !== "undefined" ? navigator : null,\n'
+    + '  MutationObserver: typeof MutationObserver !== "undefined" ? MutationObserver : null,\n'
+    + '  voiceCfgState, vadRequiredQuiet, vadSilenceMsOf,\n'
+    + '});\n';
   const sharedRuntimeChunk = 'const __DSH_SHARED__ = ' + sharedContractsRuntime.code
     + ';\nconst __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'
     + '\nconst planVoicePostprocess = __DSH_SHARED__.planVoicePostprocess;'
@@ -142,7 +207,7 @@ function buildClient() {
     + ';\nconst {\n' + Object.keys(require('../src/client/shared-runtime.cjs'))
       .filter((k) => !['CORRECTION_PHASES', 'correctionPhaseKnown', 'correctionPhaseOf', 'correctionFailureTicket', 'correctionFailureConsume'].includes(k))
       .map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_CLIENT_SHARED__;\n';
+    + '\n} = __DSH_CLIENT_SHARED__;\n' + voiceStateChunk;
   // Inject all chunks, looping until no marker remains: component chunks may
   // themselves contain other injection markers (e.g. the updater constants
   // lived between EnhanceBar and UpdaterCard), so a single pass would leave
@@ -153,7 +218,7 @@ function buildClient() {
     ['// @dsh-client-constants-inject', sharedRuntimeChunk],
     ['// @dsh-client-voice-postprocess-inject\n', ''],
     ['// @dsh-client-i18n-inject', ''],
-    ['// @dsh-client-state-inject', 'const __DSH_CLIENT_STATE__ = createClientState({ host });\nconst {\n'
+    ['// @dsh-client-state-inject', 'const __DSH_CLIENT_STATE__ = createClientState({ host, timerRef: __DSH_TIMER_REF__ });\nconst {\n'
       + Object.keys(require('../src/client/state-module.cjs').createClientState({ host: { call: () => Promise.resolve({ ok: true, config: null }) } }))
         .map((k) => '  ' + k + ',').join('\n')
       + '\n} = __DSH_CLIENT_STATE__;\n'],
@@ -170,7 +235,7 @@ function buildClient() {
       }))
         .map((k) => '  ' + k + ',').join('\n')
       + '\n} = __DSH_CLIENT_HELPERS__;\n'],
-    ['// @dsh-client-comp-enhance-button-inject\n', 'let timerSvc = null;\nconst __DSH_ENHANCE_COMPONENTS__ = ' + enhanceComponentsRuntime.code + ';'],
+    ['// @dsh-client-comp-enhance-button-inject\n', 'const __DSH_ENHANCE_COMPONENTS__ = ' + enhanceComponentsRuntime.code + ';'],
     ['// @dsh-client-comp-enhance-bar-inject\n', ''],
     ['// @dsh-client-comp-marquee-select-inject\n', ''],
     ['// @dsh-client-comp-collapsible-section-inject\n', 'const __DSH_NAVIGATION__ = ' + navigationRuntime.code
@@ -179,7 +244,12 @@ function buildClient() {
       + '  React,\n'
       + '  window: typeof window !== "undefined" ? window : null,\n'
       + '  document: typeof document !== "undefined" ? document : null,\n'
-      + '});\n'],
+      + '});\nconst __DSH_VOICE_SECTION__ = __DSH_VOICE_RUNTIME__.createVoiceSection({\n'
+      + '  React, makeT, host, voiceCfgState, subscribeVoiceConfig, saveVoiceCfg, syncVoiceFromHost,\n'
+      + '  vadSilenceMsOf, normalizeVadSilenceMs, CollapsibleSection, officialVoiceBridge, fillerSnapshot,\n'
+      + '  subscribeFiller, correctionSnapshot, subscribeCorrection, setTimeout, clearTimeout,\n'
+      + '  window: typeof window !== "undefined" ? window : null,\n'
+      + '});\nconst VoiceSection = __DSH_VOICE_SECTION__.VoiceSection;\n'],
     ['// @dsh-client-comp-model-main-section-inject\n', 'const __DSH_MODEL_SETTINGS__ = ' + modelSettingsRuntime.code
       + ';\nconst ModelMainSection = __DSH_MODEL_SETTINGS__.createModelMainSection({\n'
       + '  React, CollapsibleSection, makeT, host, DEFAULT_MODEL_CHAIN, getLastDraft, timerSvc,\n'
@@ -202,24 +272,21 @@ function buildClient() {
       + '  React, makeT, dshEnhId, subscribeConfig, subscribeSaveStatus, saveStatus, ModelConfigTab, ParamsTab,\n'
       + '});\nconst ModelPluginsSection = __DSH_SETTINGS_SHELL_API__.ModelPluginsSection;\n'
       + 'const CordisBadgePlaceholder = __DSH_SETTINGS_SHELL_API__.CordisBadgePlaceholder;\n'],
-    ['// @dsh-client-voice-correction-inject\n', voiceCorrectionChunk],
+    ['// @dsh-client-voice-correction-inject\n', ''],
     ['// @dsh-client-voice-filler-inject\n', ''],
-    ['// @dsh-client-voice-state-inject\n', 'const __DSH_VOICE_STATE__ = ' + voiceStateRuntime.code + ';'
-      + '\nconst {\n'
-      + '  VOICE_CFG_KEY, VOICE_CFG_DEFAULTS, normalizeVadSilenceMs, vadSilenceMsOf, vadRequiredQuiet,\n'
-      + '  voiceCfgState, mergeVoice, saveVoiceCfg, subscribeVoiceConfig, syncVoiceFromHost,\n'
-      + '} = __DSH_VOICE_STATE__.createVoiceState({\n'
-      + '  host,\n'
-      + '  storage: typeof localStorage !== "undefined" ? localStorage : null,\n'
-      + '  timerSvc,\n'
-      + '  fillerState,\n'
-      + '  defaults: __VOICE_CONFIG_DEFAULTS__,\n'
-      + '  console: typeof console !== "undefined" ? console : null,\n'
-      + '});\n'],
+    ['// @dsh-client-voice-state-inject\n', ''],
     ['// @dsh-client-voice-recorder-inject\n', ''],
-    ['// @dsh-client-voice-official-bridge-inject\n', voiceOfficialBridgeChunk],
-    ['// @dsh-client-voice-hotkey-inject\n', voiceHotkeyChunk],
-    ['// @dsh-client-voice-comp-section-inject\n', voiceSectionChunk],
+    ['// @dsh-client-voice-official-bridge-inject\n', ''],
+    ['// @dsh-client-voice-hotkey-inject\n', 'const __DSH_HOTKEY__ = __DSH_VOICE_RUNTIME__.createVoiceHotkey({\n'
+      + '  React, host, voiceCfgState, subscribeVoiceConfig, isEnhancing, subscribe, storeFor,\n'
+      + '  notify, enhance,\n'
+      + '  timerSvc, officialVoiceBridge, makeT, ZH, MarqueeSelect, CollapsibleSection, setInterval, clearInterval,\n'
+      + '  setTimeout, navigator: typeof navigator !== "undefined" ? navigator : null,\n'
+      + '  window: typeof window !== "undefined" ? window : null, configState,\n'
+      + '  markCorrectionSkipped, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed,\n'
+      + '  notifyCorrection, correctionState, planVoicePostprocess, voicePostprocessHas, stripFillers, runFiller,\n'
+      + '});\nconst VoiceHotkeyHost = __DSH_HOTKEY__.VoiceHotkeyHost;\n'],
+    ['// @dsh-client-voice-comp-section-inject\n', ''],
     ['// @dsh-client-styles-inject\n', 'const EnhanceButton = __DSH_ENHANCE_COMPONENTS__.createEnhanceButton({\n'
       + '  React, makeT, dshEnhId, subscribe, storeFor, notify, releaseStoreIfIdle, setLastDraft,\n'
       + '  subscribeConfig, subscribeCorrection, subscribeVoiceConfig, setActiveSession, getActiveSession,\n'
@@ -230,7 +297,11 @@ function buildClient() {
       + '});\nconst EnhanceBar = __DSH_ENHANCE_COMPONENTS__.createEnhanceBar({\n'
       + '  React, makeT, subscribe, storeFor, notify, releaseStoreIfIdle, errorKey,\n'
       + '});\n'],
-    ['// @dsh-client-app-inject\n', appChunk],
+    ['// @dsh-client-app-inject\n', 'const __DSH_APP__ = ' + appRuntime.code + ';\n'
+      + 'return __DSH_APP__.createClientApp({\n'
+      + '  styles, CSS, ZH, EN, timerRef, timerSvc, officialVoiceBridge,\n'
+      + '  ModelPluginsSection, CordisBadgePlaceholder, EnhanceButton, VoiceHotkeyHost, EnhanceBar,\n'
+      + '});\n'],
   ];
   // ── chunk 契约门（2026-10-17 事故根治）────────────────────────────────
   // 每个 chunk 必须是**字符串**（`module.exports = "<源码文本>"`）。

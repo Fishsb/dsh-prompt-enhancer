@@ -26,6 +26,7 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const BODY = fs.readFileSync(path.join(ROOT, 'plugin-host.js'), 'utf8');
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const voiceModules = require('./helpers/client-voice-modules.cjs');
 
 /**
  * 求值 host bundle（与 `lib/index.cjs` 同一机制：`new Function('harness', BODY)`）。
@@ -194,7 +195,7 @@ test('GUARD-C8 守卫在 `chain` 建立之前：即使 fallback 为空（NO_MODE
 
 // ───────────── ④ 纵深防御：client 那道拦截**必须还在**（用户裁定保留） ─────────────
 test('GUARD-D1 ⭐ 两层防线都在：client 侧调度口仍读开关（不得以「服务端有了」为由拆掉）', () => {
-  const hotkey = decodeChunk('src/client/voice/hotkey.js');
+  const hotkey = voiceModules.hotkeySource();
   assert.ok(hotkey.includes('const runCorrectionThenMaybeEnhance = () =>'),
     'client 侧调度口须仍在（用户裁定：保留，纵深防御两层）');
   assert.ok(/const correctionCfgOn = \(\) => \{/.test(hotkey), 'client 侧开关读取须仍在');

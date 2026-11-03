@@ -170,19 +170,6 @@ function browserDriver() {
       makeT, host, C.DEFAULT_MODEL_CHAIN, function () { return ''; }, null);
     var ModelMainSection = modelSettings.ModelMainSection;
     var FallbackRow = modelSettings.FallbackRow;
-    var voiceSectionFactory = new Function(
-      'React', 'CollapsibleSection', 'MarqueeSelect', 'ZH', 'EN', 't', 'makeT', 'host', 'configState',
-      'saveConfig', 'subscribeConfig', 'subscribeSaveStatus', 'saveStatus', 'voiceCfgState', 'saveVoiceCfg',
-      'subscribeVoiceConfig', 'syncVoiceFromHost', 'vadSilenceMsOf', 'normalizeVadSilenceMs',
-      'voiceHotkeyDisplay', 'officialVoiceBridge', 'fillerSnapshot', 'correctionSnapshot',
-      'subscribeFiller', 'subscribeCorrection', 'dshEnhId', 'timerSvc', 'getLastDraft',
-      'buildCandidates', 'DEFAULT_MODEL_CHAIN', 'MODE_OPTIONS', 'MODE_VALUES',
-      'MODE_BUDGET_OPTIONS', 'MODE_TIMEOUT_OPTIONS', 'MODE_MAXTOKENS_OPTIONS',
-      'MODE_OUTPUTLIMIT_OPTIONS', 'MODE_PARAMS_DEFAULT', 'MODE_BUDGET_DEFAULT',
-      'modeShortLabel', 'modeLabel', 'TEMPLATE_BUILTIN_KEYS', 'TEMPLATE_CUSTOM_MAX',
-      'TEMPLATE_TEXT_MAX', 'TEMPLATE_NAME_MAX', 'customPickIndex',
-      SRC['src/client/voice/voice-section.js']
-      + '\n;return VoiceSection;');
     var modelConfigTabFactory = new Function(
       'React', 'makeT', 'configState', 'subscribeConfig', 'host', 'DEFAULT_MODEL_CHAIN', 'saveConfig',
       'buildCandidates', 'ModelMainSection', 'VoiceSection',
@@ -224,18 +211,28 @@ function browserDriver() {
       'TEMPLATE_NAME_MAX', 'customPickIndex'];
     var idSeq = 0;
     var dshEnhId = function (p) { idSeq += 1; return (p || 'x') + '-' + idSeq; };
-    var modelConfigArgs = [React, CollapsibleSection, MarqueeSelect, ZH, dicts.EN, t, makeT, host,
-      configState, function () {}, noop, noop, saveStatus, S.voiceCfgState,
-      function () {}, noop, function () {}, S.vadSilenceMsOf, S.normalizeVadSilenceMs,
-      function (c) { return String(c || ''); }, officialVoiceBridge,
-      function () { return fSnap; }, function () { return cSnap; }, noop, noop,
-      dshEnhId, null, function () { return ''; }, MH.buildCandidates,
-      C.DEFAULT_MODEL_CHAIN, C.MODE_OPTIONS, C.MODE_VALUES, C.MODE_BUDGET_OPTIONS,
-      C.MODE_TIMEOUT_OPTIONS, C.MODE_MAXTOKENS_OPTIONS, C.MODE_OUTPUTLIMIT_OPTIONS,
-      C.MODE_PARAMS_DEFAULT, C.MODE_BUDGET_DEFAULT, C.modeShortLabel, C.modeLabel,
-      C.TEMPLATE_BUILTIN_KEYS, C.TEMPLATE_CUSTOM_MAX, C.TEMPLATE_TEXT_MAX,
-      C.TEMPLATE_NAME_MAX, C.customPickIndex];
-    var VoiceSection = voiceSectionFactory.apply(null, modelConfigArgs);
+    var voiceSectionFactory = new Function(
+      'React', 'makeT', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'saveVoiceCfg', 'syncVoiceFromHost',
+      'vadSilenceMsOf', 'normalizeVadSilenceMs', 'CollapsibleSection', 'officialVoiceBridge',
+      'fillerSnapshot', 'subscribeFiller', 'correctionSnapshot', 'subscribeCorrection',
+      'setTimeout', 'clearTimeout', 'window',
+      SRC['src/client/voice/voice-section-module.cjs']
+      + '\n;return createVoiceSection({'
+      + ' React: React, makeT: makeT, host: host, voiceCfgState: voiceCfgState,'
+      + ' subscribeVoiceConfig: subscribeVoiceConfig, saveVoiceCfg: saveVoiceCfg,'
+      + ' syncVoiceFromHost: syncVoiceFromHost, vadSilenceMsOf: vadSilenceMsOf,'
+      + ' normalizeVadSilenceMs: normalizeVadSilenceMs, CollapsibleSection: CollapsibleSection,'
+      + ' officialVoiceBridge: officialVoiceBridge, fillerSnapshot: fillerSnapshot,'
+      + ' subscribeFiller: subscribeFiller, correctionSnapshot: correctionSnapshot,'
+      + ' subscribeCorrection: subscribeCorrection, setTimeout: setTimeout, clearTimeout: clearTimeout,'
+      + ' voiceHotkeyDisplay: function (c) { return String(c || ""); },'
+      + ' window: typeof window !== "undefined" ? window : null'
+      + ' }).VoiceSection;');
+    var VoiceSection = voiceSectionFactory(React, makeT, host, S.voiceCfgState,
+      function () {}, function () {}, function () {}, S.vadSilenceMsOf, S.normalizeVadSilenceMs,
+      CollapsibleSection, officialVoiceBridge, function () { return fSnap; },
+      function () {}, function () { return cSnap; }, function () {}, setTimeout, clearTimeout,
+      typeof window !== 'undefined' ? window : null);
     var ModelConfigTab = modelConfigTabFactory(React, makeT, configState, noop, host,
       C.DEFAULT_MODEL_CHAIN, function () {}, MH.buildCandidates, ModelMainSection, VoiceSection);
     var ParamsTab = paramsTabFactory(React, MarqueeSelect, makeT, dshEnhId, configState,

@@ -17,12 +17,12 @@
 //   VTP-V  变异自证：开关关闭分支挪到最前 ⇒ VTP-A 必红
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const voiceModules = require('./helpers/client-voice-modules.cjs');
 
-const VS = 'src/client/voice/voice-section.js';
+const readVoiceSection = () => voiceModules.voiceSectionSource();
 
 function diagSource() {
-  const src = decodeChunk(VS);
+  const src = readVoiceSection();
   const i = src.indexOf('  let text;');
   const j = src.indexOf('const diagTitle');
   assert.ok(i > 0 && j > i, '诊断分支切片锚点须在位（防锚点漂移后静默取到空段）');

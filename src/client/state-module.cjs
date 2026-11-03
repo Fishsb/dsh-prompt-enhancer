@@ -10,7 +10,8 @@ const {
 function createClientState(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};
   const host = d.host;
-  const timerRef = { value: null };
+  // app apply 时同步同一个可变引用；调用方未注入时保持自持有（单测/独立使用）。
+  const timerRef = d.timerRef || { value: null };
 
 const configState = { value: { ...CONFIG_DEFAULTS }, listeners: new Set(), fresh: true, unsupported: false, hostSync: null };
 

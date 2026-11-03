@@ -92,7 +92,7 @@ test('VOICE-P07 lib/client.cjs 产物含语音逻辑（P2：热键派发点击�
   assert.ok(client.includes('isEnhancing'), '产物缺 isEnhancing');
   assert.ok(!client.includes('function RecordRTC'), 'RecordRTC vendor 应已退役（P1-a）');
   // 自建采集链退役（UD-0016）：产物不得再含自建录音入口与自行转写**调用**
-  // （⚠ 看调用形态，不看裸串：hotkey.js 的退役说明注释里会提到该 RPC 名，那是允许的）
+  // （⚠ 看调用形态，不看裸串：热键模块的退役说明注释里会提到该 RPC 名，那是允许的）
   assert.equal(client.includes('startVoiceRecording'), false, '产物不得再含自建录音入口');
   // ⚠ CHG-117：该锁是"旧物不许复活"类（盘点 N-1）—— **必须保留**，不得因 RPC 删除而删。
   assert.equal(client.includes("host.call('voice/transcribe'"), false, '产物不得再含自行调 voice/transcribe 的调用点');
@@ -263,7 +263,7 @@ test('VOICE-P23 sanitizeVoiceCfg autoEnhance 白名单（host 透传存储）', 
   assert.equal(bad.autoEnhance, false, '非法回退 false');
 });
 
-// P1-a（2026-10-13 缩批）：自动增强触发链路自 mic-button.js **搬入 hotkey.js 的 VoiceHotkeyHost**；
+// P1-a（2026-10-13 缩批）：自动增强触发链路自 mic-button.js **搬入热键模块的 VoiceHotkeyHost**；
 // 判据强度不变（仍逐项断言「产物含该链路」），只把断言点换成现行实现位置。
 test('VOICE-P24 产物含 autoEnhance 触发链路 + i18n 键平衡（v3.2.17 +3 键 → 40）', () => {
   const client = readFileSync(join(__dirname, '..', 'lib', 'client.cjs'), 'utf8'); // 唯一 client 载体
@@ -291,7 +291,7 @@ test('VOICE-P24 产物含 autoEnhance 触发链路 + i18n 键平衡（v3.2.17 +3
 // CHG-103（2026-10-15 · `G-5` 修复）：语音配置**模块级启动同步**
 // ═══════════════════════════════════════════════════════════════════════════════
 // 病历：`syncVoiceFromHost()` 此前**只在设置页 VoiceSection 挂载时**被调用
-//   （`voice-section.js` 的 useEffect 是唯一调用点）⇒ **新 origin / 未进设置页**的会话里
+//   （语音设置模块的 useEffect 是唯一调用点）⇒ **新 origin / 未进设置页**的会话里
 //   `voiceCfgState` 始终是默认值（`hotkey: { enabled: false }`）⇒ 而 `VoiceHotkeyHost` 挂在
 //   `conversation.input.right`（与设置页无关）按它决定装不装监听 ⇒ **热键静默失效**。
 // 对照：增强模块 `src/client/state.js:366` **有**模块级 `syncConfigFromHost();`（两模块不对称）。

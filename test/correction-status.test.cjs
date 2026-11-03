@@ -11,9 +11,9 @@
 //   每态都给「相位读数 + 展示键 + 样式类」三项，并**成对做负控**（邻态不得同形）。
 //
 // ⚠ 判据面（三层，缺一层就是假绿）：
-//   1. 行为层：真实求值 correction.js chunk，**驱动** markCorrection* 三件，读 snapshot.phase
+//   1. 行为层：真实求值 correction 模块正文，**驱动** markCorrection* 三件，读 snapshot.phase
 //   2. 映射层：correctionPhaseView / correctionPhaseOf 的**优先级**（失败必须优先于正常态）
-//   3. 接线层：hotkey.js 调度口**确实**调用 markCorrection*（不是只定义了没人用）
+//   3. 接线层：热键模块调度口**确实**调用 markCorrection*（不是只定义了没人用）
 // ============================================================================
 const test = require('node:test');
 const assert = require('node:assert');
@@ -23,21 +23,16 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 const { i18nSource, ZH } = require('./helpers/client-i18n.cjs');
-// 目标模式：correction.js 消费构建期注入的纠错状态模块；测试沙箱必须提供同一符号。
+const voiceModules = require('./helpers/client-voice-modules.cjs');
+// 目标模式：纠错业务模块消费构建期注入的纠错状态模块；测试沙箱必须提供同一符号。
 const CORRECTION_STATE = require('../src/client/voice/correction-state-module.cjs');
 
-/** 求值 correction.js chunk，注入一个可控的 voiceCfgState（开关真值）。 */
+/** 求值纠错业务模块正文，注入一个可控的 voiceCfgState（开关真值）。 */
 function loadCorrection(opts) {
   const o = opts || {};
-  const src = decodeChunk('src/client/voice/correction.js');
+  const src = voiceModules.correctionSource();
   const voiceCfgState = { value: { correction: { enabled: o.enabled === true } } };
-  const factory = new Function(
-    'voiceCfgState', '__DSH_CORRECTION_STATE__',
-    src + '\n;return { correctionState, correctionSnapshot, subscribeCorrection, notifyCorrection,'
-    + ' markCorrectionSkipped, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed,'
-    + ' correctionPhaseOf, correctionPhaseView, correctionPhaseKnown, CORRECTION_PHASES,'
-    + ' correctionFailureTicket, consumeCorrectionFailure };'
-  );
+  const factory = new Function('voiceCfgState', '__DSH_CORRECTION_STATE__', src);
   return factory(voiceCfgState, CORRECTION_STATE);
 }
 
@@ -214,7 +209,7 @@ test('CHG184-S12 ⭐⭐ 位置纪律：failed 相位在任何推导路径下都�
 
 // ───────────────────── 接线层：调度口真的在用状态机 ─────────────────────
 test('CHG184-S13 ⭐ 接线：hotkey 调度口调用 markCorrectionStarted / Settled / Failed（不是只定义没人用）', () => {
-  const hotkey = decodeChunk('src/client/voice/hotkey.js');
+  const hotkey = voiceModules.hotkeySource();
   // ⚠ 会话归属批（2026-10-19）改形：四个 markCorrection* 都要带**本会话 sessionId**（相位归属），
   //   故本断言的形态从 'markCorrectionStarted()' 改为带参形态 —— ⛔ 不是放宽：
   //   原来只判「调了」，现在还判「把归属传对了」（判据**加强**）。
@@ -223,13 +218,13 @@ test('CHG184-S13 ⭐ 接线：hotkey 调度口调用 markCorrectionStarted / Set
   assert.ok(hotkey.includes("markCorrectionFailed('NETWORK', sessionId)"), 'catch 分支必须记失败并带归属（不得静默）');
   assert.ok(hotkey.includes('markCorrectionSkipped'), '跳过分支必须仍在（开关约束可见）');
   // 负控：调度口**不得**再自己增减计数（那会形成第二个真值）
-  assert.ok(!/corrState\.runs \+= 1/.test(hotkey), '⛔ 调度口不得自行累加 runs（单一事实源在 correction.js）');
+  assert.ok(!/corrState\.runs \+= 1/.test(hotkey), '⛔ 调度口不得自行累加 runs（单一事实源在纠错业务模块）');
   assert.ok(!/corrState\.changed \+= 1/.test(hotkey), '⛔ 调度口不得自行累加 changed');
   assert.ok(!/corrState\.failed \+= 1/.test(hotkey), '⛔ 调度口不得自行累加 failed');
 });
 
 test('CHG184-S14 ⭐ 接线（R3 迁移）：纠错状态不再注册独立元素，改由 ✨ 按钮承载；槽位面零新增', () => {
-  const app = decodeChunk('src/client/app.js');
+  const app = fs.readFileSync(path.join(ROOT, 'src/client/app-module.cjs'), 'utf8');
   // ① 注册面：order 12 的独立纠错条目必须已删除
   assert.equal(/id: 'correction-status'/.test(app), false, '⛔ 不得再注册独立的纠错状态槽位条目');
   // ② 但 ✨ 增强按钮仍必须注册在同一槽位（它是新的承载者）
@@ -296,7 +291,7 @@ test('CHG184-S16 ⭐ 五态文案**两两不同**（否则「可判」只是形�
 
 test('CHG184-S17 变异自证：把 UNCHANGED 与 SKIPPED 合并成一个相位 ⇒ S9 必须红', () => {
   // 本用例在**内存里**改坏状态机（不落盘），验证 S9 的判别力是**行为**而非字面量。
-  const src = decodeChunk('src/client/voice/correction.js');
+  const src = voiceModules.correctionSource();
   const mutated = src.replace(
     "    if (changed) {\n      correctionState.changed += 1;\n      correctionState.phase = CORRECTION_PHASES.CHANGED;\n    } else {\n      correctionState.phase = CORRECTION_PHASES.UNCHANGED;\n    }",
     "    if (changed) {\n      correctionState.changed += 1;\n      correctionState.phase = CORRECTION_PHASES.CHANGED;\n    } else {\n      correctionState.phase = CORRECTION_PHASES.SKIPPED;\n    }"
@@ -422,7 +417,9 @@ function loadButton(opts) {
       + '  correctionPhaseOf, CORRECTION_PHASES, correctionFailureTicket, consumeCorrectionFailure,\n'
       + '  correctionPhaseView,\n'
       + '});\n');
-  const corr = decodeChunk('src/client/voice/correction.js');
+  // 与 EnhanceButton 工厂拼接时必须用**模块正文**：模块源码自带的顶层 return
+  // 会让其后的按钮工厂声明不可达（表现为 EnhanceButton is not a function）。
+  const corr = voiceModules.correctionBody();
   const DICT = {
     enhanceButton: '优化',
     enhancing: '正在优化',
@@ -495,7 +492,7 @@ test('R3-B ⭐ 纠错结束 ⇒ 按钮回到默认态（逐字比对「优化」
 });
 
 test('R3-C ⭐ 不存在独立的状态元素（搜索范围：src/client/** 全量）', () => {
-  const app = decodeChunk('src/client/app.js');
+  const app = fs.readFileSync(path.join(ROOT, 'src/client/app-module.cjs'), 'utf8');
   // ① 注册面：不得再有 correction-status 注册
   assert.equal(/id: 'correction-status'/.test(app), false, '⛔ 不得再注册独立的纠错状态槽位条目');
   // ② 文件面：correction-status.js 必须已删除（范围：src/client/voice/）
@@ -530,7 +527,7 @@ test('R3-E ⭐ 失败态不静默：短暂提示「纠错失败」后自动复�
 });
 
 test('R3-F ⭐ 「没跑（开关关）」与「跑了但没改」的区分改由**诊断区**承担（不再靠常驻提示）', () => {
-  const vs = decodeChunk('src/client/voice/voice-section.js');
+  const vs = voiceModules.voiceSectionSource();
   const i = vs.indexOf('function CorrectionDiag');
   // ⚠ 2026-10-20 残留治理批：本区间原写死 2200 字符 —— 本批给 CorrectionDiag 补了「最近一次口径」
   //   的注释与分支（+1500 字符）⇒ 旧窗口会把**尾部**那句 `t('voiceCorrectionOff')` 切在窗口外。
@@ -730,7 +727,7 @@ test('SCOPE-R3 ⭐ 变异自证：按钮不回传归属 ⇒ SCOPE-R1 的判据�
   const mutant = eb.replace('correctionPhaseOf(corrSnap, sessionId)', 'correctionPhaseOf(corrSnap)');
   assert.notEqual(mutant, eb, '前置：变异锚点须命中（否则本条恒绿、没有判别力）');
   // 变异后：B 观察者拿到的是**全局** phase（= failed）⇒ R1 的核心断言必然失败
-  const corr = decodeChunk('src/client/voice/correction.js');
+  const corr = voiceModules.correctionSource();
   const c = new Function('voiceCfgState', '__DSH_CORRECTION_STATE__', corr + ';return { correctionSnapshot, correctionPhaseOf, markCorrectionStarted, markCorrectionSettled };')({ value: { correction: { enabled: true } } }, CORRECTION_STATE);
   c.markCorrectionStarted('sess-A');
   c.markCorrectionSettled({ ok: false, code: 'TIMEOUT' }, 'x', 'sess-A');
@@ -751,7 +748,7 @@ test('SCOPE-R3 ⭐ 变异自证：按钮不回传归属 ⇒ SCOPE-R1 的判据�
 //      ⇒ 同一场失败在**每一次**该会话的按钮重渲/切回时都再闪 4 秒。
 //
 // ⚠⚠ 本轮判据纪律（第 1 轮的教训）：**C 组必须落在渲染层**（真实组件渲染树读数），
-//   ⛔ 不得只判 correction.js 的纯函数 —— 纯函数全绿而界面照旧复发，正是上一轮栽的形态。
+//   ⛔ 不得只判纠错业务模块的纯函数 —— 纯函数全绿而界面照旧复发，正是上一轮栽的形态。
 //   故 C1/C2/C3 一律经 EnhanceButton 的**真实渲染树**取「按钮可见文本」，
 //   诊断组 D1/D2/D3 一律经 CorrectionDiag 的**真实渲染树**取「诊断行可见文本」。
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -762,13 +759,13 @@ function zhDict() {
 }
 
 /**
- * 渲染 **CorrectionDiag**（voice-section.js 的**真实 chunk**）并读回可见文本。
+ * 渲染 **CorrectionDiag**（语音设置模块的**真实正文**）并读回可见文本。
  * @param {object} snap correctionSnapshot() 形状的夹具
  * @param {boolean} cfgOn 开关真值（voiceCfgState.correction.enabled）
  * @returns {{text:string, titles:string[]}} 可见文本 + title（原始读数出口）
  */
 function renderCorrectionDiag(snap, cfgOn) {
-  const src = decodeChunk('src/client/voice/voice-section.js');
+  const src = voiceModules.voiceSectionSource();
   const zh = zhDict();
   const hooks = { state: [], effects: [] };
   let si = 0;
@@ -1073,8 +1070,8 @@ test('C5 边界：消费是**高水位**，只前进不后退，且幂等', () =
 
 // ───────────────────────── 变异自证（每条判据都要有牙）─────────────────────────
 
-const VS_SRC = () => decodeChunk('src/client/voice/voice-section.js');
-const CORR_SRC = () => decodeChunk('src/client/voice/correction.js');
+const VS_SRC = () => voiceModules.voiceSectionSource();
+const CORR_SRC = () => voiceModules.correctionBody();
 const EB_SRC = () => fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8');
 
 /** 用「改过的 voice-section」渲染诊断行（变异自证用）。 */

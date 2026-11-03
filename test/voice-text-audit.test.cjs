@@ -14,15 +14,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 // ⚠ 与同目录其它测试同款：CJS + 共享单一事实源的 chunk 解码器
 //   （scripts/lib/chunk-decode.mjs 是 ESM ⇒ require 拿到命名空间对象，取具名成员解构）
-const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const voiceModules = require('./helpers/client-voice-modules.cjs');
 const { i18nBody, ZH, EN } = require('./helpers/client-i18n.cjs');
 
-const VS = 'src/client/voice/voice-section.js';
+const readVoiceSection = () => voiceModules.voiceSectionSource();
 
 function dicts() {
   return { ZH, EN };
 }
-function vs() { return decodeChunk(VS); }
+function vs() { return readVoiceSection(); }
 
 // ─────────── VTX-A 主谓同词（用户点名的那条文案 bug 的**根因形态**）───────────
 test('VTX-A 诊断行不得「主语谓语同词」（清口水词：清口水词 的根因形态）', () => {

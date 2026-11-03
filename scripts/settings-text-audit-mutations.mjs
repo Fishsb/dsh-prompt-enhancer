@@ -100,25 +100,25 @@ expectCase('M2 超长文案塞进固定宽开关（不换行控件）', 'FAIL', 
 });
 
 expectCase('M3 关闭态（0 档）改回渲染长句读数', 'RED', async (root) => {
-  await patchChunk(root, 'src/client/voice/voice-section.js', [["vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : ''", "vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : t('voiceSilenceOff')"]]);
+  await patchPlainModule(root, 'src/client/voice/voice-section-module.cjs', [["vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : ''", "vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : t('voiceSilenceOff')"]]);
   return runTest(root, 'test/vad-silence.test.cjs', 'VADSIL-P14e');
 });
 
 expectCase('M4 删掉 startMissed 异常分支文案', 'RED', async (root) => {
   // 行为判据：该态改报正常分支 ⇒ VTP-C 必红（文本层查子串抓不到这种形态）
-  await patchChunk(root, 'src/client/voice/voice-section.js', [["else if (snap.startMissed > 0 && snap.sessionsStarted === 0) { text = t('voiceOfficialStartMissed'); cls = 'dsh-plg-note dsh-plg-upd-outdated'; }", "else if (snap.startMissed > 0 && snap.sessionsStarted === 0) { text = t('voiceOfficialArmed'); }"]]);
+  await patchPlainModule(root, 'src/client/voice/voice-section-module.cjs', [["else if (snap.startMissed > 0 && snap.sessionsStarted === 0) { text = t('voiceOfficialStartMissed'); cls = 'dsh-plg-note dsh-plg-upd-outdated'; }", "else if (snap.startMissed > 0 && snap.sessionsStarted === 0) { text = t('voiceOfficialArmed'); }"]]);
   return runTest(root, 'test/voice-text-position.test.cjs', 'VTP-C');
 });
 
 expectCase('M5 删掉 abandon 异常分支文案', 'RED', async (root) => {
   // 行为判据（VTP-C 求值真实分支链）：删掉该分支后降级态落到别的键 ⇒ 必红。
-  await patchChunk(root, 'src/client/voice/voice-section.js', [["else if (snap.abandonReason) { text = t('voiceOfficialAbandon'); cls = 'dsh-plg-note dsh-plg-upd-outdated'; }", "else if (snap.abandonReason) { text = t('voiceOfficialArmed'); }"]]);
+  await patchPlainModule(root, 'src/client/voice/voice-section-module.cjs', [["else if (snap.abandonReason) { text = t('voiceOfficialAbandon'); cls = 'dsh-plg-note dsh-plg-upd-outdated'; }", "else if (snap.abandonReason) { text = t('voiceOfficialArmed'); }"]]);
   return runTest(root, 'test/voice-text-position.test.cjs', 'VTP-C');
 });
 
 expectCase('M6 挤压根因回退：读数规则删掉 + 关闭态长句回来', 'FAIL', async (root) => {
   await patchPlainModule(root, 'src/client/styles-module.cjs', [["  '.dsh-plg-row > .dsh-plg-muted{flex:none;white-space:nowrap;max-width:40%;overflow:hidden;text-overflow:ellipsis}',\n", '']]);
-  await patchChunk(root, 'src/client/voice/voice-section.js', [["vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : ''", "vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : t('voiceSilenceOff')"]]);
+  await patchPlainModule(root, 'src/client/voice/voice-section-module.cjs', [["vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : ''", "vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : t('voiceSilenceOff')"]]);
   return runAudit(root);
 });
 

@@ -29,6 +29,7 @@ const ROOT = path.join(__dirname, '..');
  *  assertion 文案；共享解码器在**读取期**即 `throw`，错误**点名 chunk 文件**。
  *  ⚠ 取具名成员解构（`require()` 一个 ESM 模块拿到命名空间对象，不可直接调用 —— 实测）。 */
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const voiceModules = require('./helpers/client-voice-modules.cjs');
 const plan = require('../src/shared/voice/postprocess-plan.cjs');
 
 // 极简 React 桩（ref/state 跨渲染持久；effect 每次渲染后执行）——照抄 official-bridge.test.cjs
@@ -77,7 +78,7 @@ function makeFakeEnv(opts) {
 
 /** 载入 official-bridge chunk（只取真实实现，不 mock 其内部）。 */
 function loadBridge(env) {
-  const src = decodeChunk('src/client/voice/official-bridge.js');
+  const src = voiceModules.officialBridgeSource();
   const factory = new Function(
     'window', 'document', 'navigator', 'MutationObserver', 'voiceCfgState', 'vadRequiredQuiet', 'vadSilenceMsOf',
     src + '\n;return officialVoiceBridge;'
@@ -87,7 +88,7 @@ function loadBridge(env) {
 }
 
 /**
- * 构建 hotkey 宿主（真实 hotkey.js 源码 + 可观测的 `voice/correct` 与 `enhance` 桩）。
+ * 构建热键宿主（真实热键模块正文 + 可观测的 `voice/correct` 与 `enhance` 桩）。
  * ⚠ 两个桩都记录**调用序号**到一个共享 timeline ⇒ 顺序可证（不只是次数）。
  */
 function buildHost(env, bridge, o) {
@@ -125,25 +126,27 @@ function buildHost(env, bridge, o) {
     },
   };
   const storeStub = { phase: 'idle', error: null, backup: '', enhanced: '', seq: 0, memoryRounds: [], optimized: false, lastModel: '', fallbackUsed: false, degraded: [], truncated: false };
-  const src = decodeChunk('src/client/voice/hotkey.js');
+  const src = voiceModules.hotkeySource();
   const factory = new Function(
-    'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'voiceHotkeyDisplay', 'parseVoiceHotkey',
-    'matchVoiceHotkey', 'isEnhancing', 'subscribe', 'storeFor', 'startVoiceRecording', 'stopVoiceRecording',
+    'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig',
+    'isEnhancing', 'subscribe', 'storeFor', 'startVoiceRecording', 'stopVoiceRecording',
     'isVoiceRecording', 'insertVoiceText', 'notify', 'enhance', 'timerSvc', 'officialVoiceBridge', 'makeT', 'ZH',
     'MarqueeSelect', 'CollapsibleSection', 'setInterval', 'clearInterval', 'setTimeout', 'navigator', 'window',
-    'configState', 'markCorrectionSkipped', 'notifyCorrection', 'correctionState',
+    'configState', 'markCorrectionSkipped', 'markCorrectionStarted', 'markCorrectionSettled',
+    'markCorrectionFailed', 'notifyCorrection', 'correctionState',
     'planVoicePostprocess', 'voicePostprocessHas',
     src + '\n;return { VoiceHotkeyHost };'
   );
   const api = factory(
-    mini.React, host, voiceCfgState, () => () => {}, (c) => c, () => null, () => false, () => false,
+    mini.React, host, voiceCfgState, () => () => {}, () => false,
     () => () => {}, () => storeStub,
     async () => { throw new Error('should not record'); }, async () => null, () => false,
     () => Promise.resolve({ filled: true }), () => {},
     (...a) => { timeline.push('enhance'); enhanceCalls.push(a); },
     timerSvcLocal, bridge, (p) => (k) => k, {}, null, null,
     setInterval, clearInterval, setTimeout, env.navigator, env.window,
-    { value: {} }, () => {}, () => {}, { runs: 0, skipped: 0, ok: 0, changed: 0, failed: 0, lastAt: 0, lastCode: '', lastSkipReason: '' },
+    { value: {} }, () => {}, () => {}, () => {}, () => {}, () => {},
+    { runs: 0, skipped: 0, ok: 0, changed: 0, failed: 0, lastAt: 0, lastCode: '', lastSkipReason: '' },
     plan.planVoicePostprocess, plan.voicePostprocessHas
   );
   const props = { sessionId: o.sessionId || 'sess-combo', inputActions: { setDraft() {} }, input: { draft: o.draft0 || '' } };
@@ -246,7 +249,7 @@ test('CHG143-C7 纠错开 + 增强关 + 纠错失败 ⇒ 不得出现增强调�
 // ───────────────────── 两个出口都要给读数（勿漏 endedInFeedback） ─────────────────────
 
 test('CHG143-C8 ⭐ 未识别出口（endedInFeedback）同样走组合判定：纠错开 + 增强开 ⇒ 纠错→增强', async () => {
-  // 病（RECON §3 点名）：hotkey.js 有**两个**「识别完成」出口 —— 正常写回 + `snap.endedInFeedback`。
+  // 病（RECON §3 点名）：热键模块有**两个**「识别完成」出口 —— 正常写回 + `snap.endedInFeedback`。
   //   只改一个 ⇒ 漏一半。本用例专测**未识别**出口。
   const env = makeFakeEnv({ recordingPhase: false });
   const bridge = loadBridge(env);
@@ -288,7 +291,7 @@ test('CHG143-M1 ⭐ 手动 ✨ 增强零纠错调用：helpers.js 的 enhance() 
 });
 
 test('CHG143-M2 ⭐ 纠错调度器**只**在语音链路的两个出口被调用（不得在增强管线内）', () => {
-  const hotkey = decodeChunk('src/client/voice/hotkey.js');
+  const hotkey = voiceModules.hotkeySource();
   // 定义形如 `const runCorrectionThenMaybeEnhance = () => {` ⇒ 名字后**不**跟 `()`
   assert.ok(hotkey.includes('const runCorrectionThenMaybeEnhance = () =>'), '调度器须有定义');
   // 调用点 = 名字后紧跟 `()`；应为**恰好 2 处**（正常写回出口 + 未识别出口）——

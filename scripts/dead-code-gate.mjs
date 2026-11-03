@@ -168,7 +168,7 @@ for (const line of git(diffArgs).split('\n')) {
       const mm = raw.match(/module\.exports\s*=\s*"([\s\S]*)";?\s*$/);
       // ⚠⚠ H2 活例修复（2026-10-17 client chunk 契约收口批）：原实现是
       //   `strip(mm ? JSON.parse('"' + mm[1] + '"') : raw)` —— **解析不出包裹就静默回退到 raw 原文**。
-      //   实测本次事故（CHG-143 的 correction.js 为裸 JS，无 `module.exports = "…"` 包裹）：
+      //   实测本次事故（CHG-143 的 correction.js 曾为裸 JS，无 `module.exports = "…"` 包裹；现为普通模块）：
       //   `mm === null` ⇒ R2 拿 raw 当 chunk 源码 ⇒ **一段语法完整、自洽的裸 JS**
       //   ⇒ declaredOf 覆盖其全部引用 ⇒ R2 照常报 `PASS | 24 个 client chunk 无未声明标识符`
       //   ⇒ **门在扫，却对「读不出契约的 chunk」零鉴别力**（读者看见的 PASS 其实是空转）。
@@ -440,7 +440,7 @@ for (const line of git(diffArgs).split('\n')) {
 
 // ==== R7 chunk 导出契约（源码层）+ 产物可求值性（产物层）====
 // 病历（2026-10-17 · 线上事故收口批 · 承 CHG-143）：
-//   `src/client/voice/correction.js` 以**裸 JS**提交（无 `module.exports = "…"` 包裹），而其余
+//   `src/client/voice/correction.js` 曾以**裸 JS**提交（无 `module.exports = "…"` 包裹；该文件已迁为普通模块），而其余
 //   23 个 client chunk 都写该包裹 ⇒ `build-client.mjs` 的 `body.replace(marker, chunk)` 拿到的是
 //   **对象** ⇒ 字符串化成 `[object Object]` 注进 `lib/client.cjs` ⇒ 浏览器求值抛
 //   `Unexpected identifier 'Object'` ⇒ **整个 client 半部装载失败**。

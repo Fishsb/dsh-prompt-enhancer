@@ -51,7 +51,7 @@ test('VCONF-05 产物面：共享运行时已由打包器注入且只注入一�
   assert.ok(client.includes('const __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'),
     '状态模块的默认值必须来自打包后的共享契约');
   assert.ok(client.includes('src/client/voice/state-module.cjs'), '产物须内联语音状态普通模块');
-  assert.ok(client.includes('__DSH_VOICE_STATE__.createVoiceState'), '状态工厂须在既有注入位实例化');
+  assert.ok(client.includes('__DSH_VOICE_RUNTIME__.createVoiceState'), '状态工厂须在语音运行时入口实例化');
   assert.equal(client.includes('const VOICE_CFG_DEFAULTS = {\n'), false,
     '状态模块不得再内联第二份默认值对象（单一事实源）');
   assert.equal(client.includes("require('../src/shared/contracts/"), false,

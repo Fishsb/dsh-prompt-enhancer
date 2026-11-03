@@ -21,6 +21,7 @@ const ROOT = path.resolve(__dirname, '..');
 //   （`scripts/lib/chunk-decode.mjs`，fail-closed 且报错点名声）。取具名成员解构 ——
 //   `require()` 一个 ESM 模块拿到的是命名空间对象，不可直接调用（实测）。
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const voiceModules = require('./helpers/client-voice-modules.cjs');
 const { i18nSource } = require('./helpers/client-i18n.cjs');
 const { stylesBody } = require('./helpers/client-styles.cjs');
 const { voiceStateChunkWithDefaults } = require('./helpers/voice-state-chunk.cjs');
@@ -162,7 +163,7 @@ test('VADSIL-P11 不回归：host 侧 sanitizeVoiceCfg 白名单与 client 同�
 
 // ───────────── 落点改造：两条入口共用同一入口 ─────────────
 test('VADSIL-P12 共用同一入口：静音档位由 bridge 的包装 VAD 单一入口驱动（自建链已退役）', () => {
-  const br = decodeChunk('src/client/voice/official-bridge.js');
+  const br = voiceModules.officialBridgeSource();
   // P2-补做（2026-10-13 · UD-0016）：自建采集链退役 ⇒ VAD 只剩**一条链路**（bridge 包装 VAD）。
   // 判据强度不变：仍逐项断言「按配置动态计算 + 取同一配置值 + 不得有固定帧数常量」。
   assert.equal(fs.existsSync(path.join(ROOT, 'src/client/voice/recorder.js')), false,
@@ -174,7 +175,7 @@ test('VADSIL-P12 共用同一入口：静音档位由 bridge 的包装 VAD 单�
 });
 
 test('VADSIL-P13 须保留：自适应底噪校准与触发门 heardSpeech 在包装 VAD 中在位', () => {
-  const br = decodeChunk('src/client/voice/official-bridge.js');
+  const br = voiceModules.officialBridgeSource();
   // P2-补做（UD-0016）：两条路径收敛为一条（wrapper VAD）⇒ 只判该条；记录退役事实的那一份不带活代码。
   for (const [name, src] of [['official-bridge', br]]) {
     assert.ok(src.includes('heardSpeech'), name + ' 缺触发门 heardSpeech（未说话不得触发，防误停）');
@@ -190,13 +191,13 @@ test('VADSIL-P13 须保留：自适应底噪校准与触发门 heardSpeech 在�
 // ⚠ 订正依据：用户点名「静音监测开关搬到第二行、覆盖掉静音时长标签与下拉框、滑块 1–5 ⇒ 0–5，
 //   0 = 静音监测关闭」⇒ 旧断言「下拉必须恰好 5 档 / 滑块域必须 1–5 / 两条控件共用 setSilence」
 //   已与新布局不符，**逐条按新布局订正**（订正前后对照见报告 §③）。
-// ⚠ 手法升级（承 client chunk 契约事故的成因形态）：**真实载入 voice-section.js**
+// ⚠ 手法升级（承 client chunk 契约事故的成因形态）：**真实载入语音设置模块**
 //   （decodeChunk → 求值 → 渲染 → 展开函数组件），**不再以子串断言代替**，也**不以外部桩替代该文件**。
 //   ⇒ 这样判据同时兜住「文件被真实解码」这一面（契约事故的成因正是"新 chunk 用桩绕过、从不真载入"）。
 
-/** 渲染 voice-section.js 的 VoiceSection，返回展开后的元素树（真载入，无桩替代）。 */
+/** 渲染语音设置模块的 VoiceSection，返回展开后的元素树（真载入，无桩替代）。 */
 function renderVoiceSection(cfg) {
-  const src = decodeChunk('src/client/voice/voice-section.js');
+  const src = voiceModules.voiceSectionSource();
   const ReactStub = {
     createElement: (type, props, ...kids) => {
       const flat = kids.flat(9).filter((k) => k !== null && k !== undefined && k !== false);
@@ -220,7 +221,7 @@ function renderVoiceSection(cfg) {
   const factory = new Function(
     'React', 'makeT', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'saveVoiceCfg', 'syncVoiceFromHost',
     'vadSilenceMsOf', 'normalizeVadSilenceMs', 'CollapsibleSection',
-    'OfficialVoiceDiag', 'FillerDiag', 'CorrectionDiag', 'voiceHotkeyDisplay',
+    'voiceHotkeyDisplay',
     'setTimeout', 'clearTimeout', 'window',
     src + '\n;return { VoiceSection };'
   );
@@ -231,7 +232,7 @@ function renderVoiceSection(cfg) {
     (patch) => { saved.push(patch); S.saveVoiceCfg(patch); },
     () => {}, S.vadSilenceMsOf, S.normalizeVadSilenceMs,
     (p) => ReactStub.createElement('section', {}, p.children),
-    () => null, () => null, () => null, (c) => String(c || ''),
+    (c) => String(c || ''),
     setTimeout, clearTimeout, {}
   );
   const expand = (n) => {
@@ -316,7 +317,7 @@ test('VADSIL-P14b 第二行 = 开关 + 滑块 + 读数；标签与下拉框已�
   //   `MarqueeSelect` 桩**；桩一旦移除（死形参收敛），渲染树里不可能出现 `mselect` ⇒ 断言**恒真、失去鉴别力**。
   //   ⇒ 升级为**源码层**判据（读该 chunk 的**解码后源码**），两义均判：①不调用 ②无参数级引用残留。
   {
-    const src = decodeChunk('src/client/voice/voice-section.js');
+    const src = voiceModules.voiceSectionSource();
     assert.equal(/React\.createElement\(\s*MarqueeSelect\b/.test(src), false,
       '第二行不得再创建 MarqueeSelect（源码层，不依赖 harness 桩）');
     assert.equal(src.includes("MarqueeSelect"), false,
@@ -398,7 +399,7 @@ test('VADSIL-P14e 0 档读数**不渲染任何文本**（更强：旧断言只�
 });
 
 test('VADSIL-P14f voiceSilenceOff 仍有消费者（防被误判孤儿而删；关闭态文案仍是诊断区的事实来源）', () => {
-  const vs = decodeChunk('src/client/voice/voice-section.js');
+  const vs = voiceModules.voiceSectionSource();
   assert.ok(vs.includes("t('voiceSilenceOff')"),
     'voiceSilenceOff 须仍有消费者（OfficialVoiceDiag 的 vadEnabled===false 分支）—— 否则该键成了孤儿');
   const iSilence = vs.indexOf("t('voiceSilenceOff')");
@@ -419,7 +420,7 @@ test('VADSIL-P14g 开关宽度**不得**由固定像素决定（本批回归成�
   const { row1 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 } });
   const chips = row1.kids.filter((k) => k.type === 'function' || (k.props && /dsh-plg-tgl/.test(String(k.props.className || ''))));
   assert.ok(chips.length >= 3, '第一行须至少有 3 个开关可判（实际 ' + chips.length + '）');
-  const src = decodeChunk('src/client/voice/voice-section.js');
+  const src = voiceModules.voiceSectionSource();
   // ① 源码面：**ToggleChip 自身**的 style 不得含 `width: <数字>px`（只判开关，不误伤热键 label/清除按钮）
   const chipStart = src.indexOf("const ToggleChip = (p) =>");
   assert.ok(chipStart > 0, '前置：须能定位 ToggleChip 定义');
@@ -477,11 +478,11 @@ test('VADSIL-P15 i18n：新增 3 键且 ZH/EN 键集相等（S-7）', () => {
 
 test('VADSIL-P16 VAD_POLL_MS 未被暴露为可调项（§7.4 明确：不暴露）', () => {
   const S = loadState();
-  const vs = decodeChunk('src/client/voice/voice-section.js');
+  const vs = voiceModules.voiceSectionSource();
   assert.equal(S.VOICE_CFG_DEFAULTS.vad.pollMs, undefined, '配置面不得出现 pollMs');
   assert.equal(/pollMs/.test(vs), false, 'UI 不得有轮询间隔控件');
   // 轮询间隔仍是官方桥内的实现细节常量（100ms），不随配置变化。
-  const br = decodeChunk('src/client/voice/official-bridge.js');
+  const br = voiceModules.officialBridgeSource();
   assert.ok(br.includes('OVB_POLL_MS = 100'), '轮询间隔须仍是 100ms 实现常量');
 });
 
@@ -571,7 +572,7 @@ function renderWithSource(src, cfg) {
   const factory = new Function(
     'React', 'makeT', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'saveVoiceCfg', 'syncVoiceFromHost',
     'vadSilenceMsOf', 'normalizeVadSilenceMs', 'CollapsibleSection',
-    'OfficialVoiceDiag', 'FillerDiag', 'CorrectionDiag', 'voiceHotkeyDisplay',
+    'voiceHotkeyDisplay',
     'setTimeout', 'clearTimeout', 'window',
     src + '\n;return { VoiceSection };'
   );
@@ -580,7 +581,7 @@ function renderWithSource(src, cfg) {
     S.voiceCfgState, () => () => {}, (patch) => { S.saveVoiceCfg(patch); },
     () => {}, S.vadSilenceMsOf, S.normalizeVadSilenceMs,
     (p) => ReactStub.createElement('section', {}, p.children),
-    () => null, () => null, () => null, (c) => String(c || ''),
+    (c) => String(c || ''),
     setTimeout, clearTimeout, {}
   );
   const expand = (n) => {
@@ -595,7 +596,7 @@ function renderWithSource(src, cfg) {
 }
 
 test('VADSIL-P14x-1 变异①：开关仍留第一行 ⇒ P14 必红（判据有牙）', () => {
-  const src = decodeChunk('src/client/voice/voice-section.js');
+  const src = voiceModules.voiceSectionSource();
   // 把静音监测开关**搬回**第一行（用**改前的原形态**内联表达式，避免 TDZ：
   //   row1 在 vadOn 声明之前 ⇒ 变异块不得引用 vadOn）
   const chipBlock = "    React.createElement(ToggleChip, {\n      on: !!(v.vad && v.vad.enabled !== false),\n      onText: t('voiceVadShort') + t(v.vad && v.vad.enabled !== false ? 'voiceAutoEnhanceOn' : 'voiceAutoEnhanceOff'),\n      title: t('voiceVadEnabled'),\n      onToggle: () => saveVoiceCfg({ vad: { enabled: !(v.vad && v.vad.enabled !== false) } }),\n    }),\n";
@@ -612,7 +613,7 @@ test('VADSIL-P14x-1 变异①：开关仍留第一行 ⇒ P14 必红（判据有
 });
 
 test('VADSIL-P14x-2 变异②：滑块最小值仍为 1 ⇒ P14c 必红（判据有牙）', () => {
-  const src = decodeChunk('src/client/voice/voice-section.js');
+  const src = voiceModules.voiceSectionSource();
   const mutated = src.replace("min: '0', max: '5', step: '1'", "min: '1', max: '5', step: '1'");
   assert.notEqual(mutated, src, '前置：变异锚点须命中');
   const mu = renderWithSource(mutated, {});
@@ -621,7 +622,7 @@ test('VADSIL-P14x-2 变异②：滑块最小值仍为 1 ⇒ P14c 必红（判据
 });
 
 test('VADSIL-P14x-3 变异③：把 0 写进 silenceMs（而非只置 enabled=false）⇒ P14d 必红（判据有牙）', () => {
-  const src = decodeChunk('src/client/voice/voice-section.js');
+  const src = voiceModules.voiceSectionSource();
   const anchor = 'silenceMs: zero ? silenceMsNow : normalizeVadSilenceMs(Number(next))';
   assert.ok(src.includes(anchor), '前置：setSilence 的写入锚点须在位');
   // 退回「另立第二份真相」的写法：0 直接写进 silenceMs

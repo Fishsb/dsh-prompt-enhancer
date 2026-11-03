@@ -16,15 +16,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
-const CHUNK = 'src/client/voice/official-bridge.js';
+const CHUNK = 'src/client/voice/official-bridge-module.cjs';
 
 // ⚠ 契约面收口批（2026-10-17 · 第 ② 件）：本地 `decodeChunk` 副本已删除，改共享单一事实源
 //   （`scripts/lib/chunk-decode.mjs`）。原实现的「行首锚定」依据已搬进该模块头注；
 //   fail-closed 与「报错点名声」两条语义逐字保留。⚠ 取具名成员解构 —— `require()` 一个
 //   ESM 模块拿到的是命名空间对象，不可直接调用（实测）。
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const readChunk = () => voiceModules.officialBridgeSource();
+const voiceModules = require('./helpers/client-voice-modules.cjs');
 const { voiceStateChunkWithDefaults } = require('./helpers/voice-state-chunk.cjs');
 const { i18nSource } = require('./helpers/client-i18n.cjs');
+const plan = require('../src/shared/voice/postprocess-plan.cjs');
 
 // §7.4 起：official-bridge 依赖 state.js 的单一事实源（vadSilenceMsOf / vadRequiredQuiet / voiceCfgState）。
 // 测试注入**真实的 state.js**（而非桩），以保证「两条入口共用同一值」在测试里也是同一份实现。
@@ -207,7 +210,7 @@ function makeFakeEnv(opts) {
 
 // 求值 chunk：注入假全局，返回桥对象 + 观察句柄
 function loadBridge(env, cfg) {
-  const src = decodeChunk(CHUNK);
+  const src = readChunk();
   const S = loadStateForBridge(env);
   // SW-1（2026-10-15 接线批）：允许用例注入指定配置（默认不注入 ⇒ 走真实 state.js 的默认值，
   //   既有用例行为逐字不变）。注入的是**真实** voiceCfgState 对象，故桥读到的是真实配置形态。
@@ -759,24 +762,29 @@ function buildHotkeyHost(env, bridge, opts) {
   // F-18：持久 store 桩 —— 组件通过 storeFor(sessionId) 写 `error` 作为「失败可见」出口，
   //   旧桩每次返回新对象 ⇒ 写进去看不见。改为稳定对象，使该出口可被断言。
   const storeStub = { phase: 'idle', error: null, backup: '', enhanced: '', seq: 0, memoryRounds: [], optimized: false, lastModel: '', fallbackUsed: false, degraded: [], truncated: false };
-  const src = decodeChunk('src/client/voice/hotkey.js');
+  const src = voiceModules.hotkeySource();
   const factory = new Function(
-    'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'voiceHotkeyDisplay', 'parseVoiceHotkey',
-    'matchVoiceHotkey', 'isEnhancing', 'subscribe', 'storeFor', 'startVoiceRecording', 'stopVoiceRecording',
+    'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig',
+    'isEnhancing', 'subscribe', 'storeFor', 'startVoiceRecording', 'stopVoiceRecording',
     'isVoiceRecording', 'insertVoiceText', 'notify', 'enhance', 'timerSvc', 'officialVoiceBridge', 'makeT', 'ZH',
     'MarqueeSelect', 'CollapsibleSection', 'setInterval', 'clearInterval', 'setTimeout', 'navigator', 'window',
+    'configState', 'markCorrectionSkipped', 'markCorrectionStarted', 'markCorrectionSettled',
+    'markCorrectionFailed', 'notifyCorrection', 'correctionState', 'planVoicePostprocess', 'voicePostprocessHas',
     src + '\n;return { VoiceHotkeyHost };'
   );
   const api = factory(
     mini.React,
     { call: () => Promise.resolve({ ok: true }) },
-    voiceCfgState, () => () => {}, (c) => c, () => null, () => false, () => false,
+    voiceCfgState, () => () => {}, () => false,
     () => () => {}, () => storeStub,
     async () => { throw new Error('should not record'); }, async () => null, () => false,
     () => Promise.resolve({ filled: true }), () => {},
     (...a) => { enhanceCalls.push(a); },   // enhance 桩
     timerSvcLocal, bridge, (p) => (k) => k, {}, null, null,
-    setInterval, clearInterval, setTimeout, env.navigator, env.window
+    setInterval, clearInterval, setTimeout, env.navigator, env.window,
+    { value: {} }, () => {}, () => {}, () => {}, () => {}, () => {},
+    { runs: 0, skipped: 0, ok: 0, changed: 0, failed: 0, lastAt: 0, lastCode: '', lastSkipReason: '' },
+    plan.planVoicePostprocess, plan.voicePostprocessHas
   );
   const props = { sessionId: o.sessionId || 'sess-x', inputActions: { setDraft() {} }, input: { draft: o.draft0 || '' } };
   const render = (draft) => { if (draft !== undefined) props.input = { draft }; mini.begin(); api.VoiceHotkeyHost(props); mini.runEffects(); };
@@ -883,17 +891,18 @@ test('OVB-A05 官方路径·自动增强：跨会话基线不串（第二会话�
 test('OVB-W01 接线：buildclient 装配清单与 skeleton 注入标记均在位', () => {
   const build = fs.readFileSync(path.join(ROOT, 'scripts', 'build-client.mjs'), 'utf8');
   const skel = fs.readFileSync(path.join(ROOT, 'src', 'client', 'skeleton.js'), 'utf8');
-  assert.ok(build.includes("require('../src/client/voice/official-bridge.js')"), 'build-client 缺 official-bridge chunk 引用');
+  assert.ok(build.includes("entry: 'src/client/voice/runtime.cjs'"), 'build-client 缺语音运行时入口');
+  assert.ok(build.includes("'src/client/voice/official-bridge-module.cjs'"), 'build-client 缺 official-bridge 模块装配校验');
   assert.ok(build.includes('@dsh-client-voice-official-bridge-inject'), 'build-client 缺注入标记映射');
   assert.ok(skel.includes('@dsh-client-voice-official-bridge-inject'), 'skeleton 缺注入标记');
 });
 
 test('OVB-W02 接线：apply 安装 + 卸载（HMR）+ 热键→派发点击官方按钮的接线均在位', () => {
-  const app = decodeChunk('src/client/app.js');
+  const app = fs.readFileSync(path.join(ROOT, 'src/client/app-module.cjs'), 'utf8');
   assert.ok(app.includes('officialVoiceBridge.install()'), 'apply 缺安装调用');
   assert.ok(app.includes('officialVoiceBridge.uninstall()'), 'apply 缺卸载（HMR 恢复）');
   assert.ok(app.includes('officialVoiceBridge.setTimer'), 'apply 缺 timer 注入');
-  const hk = decodeChunk('src/client/voice/hotkey.js');
+  const hk = voiceModules.hotkeySource();
   // P2-补做（UD-0016）：热键改为派发点击官方按钮 —— 启动走 startOfficial，停止走 stopOfficial
   assert.ok(hk.includes('officialVoiceBridge.startOfficial()'), '热键缺「派发点击官方开始按钮」（本批形态变更的落点）');
   assert.ok(hk.includes('officialVoiceBridge.stopOfficial()'), '热键缺「派发点击官方停止按钮」（唯一走完官方 finish() 的路径）');
@@ -913,7 +922,7 @@ test('OVB-W02 接线：apply 安装 + 卸载（HMR）+ 热键→派发点击官�
 });
 
 test('OVB-W03 接线：设置页诊断区在位（不静默失效的可见面）且有 i18n 键', () => {
-  const vs = decodeChunk('src/client/voice/voice-section.js');
+  const vs = voiceModules.voiceSectionSource();
   assert.ok(vs.includes('function OfficialVoiceDiag'), '设置段缺诊断组件');
   assert.ok(vs.includes("React.createElement(OfficialVoiceDiag, props)"), '诊断组件未进入渲染路径');
   assert.ok(vs.includes("t('voiceOfficialMissed')"), '缺「未观测到官方采集」文案引用');
@@ -944,7 +953,7 @@ test('OVB-W03 接线：设置页诊断区在位（不静默失效的可见面）
 
 // F-11（2026-10-13）：用户可见面不得出现未替换的占位符，且计数只留一个
 test('OVB-W04 F-11：诊断区成功态原文不含未替换占位符，且计数只出现一次', () => {
-  const vs = decodeChunk('src/client/voice/voice-section.js');
+  const vs = voiceModules.voiceSectionSource();
   const i18n = i18nSource();
   // 键：不得再含 printf 风格 %d（本项目约定为 {n}）
   assert.ok(!/voiceOfficialVerified: '[^']*%d/.test(i18n), 'F-11：键内不得再用 %d（约定 {n}）');
@@ -1007,7 +1016,7 @@ function applyMutation(src, kind) {
 }
 
 function loadMutant(env, kind) {
-  const src = applyMutation(decodeChunk(CHUNK), kind);
+  const src = applyMutation(readChunk(), kind);
   const S = loadStateForBridge(env);
   const factory = new Function(
     'window', 'document', 'navigator', 'localStorage', 'setInterval', 'clearInterval', 'MutationObserver', 'MouseEvent',
@@ -1063,7 +1072,7 @@ test('OVB-V03 变异自证·摘掉 VAD ⇒ 静音达标不再触发官方 stop�
 });
 
 test('OVB-V04 变异自证·幂等判据有牙：破坏幂等 ⇒ 层数判据必红', () => {
-  const src = decodeChunk(CHUNK);
+  const src = readChunk();
   const before = 'if (b.installed) return false;';
   assert.ok(src.includes(before), '幂等锚点须存在');
   // 运行期拼接变异：删掉幂等短路
@@ -1095,7 +1104,7 @@ test('OVB-V04 变异自证·幂等判据有牙：破坏幂等 ⇒ 层数判据�
 // ── P2-补做（UD-0016）新增能力的变异自证 ──────────────────────────────────────
 // 变异名一律**运行时拼接**（不在源码里形成字面量），且为判据的合法输入。
 test('OVB-V05 变异自证·正例必红：掏空「官方开始按钮查找」⇒ 启动正例必须失败', () => {
-  const src = decodeChunk(CHUNK);
+  const src = readChunk();
   // 变异：把按钮查找函数体掏空（恒返回 null）⇒ 启动必然失败。变异名运行时拼接，不形成字面量。
   const fnName = 'ovbFind' + 'StartButton';
   const anchor = 'function ' + fnName + '() {';
@@ -1119,7 +1128,7 @@ test('OVB-V05 变异自证·正例必红：掏空「官方开始按钮查找」�
 });
 
 test('OVB-V06 变异自证·负控必绿：同一变异下「按钮不存在不得静默」判据仍须通过', () => {
-  const src = decodeChunk(CHUNK);
+  const src = readChunk();
   const fnName = 'ovbFind' + 'StartButton';
   const mutated = src.replace('function ' + fnName + '() {', 'function ' + fnName + '() { return null;');
   const env = makeFakeEnv({ noStartButton: true });
@@ -1140,7 +1149,7 @@ test('OVB-V06 变异自证·负控必绿：同一变异下「按钮不存在不�
 });
 
 test('OVB-V07 变异自证·正例必红：把 missed 判定退回「上升沿快照」⇒ 竞态回归判据必须失败', () => {
-  const src = decodeChunk(CHUNK);
+  const src = readChunk();
   const anchor = 'if (now === (b.callCountAtPrevSessionEnd || 0)) {';
   // 变异 = 精确复现**被 CDP 证伪**的旧口径：把窗口下界当成「本会话上升沿那一刻的计数」，
   //   而实现里上升沿读到的计数**已经含本次调用**（实测：相位出现时 callCount 已为 1）
@@ -1172,7 +1181,7 @@ test('OVB-V07 变异自证·正例必红：把 missed 判定退回「上升沿�
 
 // ── N-1 修复的变异自证（变异名一律**运行时拼接**，且为判据的合法输入）──
 test('OVB-V08 变异自证·正例必红：把 N-1 守卫退回旧口径 ⇒ N-1 回归锁必须失败', () => {
-  const src = decodeChunk(CHUNK);
+  const src = readChunk();
   const guard = 'if (!ovb' + 'RecordingNow()) {';
   assert.ok(src.includes(guard), 'N-1 守卫锚点须存在');
   const mutated = src.replace(guard, 'if (false) {');
@@ -1198,7 +1207,7 @@ test('OVB-V08 变异自证·正例必红：把 N-1 守卫退回旧口径 ⇒ N-1
 });
 
 test('OVB-V09 变异自证·负控必绿：同一变异下「采集进行中仍须降级」的反向锁仍须通过', () => {
-  const src = decodeChunk(CHUNK);
+  const src = readChunk();
   const guard = 'if (!ovb' + 'RecordingNow()) {';
   const mutated = src.replace(guard, 'if (false) {');
   const env = makeFakeEnv({ recordingPhase: true, noStopButton: true });
@@ -1254,7 +1263,7 @@ test('OVB-D06 迟到落地回归锁·真命中：会话内调用虽晚但**在�
 });
 
 test('OVB-V10 变异自证·正例必红：摘掉 missed 收口判定 ⇒ 迟到落地锁（该计 missed 那一支）必须失败', () => {
-  const src = decodeChunk(CHUNK);
+  const src = readChunk();
   const anchor = 'if (now === (b.callCountAtPrevSessionEnd || 0)) {';
   // 变异 = 精确复现本批实测误报的那个写法：**只看 firstCallAt 与「会话起点是否有过调用」的时刻关系**。
   // 实测形态：上一次会话已置 firstCallAt，而本次会话的 getUserMedia 迟到到收口之后 ⇒ 时刻口径判 missed。
@@ -1346,7 +1355,7 @@ test('OVB-R03 F-18：补停**失败**必须留可见读数（不得静默）', a
 });
 
 test('OVB-R04 F-18 变异自证：退回「只写标记、无消费」⇒ OVB-R01 必红', async () => {
-  const src = decodeChunk('src/client/voice/hotkey.js');
+  const src = voiceModules.hotkeySource();
   // 变异 = 精确复现旧写法：只置标记，不启动补停轮询
   const anchor = "        longReleaseRef.current = true;\n        scheduleDeferredStop();";
   assert.ok(src.includes(anchor), 'F-18 消费锚点须存在');
@@ -1366,20 +1375,25 @@ test('OVB-R04 F-18 变异自证：退回「只写标记、无消费」⇒ OVB-R0
   const voiceCfgState = { value: { autoEnhance: false, vad: { enabled: true }, hotkey: { enabled: true, combo: 'Backquote' }, refine: {} }, listeners: new Set() };
   const storeStub = { phase: 'idle', error: null, backup: '', enhanced: '', seq: 0, memoryRounds: [], optimized: false, lastModel: '', fallbackUsed: false, degraded: [], truncated: false };
   const factory = new Function(
-    'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'voiceHotkeyDisplay', 'parseVoiceHotkey',
-    'matchVoiceHotkey', 'isEnhancing', 'subscribe', 'storeFor', 'startVoiceRecording', 'stopVoiceRecording',
+    'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig',
+    'isEnhancing', 'subscribe', 'storeFor', 'startVoiceRecording', 'stopVoiceRecording',
     'isVoiceRecording', 'insertVoiceText', 'notify', 'enhance', 'timerSvc', 'officialVoiceBridge', 'makeT', 'ZH',
     'MarqueeSelect', 'CollapsibleSection', 'setInterval', 'clearInterval', 'setTimeout', 'navigator', 'window',
+    'configState', 'markCorrectionSkipped', 'markCorrectionStarted', 'markCorrectionSettled',
+    'markCorrectionFailed', 'notifyCorrection', 'correctionState', 'planVoicePostprocess', 'voicePostprocessHas',
     mutated + '\n;return { VoiceHotkeyHost };'
   );
   const api = factory(
     mini.React, { call: () => Promise.resolve({ ok: true }) },
-    voiceCfgState, () => () => {}, (c) => c, () => null, () => false, () => false,
+    voiceCfgState, () => () => {}, () => false,
     () => () => {}, () => storeStub,
     async () => { throw new Error('x'); }, async () => null, () => false,
     () => Promise.resolve({ filled: true }), () => {}, () => {},
     timerSvcLocal, bridge, (p) => (k) => k, {}, null, null,
-    setInterval, clearInterval, setTimeout, env.navigator, env.window
+    setInterval, clearInterval, setTimeout, env.navigator, env.window,
+    { value: {} }, () => {}, () => {}, () => {}, () => {}, () => {},
+    { runs: 0, skipped: 0, ok: 0, changed: 0, failed: 0, lastAt: 0, lastCode: '', lastSkipReason: '' },
+    plan.planVoicePostprocess, plan.voicePostprocessHas
   );
   const props = { sessionId: 'sess-r4', inputActions: { setDraft() {} }, input: { draft: '' } };
   mini.begin(); api.VoiceHotkeyHost(props); mini.runEffects();
@@ -1616,7 +1630,7 @@ const SCEN_D = () => [
 
 // ⚠ 只在**内存副本**内变异（不动仓库文件）。
 function loadMutantBridge(env, mutate) {
-  const src = mutate(decodeChunk(CHUNK));
+  const src = mutate(readChunk());
   const S = loadStateForBridge(env);
   const factory = new Function(
     'window', 'document', 'navigator', 'localStorage', 'setInterval', 'clearInterval', 'MutationObserver', 'MouseEvent',
@@ -1688,7 +1702,7 @@ test('OVB-VAD-13 C 方向·反向锁：从未说话 ⇒ 不得判停（含底噪
 });
 
 test('OVB-VAD-14 双路径行为一致：float32 与 8-bit 回落路径同向，且回落路径**不得更松**', async () => {
-  const src = decodeChunk(CHUNK);
+  const src = readChunk();
   // ① 两条路径都在源码里，且回落是**显式**的（fail-closed + 可判读数）
   assert.ok(src.indexOf('getFloatTimeDomainData') >= 0, '缺 float32 主路径');
   assert.ok(src.indexOf('getByteTimeDomainData') >= 0, '缺 8-bit 回落路径');
@@ -1795,7 +1809,7 @@ test('OVB-VAD-V05 负控·基线必绿：不动 ⇒ A/B/C/D 全绿（含两路�
 
 // SW-1（2026-10-15 接线批）：`vad.enabled` 开关必须**真的约束运行期行为**
 // ═══════════════════════════════════════════════════════════════════════════════
-// 病（上批报出）：`voice-section.js` 写 `vad.enabled` **8 处**，`official-bridge.js` **引用 0 处**
+// 病（上批报出）：语音设置模块写 `vad.enabled` **8 处**，官方语音桥模块**引用 0 处**
 //   ⇒ 用户关掉「静音监测」，VAD **照跑**、仍会派发点击官方停止 = **用户可见的开关说了假话**
 //   （属「让失败不可观测」类，CHG-065 同族）⇒ 必须修。
 // 本组判据（逐条有牙）：
@@ -1845,13 +1859,13 @@ test('OVB-SW02 负控：开关开（默认）⇒ 行为与改前逐字一致（�
 
 test('OVB-SW03 独立性：关「静音监测」**不得**连带关「自动增强」', () => {
   // 静态证明（两条配置各读各的路径，无耦合）：
-  const br = decodeChunk(CHUNK);
+  const br = readChunk();
   // 「静音监测」只在桥内被读，且只用于 VAD 启动/守卫
   assert.ok(/ovbVadEnabled\(\)/.test(br), '桥须读 vad.enabled 决定是否启动 VAD');
-  // 「自动增强」的读取点仍在 hotkey.js（本批**未触碰**）——不得被 vad.enabled 影响
-  const hk = decodeChunk('src/client/voice/hotkey.js');
+  // 「自动增强」的读取点仍在热键模块（本批**未触碰**）——不得被 vad.enabled 影响
+  const hk = voiceModules.hotkeySource();
   assert.ok(hk.includes('voiceCfgState.value.autoEnhance === true'),
-    'autoEnhance 的读取点须仍在 hotkey.js（关静音监测 ≠ 关自动增强）');
+    'autoEnhance 的读取点须仍在热键模块（关静音监测 ≠ 关自动增强）');
   // ⚠ 只看**活代码**：桥内注释会提到 `autoEnhance`（说明「两者无关」这一契约本身），
   //   注释不是判定 ⇒ 判据须落在活代码上（与既有用例的 hkLive 做法同款）。
   const brLive = br.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
@@ -1941,7 +1955,7 @@ test('OVB-SW05 中途关开关：会话进行中改配置 ⇒ 当帧起不再派
 });
 
 test('OVB-SW06 诊断可见：开关态进快照且分支可区分「已关闭」与「已开启未触发」', () => {
-  const vs = decodeChunk('src/client/voice/voice-section.js');
+  const vs = voiceModules.voiceSectionSource();
   const i18n = i18nSource();
   // 独立 i18n 键（前缀刻意避开被既有判据锁数的 voiceOfficial*/voiceVad*）
   assert.ok(i18n.includes("voiceSilenceOff:"), 'i18n 缺「静音监测已关闭」键');
@@ -1976,7 +1990,7 @@ test('OVB-SW06 诊断可见：开关态进快照且分支可区分「已关闭�
   // title 暴露开关真值与「未启动」计数（可判别）
   assert.ok(vs.includes("'vadOn='"), '诊断 title 缺开关真值');
   assert.ok(vs.includes("'vadSkipped='"), '诊断 title 缺「因开关未启动 VAD」的计数');
-  const br = decodeChunk(CHUNK);
+  const br = readChunk();
   assert.ok(br.includes('vadEnabled: ovbVadEnabled()'), '快照须暴露开关当前真值');
   assert.ok(br.includes('b.vadSkipped = (b.vadSkipped || 0) + 1'), '快照须暴露「未启动」计数');
 });
@@ -1991,7 +2005,7 @@ function mutateUnwire(src) {
 
 async function runSwitchScenario(cfg, mutate) {
   const env = makeFakeEnv({ recordingPhase: true });
-  const src = mutate ? mutate(decodeChunk(CHUNK)) : decodeChunk(CHUNK);
+  const src = mutate ? mutate(readChunk()) : readChunk();
   const S = loadStateForBridge(env);
   S.voiceCfgState.value = cfg;
   const factory = new Function(
@@ -2116,7 +2130,7 @@ test('OVB-DT04 点 X 关闭 feedback ⇒ 该场仍是「最近一次会话」⇒
 
 // ── 1.2 stopMissed 可读性（选 (a)：加入 title 只读出口）────────────────────────
 test('OVB-DT05 stopMissed 进 title（只读出口），且既有顺序判据不得被破坏', () => {
-  const vs = decodeChunk('src/client/voice/voice-section.js');
+  const vs = voiceModules.voiceSectionSource();
   // 只读出口：title 数组内须出现 stopMissed（此前只有 snapshot 暴露、用户读不到）
   assert.ok(vs.includes("'stopMissed='"), '⚠ §6.1 清单第 8 行的 stopMissed 必须进入只读出口 title');
   assert.ok(/'stopMissed=' \+ \(snap\.stopMissed \|\| 0\)/.test(vs),
@@ -2155,7 +2169,7 @@ function mutateCumulative(src) {
 
 // 在纯内存副本上求值设置页诊断分支，返回「给定快照下选中的可见文案 key」
 function renderDiagKey(snap, mutate) {
-  const vs = mutate ? mutate(decodeChunk('src/client/voice/voice-section.js')) : decodeChunk('src/client/voice/voice-section.js');
+  const vs = mutate ? mutate(voiceModules.voiceSectionSource()) : voiceModules.voiceSectionSource();
   const t = (k) => k;   // 文案 key 直接当标识
   // ⚠ 切片本身已含 `let text;` 声明 ⇒ 此处**不得**再声明一次
   //   （首版即栽在 "Identifier 'text' has already been declared" —— 变异用例自己先崩，等于没做自证）
@@ -2206,7 +2220,7 @@ function mutateSnapshotCumulative(src) {
 
 function runSessionScenario(mutate) {
   const env = makeFakeEnv({ recordingPhase: true, feedbackText: '未识别到语音' });
-  const src = mutate ? mutate(decodeChunk(CHUNK)) : decodeChunk(CHUNK);
+  const src = mutate ? mutate(readChunk()) : readChunk();
   const S = loadStateForBridge(env);
   const factory = new Function(
     'window', 'document', 'navigator', 'localStorage', 'setInterval', 'clearInterval', 'MutationObserver', 'MouseEvent',
@@ -2243,7 +2257,7 @@ test('OVB-DT-V03 变异自证·桥侧正例必红：快照退回累计语义 ⇒
 
 test('OVB-DT-V04 变异自证·桥侧负控必绿：同一变异下「最近一次真失败」两种语义都为真', () => {
   const env = makeFakeEnv({ recordingPhase: true, feedbackText: '未识别到语音' });
-  const src = mutateSnapshotCumulative(decodeChunk(CHUNK));
+  const src = mutateSnapshotCumulative(readChunk());
   const S = loadStateForBridge(env);
   const factory = new Function(
     'window', 'document', 'navigator', 'localStorage', 'setInterval', 'clearInterval', 'MutationObserver', 'MouseEvent',
@@ -2540,7 +2554,7 @@ function loadMutantSrc(env, mutated) {
 
 test('OVB-UN-V01 变异自证·正例必红：门禁退回 b.active ⇒ UN01/UN02/UN04 必红', () => {
   const env = makeFakeEnv({ recordingPhase: true });
-  const bridge = loadMutantSrc(env, mutateGateBackToActive(decodeChunk(CHUNK)));
+  const bridge = loadMutantSrc(env, mutateGateBackToActive(readChunk()));
   bridge.install();
   const mo = env.observerInstances[env.observerInstances.length - 1];
   env.document._attr = 'recording'; mo.cb();
@@ -2553,7 +2567,7 @@ test('OVB-UN-V01 变异自证·正例必红：门禁退回 b.active ⇒ UN01/UN0
 
 test('OVB-UN-V02 变异自证·负控必绿：同一变异下「真采集中仍须拒绝」仍须通过', () => {
   const env = makeFakeEnv({ recordingPhase: true });
-  const bridge = loadMutantSrc(env, mutateGateBackToActive(decodeChunk(CHUNK)));
+  const bridge = loadMutantSrc(env, mutateGateBackToActive(readChunk()));
   bridge.install();
   const mo = env.observerInstances[env.observerInstances.length - 1];
   env.document._attr = 'recording'; mo.cb();
@@ -2565,7 +2579,7 @@ test('OVB-UN-V02 变异自证·负控必绿：同一变异下「真采集中仍�
 
 test('OVB-UN-V03 变异自证·正例必红：启动退回单锚（只有开始锚）⇒ UN01/UN05 必红', () => {
   const env = makeFakeEnv({ recordingPhase: true });
-  const bridge = loadMutantSrc(env, mutateStartSingleAnchor(decodeChunk(CHUNK)));
+  const bridge = loadMutantSrc(env, mutateStartSingleAnchor(readChunk()));
   bridge.install();
   const mo = env.observerInstances[env.observerInstances.length - 1];
   env.document._attr = 'feedback'; mo.cb();
@@ -2579,7 +2593,7 @@ test('OVB-UN-V03 变异自证·正例必红：启动退回单锚（只有开始�
 
 test('OVB-UN-V04 变异自证·负控必绿：同一变异下「真采集中仍拒绝」仍须通过', () => {
   const env = makeFakeEnv({ recordingPhase: true });
-  const bridge = loadMutantSrc(env, mutateStartSingleAnchor(decodeChunk(CHUNK)));
+  const bridge = loadMutantSrc(env, mutateStartSingleAnchor(readChunk()));
   bridge.install();
   const mo = env.observerInstances[env.observerInstances.length - 1];
   env.document._attr = 'recording'; mo.cb();
@@ -2589,7 +2603,7 @@ test('OVB-UN-V04 变异自证·负控必绿：同一变异下「真采集中仍�
 
 test('OVB-UN-V05 变异自证·正例必红：不重开会话 ⇒ UN09（新一轮必须能收口）必红', () => {
   const env = makeFakeEnv({ recordingPhase: true, feedbackText: '未识别到语音' });
-  const bridge = loadMutantSrc(env, mutateNoNewSession(decodeChunk(CHUNK)));
+  const bridge = loadMutantSrc(env, mutateNoNewSession(readChunk()));
   bridge.install();
   const mo = env.observerInstances[env.observerInstances.length - 1];
   env.document._attr = 'recording'; mo.cb();
@@ -2605,7 +2619,7 @@ test('OVB-UN-V05 变异自证·正例必红：不重开会话 ⇒ UN09（新一�
 
 test('OVB-UN-V06 变异自证·负控必绿：同一变异下「点 X 不得虚增会话」仍须通过', () => {
   const env = makeFakeEnv({ recordingPhase: true, feedbackText: '未识别到语音' });
-  const bridge = loadMutantSrc(env, mutateNoNewSession(decodeChunk(CHUNK)));
+  const bridge = loadMutantSrc(env, mutateNoNewSession(readChunk()));
   bridge.install();
   const mo = env.observerInstances[env.observerInstances.length - 1];
   env.document._attr = 'recording'; mo.cb();
@@ -2623,7 +2637,7 @@ test('OVB-UN-V06 变异自证·负控必绿：同一变异下「点 X 不得虚�
 //   ⇒ **一次点按 = 一次官方按钮点击**：官方未在录时点按 ⇒ 只派发「开始」，**不得**因松手而停；
 //     官方已在录时点按 ⇒ 派发「停止」（= 设计里的「再按结束」）。
 //   ⇒ **长按（≥500ms）保持原样**：按住说话、松开停止（用户明说「长按可以正常识别」）。
-// 病（取证批 CHG-097 双证坐实，`hotkey.js:290` 旧写法）：
+// 病（取证批 CHG-097 双证坐实，热键模块旧写法）：
 //   `keydown` 置位 → `keyup` 立即消费 ⇒ 一次点按派发「开始+停止」⇒ 录音 <100ms
 //   ⇒ 官方 `client.js:4759` `decodeAudioData` 抛 `EncodingError`（真机 blob 110B）
 //   ⇒ 用户看到「语音识别失败：Unable to decode audio data」。
@@ -2694,7 +2708,7 @@ test('OVB-POINT04 「再按结束」：官方已在录时点按 ⇒ 派发停止
 
 test('OVB-POINT05 判别力自证：同一时序下，旧判据（statusRef）**必然**派发停止 ⇒ 判据有牙', async () => {
   // 用**纯静态**判据补充行为读数：确认新判据源**不是** statusRef（否则与旧实现同形 = 假锁）。
-  const hk = decodeChunk('src/client/voice/hotkey.js');
+  const hk = voiceModules.hotkeySource();
   assert.ok(hk.includes("pressWasRecordingRef.current === true"),
     '点按分支须以「按下前的相位真值快照」为判据（本批修复点）');
   assert.equal(/if \(statusRef\.current === 'recording'\) stopAndTranscribe\(0\);/.test(hk), false,
@@ -2729,7 +2743,7 @@ test('OVB-POINT-V01 变异自证·正例必红：退回 statusRef 判据 ⇒ 点
   const env = makeFakeEnv({ recordingPhase: true });
   const bridge = loadBridge(env);
   bridge.install();
-  const src = mutatePointPress(decodeChunk('src/client/voice/hotkey.js'));
+  const src = mutatePointPress(voiceModules.hotkeySource());
   const mini = makeMiniReact();
   const timerRegs = [];
   const timerSvcLocal = {
@@ -2740,20 +2754,25 @@ test('OVB-POINT-V01 变异自证·正例必红：退回 statusRef 判据 ⇒ 点
   const voiceCfgState = { value: { autoEnhance: false, vad: { enabled: true }, hotkey: { enabled: true, combo: 'Alt+Backquote' }, refine: {} }, listeners: new Set(), synced: true };
   const storeStub = { phase: 'idle', error: null };
   const factory = new Function(
-    'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'voiceHotkeyDisplay', 'parseVoiceHotkey',
-    'matchVoiceHotkey', 'isEnhancing', 'subscribe', 'storeFor', 'startVoiceRecording', 'stopVoiceRecording',
+    'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig',
+    'isEnhancing', 'subscribe', 'storeFor', 'startVoiceRecording', 'stopVoiceRecording',
     'isVoiceRecording', 'insertVoiceText', 'notify', 'enhance', 'timerSvc', 'officialVoiceBridge', 'makeT', 'ZH',
     'MarqueeSelect', 'CollapsibleSection', 'setInterval', 'clearInterval', 'setTimeout', 'navigator', 'window',
+    'configState', 'markCorrectionSkipped', 'markCorrectionStarted', 'markCorrectionSettled',
+    'markCorrectionFailed', 'notifyCorrection', 'correctionState', 'planVoicePostprocess', 'voicePostprocessHas',
     src + '\n;return { VoiceHotkeyHost };'
   );
   const api = factory(
     mini.React, { call: () => Promise.resolve({ ok: true }) },
-    voiceCfgState, () => () => {}, (c) => c, () => null, () => false, () => false,
+    voiceCfgState, () => () => {}, () => false,
     () => () => {}, () => storeStub,
     async () => { throw new Error('should not record'); }, async () => null, () => false,
     () => Promise.resolve({ filled: true }), () => {},
     (...a) => {}, timerSvcLocal, bridge, (p) => (k) => k, {}, null, null,
-    setInterval, clearInterval, setTimeout, env.navigator, env.window
+    setInterval, clearInterval, setTimeout, env.navigator, env.window,
+    { value: {} }, () => {}, () => {}, () => {}, () => {}, () => {},
+    { runs: 0, skipped: 0, ok: 0, changed: 0, failed: 0, lastAt: 0, lastCode: '', lastSkipReason: '' },
+    plan.planVoicePostprocess, plan.voicePostprocessHas
   );
   const props = { sessionId: 'sess-mut', inputActions: { setDraft() {} }, input: { draft: '' } };
   mini.begin(); api.VoiceHotkeyHost(props); mini.runEffects();
@@ -2892,22 +2911,27 @@ function buildMutatedHost(mutation, opts) {
   //   ⇒ 变异用例会**平凡通过**（0===0）＝假绿，正是 D-14 病历。实测踩到过。）
   const voiceCfgState = { value: { autoEnhance: false, vad: { enabled: true }, hotkey: { enabled: true, combo: 'Backquote' }, refine: {} }, listeners: new Set(), synced: true };
   const storeStub = { phase: 'idle', error: null };
-  const src = mutateHotkey(decodeChunk('src/client/voice/hotkey.js'), mutation);
+  const src = mutateHotkey(voiceModules.hotkeySource(), mutation);
   const factory = new Function(
-    'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig', 'voiceHotkeyDisplay', 'parseVoiceHotkey',
-    'matchVoiceHotkey', 'isEnhancing', 'subscribe', 'storeFor', 'startVoiceRecording', 'stopVoiceRecording',
+    'React', 'host', 'voiceCfgState', 'subscribeVoiceConfig',
+    'isEnhancing', 'subscribe', 'storeFor', 'startVoiceRecording', 'stopVoiceRecording',
     'isVoiceRecording', 'insertVoiceText', 'notify', 'enhance', 'timerSvc', 'officialVoiceBridge', 'makeT', 'ZH',
     'MarqueeSelect', 'CollapsibleSection', 'setInterval', 'clearInterval', 'setTimeout', 'navigator', 'window',
+    'configState', 'markCorrectionSkipped', 'markCorrectionStarted', 'markCorrectionSettled',
+    'markCorrectionFailed', 'notifyCorrection', 'correctionState', 'planVoicePostprocess', 'voicePostprocessHas',
     src + '\n;return { VoiceHotkeyHost };'
   );
   const api = factory(
     mini.React, { call: () => Promise.resolve({ ok: true }) },
-    voiceCfgState, () => () => {}, (c) => c, () => null, () => false, () => false,
+    voiceCfgState, () => () => {}, () => false,
     () => () => {}, () => storeStub,
     async () => { throw new Error('should not record'); }, async () => null, () => false,
     () => Promise.resolve({ filled: true }), () => {},
     (...a) => {}, timerSvcLocal, bridge, (p) => (k) => k, {}, null, null,
-    setInterval, clearInterval, setTimeout, env.navigator, env.window
+    setInterval, clearInterval, setTimeout, env.navigator, env.window,
+    { value: {} }, () => {}, () => {}, () => {}, () => {}, () => {},
+    { runs: 0, skipped: 0, ok: 0, changed: 0, failed: 0, lastAt: 0, lastCode: '', lastSkipReason: '' },
+    plan.planVoicePostprocess, plan.voicePostprocessHas
   );
   // ⚠ 顺序与 buildHotkeyHost 完全一致：render() = begin() → 组件调用 → runEffects()
   //   （顺序错/缺 begin ⇒ effect 不注册 ⇒ 事件处理器缺席，实测踩到）

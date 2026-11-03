@@ -475,7 +475,7 @@ test('D-10 回归锁：被吞形态若复现，判据读数会立刻变化（端
 });
 
 // ── R7 client chunk 导出契约（源码层）+ 产物可求值性（产物层）回归锁 ──────────────
-// 病历（2026-10-17 · 线上事故收口批 · 承 CHG-143）：`src/client/voice/correction.js`
+// 病历（2026-10-17 · 线上事故收口批 · 承 CHG-143）：`src/client/voice/correction.js`（现为普通模块）
 //   以**裸 JS** 提交（其余 23 个 client chunk 写 `module.exports = "…"`）⇒ build-client 把对象
 //   字符串化成 `[object Object]` 注进 `lib/client.cjs` ⇒ 浏览器求值抛
 //   `Unexpected identifier 'Object'` ⇒ **整个 client 半部装载失败**，而 npm test 467 /
@@ -496,12 +496,12 @@ function unwrapChunkToBareJs(dir, rel) {
 }
 
 test('R7 变异自证（源码层）：任一 chunk 改回裸 JS ⇒ R7 必红且点名该文件', () => {
-  // ⚠ **任取一个** chunk（不是只有 correction.js）⇒ 证明覆盖面是「每个 chunk」而非「某文件」
-  const rel = 'src/client/voice/' + 'hotkey' + '.js'; // 运行时拼接，避免本文件被误当成实现点位
+  // ⚠ **任取一个** chunk（不是只有历史病历里的 correction.js）⇒ 证明覆盖面是「每个 chunk」而非「某文件」
+  const rel = 'src/client/' + 'skeleton' + '.js'; // 运行时拼接，避免本文件被误当成实现点位
   withFixture((dir) => unwrapChunkToBareJs(dir, rel), (dir) => {
     const r = runGate(dir);
     assert.equal(r.code, 1, '源码层契约违反必须 exit 1（若为 0 则 R7 是恒真判据 = 假绿）');
-    assert.match(r.out, /FAIL \| R7 \|[^\n]*hotkey\.js/, 'R7 必须点名违规 chunk');
+    assert.match(r.out, /FAIL \| R7 \|[^\n]*skeleton\.js/, 'R7 必须点名违规 chunk');
     assert.match(r.out, /导出形态违反/, 'R7 必须说明是导出形态（不是别的理由）');
   });
 });
@@ -549,7 +549,7 @@ test('R2 fail-closed（H2 活例修复）：读不出包裹的 chunk 不得再�
   // 病历：原实现 `strip(mm ? JSON.parse(…) : raw)` ⇒ 裸 JS chunk 被当成 chunk 源码正常扫描
   //   ⇒ 照常打 `PASS | 24 个 client chunk …`（读者 grep PASS 得到假读数）。
   // 目标模式（CHG-313）：filler 已迁为普通模块，变异目标改用仍在位的 client chunk。
-  const rel = 'src/client/voice/' + 'correction' + '.js';
+  const rel = 'src/client/' + 'skeleton' + '.js';
   withFixture((dir) => unwrapChunkToBareJs(dir, rel), (dir) => {
     const r = runGate(dir);
     assert.equal(r.code, 1, '契约违反必须 exit 1');
