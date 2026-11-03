@@ -236,7 +236,18 @@ test('CHG184-S14 ⭐ 接线（R3 迁移）：纠错状态不再注册独立元�
   assert.ok(/id: 'prompt-enhance'/.test(app), '✨ 增强按钮必须仍注册（新承载者）');
   assert.ok(app.indexOf('conversation.input.right') >= 0, '✨ 仍必须在输入框右槽位');
   // ③ 承载者必须真的接上了纠错相位（不是只删了旧的、没接新的）
-  const eb = decodeChunk('src/client/components/enhance-button.js');
+  const eb = fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8')
+    .replace(/^'use strict';\s*/, '')
+    .replace(/function createEnhanceButton\(deps\) \{/, 'function __enhanceButtonFactory(deps) {')
+    .replace(/\n  return EnhanceButton;\n\}\n\nmodule\.exports = \{ createEnhanceButton \};\s*$/, '\n  return EnhanceButton;\n}\nconst EnhanceButton = __enhanceButtonFactory({\n'
+      + '  React, makeT, dshEnhId: function (p) { return p; },\n'
+      + '  subscribe, storeFor, notify, releaseStoreIfIdle, setLastDraft,\n'
+      + '  subscribeConfig, subscribeCorrection, subscribeVoiceConfig, setActiveSession, getActiveSession,\n'
+      + '  safeSetDraft, clearResultStore, clearSeen, guardPasses, saveConfig, configState, enhance,\n'
+      + '  cancelEnhance, undo, modeShortLabel, prettifyModel, timerSvc, host, correctionSnapshot,\n'
+      + '  correctionPhaseOf, CORRECTION_PHASES, correctionFailureTicket, consumeCorrectionFailure,\n'
+      + '  correctionPhaseView,\n'
+      + '});\n');
   assert.ok(/subscribeCorrection/.test(eb), '✨ 按钮必须订阅纠错状态机（否则删了旧的但没接新的 = 状态不可见）');
   assert.ok(/correctionPhaseOf/.test(eb), '✨ 按钮必须读纠错相位');
   assert.ok(/corrTakesOver/.test(eb), '✨ 按钮必须有「纠错接管」分支');
@@ -399,7 +410,18 @@ function readTree(node) {
 function loadButton(opts) {
   const o = opts || {};
   const mini = makeRenderReact();
-  const eb = decodeChunk('src/client/components/enhance-button.js');
+  const eb = fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8')
+    .replace(/^'use strict';\s*/, '')
+    .replace(/function createEnhanceButton\(deps\) \{/, 'function __enhanceButtonFactory(deps) {')
+    .replace(/\n  return EnhanceButton;\n\}\n\nmodule\.exports = \{ createEnhanceButton \};\s*$/, '\n  return EnhanceButton;\n}\nconst EnhanceButton = __enhanceButtonFactory({\n'
+      + '  React, makeT, dshEnhId: function (p) { return p; },\n'
+      + '  subscribe, storeFor, notify, releaseStoreIfIdle, setLastDraft,\n'
+      + '  subscribeConfig, subscribeCorrection, subscribeVoiceConfig, setActiveSession, getActiveSession,\n'
+      + '  safeSetDraft, clearResultStore, clearSeen, guardPasses, saveConfig, configState, enhance,\n'
+      + '  cancelEnhance, undo, modeShortLabel, prettifyModel, timerSvc, host, correctionSnapshot,\n'
+      + '  correctionPhaseOf, CORRECTION_PHASES, correctionFailureTicket, consumeCorrectionFailure,\n'
+      + '  correctionPhaseView,\n'
+      + '});\n');
   const corr = decodeChunk('src/client/voice/correction.js');
   const DICT = {
     enhanceButton: '优化',
@@ -417,6 +439,8 @@ function loadButton(opts) {
     'React', 'makeT', 'voiceCfgState', 'configState', 'subscribeCorrection', 'subscribeVoiceConfig', '__DSH_CORRECTION_STATE__',
     'subscribe', 'subscribeConfig', 'storeFor', 'timerSvc', 'host', 'setLastDraft', 'setActiveSession',
     'getActiveSession', 'guardPasses', 'enhance', 'undo', 'modeShortLabel', 'prettifyModel', 'saveConfig',
+    'dshEnhId', 'notify', 'releaseStoreIfIdle', 'safeSetDraft', 'clearResultStore', 'clearSeen',
+    'cancelEnhance', 'consumeCorrectionFailure', 'correctionPhaseView',
     corr + '\n' + eb + '\n;return { EnhanceButton, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed,'
       // ⚠ 本工厂同时用于「当前源码」与「HEAD 原形」⇒ 新符号必须 typeof 兜底：
       //   否则拿 HEAD 源码求值时这里会抛 ReferenceError，让**整组**变异自证看起来"红了"，
@@ -429,7 +453,8 @@ function loadButton(opts) {
   const api = factory(
     mini.React, makeT, voiceCfgState, configState, () => () => {}, () => () => {}, CORRECTION_STATE,
     () => () => {}, () => () => {}, storeFor, timers.svc, { call: () => Promise.reject(new Error('只读')) },
-    () => {}, () => {}, () => null, () => true, () => {}, () => {}, (t, m) => m, (m) => m, () => {}
+    () => {}, () => {}, () => null, () => true, () => {}, () => {}, (t, m) => m, (m) => m, () => {},
+    (p) => p, () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => null
   );
   return { api, mini, timers };
 }
@@ -492,7 +517,7 @@ test('R3-D ⭐ 忙态相撞：增强在跑 + 纠错也跑 ⇒ 显示「正在优
 
 test('R3-E ⭐ 失败态不静默：短暂提示「纠错失败」后自动复原（时长 4000ms）', () => {
   const { decodeChunk: dc } = require('../scripts/lib/chunk-decode.mjs');
-  const eb = dc('src/client/components/enhance-button.js');
+  const eb = fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8');
   // ① 失败提示的时长必须是 4000（与报告 §D 一致）
   assert.ok(/timerSvc\.timeout\(function \(\) \{ setFlash\(false\); \}, 4000\)/.test(eb),
     '⚠ 失败提示须经既有 timer 服务定时复原，时长 4000ms');
@@ -536,14 +561,14 @@ test('R3-F ⭐ 「没跑（开关关）」与「跑了但没改」的区分改�
 });
 
 test('R3-G 变异自证：删掉按钮的纠错接管分支 ⇒ R3-A 必红（判据有牙）', () => {
-  const eb = decodeChunk('src/client/components/enhance-button.js');
-  const mutated = eb.replace(/if \(corrTakesOver\) \{ cls = "dsh-enh-btn dsh-enh-btn-busy dsh-enh-btn-text"; \}/, '');
+  const eb = fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8');
+  const mutated = eb.replace(/if \(corrTakesOver\) \{ cls = 'dsh-enh-btn dsh-enh-btn-busy dsh-enh-btn-text'; \}/, '');
   assert.notEqual(mutated, eb, '前置：变异锚点须命中');
   assert.equal(/if \(corrTakesOver\)/.test(mutated), false, '变异后接管分支应消失 ⇒ R3-A 的 busy 断言必红');
 });
 
 test('R3-H 负控：不动任何文件 ⇒ 本组全绿（防恒红）', () => {
-  const eb = decodeChunk('src/client/components/enhance-button.js');
+  const eb = fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8');
   assert.ok(eb.includes('corrTakesOver'), '接管变量在位');
   assert.ok(eb.includes('voiceCorrectionRunningOnButton'), '按钮纠错文案键在位');
 });
@@ -701,7 +726,7 @@ test('SCOPE-R2 ⭐ 渲染层负控：A 自己也必须仍可见失败（防「�
 });
 
 test('SCOPE-R3 ⭐ 变异自证：按钮不回传归属 ⇒ SCOPE-R1 的判据必红（判据有牙）', () => {
-  const eb = decodeChunk('src/client/components/enhance-button.js');
+  const eb = fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8');
   const mutant = eb.replace('correctionPhaseOf(corrSnap, sessionId)', 'correctionPhaseOf(corrSnap)');
   assert.notEqual(mutant, eb, '前置：变异锚点须命中（否则本条恒绿、没有判别力）');
   // 变异后：B 观察者拿到的是**全局** phase（= failed）⇒ R1 的核心断言必然失败
@@ -1050,7 +1075,7 @@ test('C5 边界：消费是**高水位**，只前进不后退，且幂等', () =
 
 const VS_SRC = () => decodeChunk('src/client/voice/voice-section.js');
 const CORR_SRC = () => decodeChunk('src/client/voice/correction.js');
-const EB_SRC = () => decodeChunk('src/client/components/enhance-button.js');
+const EB_SRC = () => fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8');
 
 /** 用「改过的 voice-section」渲染诊断行（变异自证用）。 */
 function renderDiagFromSrc(src, snap, cfgOn) {

@@ -267,7 +267,7 @@ function parseCfgTabTopLevel(cfgCode) {
 }
 
 test('GEOLOCK-A1 页内 tab 表只能是 models / params 两项（⛔ 语音不得再是 tab）', async () => {
-  const plugins = await codeOf('src/client/components/model-plugins-section.js');
+  const plugins = await codeOf('src/client/components/model-plugins-section-module.cjs');
   const tabTable = parseTabTable(plugins);
   assert.ok(tabTable, '前置：须能定位页内 tab 表 const tabs = [...]');
   const keys = tabTable.entries.map((e) => e.key);
@@ -282,7 +282,7 @@ test('GEOLOCK-A1 页内 tab 表只能是 models / params 两项（⛔ 语音不�
 });
 
 test('GEOLOCK-A2 tab 正文分派只剩 models / params 两支（⛔ 无 voice 分支）', async () => {
-  const plugins = await codeOf('src/client/components/model-plugins-section.js');
+  const plugins = await codeOf('src/client/components/model-plugins-section-module.cjs');
   const dispatch = parseTabBodyDispatch(plugins);
   assert.equal(dispatch.models, 'ModelConfigTab', 'models 分支须渲染 ModelConfigTab');
   assert.equal(dispatch.params, 'ParamsTab', 'params 分支须渲染 ParamsTab');
@@ -370,7 +370,7 @@ test('GEOLOCK-A5 语音块标题 = 「语音增强」（中英各一），且两
 });
 
 test('GEOLOCK-A-V 变异自证：两个错误方向各自打红（嵌回卡片内 / 改回独立 tab）+ 负控', async () => {
-  const plugins = await codeOf('src/client/components/model-plugins-section.js');
+  const plugins = await codeOf('src/client/components/model-plugins-section-module.cjs');
   const cfgTab = await codeOf('src/client/components/model-config-tab-module.cjs');
 
   // ⭐ 方向①：把语音**嵌进模型配置卡片内部**（= 退回从属；本轮之前的错误方向之一）

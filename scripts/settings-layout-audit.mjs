@@ -60,7 +60,7 @@ const CHUNKS = [
   'src/client/components/fallback-row-module.cjs',
   'src/client/components/model-config-tab-module.cjs',
   'src/client/components/params-tab-module.cjs',
-  'src/client/components/model-plugins-section.js',
+  'src/client/components/model-plugins-section-module.cjs',
   'src/client/voice/voice-section.js',
   'src/client/styles-module.cjs',
 ];

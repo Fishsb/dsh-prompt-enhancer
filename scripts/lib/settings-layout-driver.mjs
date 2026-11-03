@@ -214,7 +214,7 @@ function browserDriver() {
     var noop = function () { return function () {}; };
     var configState = { value: JSON.parse(JSON.stringify(scn.cfg)), fresh: false, hostSync: true, unsupported: false };
 
-    var compCode = SRC['src/client/components/model-plugins-section.js'];
+    var compCode = SRC['src/client/components/model-plugins-section-module.cjs'];
     var NAMES = ['React', 'CollapsibleSection', 'MarqueeSelect', 'ModelMainSection', 'FallbackRow', 'ZH', 'EN', 't', 'makeT', 'host', 'configState', 'saveConfig', 'subscribeConfig', 'subscribeSaveStatus', 'saveStatus',
       'voiceCfgState', 'saveVoiceCfg', 'subscribeVoiceConfig', 'syncVoiceFromHost', 'vadSilenceMsOf', 'normalizeVadSilenceMs',
       'voiceHotkeyDisplay', 'officialVoiceBridge', 'fillerSnapshot', 'correctionSnapshot', 'subscribeFiller', 'subscribeCorrection',
@@ -251,8 +251,12 @@ function browserDriver() {
       C.DEFAULT_MODEL_CHAIN, C.MODE_OPTIONS, C.MODE_VALUES, C.MODE_BUDGET_OPTIONS, C.MODE_TIMEOUT_OPTIONS, C.MODE_MAXTOKENS_OPTIONS,
       C.MODE_OUTPUTLIMIT_OPTIONS, C.MODE_PARAMS_DEFAULT, C.MODE_BUDGET_DEFAULT, C.modeShortLabel, C.modeLabel,
       C.TEMPLATE_BUILTIN_KEYS, C.TEMPLATE_CUSTOM_MAX, C.TEMPLATE_TEXT_MAX, C.TEMPLATE_NAME_MAX, C.customPickIndex];
-    var compFactory = new Function(NAMES.join(', '), compCode + '\n;return { ModelPluginsSection: ModelPluginsSection };');
-    var api = compFactory.apply(null, values);
+    var shellFactory = new Function(NAMES.join(', '), compCode + '\n;return createModelPluginsSection({'
+      + ' React: React, makeT: makeT, dshEnhId: dshEnhId, subscribeConfig: subscribeConfig,'
+      + ' subscribeSaveStatus: subscribeSaveStatus, saveStatus: saveStatus,'
+      + ' ModelConfigTab: typeof ModelConfigTab !== "undefined" ? ModelConfigTab : null,'
+      + ' ParamsTab: typeof ParamsTab !== "undefined" ? ParamsTab : null });');
+    var api = shellFactory.apply(null, values);
     api.ModelConfigTab = ModelConfigTab;
     api.ParamsTab = ParamsTab;
     return { api: api, t: t };
