@@ -120,6 +120,14 @@ function buildHost() {
   const enhanceAnalyzeChunk = 'const __DSH_ENHANCE_ANALYZE__ = ' + enhanceAnalyzeBundle.code
     + ';\nconst {\n' + Object.keys(require('../src/host/enhance-analyze.cjs')).map((k) => '  ' + k + ',').join('\n')
     + '\n} = __DSH_ENHANCE_ANALYZE__;\n';
+  // 目标模式：增强 assemble 阶段迁为普通模块（消息组装 / 记忆链 / 日志）。
+  const enhanceAssembleBundle = bundleModules({ root, entry: 'src/host/enhance-assemble.cjs' });
+  if (!enhanceAssembleBundle.modules.includes('src/host/enhance-assemble.cjs')) {
+    throw new Error('[build-host] 增强 assemble 模块未进入打包图');
+  }
+  const enhanceAssembleChunk = 'const __DSH_ENHANCE_ASSEMBLE__ = ' + enhanceAssembleBundle.code
+    + ';\nconst {\n' + Object.keys(require('../src/host/enhance-assemble.cjs')).map((k) => '  ' + k + ',').join('\n')
+    + '\n} = __DSH_ENHANCE_ASSEMBLE__;\n';
   const enhanceChunk = loadChunk('src/host/enhance-handlers.js');
 
   // Inject all chunks, looping until no marker remains (same policy as
@@ -135,6 +143,7 @@ function buildHost() {
     ['// @dsh-correction-runner-inject', correctionRunnerChunk],
     ['// @dsh-enhance-runtime-inject', enhanceRuntimeChunk],
     ['// @dsh-enhance-analyze-inject', enhanceAnalyzeChunk],
+    ['// @dsh-enhance-assemble-inject', enhanceAssembleChunk],
     ['// @dsh-enhance-inject', enhanceChunk],
   ];
 
