@@ -156,7 +156,7 @@ async function v2ResolveProgress(services, historyText, cfg) {
         // 诊断标签失准会误导排查方向——按真实 kind 分流，并带上 failure code。
         const why = timedOut ? 'timeout'
           : (result.kind === 'maxtokens' ? 'truncated'
-          : (result.kind === 'error' ? ('error-' + String((result.failure && result.failure.code) || 'unknown'))
+          : (result.kind === 'error' ? 'failed'
           : (result.kind === 'aborted' || result.kind === 'cancelled' ? String(result.kind) : 'empty')));
         degrade(why);
         hlog('[enhance] v2 smart progress ' + why);

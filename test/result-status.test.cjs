@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { RESULT_STATUS, resultStatusOf, resultIsTerminal } = require('../src/shared/contracts/result.cjs');
+const { RESULT_STATUS, resultStatusOf, resultIsTerminal, postprocessOutcomeOf } = require('../src/shared/contracts/result.cjs');
 
 test('RESULT-01 成功且有改动 => changed', () => {
   assert.equal(resultStatusOf({ ok: true, changed: true, text: 'b' }), RESULT_STATUS.CHANGED);
@@ -36,4 +36,22 @@ test('RESULT-07 terminal：只有 changed/unchanged 算终态', () => {
   assert.equal(resultIsTerminal({ ok: true, changed: false }), true);
   assert.equal(resultIsTerminal({ ok: true, skipped: true }), false);
   assert.equal(resultIsTerminal({ ok: false }), false);
+});
+
+test('RESULT-08 postprocessOutcomeOf：统一四态与 changes/reason/degraded', () => {
+  assert.deepEqual(postprocessOutcomeOf({ ok: true, before: 'a', text: 'b' }), {
+    status: 'changed', text: 'b', changes: [], reason: '', degraded: false,
+  });
+  assert.deepEqual(postprocessOutcomeOf({ ok: true, before: 'a', text: 'a', removed: [{ text: '嗯' }] }), {
+    status: 'unchanged', text: 'a', changes: [{ text: '嗯' }], reason: '', degraded: false,
+  });
+  assert.deepEqual(postprocessOutcomeOf({ ok: true, skipped: true, reason: 'disabled' }), {
+    status: 'skipped', text: '', changes: [], reason: 'disabled', degraded: false,
+  });
+  assert.deepEqual(postprocessOutcomeOf({ ok: false, code: 'NO_MODEL', degraded: ['events'] }), {
+    status: 'failed', text: '', changes: [], reason: '', degraded: true,
+  });
+  assert.deepEqual(postprocessOutcomeOf(null), {
+    status: 'failed', text: '', changes: [], reason: '', degraded: false,
+  });
 });

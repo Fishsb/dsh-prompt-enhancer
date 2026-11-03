@@ -245,7 +245,7 @@ function createClientHelpers(deps) {
     host.call('enhance', request).then((response) => {
       if (seq !== session.seq) return;
       const result = response && typeof response === 'object' ? response : {};
-      const resultStatus = resultStatusOf({ ok: result.ok === true, text: result.text, before: session.backup });
+      const resultStatus = resultStatusOf({ ok: result.ok === true, text: result.text, before: session.backup, skipped: result.skipped === true });
 
       if (result.ok && typeof result.text === 'string' && result.text !== '') {
         const sessionChanged = getActiveSession() !== sessionId;

@@ -18,4 +18,5 @@ module.exports = {
   RESULT_STATUS: result.RESULT_STATUS,
   resultStatusOf: result.resultStatusOf,
   resultIsTerminal: result.resultIsTerminal,
+  postprocessOutcomeOf: result.postprocessOutcomeOf,
 };

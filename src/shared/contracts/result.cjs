@@ -24,4 +24,17 @@ function resultIsTerminal(result) {
   return s !== RESULT_STATUS.SKIPPED && s !== RESULT_STATUS.FAILED;
 }
 
-module.exports = { RESULT_STATUS, resultStatusOf, resultIsTerminal };
+// 统一后处理结果形状：执行层按“是否改动 / 是否跳过 / 是否降级”给读数，
+// 这里只做归一，不改任何 RPC 字段或用户可见文案。
+function postprocessOutcomeOf(result) {
+  const r = result && typeof result === 'object' ? result : {};
+  return {
+    status: resultStatusOf(r),
+    text: typeof r.text === 'string' ? r.text : '',
+    changes: Array.isArray(r.removed) ? r.removed.slice() : [],
+    reason: typeof r.reason === 'string' ? r.reason : '',
+    degraded: r.degraded === true || (Array.isArray(r.degraded) && r.degraded.length > 0),
+  };
+}
+
+module.exports = { RESULT_STATUS, resultStatusOf, resultIsTerminal, postprocessOutcomeOf };

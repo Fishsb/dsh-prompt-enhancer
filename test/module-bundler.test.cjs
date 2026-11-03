@@ -103,3 +103,23 @@ test('MB-07 正式构建入口：build-client 通过打包器生成共享运行�
   assert.equal(client.includes("require('../src/shared/contracts/client-runtime.cjs')"), false,
     '产物不得保留共享入口的外部 require');
 });
+
+test('MB-08 JSON 模块被正确打包，且非法 JSON fail-closed', async () => {
+  const { bundleModules } = await loadBundler();
+  const dir = fixture({
+    'entry.cjs': "const data = require('./data.json');\nmodule.exports = { status: data.status };\n",
+    'data.json': JSON.stringify({ status: ['changed', 'failed'] }),
+  });
+  const out = bundleModules({ root: dir, entry: 'entry.cjs' });
+  const api = new Function('return (' + out.code.replace(/^\/\/[^\n]*\n/, '') + ')')();
+  assert.deepEqual(api.status, ['changed', 'failed']);
+  assert.equal(out.code.includes('module.exports = {"status"'), true, 'JSON 必须以 CommonJS 赋值形态进入装配图');
+  assert.equal(out.code.includes('"data.json"'), true, 'JSON 模块必须以模块 id 进入装配图');
+
+  const bad = fixture({
+    'entry.cjs': "module.exports = require('./bad.json');\n",
+    'bad.json': '{ broken',
+  });
+  assert.throws(() => bundleModules({ root: bad, entry: 'entry.cjs' }),
+    (e) => /bad\.json|JSON/.test(e.message), '非法 JSON 必须在构建期点名失败');
+});

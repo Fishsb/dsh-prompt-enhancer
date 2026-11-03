@@ -12,3 +12,10 @@ test('contract matches live RPC registry',function(){
 test('contract result status has four states',function(){
   assert.deepEqual([...c.status],['changed','unchanged','skipped','failed']);
 });
+
+test('contract degraded reasons are frozen and stable',function(){
+  for (const reason of ['relevance','relevance-timeout','intent','docs','history-timeout','webplan','v2progress-failed','output-truncated']) {
+    assert.ok(c.degraded.includes(reason), 'missing degraded reason: ' + reason);
+  }
+  assert.equal(Object.isFrozen(c.degraded),true);
+});

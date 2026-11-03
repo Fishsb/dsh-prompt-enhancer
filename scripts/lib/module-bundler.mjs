@@ -147,7 +147,12 @@ function collectGraph(root, entries) {
     if (modules.has(id)) return id;
     if (visiting.has(id)) return id;
     visiting.add(id);
-    const code = fs.readFileSync(file, 'utf8');
+    const source = fs.readFileSync(file, 'utf8');
+    // JSON 是一等模块类型：以 CommonJS 导出求值，避免把 JSON 原文当 JS 解析。
+    // JSON.parse 同时承担 fail-closed 校验与确定性规范化。
+    const code = file.endsWith('.json')
+      ? 'module.exports = ' + JSON.stringify(JSON.parse(source)) + ';'
+      : source;
     const parsed = parseModule(file, code);
     const resolvedDeps = new Map();
     for (const dep of parsed.deps) {

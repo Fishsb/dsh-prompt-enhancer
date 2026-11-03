@@ -2300,7 +2300,7 @@ async function v2ResolveProgress(services, historyText, cfg) {
         // 诊断标签失准会误导排查方向——按真实 kind 分流，并带上 failure code。
         const why = timedOut ? 'timeout'
           : (result.kind === 'maxtokens' ? 'truncated'
-          : (result.kind === 'error' ? ('error-' + String((result.failure && result.failure.code) || 'unknown'))
+          : (result.kind === 'error' ? 'failed'
           : (result.kind === 'aborted' || result.kind === 'cancelled' ? String(result.kind) : 'empty')));
         degrade(why);
         hlog('[enhance] v2 smart progress ' + why);
@@ -3076,6 +3076,11 @@ module.exports = { createEnhancePipeline };
 
 return module.exports;
 },
+  "src/shared/contracts/index.json": function (exports, module, __load) {
+
+module.exports = {"methods":["enhance","enhance/progress","cancel","models/list","models/current","models/resolve","models/test","models/stats","models/autochain","template/default","logs/last","config/get","config/set","voice/status","voice/correct"],"configKeys":["version","fallback","customModels","order","params","template","mode","context","memory","updater","voice"],"status":["changed","unchanged","skipped","failed"],"degraded":["relevance","relevance-budget","relevance-timeout","relevance-truncated","relevance-unparsed","relevance-failed","intent","intent-budget","intent-timeout","intent-truncated","intent-unparsed","intent-failed","docs","docs-budget","docs-timeout","docs-truncated","docs-unparsed","docs-failed","history","history-timeout","webplan","webplan-budget","webplan-timeout","webplan-truncated","webplan-unparsed","webplan-failed","websearch","websearch-budget","websearch-timeout","websearch-failed","v2progress-bad-json","v2progress-timeout","v2progress-truncated","v2progress-empty","v2progress-aborted","v2progress-cancelled","v2progress-failed","output-truncated"]};
+return module.exports;
+},
   "src/host/enhance-runtime.cjs": function (exports, module, __load) {
 
 'use strict';
@@ -3092,6 +3097,8 @@ return module.exports;
 // 不读取配置、不调用模型、不写回草稿；llm/timer/日志全部由调用方注入。
 
 const RETRY_ALWAYS_SAFETY_CAP = 5;
+const contractData = __load("src/shared/contracts/index.json");
+const DEGRADED_REASONS = new Set(contractData.degraded || []);
 
 function createEnhanceRuntime(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};
@@ -3104,6 +3111,11 @@ function createEnhanceRuntime(deps) {
     const rec = state.rec;
     if (!Array.isArray(rec.degraded)) rec.degraded = [];
     const k = String(kind || 'unknown');
+    // 契约外的降级原因不进入用户可见的 degraded 清单，避免契约面与运行面各说一套。
+    if (!DEGRADED_REASONS.has(k)) {
+      hlog('[enhance] degraded reason not in contract: ' + k);
+      return;
+    }
     if (rec.degraded.indexOf(k) === -1) rec.degraded.push(k);
   }
 
@@ -4487,7 +4499,21 @@ function resultIsTerminal(result) {
   return s !== RESULT_STATUS.SKIPPED && s !== RESULT_STATUS.FAILED;
 }
 
-module.exports = { RESULT_STATUS, resultStatusOf, resultIsTerminal };
+// 统一后处理结果形状：执行层按“是否改动 / 是否跳过 / 是否降级”给读数，
+// 这里只做归一，不改任何 RPC 字段或用户可见文案。
+function postprocessOutcomeOf(result) {
+  const r = result && typeof result === 'object' ? result : {};
+  return {
+    status: resultStatusOf(r),
+    text: typeof r.text === 'string' ? r.text : '',
+    changes: Array.isArray(r.removed) ? r.removed.slice() : [],
+    reason: typeof r.reason === 'string' ? r.reason : '',
+    degraded: r.degraded === true || (Array.isArray(r.degraded) && r.degraded.length > 0),
+  };
+}
+
+module.exports = { RESULT_STATUS, resultStatusOf, resultIsTerminal, postprocessOutcomeOf };
+
 return module.exports;
 },
   "src/host/enhance-result-module.cjs": function (exports, module, __load) {
@@ -4499,7 +4525,7 @@ return module.exports;
 //
 // 兼容性：线上 enhance 返回仍为 { ok, text, model, fallbackUsed?, truncated?, degraded? }。
 // status 只作为**可选**的语义读数附加，供后续客户端统一状态使用。
-const { resultStatusOf } = __load("src/shared/contracts/result.cjs");
+const { RESULT_STATUS, resultStatusOf } = __load("src/shared/contracts/result.cjs");
 
 function enhanceSuccessResult(input) {
   const v = input && typeof input === 'object' ? input : {};
@@ -4515,7 +4541,7 @@ function enhanceFailureResult(input) {
   const result = {
     ok: false,
     code: v.code || 'LLM_FAILED',
-    status: 'failed',
+    status: RESULT_STATUS.FAILED,
   };
   if (v.message !== undefined) result.message = v.message;
   return result;

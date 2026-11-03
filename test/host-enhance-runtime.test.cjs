@@ -88,3 +88,13 @@ test('HER-06 产物内联运行时模块（无外部 require）', () => {
   assert.ok(host.includes('createEnhanceRuntime({ ctx, llm, hlog })'), 'chunk 必须以注入依赖构造运行时');
   assert.equal((host.match(/require\(/g) || []).length, 0, 'host 产物不得含外部 require');
 });
+
+test('HER-07 降级清单只收契约内原因（契约外只留诊断日志）', () => {
+  const { rt, logs } = makeRuntime();
+  const state = { rec: {} };
+  rt.markDegraded(state, 'relevance-timeout');
+  rt.markDegraded(state, 'not-in-contract');
+  rt.markDegraded(state, 'output-truncated');
+  assert.deepEqual(state.rec.degraded, ['relevance-timeout', 'output-truncated']);
+  assert.ok(logs.some((line) => line.includes('not-in-contract')), '契约外原因必须可诊断');
+});

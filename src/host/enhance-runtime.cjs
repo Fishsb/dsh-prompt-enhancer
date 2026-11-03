@@ -12,6 +12,8 @@
 // 不读取配置、不调用模型、不写回草稿；llm/timer/日志全部由调用方注入。
 
 const RETRY_ALWAYS_SAFETY_CAP = 5;
+const contractData = require('../shared/contracts/index.json');
+const DEGRADED_REASONS = new Set(contractData.degraded || []);
 
 function createEnhanceRuntime(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};
@@ -24,6 +26,11 @@ function createEnhanceRuntime(deps) {
     const rec = state.rec;
     if (!Array.isArray(rec.degraded)) rec.degraded = [];
     const k = String(kind || 'unknown');
+    // 契约外的降级原因不进入用户可见的 degraded 清单，避免契约面与运行面各说一套。
+    if (!DEGRADED_REASONS.has(k)) {
+      hlog('[enhance] degraded reason not in contract: ' + k);
+      return;
+    }
     if (rec.degraded.indexOf(k) === -1) rec.degraded.push(k);
   }
 
