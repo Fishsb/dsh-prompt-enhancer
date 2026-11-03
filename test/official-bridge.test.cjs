@@ -24,6 +24,7 @@ const CHUNK = 'src/client/voice/official-bridge.js';
 //   ESM 模块拿到的是命名空间对象，不可直接调用（实测）。
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 const { voiceStateChunkWithDefaults } = require('./helpers/voice-state-chunk.cjs');
+const { i18nSource } = require('./helpers/client-i18n.cjs');
 
 // §7.4 起：official-bridge 依赖 state.js 的单一事实源（vadSilenceMsOf / vadRequiredQuiet / voiceCfgState）。
 // 测试注入**真实的 state.js**（而非桩），以保证「两条入口共用同一值」在测试里也是同一份实现。
@@ -925,7 +926,7 @@ test('OVB-W03 接线：设置页诊断区在位（不静默失效的可见面）
   assert.ok(vs.includes("t('voiceOfficialStartMissed')"), '缺「未能派发点击官方开始按钮」分支（不得静默失败）');
   assert.ok(vs.includes("t('voiceOfficialSelfCapture')"), '缺 selfCapture 分支（D-2 修复）');
   assert.ok(vs.includes('snap.sessionsStarted > 0'), 'D-1 修复须以官方会话计数分支（严格可判别）');
-  const i18n = decodeChunk('src/client/i18n.js');
+  const i18n = i18nSource();
   for (const k of ['voiceOfficialDiagTitle', 'voiceOfficialActive', 'voiceOfficialMissed', 'voiceOfficialAbandon', 'voiceOfficialSelfCapture', 'voiceOfficialArmed', 'voiceOfficialDisabled',
     'voiceOfficialVerified', 'voiceOfficialStartMissed', 'voiceOfficialFeedback', 'voiceOfficialFeedbackSeen', 'voiceOfficialFeedbackSeenAgo']) {
     assert.ok(i18n.includes(k + ":"), 'i18n 缺键 ' + k);
@@ -944,7 +945,7 @@ test('OVB-W03 接线：设置页诊断区在位（不静默失效的可见面）
 // F-11（2026-10-13）：用户可见面不得出现未替换的占位符，且计数只留一个
 test('OVB-W04 F-11：诊断区成功态原文不含未替换占位符，且计数只出现一次', () => {
   const vs = decodeChunk('src/client/voice/voice-section.js');
-  const i18n = decodeChunk('src/client/i18n.js');
+  const i18n = i18nSource();
   // 键：不得再含 printf 风格 %d（本项目约定为 {n}）
   assert.ok(!/voiceOfficialVerified: '[^']*%d/.test(i18n), 'F-11：键内不得再用 %d（约定 {n}）');
   assert.ok(/voiceOfficialVerified: '[^']*\{n\}[^']*'/.test(i18n), 'F-11：键内须含 {n} 占位符');
@@ -964,7 +965,7 @@ test('OVB-W04 F-11：诊断区成功态原文不含未替换占位符，且计�
 });
 
 test('OVB-W05 F-11 变异自证：把键退回 %d（且渲染处仍追加）⇒ OVB-W04 必红', () => {
-  const i18n = decodeChunk('src/client/i18n.js');
+  const i18n = i18nSource();
   // 锚点随文案重写订正（值变了，键与占位符约定不变）：从当前 i18n 动态取该键的现值
   const anchor = "voiceOfficialVerified: '" + (i18n.match(/voiceOfficialVerified: '([^']*)'/) || [0, ''])[1] + "'";
   assert.ok(i18n.includes(anchor), 'F-11 修复锚点须存在');
@@ -1941,7 +1942,7 @@ test('OVB-SW05 中途关开关：会话进行中改配置 ⇒ 当帧起不再派
 
 test('OVB-SW06 诊断可见：开关态进快照且分支可区分「已关闭」与「已开启未触发」', () => {
   const vs = decodeChunk('src/client/voice/voice-section.js');
-  const i18n = decodeChunk('src/client/i18n.js');
+  const i18n = i18nSource();
   // 独立 i18n 键（前缀刻意避开被既有判据锁数的 voiceOfficial*/voiceVad*）
   assert.ok(i18n.includes("voiceSilenceOff:"), 'i18n 缺「静音监测已关闭」键');
   assert.ok(vs.includes("t('voiceSilenceOff')"), '诊断分支缺「已关闭」分支引用');

@@ -22,6 +22,7 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const { i18nSource, ZH } = require('./helpers/client-i18n.cjs');
 // 目标模式：correction.js 消费构建期注入的纠错状态模块；测试沙箱必须提供同一符号。
 const CORRECTION_STATE = require('../src/client/voice/correction-state-module.cjs');
 
@@ -247,7 +248,7 @@ test('CHG184-S14 ⭐ 接线（R3 迁移）：纠错状态不再注册独立元�
 });
 
 test('CHG184-S15 i18n：五态键 ZH/EN 双侧齐全且逐键同形（S-7）', () => {
-  const i18n = decodeChunk('src/client/i18n.js');
+  const i18n = i18nSource();
   const keys = ['voiceCorrectionStateIdle', 'voiceCorrectionStateIdleOff', 'voiceCorrectionStateRunning',
     'voiceCorrectionStateChanged', 'voiceCorrectionStateUnchanged', 'voiceCorrectionStateSkipped',
     'voiceCorrectionStateFailed', 'voiceCorrectionStateAriaLabel'];
@@ -258,7 +259,7 @@ test('CHG184-S15 i18n：五态键 ZH/EN 双侧齐全且逐键同形（S-7）', (
 });
 
 test('CHG184-S16 ⭐ 五态文案**两两不同**（否则「可判」只是形而上）', () => {
-  const i18n = decodeChunk('src/client/i18n.js');
+  const i18n = i18nSource();
   // 取 ZH 那一段里的取值（第一个匹配即 ZH 侧）
   const grab = (k) => {
     const m = i18n.match(new RegExp(k + ":\\s*'([^']*)'"));
@@ -528,8 +529,7 @@ test('R3-F ⭐ 「没跑（开关关）」与「跑了但没改」的区分改�
   assert.ok(/if \(ph === 'unchanged'\) return t\('voiceCorrectionNoChange'\)/.test(diag), '「跑了但没改」分支须独立存在');
   assert.ok(/if \(!on\) return t\('voiceCorrectionOff'\)/.test(diag), 'idle+开关关分支须独立存在');
   // ④ i18n 逐字不同
-  const i18n = decodeChunk('src/client/i18n.js');
-  const got = new Function(i18n + '; return { ZH: ZH, EN: EN };')();
+  const got = { ZH };
   assert.equal(got.ZH.voiceCorrectionOff, '开关关闭，未纠错');
   assert.equal(got.ZH.voiceCorrectionNoChange, '检查过，没有错字');
   assert.notEqual(got.ZH.voiceCorrectionOff, got.ZH.voiceCorrectionNoChange, '⭐ 两态文本必须不同');
@@ -733,8 +733,7 @@ test('SCOPE-R3 ⭐ 变异自证：按钮不回传归属 ⇒ SCOPE-R1 的判据�
 
 /** 取 i18n 的中文表（诊断/按钮的可见文本读它，避免判据里复制产品文案）。 */
 function zhDict() {
-  const i18n = decodeChunk('src/client/i18n.js');
-  return new Function(i18n + ';return ZH;')();
+  return ZH;
 }
 
 /**

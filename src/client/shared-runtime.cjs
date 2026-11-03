@@ -6,11 +6,14 @@ const filler = require('./voice/filler-module.cjs');
 const correctionState = require('./voice/correction-state-module.cjs');
 const modelHelpers = require('./model-helpers-module.cjs');
 const constants = require('./constants-module.cjs');
+const i18n = require('./i18n-module.cjs');
 const clientState = require('./state-module.cjs');
 const clientHelpers = require('./helpers-module.cjs');
 
 module.exports = {
   ...constants,
+  ZH: i18n.ZH,
+  EN: i18n.EN,
   FILLER_CHARS: filler.FILLER_CHARS,
   FILLER_CHARS_GUARDED: filler.FILLER_CHARS_GUARDED,
   FILLER_PHRASES_HARD: filler.FILLER_PHRASES_HARD,

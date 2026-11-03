@@ -23,7 +23,6 @@ function buildClient() {
   // LF-based marker lookups. Chunks are normalized again at the end so the
   // committed artifacts stay byte-stable (LF).
   body = body.replace(/\r\n/g, '\n');
-  const i18nChunk = require('../src/client/i18n.js');
   const enhanceButtonChunk = require('../src/client/components/enhance-button.js');
   // CHG-184（纠错状态可视化批）：输入框旁的五态指示 chunk（与 ✨ 按钮同槽位、同族样式）
   const enhanceBarChunk = require('../src/client/components/enhance-bar.js');
@@ -77,6 +76,9 @@ function buildClient() {
   if (!clientSharedRuntime.modules.includes('src/client/constants-module.cjs')) {
     throw new Error('[build-client] 客户端共享运行时打包不完整：缺少常量模块');
   }
+  if (!clientSharedRuntime.modules.includes('src/client/i18n-module.cjs')) {
+    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少文案模块');
+  }
   if (!clientSharedRuntime.modules.includes('src/client/state-module.cjs')) {
     throw new Error('[build-client] 客户端共享运行时打包不完整：缺少状态模块');
   }
@@ -108,7 +110,7 @@ function buildClient() {
     // 放到 postprocess 注入位会落成 TDZ：`Cannot access '__VOICE_CONFIG_DEFAULTS__' before initialization`）。
     ['// @dsh-client-constants-inject', sharedRuntimeChunk],
     ['// @dsh-client-voice-postprocess-inject\n', ''],
-    ['// @dsh-client-i18n-inject', i18nChunk],
+    ['// @dsh-client-i18n-inject', ''],
     ['// @dsh-client-state-inject', 'const __DSH_CLIENT_STATE__ = createClientState({ host });\nconst {\n'
       + Object.keys(require('../src/client/state-module.cjs').createClientState({ host: { call: () => Promise.resolve({ ok: true, config: null }) } }))
         .map((k) => '  ' + k + ',').join('\n')

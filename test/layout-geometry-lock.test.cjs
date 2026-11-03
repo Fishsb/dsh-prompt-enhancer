@@ -20,6 +20,7 @@ const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const { ZH, EN } = require('./helpers/client-i18n.cjs');
 
 function voiceSrc() {
   return decodeChunk('src/client/voice/voice-section.js');
@@ -328,8 +329,7 @@ test('GEOLOCK-A4 VoiceSection 全 client chunk 只挂载**一处**，且该处�
 });
 
 test('GEOLOCK-A5 语音块标题 = 「语音增强」（中英各一），且两个 tab 标签均在 i18n 两侧', () => {
-  const i18n = decodeChunk('src/client/i18n.js');
-  const dict = new Function(i18n + '\n;return { ZH: ZH, EN: EN };')();
+  const dict = { ZH, EN };
   assert.equal(typeof dict.ZH, 'object', '前置：ZH 字典须可求值');
   assert.equal(typeof dict.EN, 'object', '前置：EN 字典须可求值');
   // ① 两个 tab 的标签键在两侧都存在

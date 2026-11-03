@@ -55,6 +55,17 @@ function patchChunk(root, rel, edits) {
   fs.writeFileSync(path.join(root, rel), raw.slice(0, i + HEAD_LIT.length) + lit.slice(1, -1) + raw.slice(end), 'utf8');
 }
 
+function patchPlainModule(root, rel, edits) {
+  const abs = path.join(root, rel);
+  let out = fs.readFileSync(abs, 'utf8');
+  for (const pair of edits) {
+    const from = pair[0], to = pair[1];
+    if (!out.includes(from)) throw new Error('变异锚点未命中：' + JSON.stringify(String(from).slice(0, 60)) + ' @ ' + rel);
+    out = out.split(from).join(to);
+  }
+  fs.writeFileSync(abs, out, 'utf8');
+}
+
 function runAudit(root) {
   const r = spawnSync(NODE, [path.join(root, 'scripts/settings-layout-audit.mjs'), '--root', root], { encoding: 'utf8', timeout: 300000, maxBuffer: 64 * 1024 * 1024 });
   const out = String(r.stdout || '');
@@ -79,12 +90,12 @@ const CASES = [];
 const expectCase = (name, kind, fn) => CASES.push({ name, kind, fn });
 
 expectCase('M1 超长文案（40 字）塞进 label 列', 'FAIL', async (root) => {
-  await patchChunk(root, 'src/client/i18n.js', [["cfgMaxTokens: '回复长度上限'", "cfgMaxTokens: '" + '超长文案'.repeat(10) + "'"]]);
+  await patchPlainModule(root, 'src/client/i18n-module.cjs', [["cfgMaxTokens: '回复长度上限'", "cfgMaxTokens: '" + '超长文案'.repeat(10) + "'"]]);
   return runAudit(root);
 });
 
 expectCase('M2 超长文案塞进固定宽开关（不换行控件）', 'FAIL', async (root) => {
-  await patchChunk(root, 'src/client/i18n.js', [["voiceAutoEnhance: '自动增强'", "voiceAutoEnhance: '" + '超长文案'.repeat(10) + "'"]]);
+  await patchPlainModule(root, 'src/client/i18n-module.cjs', [["voiceAutoEnhance: '自动增强'", "voiceAutoEnhance: '" + '超长文案'.repeat(10) + "'"]]);
   return runAudit(root);
 });
 
@@ -119,7 +130,7 @@ expectCase('M7 label 列改回内容定宽', 'FAIL', async (root) => {
 expectCase('M8 文案 bug 回归（主谓同词）', 'RED', async (root) => {
   // 本批修法是「只改值、不改键名、不新增键」⇒ 回归的形态是**把谓词键的值改回与主语同词**
   //   （不是换键）。这正是用户当初看到「清口水词：清口水词」的那一态。
-  await patchChunk(root, 'src/client/i18n.js', [["voiceRefineEnabled: '这次没有口水词'", "voiceRefineEnabled: '清口水词'"]]);
+  await patchPlainModule(root, 'src/client/i18n-module.cjs', [["voiceRefineEnabled: '这次没有口水词'", "voiceRefineEnabled: '清口水词'"]]);
   return runTest(root, 'test/voice-text-audit.test.cjs', 'VTX-A');
 });
 

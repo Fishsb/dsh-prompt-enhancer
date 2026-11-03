@@ -120,7 +120,7 @@ function browserDriver() {
     var S = stateFactory(localStorageStub, host);
     S.voiceCfgState.value = JSON.parse(JSON.stringify(scn.voice));
 
-    var i18nFactory = new Function(SRC['src/client/i18n.js'] + '\n;return { ZH: ZH, EN: EN };');
+    var i18nFactory = new Function(SRC['src/client/i18n-module.cjs'] + '\n;return { ZH: ZH, EN: EN };');
     var dicts = i18nFactory();
     // overrides 形态：{ kind: 'zh' | 'en' | 'worst' | 'path' }
     //   zh    = 当前 ZH 值（基线）；

@@ -20,6 +20,7 @@ const ROOT = path.resolve(__dirname, '..');
 //   （`scripts/lib/chunk-decode.mjs`，fail-closed 且报错点名声）。取具名成员解构 ——
 //   `require()` 一个 ESM 模块拿到的是命名空间对象，不可直接调用（实测）。
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const { i18nSource } = require('./helpers/client-i18n.cjs');
 const { voiceStateChunkWithDefaults } = require('./helpers/voice-state-chunk.cjs');
 
 // 求值 state.js：得到归一化 / 帧数派生（§7.4 的单一事实源）
@@ -472,7 +473,7 @@ test('VADSIL-P14i 静音行：滑块吃满 + 读数有槽（关/开两态滑块�
   assert.ok(/min-width:\s*[\d.]+em/.test(rd[1]), '读数槽须用 em 计最小占位（px 会给开关引入固定像素的同族问题；实得 ' + rd[1].slice(0, 60) + '）');
 });
 test('VADSIL-P15 i18n：新增 3 键且 ZH/EN 键集相等（S-7）', () => {
-  const i18n = decodeChunk('src/client/i18n.js');
+  const i18n = i18nSource();
   for (const k of ['voiceVadSilenceLabel', 'voiceVadSilenceUnit', 'voiceVadSilenceHint']) {
     assert.ok(i18n.includes(k + ':'), 'i18n 缺键 ' + k);
   }

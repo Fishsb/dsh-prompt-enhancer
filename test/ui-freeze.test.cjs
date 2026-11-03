@@ -3,8 +3,9 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const ROOT=path.join(__dirname,'..');
+const {i18nSource}=require('./helpers/client-i18n.cjs');
 function snapshot(){
-const s=require(path.join(ROOT,'src/client/i18n.js'));
+const s=i18nSource();
 const i=s.indexOf('const ZH = {');
 const j=s.lastIndexOf('const EN = {');
 const e=s.indexOf('\n};',j);

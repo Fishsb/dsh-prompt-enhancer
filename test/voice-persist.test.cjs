@@ -21,10 +21,11 @@ const asr = require('../lib/asr.cjs');
 //   ESM 模块拿到命名空间对象，不可直接调用（实测）。
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 const { voiceStateChunkWithDefaults } = require('./helpers/voice-state-chunk.cjs');
+const { i18nSource } = require('./helpers/client-i18n.cjs');
 
 /** 解出 i18n chunk 源码原文（本文件三处解码点的单一落点；再往下分 ZH/EN 两段）。 */
 function decodeI18nBody() {
-  return decodeChunk('src/client/i18n.js');
+  return i18nSource();
 }
 
 // ---- 1. voice/* RPC schema 校验 ----

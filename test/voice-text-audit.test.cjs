@@ -15,13 +15,12 @@ const assert = require('node:assert/strict');
 // ⚠ 与同目录其它测试同款：CJS + 共享单一事实源的 chunk 解码器
 //   （scripts/lib/chunk-decode.mjs 是 ESM ⇒ require 拿到命名空间对象，取具名成员解构）
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const { i18nBody, ZH, EN } = require('./helpers/client-i18n.cjs');
 
 const VS = 'src/client/voice/voice-section.js';
-const I18N = 'src/client/i18n.js';
 
 function dicts() {
-  const src = decodeChunk(I18N);
-  return new Function(src + ';return { ZH: ZH, EN: EN };')();
+  return { ZH, EN };
 }
 function vs() { return decodeChunk(VS); }
 
@@ -146,7 +145,7 @@ function mutate(src, pairs) {
 
 test('VTX-V01 变异自证·正例必红：把谓词键的值改回与主语同词 ⇒ VTX-A 必红', () => {
   const D = dicts();
-  const i18n = decodeChunk(I18N);
+  const i18n = i18nBody();
   // 单因子变异：只把 voiceRefineEnabled 的中文值改回与主语同词的「清口水词」
   //   （这就是用户看到「清口水词：清口水词」的那一态）⇒ VTX-A 的 notEqual 必须变红。
   // 锚点取**当前实际值**（本文件不复制产品文案的旧值 —— 那样一动文案就静默失效）
