@@ -114,7 +114,12 @@ export function listChunkFiles(root, relDir) {
       if (ent.name.endsWith('.js')) out.push(path.relative(root, full).split(path.sep).join('/'));
     }
   };
-  for (const rel of dirs) walk(path.join(root, rel));
+  for (const rel of dirs) {
+    const dir = path.join(root, rel);
+    // 扫描面缺位必须显式抛错（调用方据此判红）；只有目录存在且为空才是合法的 0 件。
+    if (!fs.existsSync(dir)) throw new Error('chunk scan directory missing: ' + rel);
+    walk(dir);
+  }
   return out.sort();
 }
 export function decodeChunk(file, opts) {

@@ -27,8 +27,9 @@ const { decodeChunkText, chunkWrapperLiteral, listChunkFiles } = chunkDecode;
 
 const CHUNKS = listChunkFiles(ROOT);
 
-test('CH-01 枚举面非空且与 R7 自报读数同值（跨实现交叉校验，不是第二份枚举）', () => {
-  assert.ok(CHUNKS.length > 0, '枚举必须非空（空清单 ⇒ 后面的逐件断言全部空转）');
+test('CH-01 枚举面与 R7 自报读数同值（跨实现交叉校验，不是第二份枚举）', () => {
+  // 目标模式：client/host 业务已全部迁为普通模块，chunk 面允许为 0。
+  // 此时仍执行下面的对拍，证明「0」是实际枚举结果，而不是扫描器坏掉。
   // 与既有门禁**对拍**：R7 的自报行里那个数字是它自己枚出来的面。两侧不一致 ⇒ 有一侧漏了。
   const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'dead-code-gate.mjs')], { cwd: ROOT, encoding: 'utf8' });
   const m = String(r.stdout || '').match(/R7 \| (\d+) 个 client chunk/);
@@ -38,7 +39,6 @@ test('CH-01 枚举面非空且与 R7 自报读数同值（跨实现交叉校验�
 });
 
 test('CH-02 逐件 fail-closed：每个 chunk 解码后必须是**非空字符串**，且解出的仍可求值', () => {
-  assert.ok(CHUNKS.length > 0, '前置：枚举非空');
   const bad = [];
   for (const rel of CHUNKS) {
     const raw = fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -78,4 +78,18 @@ test('CH-04 负控：真实工作区不动 ⇒ 全部 chunk 解码必成功（�
     try { decodeChunkText(fs.readFileSync(path.join(ROOT, rel), 'utf8'), rel); return true; } catch (e) { return false; }
   });
   assert.equal(ok.length, CHUNKS.length, '真实工作区全部 chunk 必须可解（实得 ' + ok.length + '/' + CHUNKS.length + '）');
+});
+
+test('CH-05 扫描面缺位必须抛错；目录存在且为空才允许 0 件', () => {
+  const { listChunkFiles: list } = chunkDecode;
+  assert.throws(() => list(path.join(ROOT, 'definitely-not-a-repo-' + Date.now())),
+    (e) => /chunk scan directory missing/.test(e.message), '扫描目录缺位不得静默返回空清单');
+  const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'chunk-empty-'));
+  try {
+    fs.mkdirSync(path.join(emptyRoot, 'src', 'client'), { recursive: true });
+    fs.mkdirSync(path.join(emptyRoot, 'src', 'host'), { recursive: true });
+    assert.deepEqual(list(emptyRoot), [], '目录存在且无 .js chunk ⇒ 合法的 0 件');
+  } finally {
+    fs.rmSync(emptyRoot, { recursive: true, force: true });
+  }
 });

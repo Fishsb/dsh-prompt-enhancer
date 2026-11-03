@@ -175,7 +175,8 @@ test('CS-09 取值等价：共享解码器与旧实现口径在**全部** chunk 
   const clientChunks = listChunks(ROOT, path.join('src', 'client'));
   assert.equal(chunks.length, clientChunks.length,
     '扫描面必须等于 client 的实际 chunk 文件集（不得写死件数）');
-  assert.ok(chunks.length > 0, '扫描面不得为空');
+  // 目标模式：chunk 面允许为 0（业务已全部是普通模块）；
+  // 这里仍对拍 R7 的真实读数，0 必须是两侧一致的实际枚举结果。
   const OLD_LOOSE = /module\.exports\s*=\s*"([\s\S]*)";?\s*$/;
   for (const rel of chunks) {
     const raw = fs.readFileSync(path.join(ROOT, rel), 'utf8');

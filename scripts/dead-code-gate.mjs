@@ -460,7 +460,9 @@ for (const line of git(diffArgs).split('\n')) {
       if (ent.name.endsWith('.js')) clientChunks.push(full);
     }
   };
-  walkClientChunks(clientChunkDir);
+  try { walkClientChunks(clientChunkDir); } catch (e) {
+    problems.push('client chunk 目录缺位（无扫描面 ⇒ 不得判绿）: ' + path.relative(ROOT, clientChunkDir));
+  }
   for (const f of clientChunks) {
     const rel = path.relative(ROOT, f);
     let v;

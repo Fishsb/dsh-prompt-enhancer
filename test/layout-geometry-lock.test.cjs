@@ -628,6 +628,8 @@ test('GEOLOCK-B5 真机可用宽只以**具名常量**出现一次（⛔ 不许�
   for (const rel of listChunkFiles(ROOT)) {
     if ((codeOnly(decodeChunk(rel)).match(literalRe) || []).length > 0) productHits.push(rel);
   }
+  // 目标模式：业务已全部是普通模块 ⇒ chunk 面允许为 0。
+  // 该判据仍以「0 命中」为通过条件；chunk 面存在时逐件检查。
   assert.deepEqual(productHits, [],
     '⛔ 产品源码的**代码面**不得出现该数字（散落魔数）；命中 ' + JSON.stringify(productHits)
     + '｜判据范围 = src/client/** + src/host/** 全部 chunk 的剥注释代码面（不含注释文本）');

@@ -566,3 +566,24 @@ test('R7 覆盖面（host 面同族）：host 装配图新增未接线模块 ⇒
     assert.match(r.out, /FAIL \| R4 \|[^\n]*orphan-module\.cjs/, 'R4 必须点名未接线模块');
   });
 });
+
+test('R7 零 chunk 负控：合法空 chunk 面仍判绿（0 件不是扫描器坏掉）', () => {
+  // 目标模式：业务已全部是普通模块，src/client/** 不再含 .js chunk。
+  // 此用例锁定「零 chunk 面」是合法状态：R7 仍必须给出 PASS，且失败面不得空转。
+  const { listChunkFiles } = require('../scripts/lib/chunk-decode.mjs');
+  assert.equal(listChunkFiles(ROOT).length, 0, '当前目标形态：chunk 面应为 0 件');
+  withFixture(null, (dir) => {
+    const r = runGate(dir);
+    assert.equal(r.code, 0, '零 chunk 且装配图完整必须 exit 0');
+    assert.match(r.out, /PASS \| R7 \| 0 个 client chunk/, 'R7 必须显式报 0 件（不是缺席）');
+  });
+});
+
+test('R7 零 chunk fail-closed：chunk 扫描目录缺位 ⇒ 必红', () => {
+  withFixture((dir) => {
+    fs.rmSync(path.join(dir, 'src', 'client'), { recursive: true, force: true });
+  }, (dir) => {
+    const r = runGate(dir);
+    assert.equal(r.code, 1, '扫描目录缺位必须 exit 1（0 件只能来自存在的空目录）');
+  });
+});

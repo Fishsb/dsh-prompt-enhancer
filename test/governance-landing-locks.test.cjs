@@ -136,7 +136,12 @@ const HOST_DIR = path.join(ROOT, 'src', 'host');
 const hostFilesOnDisk = fs.readdirSync(HOST_DIR).filter((f) => f.endsWith('.js')).length;
 const hostLinesOnDisk = fs.readdirSync(HOST_DIR).filter((f) => f.endsWith('.js'))
   .reduce((sum, f) => sum + fs.readFileSync(path.join(HOST_DIR, f), 'utf8').split('\n').length, 0);
-const TRUTH = { indexLines: 114, hostFiles: hostFilesOnDisk, hostLines: hostLinesOnDisk, rpcLive: 15, rpcBundled: 12, rpcNative: 3, libFiles: 12, templates: 10, chunks: 29, whitelist: 5 };
+// chunks 由磁盘实测注入（目标模式下 chunk 面可为 0，不写死历史快照）。
+const chunkFilesOnDisk = (() => {
+  const { listChunkFiles } = require('../scripts/lib/chunk-decode.mjs');
+  return listChunkFiles(ROOT).length;
+})();
+const TRUTH = { indexLines: 114, hostFiles: hostFilesOnDisk, hostLines: hostLinesOnDisk, rpcLive: 15, rpcBundled: 12, rpcNative: 3, libFiles: 12, templates: 10, chunks: chunkFilesOnDisk, whitelist: 5 };
 
 /** 与真实派生同形的替身 —— **不触碰真实工作区**，值由调用方给定。 */
 const depsFrom = (v) => ({

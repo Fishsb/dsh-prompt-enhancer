@@ -1004,7 +1004,10 @@ const STRUCTURAL = [
     const contract = /^\s*\*\s+text=auto\s+eol=lf\s*$/m.test(attrs);
     const r = eolRows();
     if (!r || r.error) return no('git ls-files --eol 不可执行：' + (r && r.error ? r.error : '.git 缺位（非 git 检出 / 解包发行物）'));
-    const rows = r.rows.filter((x) => !x.raw);
+    // 工作区删除（尚未提交）的受控件不是行尾契约的对象；用 `w/ ?` 排除，
+    // 否则一次正常删除会把 S-8 判成假红（文件内容与契约均未变）。
+    // 该排除仅作用于工作树列；索引侧仍由下方 malformed / text 判据覆盖。
+    const rows = r.rows.filter((x) => !x.raw && x.worktree !== '?');
     const malformed = r.rows.filter((x) => x.raw);
     const scan = (rs) => {
       const text = rs.filter((x) => x.attr === 'text' || x.attr === 'text=auto');
