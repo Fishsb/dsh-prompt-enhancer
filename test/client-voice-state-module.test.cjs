@@ -157,11 +157,10 @@ test('CVSTATE-06 产物内联状态模块，共享运行时暴露 fillerState，
   const build = fs.readFileSync(path.join(REPO_ROOT, 'scripts/build-client.mjs'), 'utf8');
   const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/shared-runtime.cjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(build.includes("entry: 'src/client/voice/state-module.cjs'"));
-  assert.ok(build.includes("'// @dsh-client-voice-recorder-inject\\n', ''"));
+  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"), 'build-client 必须从普通入口模块打包');
   assert.ok(shared.includes('fillerState: filler.fillerState'));
   assert.ok(client.includes('src/client/voice/state-module.cjs'));
-  assert.ok(client.includes('__DSH_VOICE_RUNTIME__.createVoiceState'));
+  assert.ok(client.includes('createVoiceState({ host:'));
   assert.equal(client.includes('src/client/voice/state.js'), false);
   assert.equal(client.includes('src/client/voice/recorder.js'), false);
   assert.equal((client.match(/require\(['"]\.\.?\//g) || []).length, 0);

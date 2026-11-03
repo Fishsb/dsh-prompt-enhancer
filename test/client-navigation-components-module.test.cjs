@@ -46,7 +46,7 @@ test('CNAV-04 跑马灯组件仍消费 window/document 与键盘导航', () => {
 test('CNAV-05 构建产物内联导航运行时，不再装载旧组件 chunk', () => {
   const build = fs.readFileSync(path.join(REPO_ROOT, 'scripts/build-client.mjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(build.includes("entry: 'src/client/components/navigation-runtime.cjs'"));
+  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"));
   assert.ok(client.includes('src/client/components/navigation-runtime.cjs'));
   assert.ok(client.includes('src/client/components/collapsible-section-module.cjs'));
   assert.ok(client.includes('src/client/components/marquee-select-module.cjs'));

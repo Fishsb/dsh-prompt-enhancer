@@ -173,12 +173,12 @@ test('CSTAB-04 模式切换同时重置 params 与 context 默认值', () => {
 test('CSTAB-05 构建产物内联两个 tab 运行时，旧 chunk 与相对 require 均不存在', () => {
   const build = fs.readFileSync(path.join(REPO_ROOT, 'scripts/build-client.mjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(build.includes("entry: 'src/client/components/model-config-tab-module.cjs'"));
-  assert.ok(build.includes("entry: 'src/client/components/params-tab-module.cjs'"));
+  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"));
+  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"));
   assert.ok(client.includes('src/client/components/model-config-tab-module.cjs'));
   assert.ok(client.includes('src/client/components/params-tab-module.cjs'));
-  assert.ok(client.includes('.createModelConfigTab('));
-  assert.ok(client.includes('.createParamsTab('));
+  assert.ok(client.includes('createModelConfigTab({'));
+  assert.ok(client.includes('createParamsTab({'));
   assert.equal(client.includes('src/client/components/model-config-tab.js'), false);
   assert.equal(client.includes('src/client/components/params-tab.js'), false);
   assert.equal((client.match(/require\(["']\.\.?\//g) || []).length, 0);

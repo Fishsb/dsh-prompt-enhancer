@@ -2,29 +2,108 @@
 
 // 客户端插件装配入口普通模块（构建期由打包器内联）。
 // apply 的注册顺序、槽位 ID、标签与卸载行为不变。
+const shared = require('./shared-runtime.cjs');
+const contracts = require('../shared/contracts/client-runtime.cjs');
+const { createClientState } = require('./state-module.cjs');
+const { createClientHelpers } = require('./helpers-module.cjs');
+const { createVoiceState } = require('./voice/state-module.cjs');
+const { createCorrectionState } = require('./voice/correction-module.cjs');
+const { createOfficialVoiceBridge } = require('./voice/official-bridge-module.cjs');
+const { createVoiceHotkey } = require('./voice/hotkey-module.cjs');
+const { createVoiceSection } = require('./voice/voice-section-module.cjs');
+const { createCollapsibleSection, createMarqueeSelect } = require('./components/navigation-runtime.cjs');
+const { createModelMainSection, createFallbackRow } = require('./components/model-settings-runtime.cjs');
+const { createModelConfigTab } = require('./components/model-config-tab-module.cjs');
+const { createParamsTab } = require('./components/params-tab-module.cjs');
+const { createModelPluginsSection } = require('./components/settings-shell-runtime.cjs');
+const { createEnhanceButton, createEnhanceBar } = require('./components/enhance-components-runtime.cjs');
 function createClientApp(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};
   const styles = d.styles;
-  const CSS = d.CSS;
-  const ZH = d.ZH;
-  const EN = d.EN;
+  const CSS = shared.CSS;
+  const ZH = shared.ZH;
+  const EN = shared.EN;
   const timerRef = d.timerRef;
-  let timerSvc = d.timerSvc || null;
+  const timerSvc = d.timerSvc || null;
   let dynFace = null;
-  const officialVoiceBridge = d.officialVoiceBridge;
-  const ModelPluginsSection = d.ModelPluginsSection;
-  const CordisBadgePlaceholder = d.CordisBadgePlaceholder;
-  const EnhanceButton = d.EnhanceButton;
-  const VoiceHotkeyHost = d.VoiceHotkeyHost;
-  const EnhanceBar = d.EnhanceBar;
+
+  // 目标模式：状态/语音/组件的依赖图在此显式装配，替代旧注入标记与隐式全局。
+  const configState = createClientState({ host: d.host, timerRef });
+  const helpers = createClientHelpers({ host: d.host, configState, dictionary: ZH, storage: d.storage, resultStatusOf: contracts.resultStatusOf });
+  const voiceCfgState = createVoiceState({ host: d.host, storage: d.storage, timerSvc, fillerState: shared.fillerState, defaults: contracts.VOICE_CONFIG_DEFAULTS, console: d.console });
+  const correction = createCorrectionState({ voiceCfgState, correctionStateCore: { CORRECTION_PHASES: shared.CORRECTION_PHASES, correctionPhaseKnown: shared.correctionPhaseKnown, correctionPhaseOf: shared.correctionPhaseOf, correctionFailureTicket: shared.correctionFailureTicket, correctionFailureConsume: shared.correctionFailureConsume } });
+  const officialVoiceBridge = createOfficialVoiceBridge({
+    window: d.window, document: d.document, navigator: d.navigator, MutationObserver: d.MutationObserver,
+    voiceCfgState, vadRequiredQuiet: voiceCfgState.vadRequiredQuiet, vadSilenceMsOf: voiceCfgState.vadSilenceMsOf,
+  });
+  const CollapsibleSection = createCollapsibleSection({ React: d.React, dshEnhId: helpers.dshEnhId });
+  const MarqueeSelect = createMarqueeSelect({ React: d.React, window: d.window, document: d.document });
+  const VoiceSection = createVoiceSection({
+    React: d.React, makeT: helpers.makeT, host: d.host, voiceCfgState,
+    subscribeVoiceConfig: voiceCfgState.subscribeVoiceConfig, saveVoiceCfg: voiceCfgState.saveVoiceCfg,
+    syncVoiceFromHost: voiceCfgState.syncVoiceFromHost, vadSilenceMsOf: voiceCfgState.vadSilenceMsOf,
+    normalizeVadSilenceMs: voiceCfgState.normalizeVadSilenceMs, CollapsibleSection, officialVoiceBridge,
+    fillerSnapshot: shared.fillerSnapshot, subscribeFiller: shared.subscribeFiller,
+    correctionSnapshot: correction.correctionSnapshot, subscribeCorrection: correction.subscribeCorrection,
+    setTimeout: d.setTimeout || setTimeout, clearTimeout: d.clearTimeout || clearTimeout, window: d.window,
+  }).VoiceSection;
+  const ModelMainSection = createModelMainSection({
+    React: d.React, CollapsibleSection, makeT: helpers.makeT, host: d.host, DEFAULT_MODEL_CHAIN: shared.DEFAULT_MODEL_CHAIN, getLastDraft: helpers.getLastDraft, timerSvc,
+  });
+  const FallbackRow = createFallbackRow({ React: d.React, MarqueeSelect, makeT: helpers.makeT, host: d.host });
+  const ModelConfigTab = createModelConfigTab({
+    React: d.React, makeT: helpers.makeT, configState, subscribeConfig: configState.subscribeConfig,
+    host: d.host, DEFAULT_MODEL_CHAIN: shared.DEFAULT_MODEL_CHAIN, saveConfig: configState.saveConfig,
+    buildCandidates: d.buildCandidates, ModelMainSection, VoiceSection,
+  });
+  const ParamsTab = createParamsTab({
+    React: d.React, MarqueeSelect, makeT: helpers.makeT, dshEnhId: helpers.dshEnhId, configState,
+    saveConfig: configState.saveConfig, host: d.host, MODE_OPTIONS: shared.MODE_OPTIONS,
+    MODE_TIMEOUT_OPTIONS: shared.MODE_TIMEOUT_OPTIONS, MODE_MAXTOKENS_OPTIONS: shared.MODE_MAXTOKENS_OPTIONS,
+    MODE_OUTPUTLIMIT_OPTIONS: shared.MODE_OUTPUTLIMIT_OPTIONS, MODE_BUDGET_OPTIONS: shared.MODE_BUDGET_OPTIONS,
+    MODE_PARAMS_DEFAULT: shared.MODE_PARAMS_DEFAULT, MODE_BUDGET_DEFAULT: shared.MODE_BUDGET_DEFAULT,
+    modeShortLabel: shared.modeShortLabel, modeLabel: shared.modeLabel, TEMPLATE_BUILTIN_KEYS: shared.TEMPLATE_BUILTIN_KEYS,
+    TEMPLATE_CUSTOM_MAX: shared.TEMPLATE_CUSTOM_MAX, TEMPLATE_TEXT_MAX: shared.TEMPLATE_TEXT_MAX,
+    TEMPLATE_NAME_MAX: shared.TEMPLATE_NAME_MAX, customPickIndex: shared.customPickIndex,
+  });
+  const shell = createModelPluginsSection({ React: d.React, makeT: helpers.makeT, dshEnhId: helpers.dshEnhId, subscribeConfig: configState.subscribeConfig, subscribeSaveStatus: configState.subscribeSaveStatus, saveStatus: configState.saveStatus, ModelConfigTab, ParamsTab });
+  const ModelPluginsSection = shell.ModelPluginsSection;
+  const CordisBadgePlaceholder = shell.CordisBadgePlaceholder;
+  const EnhanceButton = createEnhanceButton({
+    React: d.React, makeT: helpers.makeT, dshEnhId: helpers.dshEnhId, subscribe: helpers.subscribe, storeFor: helpers.storeFor,
+    notify: helpers.notify, releaseStoreIfIdle: helpers.releaseStoreIfIdle, setLastDraft: helpers.setLastDraft,
+    subscribeConfig: configState.subscribeConfig, subscribeCorrection: correction.subscribeCorrection,
+    subscribeVoiceConfig: voiceCfgState.subscribeVoiceConfig, setActiveSession: helpers.setActiveSession,
+    getActiveSession: helpers.getActiveSession, safeSetDraft: helpers.safeSetDraft, clearResultStore: helpers.clearResultStore,
+    clearSeen: helpers.clearSeen, guardPasses: helpers.guardPasses, saveConfig: configState.saveConfig, configState,
+    enhance: helpers.enhance, cancelEnhance: helpers.cancelEnhance, undo: helpers.undo, modeShortLabel: d.modeShortLabel,
+    prettifyModel: shared.prettifyModel, timerSvc, host: d.host, correctionSnapshot: correction.correctionSnapshot,
+    correctionPhaseOf: correction.correctionPhaseOf, CORRECTION_PHASES: correction.CORRECTION_PHASES,
+    correctionFailureTicket: correction.correctionFailureTicket, consumeCorrectionFailure: correction.consumeCorrectionFailure,
+    correctionPhaseView: correction.correctionPhaseView,
+  });
+  const EnhanceBar = createEnhanceBar({ React: d.React, makeT: helpers.makeT, subscribe: helpers.subscribe, storeFor: helpers.storeFor, notify: helpers.notify, releaseStoreIfIdle: helpers.releaseStoreIfIdle, errorKey: helpers.errorKey });
+  // 共享常量/模型工具从共享运行时取，组件不再依赖隐式全局。
+
+  const VoiceHotkeyHost = createVoiceHotkey({
+    React: d.React, host: d.host, voiceCfgState, subscribeVoiceConfig: voiceCfgState.subscribeVoiceConfig,
+    isEnhancing: helpers.isEnhancing, subscribe: helpers.subscribe, storeFor: helpers.storeFor, notify: helpers.notify,
+    enhance: helpers.enhance, timerSvc, officialVoiceBridge, makeT: helpers.makeT, ZH, MarqueeSelect, CollapsibleSection,
+    setInterval: d.setInterval || setInterval, clearInterval: d.clearInterval || clearInterval, setTimeout: d.setTimeout || setTimeout,
+    navigator: d.navigator, window: d.window, configState,
+    markCorrectionSkipped: correction.markCorrectionSkipped, markCorrectionStarted: correction.markCorrectionStarted,
+    markCorrectionSettled: correction.markCorrectionSettled, markCorrectionFailed: correction.markCorrectionFailed,
+    notifyCorrection: correction.notifyCorrection, correctionState: correction.correctionState,
+    planVoicePostprocess: contracts.planVoicePostprocess, voicePostprocessHas: contracts.voicePostprocessHas,
+    stripFillers: shared.stripFillers, runFiller: shared.runFiller,
+  }).VoiceHotkeyHost;
   return {
   inject: ['timer'],
   apply(ctx) {
     const slots = ctx.get('slots');
     if (slots === undefined) return;
-    styles.insert(CSS);
-    timerSvc = ctx.get('timer') || null;
-    if (typeof timerRef !== 'undefined' && timerRef) timerRef.value = timerSvc;
+    styles.insert(shared.CSS);
+    if (typeof timerRef !== 'undefined' && timerRef) timerRef.value = ctx.get('timer') || null;
     // P2-补做（2026-10-13 · CHG-011 / §4.6.2.6 · UD-0014 选 B）：官方录音路径增值桥——
     // 静音监测（自动停）+ 自动增强挂到官方录音路径上（只观测不改行为）。
     // 安装必须在 apply 阶段完成：官方采集期间插件的 conversation.input.right 被官方隐藏
@@ -32,7 +111,7 @@ function createClientApp(deps) {
     // 录音监测**不能**寄居其中（厦门实证：standardControls[hidden]{display:none}）。
     ctx.effect(() => {
       if (typeof officialVoiceBridge === 'undefined' || !officialVoiceBridge) return () => {};
-      officialVoiceBridge.setTimer(timerSvc);
+      officialVoiceBridge.setTimer(ctx.get('timer') || null);
       try { officialVoiceBridge.install(); } catch (e) { /* 安装失败不得阻断插件其余面 */ }
       return () => {
         try { officialVoiceBridge.uninstall(); } catch (e) { /* HMR 卸载恢复原函数 */ }
@@ -50,8 +129,8 @@ function createClientApp(deps) {
           return null;
         }
       };
-      ctx.effect(() => safeRegister('enhance', 'zh', ZH));
-      ctx.effect(() => safeRegister('enhance', 'en', EN));
+      ctx.effect(() => safeRegister('enhance', 'zh', shared.ZH));
+      ctx.effect(() => safeRegister('enhance', 'en', shared.EN));
     }
     dynFace = ctx.get('dynamicCordisRunner') || null;
     // v16：整合「插件管理」+「优化配置」为单一入口「模型与插件」（页内三区 tab）

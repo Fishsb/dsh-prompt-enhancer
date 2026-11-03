@@ -56,8 +56,7 @@ test('CSTATE-05 产物内联状态模块，app 同步 timerRef', () => {
   const app = fs.readFileSync(path.join(REPO_ROOT, 'src/client/app-module.cjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
   assert.ok(shared.includes("require('./state-module.cjs')"));
-  assert.ok(app.includes('timerRef.value = timerSvc'));
+  assert.ok(app.includes("timerRef.value = ctx.get('timer')"));
   assert.ok(client.includes('src/client/state-module.cjs'));
-  assert.ok(client.includes('createClientState({ host, timerRef: __DSH_TIMER_REF__ })'));
-  assert.ok(client.includes('timerRef.value = timerSvc'));
+  assert.ok(client.includes('createClientState({ host: d.host, timerRef })'));
 });

@@ -164,7 +164,7 @@ test('CMSC-04 ModelMainSection 保留默认链、单点测试状态与折叠区�
 test('CMSC-05 构建产物内联模型设置运行时，旧 chunk 与相对 require 均不存在', () => {
   const build = fs.readFileSync(path.join(REPO_ROOT, 'scripts/build-client.mjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(build.includes("entry: 'src/client/components/model-settings-runtime.cjs'"));
+  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"));
   assert.ok(client.includes('src/client/components/model-settings-runtime.cjs'));
   assert.ok(client.includes('src/client/components/fallback-row-module.cjs'));
   assert.ok(client.includes('src/client/components/model-main-section-module.cjs'));

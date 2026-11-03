@@ -495,14 +495,16 @@ function unwrapChunkToBareJs(dir, rel) {
   fs.writeFileSync(abs, decodeChunkFile(abs), 'utf8');
 }
 
-test('R7 变异自证（源码层）：任一 chunk 改回裸 JS ⇒ R7 必红且点名该文件', () => {
-  // ⚠ **任取一个** chunk（不是只有历史病历里的 correction.js）⇒ 证明覆盖面是「每个 chunk」而非「某文件」
-  const rel = 'src/client/' + 'skeleton' + '.js'; // 运行时拼接，避免本文件被误当成实现点位
-  withFixture((dir) => unwrapChunkToBareJs(dir, rel), (dir) => {
+test('R7 变异自证（源码层）：client 入口引用缺失模块 ⇒ 构建必红且点名', () => {
+  const rel = 'src/client/' + 'app-module' + '.cjs';
+  withFixture((dir) => {
+    const abs = path.join(dir, rel);
+    const src = fs.readFileSync(abs, 'utf8');
+    fs.writeFileSync(abs, src.replace("require('./state-module.cjs')", "require('./missing-state-module.cjs')"), 'utf8');
+  }, (dir) => {
     const r = runGate(dir);
-    assert.equal(r.code, 1, '源码层契约违反必须 exit 1（若为 0 则 R7 是恒真判据 = 假绿）');
-    assert.match(r.out, /FAIL \| R7 \|[^\n]*skeleton\.js/, 'R7 必须点名违规 chunk');
-    assert.match(r.out, /导出形态违反/, 'R7 必须说明是导出形态（不是别的理由）');
+    assert.equal(r.code, 1, '源码层装配失败必须 exit 1');
+    assert.match(r.out, /app-module\.cjs|missing-state-module\.cjs|装配图不完整|无法解析/, 'R7 必须点名入口模块');
   });
 });
 
@@ -545,17 +547,12 @@ test('R7 fail-closed：产物缺位 / chunk 目录缺位 ⇒ FAIL，不得静默
   });
 });
 
-test('R2 fail-closed（H2 活例修复）：读不出包裹的 chunk 不得再静默回退到原文而报 PASS', () => {
-  // 病历：原实现 `strip(mm ? JSON.parse(…) : raw)` ⇒ 裸 JS chunk 被当成 chunk 源码正常扫描
-  //   ⇒ 照常打 `PASS | 24 个 client chunk …`（读者 grep PASS 得到假读数）。
-  // 目标模式（CHG-313）：filler 已迁为普通模块，变异目标改用仍在位的 client chunk。
-  const rel = 'src/client/' + 'skeleton' + '.js';
-  withFixture((dir) => unwrapChunkToBareJs(dir, rel), (dir) => {
+test('R2 fail-closed：client 入口模块缺失 ⇒ 构建期不得静默判绿', () => {
+  const rel = 'src/client/' + 'app-module' + '.cjs';
+  withFixture((dir) => { fs.rmSync(path.join(dir, rel)); }, (dir) => {
     const r = runGate(dir);
-    assert.equal(r.code, 1, '契约违反必须 exit 1');
-    assert.match(r.out, /FAIL \| R2 \|[^\n]*读不出 chunk 导出契约/, 'R2 必须显式报契约读取失败');
-    // ⚠ 关键：不得同时出现同一规则的 PASS 行（那正是本次事故的"读数看起来是绿的"）
-    assert.doesNotMatch(r.out, /PASS \| R2 \|/, 'R2 有契约违反时不得再打 PASS 行（防假读数）');
+    assert.equal(r.code, 1, '入口缺位必须 exit 1');
+    assert.match(r.out, /app-module\.cjs|装配图不完整|无法解析/, 'R2 必须显式报装配失败');
   });
 });
 

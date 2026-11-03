@@ -47,8 +47,8 @@ test('CI18N-04 共享运行时聚合文案模块，产物不再装载旧 chunk',
 
 test('CI18N-05 构建后 ZH/EN 仍从共享运行时同名解构', () => {
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(client.includes('  ZH,'));
-  assert.ok(client.includes('  EN,'));
+  assert.ok(client.includes('ZH: i18n.ZH'));
+  assert.ok(client.includes('EN: i18n.EN'));
   assert.ok(client.includes('dictionary: ZH'));
   assert.ok(client.includes('vadRequiredQuiet'));
 });

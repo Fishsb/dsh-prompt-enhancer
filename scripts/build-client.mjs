@@ -14,327 +14,26 @@ const require = createRequire(import.meta.url);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
 function buildClient() {
-  // The bundle skeleton (header comments + all injection markers) lives in
-  // src/client/skeleton.js; every chunk is injected below.
-  // 骨架自身也走同一导出契约：裸 JS / 对象导出必须在替换前给出可归因的裁决，
-  // 不得让 `body.replace is not a function` 这类未归因异常先冒出来。
-  const skeletonChunk = require('../src/client/skeleton.js');
-  if (typeof skeletonChunk !== 'string') {
-    throw new Error('chunk 契约违反: src/client/skeleton.js 未导出字符串（实得 ' + typeof skeletonChunk + '）');
-  }
-  let body = skeletonChunk;
-
-  // Normalize line endings BEFORE marker matching: source files may carry CRLF
-  // (e.g. after a git checkout with core.autocrlf), which would break the
-  // LF-based marker lookups. Chunks are normalized again at the end so the
-  // committed artifacts stay byte-stable (LF).
-  body = body.replace(/\r\n/g, '\n');
-  // P1-a（2026-10-13 缩批）：RecordRTC vendor chunk 已退役（采集改浏览器原生 MediaRecorder）；
-  // mic-button / voice-insert 已退役（按钮 UI 交官方；热键与填入逻辑搬入 hotkey 模块）。
-  // CHG-117（2026-10-16 · 规整改造批）：清口水词 —— 本地纯规则清理器（不调模型）
-  // CHG-143（纠错语音独立步批）：语音纠错的可见性状态 chunk（照 filler.js 既有模式）
-  // 目标模式：清口水词已迁为普通 CommonJS 模块，由共享运行时统一打包。
-  const voiceFillerChunk = null;
-  // P2-补做（2026-10-13 · CHG-011 / §4.6.2.6 · UD-0014 选 B）：官方录音路径增值桥
-  // （包装标准 API 只观测；静音监测 + 自动增强挂到官方路径 ⇒ 两条入口能力一致）
-  const voiceRuntime = bundleModules({
-    root,
-    entry: 'src/client/voice/runtime.cjs',
-  });
+  // 目标模式：client 入口是普通 CommonJS 模块，由 module-bundler 打成自包含表达式。
+  // 不再维护字符串骨架、注入标记或逐块拼接；装配失败 fail-closed。
   const appRuntime = bundleModules({
     root,
     entry: 'src/client/app-module.cjs',
   });
-  // 目标模式：共享契约与语音后处理计划是**普通 CommonJS 模块**，由打包器在构建期
-  // 打成自包含表达式。产物内没有模块系统、没有外部 require；源码侧仍可正常
-  // require/import 相对依赖（这是与旧 chunk 注入的分界点）。
-  const sharedContractsRuntime = bundleModules({
-    root,
-    entry: 'src/shared/contracts/client-runtime.cjs',
-  });
-  if (!sharedContractsRuntime.modules.includes('src/shared/contracts/voice-config.cjs')
-    || !sharedContractsRuntime.modules.includes('src/shared/voice/postprocess-plan.cjs')) {
-    throw new Error('[build-client] 共享运行时打包不完整：缺少契约或后处理计划模块');
-  }
-  const clientSharedRuntime = bundleModules({
-    root,
-    entry: 'src/client/shared-runtime.cjs',
-  });
-  const navigationRuntime = bundleModules({
-    root,
-    entry: 'src/client/components/navigation-runtime.cjs',
-  });
-  const voiceStateRuntime = bundleModules({
-    root,
-    entry: 'src/client/voice/state-module.cjs',
-  });
-  const modelSettingsRuntime = bundleModules({
-    root,
-    entry: 'src/client/components/model-settings-runtime.cjs',
-  });
-  const modelConfigTabRuntime = bundleModules({
-    root,
-    entry: 'src/client/components/model-config-tab-module.cjs',
-  });
-  const paramsTabRuntime = bundleModules({
-    root,
-    entry: 'src/client/components/params-tab-module.cjs',
-  });
-  const enhanceComponentsRuntime = bundleModules({
-    root,
-    entry: 'src/client/components/enhance-components-runtime.cjs',
-  });
-  const settingsShellRuntime = bundleModules({
-    root,
-    entry: 'src/client/components/settings-shell-runtime.cjs',
-  });
-  if (!clientSharedRuntime.modules.includes('src/client/voice/filler-module.cjs')) {
-    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少清口水词模块');
-  }
-  if (!clientSharedRuntime.modules.includes('src/client/voice/correction-state-module.cjs')) {
-    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少纠错状态模块');
-  }
-  if (!clientSharedRuntime.modules.includes('src/client/model-helpers-module.cjs')) {
-    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少模型候选模块');
-  }
-  if (!clientSharedRuntime.modules.includes('src/client/constants-module.cjs')) {
-    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少常量模块');
-  }
-  if (!clientSharedRuntime.modules.includes('src/client/i18n-module.cjs')) {
-    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少文案模块');
-  }
-  if (!clientSharedRuntime.modules.includes('src/client/styles-module.cjs')) {
-    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少样式模块');
-  }
-  if (!clientSharedRuntime.modules.includes('src/client/state-module.cjs')) {
-    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少状态模块');
-  }
-  if (!clientSharedRuntime.modules.includes('src/client/helpers-module.cjs')) {
-    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少增强会话模块');
-  }
-  if (!navigationRuntime.modules.includes('src/client/components/collapsible-section-module.cjs')
-    || !navigationRuntime.modules.includes('src/client/components/marquee-select-module.cjs')) {
-    throw new Error('[build-client] 导航组件运行时打包不完整：缺少基础 UI 组件模块');
-  }
-  if (!modelSettingsRuntime.modules.includes('src/client/components/fallback-row-module.cjs')
-    || !modelSettingsRuntime.modules.includes('src/client/components/model-main-section-module.cjs')) {
-    throw new Error('[build-client] 模型设置运行时打包不完整：缺少模型配置组件模块');
-  }
-  if (!voiceStateRuntime.modules.includes('src/client/voice/state-module.cjs')) {
-    throw new Error('[build-client] 语音运行时打包不完整：缺少语音配置状态模块');
-  }
-  if (!modelConfigTabRuntime.modules.includes('src/client/components/model-config-tab-module.cjs')) {
-    throw new Error('[build-client] 模型配置 tab 运行时打包不完整');
-  }
-  if (!paramsTabRuntime.modules.includes('src/client/components/params-tab-module.cjs')) {
-    throw new Error('[build-client] 优化参数 tab 运行时打包不完整');
-  }
-  if (!enhanceComponentsRuntime.modules.includes('src/client/components/enhance-button-module.cjs')
-    || !enhanceComponentsRuntime.modules.includes('src/client/components/enhance-bar-module.cjs')) {
-    throw new Error('[build-client] 增强交互运行时打包不完整');
-  }
-  if (!settingsShellRuntime.modules.includes('src/client/components/model-plugins-section-module.cjs')) {
-    throw new Error('[build-client] 设置页容器运行时打包不完整');
+  if (!appRuntime.modules.includes('src/client/app-module.cjs')) {
+    throw new Error('[build-client] 装配图不完整：缺少入口模块');
   }
   for (const required of [
-    'src/client/voice/state-module.cjs',
-    'src/client/voice/correction-module.cjs',
-    'src/client/voice/official-bridge-module.cjs',
-    'src/client/voice/hotkey-module.cjs',
-    'src/client/voice/voice-section-module.cjs',
+    'src/client/shared-runtime.cjs',
+    'src/shared/contracts/client-runtime.cjs',
+    'src/client/components/enhance-components-runtime.cjs',
   ]) {
-    if (!voiceRuntime.modules.includes(required)) {
-      throw new Error('[build-client] 语音运行时打包不完整：缺少 ' + required);
+    if (!appRuntime.modules.includes(required)) {
+      throw new Error('[build-client] 装配图不完整：缺少 ' + required);
     }
   }
-  if (!appRuntime.modules.includes('src/client/app-module.cjs')) {
-    throw new Error('[build-client] 客户端装配入口打包不完整');
-  }
-  const voiceStateChunk = 'const __DSH_VOICE_RUNTIME__ = ' + voiceRuntime.code + ';'
-    // timerSvc 在 app.apply 之前就可能被组件工厂捕获；用可变代理保证服务晚到仍然生效。
-    + '\nconst __DSH_TIMER_REF__ = { value: null };'
-    + '\nconst timerSvc = {'
-    + '\n  timeout(fn, ms) {'
-    + '\n    const t = __DSH_TIMER_REF__.value;'
-    + '\n    if (t && typeof t.timeout === "function") return t.timeout(fn, ms);'
-    + '\n    if (typeof setTimeout === "function") { const id = setTimeout(fn, ms); return () => { try { clearTimeout(id); } catch (e) {} }; }'
-    + '\n    return () => {};'
-    + '\n  },'
-    + '\n  interval(fn, ms) {'
-    + '\n    const t = __DSH_TIMER_REF__.value;'
-    + '\n    if (t && typeof t.interval === "function") return t.interval(fn, ms);'
-    + '\n    if (typeof setInterval === "function") { const id = setInterval(fn, ms); return () => { try { clearInterval(id); } catch (e) {} }; }'
-    + '\n    return () => {};'
-    + '\n  },'
-    + '\n};'
-    + '\nconst __DSH_VOICE_STATE__ = __DSH_VOICE_RUNTIME__.createVoiceState({\n'
-    + '  host,\n'
-    + '  storage: typeof localStorage !== "undefined" ? localStorage : null,\n'
-    + '  timerSvc,\n'
-    + '  fillerState,\n'
-    + '  defaults: __VOICE_CONFIG_DEFAULTS__,\n'
-    + '  console: typeof console !== "undefined" ? console : null,\n'
-    + '});\nconst {\n'
-    + '  VOICE_CFG_KEY, VOICE_CFG_DEFAULTS, normalizeVadSilenceMs, vadSilenceMsOf, vadRequiredQuiet,\n'
-    + '  voiceCfgState, mergeVoice, saveVoiceCfg, subscribeVoiceConfig, syncVoiceFromHost,\n'
-    + '} = __DSH_VOICE_STATE__;\n'
-    + 'const __DSH_CORRECTION__ = __DSH_VOICE_RUNTIME__.createCorrectionState({\n'
-    + '  voiceCfgState, correctionStateCore: __DSH_CORRECTION_STATE__,\n'
-    + '});\nconst {\n  CORRECTION_PHASES, correctionState, notifyCorrection, subscribeCorrection,\n'
-    + '  markCorrectionSkipped, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed,\n'
-    + '  correctionPhaseOf, correctionPhaseKnown, correctionPhaseView, correctionSnapshot,\n'
-    + '  correctionFailureTicket, consumeCorrectionFailure,\n'
-    + '} = __DSH_CORRECTION__;\n'
-    + 'const officialVoiceBridge = __DSH_VOICE_RUNTIME__.createOfficialVoiceBridge({\n'
-    + '  window: typeof window !== "undefined" ? window : null,\n'
-    + '  document: typeof document !== "undefined" ? document : null,\n'
-    + '  navigator: typeof navigator !== "undefined" ? navigator : null,\n'
-    + '  MutationObserver: typeof MutationObserver !== "undefined" ? MutationObserver : null,\n'
-    + '  voiceCfgState, vadRequiredQuiet, vadSilenceMsOf,\n'
-    + '});\n';
-  const sharedRuntimeChunk = 'const __DSH_SHARED__ = ' + sharedContractsRuntime.code
-    + ';\nconst __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'
-    + '\nconst planVoicePostprocess = __DSH_SHARED__.planVoicePostprocess;'
-    + '\nconst voicePostprocessHas = __DSH_SHARED__.voicePostprocessHas;\n'
-    + '\nconst __DSH_CLIENT_SHARED__ = ' + clientSharedRuntime.code
-    + ';\nconst __DSH_CORRECTION_STATE__ = { CORRECTION_PHASES: __DSH_CLIENT_SHARED__.CORRECTION_PHASES,'
-    + ' correctionPhaseKnown: __DSH_CLIENT_SHARED__.correctionPhaseKnown,'
-    + ' correctionPhaseOf: __DSH_CLIENT_SHARED__.correctionPhaseOf,'
-    + ' correctionFailureTicket: __DSH_CLIENT_SHARED__.correctionFailureTicket,'
-    + ' correctionFailureConsume: __DSH_CLIENT_SHARED__.correctionFailureConsume }'
-    // ⚠ 纠错状态符号只经 __DSH_CORRECTION_STATE__ 访问；若在此处再解构同名符号，
-    //   会与 correction.js 内的函数/常量声明在同一作用域重复声明（R7 实测）。
-    + ';\nconst {\n' + Object.keys(require('../src/client/shared-runtime.cjs'))
-      .filter((k) => !['CORRECTION_PHASES', 'correctionPhaseKnown', 'correctionPhaseOf', 'correctionFailureTicket', 'correctionFailureConsume'].includes(k))
-      .map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_CLIENT_SHARED__;\n' + voiceStateChunk;
-  // Inject all chunks, looping until no marker remains: component chunks may
-  // themselves contain other injection markers (e.g. the updater constants
-  // lived between EnhanceBar and UpdaterCard), so a single pass would leave
-  // nested markers unexpanded.
-  const injections = [
-    // 共享运行时必须先于 state chunk 注入（state 的顶层 `const` 在求值时读取默认值；
-    // 放到 postprocess 注入位会落成 TDZ：`Cannot access '__VOICE_CONFIG_DEFAULTS__' before initialization`）。
-    ['// @dsh-client-constants-inject', sharedRuntimeChunk],
-    ['// @dsh-client-voice-postprocess-inject\n', ''],
-    ['// @dsh-client-i18n-inject', ''],
-    ['// @dsh-client-state-inject', 'const __DSH_CLIENT_STATE__ = createClientState({ host, timerRef: __DSH_TIMER_REF__ });\nconst {\n'
-      + Object.keys(require('../src/client/state-module.cjs').createClientState({ host: { call: () => Promise.resolve({ ok: true, config: null }) } }))
-        .map((k) => '  ' + k + ',').join('\n')
-      + '\n} = __DSH_CLIENT_STATE__;\n'],
-    ['// @dsh-client-helpers-inject', 'const __DSH_CLIENT_HELPERS__ = createClientHelpers({\n'
-      + '  host,\n'
-      + '  configState,\n'
-      + '  dictionary: ZH,\n'
-      + '  storage: typeof localStorage !== "undefined" ? localStorage : null,\n'
-      + '  resultStatusOf: typeof __DSH_SHARED__.resultStatusOf === "function" ? __DSH_SHARED__.resultStatusOf : null,\n'
-      + '});\nconst {\n'
-      + Object.keys(require('../src/client/helpers-module.cjs').createClientHelpers({
-        host: { call: () => Promise.resolve({ ok: true }) },
-        configState: { value: {} },
-      }))
-        .map((k) => '  ' + k + ',').join('\n')
-      + '\n} = __DSH_CLIENT_HELPERS__;\n'],
-    ['// @dsh-client-comp-enhance-button-inject\n', 'const __DSH_ENHANCE_COMPONENTS__ = ' + enhanceComponentsRuntime.code + ';'],
-    ['// @dsh-client-comp-enhance-bar-inject\n', ''],
-    ['// @dsh-client-comp-marquee-select-inject\n', ''],
-    ['// @dsh-client-comp-collapsible-section-inject\n', 'const __DSH_NAVIGATION__ = ' + navigationRuntime.code
-      + ';\nconst CollapsibleSection = __DSH_NAVIGATION__.createCollapsibleSection({ React, dshEnhId });\n'
-      + 'const MarqueeSelect = __DSH_NAVIGATION__.createMarqueeSelect({\n'
-      + '  React,\n'
-      + '  window: typeof window !== "undefined" ? window : null,\n'
-      + '  document: typeof document !== "undefined" ? document : null,\n'
-      + '});\nconst __DSH_VOICE_SECTION__ = __DSH_VOICE_RUNTIME__.createVoiceSection({\n'
-      + '  React, makeT, host, voiceCfgState, subscribeVoiceConfig, saveVoiceCfg, syncVoiceFromHost,\n'
-      + '  vadSilenceMsOf, normalizeVadSilenceMs, CollapsibleSection, officialVoiceBridge, fillerSnapshot,\n'
-      + '  subscribeFiller, correctionSnapshot, subscribeCorrection, setTimeout, clearTimeout,\n'
-      + '  window: typeof window !== "undefined" ? window : null,\n'
-      + '});\nconst VoiceSection = __DSH_VOICE_SECTION__.VoiceSection;\n'],
-    ['// @dsh-client-comp-model-main-section-inject\n', 'const __DSH_MODEL_SETTINGS__ = ' + modelSettingsRuntime.code
-      + ';\nconst ModelMainSection = __DSH_MODEL_SETTINGS__.createModelMainSection({\n'
-      + '  React, CollapsibleSection, makeT, host, DEFAULT_MODEL_CHAIN, getLastDraft, timerSvc,\n'
-      + '});\n'],
-    ['// @dsh-client-comp-fallback-row-inject\n', 'const FallbackRow = __DSH_MODEL_SETTINGS__.createFallbackRow({\n'
-      + '  React, MarqueeSelect, makeT, host,\n'
-      + '});\n'],
-    ['// @dsh-client-comp-model-config-tab-inject\n', 'const ModelConfigTab = ' + modelConfigTabRuntime.code + '.createModelConfigTab({\n'
-      + '  React, makeT, configState, subscribeConfig, host, DEFAULT_MODEL_CHAIN, saveConfig,\n'
-      + '  buildCandidates, ModelMainSection, VoiceSection,\n'
-      + '});\n'],
-    ['// @dsh-client-comp-params-tab-inject\n', 'const ParamsTab = ' + paramsTabRuntime.code + '.createParamsTab({\n'
-      + '  React, MarqueeSelect, makeT, dshEnhId, configState, saveConfig, host,\n'
-      + '  MODE_OPTIONS, MODE_TIMEOUT_OPTIONS, MODE_MAXTOKENS_OPTIONS, MODE_OUTPUTLIMIT_OPTIONS,\n'
-      + '  MODE_BUDGET_OPTIONS, MODE_PARAMS_DEFAULT, MODE_BUDGET_DEFAULT, modeShortLabel, modeLabel,\n'
-      + '  TEMPLATE_BUILTIN_KEYS, TEMPLATE_CUSTOM_MAX, TEMPLATE_TEXT_MAX, TEMPLATE_NAME_MAX, customPickIndex,\n'
-      + '});\n'],
-    ['// @dsh-client-comp-model-plugins-section-inject\n', 'const __DSH_SETTINGS_SHELL__ = ' + settingsShellRuntime.code + ';'
-      + '\nconst __DSH_SETTINGS_SHELL_API__ = __DSH_SETTINGS_SHELL__.createModelPluginsSection({\n'
-      + '  React, makeT, dshEnhId, subscribeConfig, subscribeSaveStatus, saveStatus, ModelConfigTab, ParamsTab,\n'
-      + '});\nconst ModelPluginsSection = __DSH_SETTINGS_SHELL_API__.ModelPluginsSection;\n'
-      + 'const CordisBadgePlaceholder = __DSH_SETTINGS_SHELL_API__.CordisBadgePlaceholder;\n'],
-    ['// @dsh-client-voice-correction-inject\n', ''],
-    ['// @dsh-client-voice-filler-inject\n', ''],
-    ['// @dsh-client-voice-state-inject\n', ''],
-    ['// @dsh-client-voice-recorder-inject\n', ''],
-    ['// @dsh-client-voice-official-bridge-inject\n', ''],
-    ['// @dsh-client-voice-hotkey-inject\n', 'const __DSH_HOTKEY__ = __DSH_VOICE_RUNTIME__.createVoiceHotkey({\n'
-      + '  React, host, voiceCfgState, subscribeVoiceConfig, isEnhancing, subscribe, storeFor,\n'
-      + '  notify, enhance,\n'
-      + '  timerSvc, officialVoiceBridge, makeT, ZH, MarqueeSelect, CollapsibleSection, setInterval, clearInterval,\n'
-      + '  setTimeout, navigator: typeof navigator !== "undefined" ? navigator : null,\n'
-      + '  window: typeof window !== "undefined" ? window : null, configState,\n'
-      + '  markCorrectionSkipped, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed,\n'
-      + '  notifyCorrection, correctionState, planVoicePostprocess, voicePostprocessHas, stripFillers, runFiller,\n'
-      + '});\nconst VoiceHotkeyHost = __DSH_HOTKEY__.VoiceHotkeyHost;\n'],
-    ['// @dsh-client-voice-comp-section-inject\n', ''],
-    ['// @dsh-client-styles-inject\n', 'const EnhanceButton = __DSH_ENHANCE_COMPONENTS__.createEnhanceButton({\n'
-      + '  React, makeT, dshEnhId, subscribe, storeFor, notify, releaseStoreIfIdle, setLastDraft,\n'
-      + '  subscribeConfig, subscribeCorrection, subscribeVoiceConfig, setActiveSession, getActiveSession,\n'
-      + '  safeSetDraft, clearResultStore, clearSeen, guardPasses, saveConfig, configState, enhance,\n'
-      + '  cancelEnhance, undo, modeShortLabel, prettifyModel, timerSvc, host, correctionSnapshot,\n'
-      + '  correctionPhaseOf, CORRECTION_PHASES, correctionFailureTicket, consumeCorrectionFailure,\n'
-      + '  correctionPhaseView,\n'
-      + '});\nconst EnhanceBar = __DSH_ENHANCE_COMPONENTS__.createEnhanceBar({\n'
-      + '  React, makeT, subscribe, storeFor, notify, releaseStoreIfIdle, errorKey,\n'
-      + '});\n'],
-    ['// @dsh-client-app-inject\n', 'const __DSH_APP__ = ' + appRuntime.code + ';\n'
-      + 'return __DSH_APP__.createClientApp({\n'
-      + '  styles, CSS, ZH, EN, timerRef, timerSvc, officialVoiceBridge,\n'
-      + '  ModelPluginsSection, CordisBadgePlaceholder, EnhanceButton, VoiceHotkeyHost, EnhanceBar,\n'
-      + '});\n'],
-  ];
-  // ── chunk 契约门（2026-10-17 事故根治）────────────────────────────────
-  // 每个 chunk 必须是**字符串**（`module.exports = "<源码文本>"`）。
-  // 病历：src/client/voice/correction.js 曾以裸 JS 提交（`var ...; function ...` 且无
-  //   module.exports 包裹）⇒ require 返回**空对象** ⇒ `body.replace(marker, chunk)`
-  //   把对象字符串化成 "[object Object]" 注入产物 ⇒ 浏览器 new Function 求值抛
-  //   `Unexpected identifier 'Object'` ⇒ 整个 client 半部装载失败（web boot 报
-  //   「1 entry did not activate / import failed」）。
-  // 本门在**构建期**即拒绝，并给出违规 chunk 的 marker 与实得类型（不是等浏览器报错）。
-  const badChunks = injections.filter(([, c]) => typeof c !== 'string');
-  if (badChunks.length) {
-    console.error('[build-client] chunk 契约违反 —— 以下 chunk 未导出字符串：');
-    for (const [marker, c] of badChunks) console.error('  · ' + marker.trim() + '  → 实得 ' + (typeof c));
-    console.error('  修复：把 chunk 源码包成 module.exports = "<JSON 转义后的源码>";');
-    throw new Error('chunk 契约门未通过（' + badChunks.length + ' 个）');
-  }
 
-  let previous;
-  do {
-    previous = body;
-    for (const [marker, chunk] of injections) {
-      if (body.includes(marker)) {
-        body = body.replace(marker, chunk);
-      }
-    }
-  } while (body !== previous);
-
-  // Final line-ending normalization: chunk files may carry CRLF.
-  body = body.replace(/\r\n/g, '\n');
-
-  // Embed the body as a JSON string literal: safe against backticks, ${}, and
-  // every other JS metacharacter inside the plugin code.
-  const embedded = JSON.stringify(body);
+  const embedded = appRuntime.code;
 
   const template = `// GENERATED by scripts/build-client.mjs — do not edit by hand.
 // Rebuild after changing src/client/**: node scripts/build-client.mjs
@@ -358,33 +57,20 @@ window.__ModuleLoader__.load({
       },
     };
 
-    // v2.6.0: bridge to the standalone update executor (lib/updater-host.cjs)
-    // on its own port — survives dsh-web restarts; CORS allowed by the executor.
-    const executor = {
-      call(method, args, port) {
-        return fetch('http://127.0.0.1:' + port + '/rpc', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ method, args: args || {} }),
-        }).then((response) => response.json());
-      },
-    };
-
-    // styles facade: inject CSS into a dedicated <style> tag.
-    const styles = {
-      insert(css) {
-        if (document.querySelector('style[data-plugin-css="dsh-prompt-enhancer"]') !== null) return;
-        const tag = document.createElement('style');
-        tag.dataset.plugin = 'dsh-prompt-enhancer';
-        tag.dataset.pluginCss = 'dsh-prompt-enhancer';
-        tag.textContent = css;
-        document.head.appendChild(tag);
-      },
-    };
-
-    // Evaluate the dynamic client body (a top-level-return plugin object)
-    // with the static environment's symbols closed over.
-    const plugin = new Function('React', 'host', 'styles', 'executor', ${embedded})(React, host, styles, executor);
+    // 目标模式：入口普通模块直接返回插件对象；环境依赖显式传入。
+    const __DSH_CLIENT_APP__ = ${embedded};
+    const plugin = __DSH_CLIENT_APP__.createClientApp({
+      React, host, window: typeof window !== 'undefined' ? window : null,
+      document: typeof document !== 'undefined' ? document : null,
+      navigator: typeof navigator !== 'undefined' ? navigator : null,
+      MutationObserver: typeof MutationObserver !== 'undefined' ? MutationObserver : null,
+      localStorage: typeof localStorage !== 'undefined' ? localStorage : null,
+      setTimeout: typeof setTimeout !== 'undefined' ? setTimeout : null,
+      clearTimeout: typeof clearTimeout !== 'undefined' ? clearTimeout : null,
+      setInterval: typeof setInterval !== 'undefined' ? setInterval : null,
+      clearInterval: typeof clearInterval !== 'undefined' ? clearInterval : null,
+      console: typeof console !== 'undefined' ? console : null,
+    });
 
     module.exports = { ...plugin, inject: ['slots', 'locale', 'timer'] };
     return module.exports;
@@ -392,9 +78,6 @@ window.__ModuleLoader__.load({
 });
 `;
 
-  // P1a（2026-09-19·圆桌决策 A）：root plugin-client.js 已退役——它「生成 + 进发布物 + 从不被装载」
-  // （DSH 只认 package.json exports["./client"] → lib/client.cjs），且其正文已被本 template
-  // 逐字内嵌（实测 318,792 字符在位），删除零代码丢失。唯一 client 载体 = lib/client.cjs。
   return { template };
 }
 

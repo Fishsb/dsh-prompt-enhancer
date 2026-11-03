@@ -16,7 +16,7 @@ test('CRS-01 helpers 在成功分支写入统一 resultStatus', () => {
 
 test('CRS-02 产物内联共享 result 契约（无外部 require）', () => {
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib', 'client.cjs'), 'utf8');
-  assert.ok(client.includes('\\"src/shared/contracts/result.cjs\\"'), '产物必须内联 result 契约');
+  assert.ok(client.includes('"src/shared/contracts/result.cjs"'), '产物必须内联 result 契约');
   assert.ok(client.includes('resultStatusOf'), '产物必须含状态映射函数');
   assert.equal(client.includes("require('../src/shared/contracts/result.cjs')"), false,
     '产物不得保留外部 require');

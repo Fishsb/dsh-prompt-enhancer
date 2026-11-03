@@ -888,13 +888,11 @@ test('OVB-A05 官方路径·自动增强：跨会话基线不串（第二会话�
 });
 
 // ───────────────────────────── 接线契约（防"注释有、代码无"） ─────────────────────────────
-test('OVB-W01 接线：buildclient 装配清单与 skeleton 注入标记均在位', () => {
+test('OVB-W01 接线：build-client 以普通入口模块装配（无注入标记）', () => {
   const build = fs.readFileSync(path.join(ROOT, 'scripts', 'build-client.mjs'), 'utf8');
-  const skel = fs.readFileSync(path.join(ROOT, 'src', 'client', 'skeleton.js'), 'utf8');
-  assert.ok(build.includes("entry: 'src/client/voice/runtime.cjs'"), 'build-client 缺语音运行时入口');
-  assert.ok(build.includes("'src/client/voice/official-bridge-module.cjs'"), 'build-client 缺 official-bridge 模块装配校验');
-  assert.ok(build.includes('@dsh-client-voice-official-bridge-inject'), 'build-client 缺注入标记映射');
-  assert.ok(skel.includes('@dsh-client-voice-official-bridge-inject'), 'skeleton 缺注入标记');
+  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"), 'build-client 缺普通入口模块');
+  const app = fs.readFileSync(path.join(ROOT, 'src', 'client', 'app-module.cjs'), 'utf8');
+  assert.ok(app.includes('createOfficialVoiceBridge'), 'client 入口装配图缺官方语音桥');
 });
 
 test('OVB-W02 接线：apply 安装 + 卸载（HMR）+ 热键→派发点击官方按钮的接线均在位', () => {

@@ -185,8 +185,8 @@ test('CHELP-09 产物内联增强会话模块，仍自包含', () => {
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
   assert.ok(client.includes('src/client/helpers-module.cjs'));
   assert.ok(client.includes('createClientHelpers('));
-  assert.ok(client.includes('storage: typeof localStorage !== \\"undefined\\" ? localStorage : null'),
-    '产物中的注入片段应保留浏览器 storage 注入');
+  assert.ok(client.includes('storage: d.storage'),
+    '入口必须把浏览器 storage 显式传入增强会话模块');
   assert.equal(client.includes('src/client/helpers.js'), false);
   assert.equal((client.match(/require\(['"]\.\.?\//g) || []).length, 0);
 });

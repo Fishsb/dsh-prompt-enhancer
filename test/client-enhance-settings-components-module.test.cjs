@@ -127,16 +127,16 @@ test('CESC-04 设置页容器只保留 models/params 两 tab，且两面板均�
 test('CESC-05 产物内联三个交互模块，旧 chunk 与相对 require 均不存在', () => {
   const build = fs.readFileSync(path.join(REPO_ROOT, 'scripts/build-client.mjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(build.includes("entry: 'src/client/components/enhance-components-runtime.cjs'"));
-  assert.ok(build.includes("entry: 'src/client/components/settings-shell-runtime.cjs'"));
+  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"));
+  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"));
   for (const mod of [
     'src/client/components/enhance-button-module.cjs',
     'src/client/components/enhance-bar-module.cjs',
     'src/client/components/model-plugins-section-module.cjs',
   ]) assert.ok(client.includes(mod), '产物缺模块 ' + mod);
-  assert.ok(client.includes('.createEnhanceButton('));
-  assert.ok(client.includes('.createEnhanceBar('));
-  assert.ok(client.includes('.createModelPluginsSection('));
+  assert.ok(client.includes('createEnhanceButton({'));
+  assert.ok(client.includes('createEnhanceBar({'));
+  assert.ok(client.includes('createModelPluginsSection({'));
   assert.equal(client.includes('src/client/components/enhance-button.js'), false);
   assert.equal(client.includes('src/client/components/enhance-bar.js'), false);
   assert.equal(client.includes('src/client/components/model-plugins-section.js'), false);

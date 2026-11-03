@@ -12,11 +12,8 @@ test('CCSP-01 产物内联纠错状态模块与共享运行时', () => {
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib', 'client.cjs'), 'utf8');
   const modId = 'src/client/voice/correction-state-module.cjs';
   assert.ok(client.includes(modId), 'client 产物必须内联纠错状态模块');
-  assert.ok(client.includes('const __DSH_CORRECTION_STATE__ = { CORRECTION_PHASES: __DSH_CLIENT_SHARED__.CORRECTION_PHASES'),
-    '产物必须把纠错状态模块暴露为构建期符号');
-  // 顶层构建期注入别名恰有一次；模块内部局部依赖声明是工厂正文的一部分，不计入顶层注入。
-  assert.equal((client.match(/const __DSH_CORRECTION_STATE__ = /g) || []).length, 2,
-    '纠错状态顶层注入只能出现一次');
+  assert.ok(client.includes('correctionStateCore: { CORRECTION_PHASES: shared.CORRECTION_PHASES'),
+    '产物必须把纠错状态模块依赖显式传入');
   assert.ok(client.includes('src/client/voice/correction-module.cjs'),
     '纠错业务模块必须由语音运行时打包');
   assert.equal(client.includes("require('./voice/correction-state-module.cjs')"), false,
