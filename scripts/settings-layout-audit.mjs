@@ -49,7 +49,7 @@ const ROW1_W = Number(argOf('--row1', '')) || 0;
 
 const CHUNKS = [
   'src/client/i18n.js',
-  'src/client/constants.js',
+  'src/client/constants-module.cjs',
   'src/client/model-helpers-module.cjs',
   'src/client/helpers.js',
   'src/client/voice/state.js',

@@ -5,8 +5,10 @@
 const filler = require('./voice/filler-module.cjs');
 const correctionState = require('./voice/correction-state-module.cjs');
 const modelHelpers = require('./model-helpers-module.cjs');
+const constants = require('./constants-module.cjs');
 
 module.exports = {
+  ...constants,
   FILLER_CHARS: filler.FILLER_CHARS,
   FILLER_CHARS_GUARDED: filler.FILLER_CHARS_GUARDED,
   FILLER_PHRASES_HARD: filler.FILLER_PHRASES_HARD,

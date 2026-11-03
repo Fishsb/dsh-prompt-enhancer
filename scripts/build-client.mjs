@@ -24,7 +24,6 @@ function buildClient() {
   // committed artifacts stay byte-stable (LF).
   body = body.replace(/\r\n/g, '\n');
   const i18nChunk = require('../src/client/i18n.js');
-  const constantsChunk = require('../src/client/constants.js');
   const stateChunk = require('../src/client/state.js');
   const helpersChunk = require('../src/client/helpers.js');
   const enhanceButtonChunk = require('../src/client/components/enhance-button.js');
@@ -77,6 +76,9 @@ function buildClient() {
   if (!clientSharedRuntime.modules.includes('src/client/model-helpers-module.cjs')) {
     throw new Error('[build-client] 客户端共享运行时打包不完整：缺少模型候选模块');
   }
+  if (!clientSharedRuntime.modules.includes('src/client/constants-module.cjs')) {
+    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少常量模块');
+  }
   const sharedRuntimeChunk = 'const __DSH_SHARED__ = ' + sharedContractsRuntime.code
     + ';\nconst __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'
     + '\nconst planVoicePostprocess = __DSH_SHARED__.planVoicePostprocess;'
@@ -100,7 +102,7 @@ function buildClient() {
   const injections = [
     // 共享运行时必须先于 state chunk 注入（state 的顶层 `const` 在求值时读取默认值；
     // 放到 postprocess 注入位会落成 TDZ：`Cannot access '__VOICE_CONFIG_DEFAULTS__' before initialization`）。
-    ['// @dsh-client-constants-inject', constantsChunk + '\n' + sharedRuntimeChunk],
+    ['// @dsh-client-constants-inject', sharedRuntimeChunk],
     ['// @dsh-client-voice-postprocess-inject\n', ''],
     ['// @dsh-client-i18n-inject', i18nChunk],
     ['// @dsh-client-state-inject', stateChunk],

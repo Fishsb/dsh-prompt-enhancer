@@ -138,7 +138,7 @@ function browserDriver() {
       return o;
     }
 
-    var constantsFactory = new Function(SRC['src/client/constants.js']
+    var constantsFactory = new Function(SRC['src/client/constants-module.cjs']
       + '\n;return { CONFIG_DEFAULTS: CONFIG_DEFAULTS, DEFAULT_MODEL_CHAIN: DEFAULT_MODEL_CHAIN, MODE_OPTIONS: MODE_OPTIONS, MODE_VALUES: MODE_VALUES, MODE_BUDGET_OPTIONS: MODE_BUDGET_OPTIONS, MODE_TIMEOUT_OPTIONS: MODE_TIMEOUT_OPTIONS, MODE_MAXTOKENS_OPTIONS: MODE_MAXTOKENS_OPTIONS, MODE_OUTPUTLIMIT_OPTIONS: MODE_OUTPUTLIMIT_OPTIONS, MODE_PARAMS_DEFAULT: MODE_PARAMS_DEFAULT, MODE_BUDGET_DEFAULT: MODE_BUDGET_DEFAULT, modeShortLabel: modeShortLabel, modeLabel: modeLabel, TEMPLATE_BUILTIN_KEYS: TEMPLATE_BUILTIN_KEYS, TEMPLATE_CUSTOM_MAX: TEMPLATE_CUSTOM_MAX, TEMPLATE_TEXT_MAX: TEMPLATE_TEXT_MAX, TEMPLATE_NAME_MAX: TEMPLATE_NAME_MAX, customPickIndex: customPickIndex };');
     var C = constantsFactory();
     var mhFactory = new Function(SRC['src/client/model-helpers-module.cjs'] + '\n;return { buildCandidates: buildCandidates };');

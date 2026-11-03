@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+- **目标模式：client 常量与配置默认值迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：新增 `src/client/constants-module.cjs`，把 `constants.js` 的 21 项纯常量、配置默认值、模式档位和标签辅助函数迁出并纳入客户端共享运行时；旧 chunk 退役，client chunk 数由 22 降至 21。`settings-layout-audit`/浏览器驱动、R2 白名单与共享运行时完整性门同步。新增 `test/client-constants-module.test.cjs`（4 条）。**已实测**：常量 + 候选 + client 组合 + 布局 + 清单 50/50；bundle smoke 22/22；dead-code R1–R7 全过（client chunk 21 / host chunk 2 / 总 23）；`build-client --check` / `node --check lib/client.cjs` 一致。未 bump/tag/发布/安装/重启。
+
 - **目标模式：client 模型候选函数迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：新增 `src/client/model-helpers-module.cjs` 并纳入客户端共享运行时，`buildCandidates` 从 `model-helpers.js` 字符串 chunk 迁出；旧 chunk 退役，client chunk 数由 23 降至 22。`settings-layout-audit`/浏览器驱动同步读取普通模块源码，保持布局量测同源；R2 白名单显式登记共享运行时注入的 `buildCandidates`。新增 `test/client-model-helpers-module.test.cjs`（4 条）。**已实测**：候选模块 + client 组合 + 清单 22/22；布局几何/chunk 契约通过；bundle smoke 22/22；dead-code R1–R7 全过；`build-client --check` / `node --check lib/client.cjs` 一致。未 bump/tag/发布/安装/重启。
 
 - **目标模式：清理更新执行器与 agent 查询死残留（架构/维护 · 2026-11-03 · [PE-F01]）**：从 `app.js` 删除已零消费的 `updateCache`、`pullInFlight`、`resolveSessionPolicy` 与 `resolveAgent`，以及对应历史注释块；更新执行仍由独立执行器路径承担，15 条线上 RPC 不受影响。新增 `test/host-app-residue.test.cjs`（2 条）锁住源码与产物不得复活。**已实测**：残留锁 + bundle smoke + 清单 33/33；dead-code R1–R7、RPC 15 条一致；`build-host --check` / `node --check plugin-host.js` 一致。未 bump/tag/发布/安装/重启。
