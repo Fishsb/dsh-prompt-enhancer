@@ -50,7 +50,7 @@ const ROW1_W = Number(argOf('--row1', '')) || 0;
 const CHUNKS = [
   'src/client/i18n.js',
   'src/client/constants.js',
-  'src/client/model-helpers.js',
+  'src/client/model-helpers-module.cjs',
   'src/client/helpers.js',
   'src/client/voice/state.js',
   'src/client/components/collapsible-section.js',
@@ -65,6 +65,12 @@ const CHUNKS = [
 ];
 
 function readChunk(rel) {
+  if (rel.endsWith('.cjs')) {
+    const raw = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    return raw
+      .replace(/^'use strict';\s*/, '')
+      .replace(/\nmodule\.exports\s*=\s*\{[\s\S]*?\};\s*$/, '');
+  }
   // ⚠ decodeChunk(file, opts) 的第二参是 { root }（不是裸路径）。传裸路径会**静默**回落到本仓根
   //   —— 那样 --root 失效，变异/负控会量到错的树（本席实测踩到过：M 系列曾量到工作树）。
   return decodeChunk(rel, { root: ROOT });

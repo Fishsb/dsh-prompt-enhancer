@@ -27,7 +27,6 @@ function buildClient() {
   const constantsChunk = require('../src/client/constants.js');
   const stateChunk = require('../src/client/state.js');
   const helpersChunk = require('../src/client/helpers.js');
-  const modelHelpersChunk = require('../src/client/model-helpers.js');
   const enhanceButtonChunk = require('../src/client/components/enhance-button.js');
   // CHG-184（纠错状态可视化批）：输入框旁的五态指示 chunk（与 ✨ 按钮同槽位、同族样式）
   const enhanceBarChunk = require('../src/client/components/enhance-bar.js');
@@ -75,6 +74,9 @@ function buildClient() {
   if (!clientSharedRuntime.modules.includes('src/client/voice/correction-state-module.cjs')) {
     throw new Error('[build-client] 客户端共享运行时打包不完整：缺少纠错状态模块');
   }
+  if (!clientSharedRuntime.modules.includes('src/client/model-helpers-module.cjs')) {
+    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少模型候选模块');
+  }
   const sharedRuntimeChunk = 'const __DSH_SHARED__ = ' + sharedContractsRuntime.code
     + ';\nconst __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'
     + '\nconst planVoicePostprocess = __DSH_SHARED__.planVoicePostprocess;'
@@ -103,7 +105,6 @@ function buildClient() {
     ['// @dsh-client-i18n-inject', i18nChunk],
     ['// @dsh-client-state-inject', stateChunk],
     ['// @dsh-client-helpers-inject', helpersChunk],
-    ['// @dsh-client-model-helpers-inject', modelHelpersChunk],
     ['// @dsh-client-comp-enhance-button-inject\n', enhanceButtonChunk],
     ['// @dsh-client-comp-enhance-bar-inject\n', enhanceBarChunk],
     ['// @dsh-client-comp-marquee-select-inject\n', marqueeSelectChunk],

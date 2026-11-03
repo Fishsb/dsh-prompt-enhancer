@@ -4,6 +4,7 @@
 // 这里的模块必须无浏览器/宿主环境依赖：纯契约、纯规则。
 const filler = require('./voice/filler-module.cjs');
 const correctionState = require('./voice/correction-state-module.cjs');
+const modelHelpers = require('./model-helpers-module.cjs');
 
 module.exports = {
   FILLER_CHARS: filler.FILLER_CHARS,
@@ -22,4 +23,5 @@ module.exports = {
   correctionPhaseOf: correctionState.correctionPhaseOf,
   correctionFailureTicket: correctionState.correctionFailureTicket,
   correctionFailureConsume: correctionState.correctionFailureConsume,
+  buildCandidates: modelHelpers.buildCandidates,
 };

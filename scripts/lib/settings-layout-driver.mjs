@@ -141,7 +141,7 @@ function browserDriver() {
     var constantsFactory = new Function(SRC['src/client/constants.js']
       + '\n;return { CONFIG_DEFAULTS: CONFIG_DEFAULTS, DEFAULT_MODEL_CHAIN: DEFAULT_MODEL_CHAIN, MODE_OPTIONS: MODE_OPTIONS, MODE_VALUES: MODE_VALUES, MODE_BUDGET_OPTIONS: MODE_BUDGET_OPTIONS, MODE_TIMEOUT_OPTIONS: MODE_TIMEOUT_OPTIONS, MODE_MAXTOKENS_OPTIONS: MODE_MAXTOKENS_OPTIONS, MODE_OUTPUTLIMIT_OPTIONS: MODE_OUTPUTLIMIT_OPTIONS, MODE_PARAMS_DEFAULT: MODE_PARAMS_DEFAULT, MODE_BUDGET_DEFAULT: MODE_BUDGET_DEFAULT, modeShortLabel: modeShortLabel, modeLabel: modeLabel, TEMPLATE_BUILTIN_KEYS: TEMPLATE_BUILTIN_KEYS, TEMPLATE_CUSTOM_MAX: TEMPLATE_CUSTOM_MAX, TEMPLATE_TEXT_MAX: TEMPLATE_TEXT_MAX, TEMPLATE_NAME_MAX: TEMPLATE_NAME_MAX, customPickIndex: customPickIndex };');
     var C = constantsFactory();
-    var mhFactory = new Function(SRC['src/client/model-helpers.js'] + '\n;return { buildCandidates: buildCandidates };');
+    var mhFactory = new Function(SRC['src/client/model-helpers-module.cjs'] + '\n;return { buildCandidates: buildCandidates };');
     var MH = mhFactory();
 
     var dSnap = Object.assign({ installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 0, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false, feedbackMessage: '', stopMissed: 0, startClicks: 0, stopClicks: 0, vadHeardSpeech: false, vadQuietFrames: 0, vadThreshold: 0, vadNoiseFloor: 0, vadSkipped: 0 }, scn.diag || {});
