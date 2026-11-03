@@ -1,21 +1,36 @@
 'use strict';
 
-// 求值 `src/client/voice/state.js` 的统一夹具。
+// 求值 `src/client/voice/state-module.cjs` 的统一夹具。
 //
 // 目标模式下，语音配置默认值的事实源是 `src/shared/contracts/voice-config.cjs`；
-// 生产构建会把该契约的默认值注入为 `__VOICE_CONFIG_DEFAULTS__`。测试不能绕过这条
-// 注入链，否则会得到“源码能构建、测试却缺全局”的假红。
+// 生产构建把该契约传给 `createVoiceState({ defaults })`。测试沿用同一注入形态。
 //
-// 这里只做同一件事：把契约默认值作为前置声明拼到 chunk 源码之前，再交给调用方的
-// `new Function(...)`。不修改 chunk 源码，也不在运行期保留第二份默认值。
-const { decodeChunk } = require('../../scripts/lib/chunk-decode.mjs');
+// 这里读取普通模块正文，拼出同一工厂调用并把导出解构为旧测试期待的顶层名字。
+const fs = require('node:fs');
+const path = require('node:path');
 const { VOICE_CONFIG_DEFAULTS } = require('../../src/shared/contracts/voice-config.cjs');
 
 function voiceStateChunkWithDefaults() {
   const prelude = 'const __VOICE_CONFIG_DEFAULTS__ = '
     + JSON.stringify(VOICE_CONFIG_DEFAULTS)
     + ';\n';
-  return prelude + decodeChunk('src/client/voice/state.js');
+  const modulePath = path.join(__dirname, '..', '..', 'src', 'client', 'voice', 'state-module.cjs');
+  const body = fs.readFileSync(modulePath, 'utf8')
+    .replace(/\nmodule\.exports\s*=\s*\{\s*createVoiceState\s*\};\s*$/, '')
+    .replace(/^'use strict';\s*/, '');
+  const epilogue = '\nconst __VOICE_STATE__ = createVoiceState({\n'
+    + '  host,\n'
+    + '  storage: localStorage,\n'
+    + '  timerSvc: typeof timerSvc !== "undefined" ? timerSvc : null,\n'
+    + '  fillerState: typeof fillerState !== "undefined" ? fillerState : null,\n'
+    + '  defaults: __VOICE_CONFIG_DEFAULTS__,\n'
+    + '  autoSync: false,\n'
+    + '});\n'
+    + 'const { VOICE_CFG_KEY, VOICE_CFG_DEFAULTS, normalizeVadSilenceMs, vadSilenceMsOf,\n'
+    + '  vadRequiredQuiet, voiceCfgState, mergeVoice, persistVoiceLocal, notifyVoice,\n'
+    + '  syncVoiceFromHost, saveVoiceCfg, cleanupLegacyRefine, subscribeVoiceConfig } = __VOICE_STATE__;\n'
+    + 'syncVoiceFromHost();\n';
+  return prelude + body + epilogue;
 }
 
 module.exports = { voiceStateChunkWithDefaults };

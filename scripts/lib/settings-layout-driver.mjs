@@ -120,9 +120,10 @@ function browserDriver() {
       + '\n;return { VOICE_CONFIG_DEFAULTS: VOICE_CONFIG_DEFAULTS };');
     var voiceConfig = voiceConfigFactory();
     var __VOICE_CONFIG_DEFAULTS__ = voiceConfig.VOICE_CONFIG_DEFAULTS;
-    var stateFactory = new Function('localStorage', 'host', '__VOICE_CONFIG_DEFAULTS__', SRC['src/client/voice/state.js']
-      + '\n;return { normalizeVadSilenceMs: normalizeVadSilenceMs, vadSilenceMsOf: vadSilenceMsOf, vadRequiredQuiet: vadRequiredQuiet, VOICE_CFG_DEFAULTS: VOICE_CFG_DEFAULTS, voiceCfgState: voiceCfgState, mergeVoice: mergeVoice, saveVoiceCfg: saveVoiceCfg, subscribeVoiceConfig: subscribeVoiceConfig, syncVoiceFromHost: syncVoiceFromHost };');
-    var S = stateFactory(localStorageStub, host, __VOICE_CONFIG_DEFAULTS__);
+    var stateFactory = new Function('host', 'storage', 'timerSvc', 'fillerState', 'defaults',
+      SRC['src/client/voice/state-module.cjs']
+      + '\n;return createVoiceState({ host: host, storage: storage, timerSvc: timerSvc, fillerState: fillerState, defaults: defaults, autoSync: false });');
+    var S = stateFactory(host, localStorageStub, null, null, __VOICE_CONFIG_DEFAULTS__);
     S.voiceCfgState.value = JSON.parse(JSON.stringify(scn.voice));
 
     var i18nFactory = new Function(SRC['src/client/i18n-module.cjs'] + '\n;return { ZH: ZH, EN: EN };');

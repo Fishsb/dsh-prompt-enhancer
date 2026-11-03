@@ -320,19 +320,18 @@ test('CHG143-M3 ⭐ 手动增强路径（helpers.enhance）与语音纠错在源
 // ───────────────────── 开关默认关闭（用户已定） ─────────────────────
 
 test('CHG143-S1 新开关默认**关闭**：client 默认值 + mergeVoice 白名单取形', () => {
-  const state = decodeChunk('src/client/voice/state.js');
-  // 目标模式：默认值已迁到共享契约，state.js 只消费注入值。
-  // 这里直接对照事实源，而不是在 chunk 源码里找旧的内联字面量。
+  const state = fs.readFileSync(path.join(ROOT, 'src/client/voice/state-module.cjs'), 'utf8');
+  // 目标模式：默认值由共享契约显式注入普通模块。
   const defaults = require('../src/shared/contracts/voice-config.cjs').VOICE_CONFIG_DEFAULTS;
   assert.equal(defaults.correction.enabled, false, 'VOICE_CFG_DEFAULTS.correction.enabled 须为 false');
-  assert.ok(state.includes('__VOICE_CONFIG_DEFAULTS__'), 'state.js 须消费共享契约默认值');
+  assert.ok(state.includes('d.defaults'), 'state 模块须显式消费注入默认值');
   assert.ok(/correction:\s*\{\s*enabled:\s*\(v && v\.correction && v\.correction\.enabled === true\)/.test(state),
     'mergeVoice 取形须逐字对齐 autoEnhance（=== true ⇒ 缺省/非法回退 false）');
 });
 
 test('CHG143-S2 两侧白名单**同形**：host sanitizeVoiceCfg ↔ client mergeVoice', () => {
   const host = fs.readFileSync(path.join(ROOT, 'lib/asr.cjs'), 'utf8');
-  const client = decodeChunk('src/client/voice/state.js');
+  const client = fs.readFileSync(path.join(ROOT, 'src/client/voice/state-module.cjs'), 'utf8');
   // host 侧（lib/asr.cjs 是普通 cjs 源文本）
   assert.ok(/correction:\s*\{\s*enabled:\s*\(cfg && cfg\.correction && cfg\.correction\.enabled === true\) \? true : false \}/.test(host),
     'host sanitizeVoiceCfg 须有同形 correction 白名单');

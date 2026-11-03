@@ -13,6 +13,7 @@
 // ⚠ 计时精度**未实测**（最坏偏差 ~VAD_POLL_MS = 100ms 粒度，见 U12/B4）——本文件**不**断言精度。
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -161,24 +162,18 @@ test('VADSIL-P11 不回归：host 侧 sanitizeVoiceCfg 白名单与 client 同�
 
 // ───────────── 落点改造：两条入口共用同一入口 ─────────────
 test('VADSIL-P12 共用同一入口：静音档位由 bridge 的包装 VAD 单一入口驱动（自建链已退役）', () => {
-  const rec = decodeChunk('src/client/voice/recorder.js');
   const br = decodeChunk('src/client/voice/official-bridge.js');
   // P2-补做（2026-10-13 · UD-0016）：自建采集链退役 ⇒ VAD 只剩**一条链路**（bridge 包装 VAD）。
   // 判据强度不变：仍逐项断言「按配置动态计算 + 取同一配置值 + 不得有固定帧数常量」。
-  const liveRec = rec.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-  assert.equal(liveRec.trim(), '', 'recorder.js 活代码须已空壳（自建采集链退役，仅留说明注释）');
-  assert.equal(/\bconst VAD_SILENCE_MS\b/.test(liveRec), false, 'recorder 活代码不得再有硬编码静音时长常量');
-  assert.equal(/\bconst VAD_REQUIRED_QUIET\b/.test(liveRec), false, 'recorder 活代码不得再有固定帧数常量');
+  assert.equal(fs.existsSync(path.join(ROOT, 'src/client/voice/recorder.js')), false,
+    'recorder.js 退役占位不得保留为源码 chunk');
   // 包装 VAD：同一入口（唯一在用的落点）
   assert.ok(br.includes('vadRequiredQuiet(vadSilenceMsOf(voiceCfgState.value))'), 'bridge 缺「经同一入口按配置动态计算帧数」');
   assert.equal(br.includes('const OVB_REQUIRED_QUIET'), false, 'bridge 不得再有固定帧数常量');
   assert.equal(/\bconst OVB_SILENCE_MS\b/.test(br.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n')), false, 'bridge 活代码不得再有硬编码静音时长常量');
-  // 退役后不得再有第二条 VAD 实现（防止「退役了却留着第二份真相」）
-  assert.equal(rec.includes('setInterval'), false, 'recorder 活代码不得再有自建 VAD 轮询');
 });
 
 test('VADSIL-P13 须保留：自适应底噪校准与触发门 heardSpeech 在包装 VAD 中在位', () => {
-  const rec = decodeChunk('src/client/voice/recorder.js');
   const br = decodeChunk('src/client/voice/official-bridge.js');
   // P2-补做（UD-0016）：两条路径收敛为一条（wrapper VAD）⇒ 只判该条；记录退役事实的那一份不带活代码。
   for (const [name, src] of [['official-bridge', br]]) {
@@ -188,11 +183,6 @@ test('VADSIL-P13 须保留：自适应底噪校准与触发门 heardSpeech 在�
     assert.ok(/THRESHOLD_MAX/.test(src), name + ' 缺阈值上限');
     // 触发门语义：必须先 heardSpeech 才计静音帧
     assert.ok(/else if \(heardSpeech\)/.test(src), name + ' 触发门用法被改（须保持「先听到语音才计静音」）');
-  }
-  // 退役面：recorder.js 活代码不得再留第二套校准常量（防「退役了却留着第二份真相」）
-  const recLive = rec.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-  for (const sym of ['heardSpeech', 'CALIBRATE_FRAMES', 'NOISE_FACTOR', 'THRESHOLD_MAX']) {
-    assert.equal(recLive.includes(sym), false, 'recorder 活代码不得再有 ' + sym + '（自建 VAD 已退役）');
   }
 });
 
@@ -490,15 +480,15 @@ test('VADSIL-P16 VAD_POLL_MS 未被暴露为可调项（§7.4 明确：不暴露
   const vs = decodeChunk('src/client/voice/voice-section.js');
   assert.equal(S.VOICE_CFG_DEFAULTS.vad.pollMs, undefined, '配置面不得出现 pollMs');
   assert.equal(/pollMs/.test(vs), false, 'UI 不得有轮询间隔控件');
-  // 轮询间隔仍是实现细节常量（100ms），且不随配置变化
-  const rec = decodeChunk('src/client/voice/recorder.js');
-  assert.ok(rec.includes('VAD_POLL_MS = 100'), '轮询间隔须仍是 100ms 实现常量');
+  // 轮询间隔仍是官方桥内的实现细节常量（100ms），不随配置变化。
+  const br = decodeChunk('src/client/voice/official-bridge.js');
+  assert.ok(br.includes('OVB_POLL_MS = 100'), '轮询间隔须仍是 100ms 实现常量');
 });
 
 // ───────────── 变异自证 ─────────────
 // 变异名运行时拼接；正例必红、负控必绿。
 function mutate(src, kind) {
-  // 目标模式：默认值来自共享契约注入（`__VOICE_CONFIG_DEFAULTS__`），不再是 state.js 里的字面量。
+  // 目标模式：默认值来自共享契约显式注入。
   // 变异仍打在「默认值」这一个事实上，只是位置随事实源迁移。
   const contractDefaults = require('../src/shared/contracts/voice-config.cjs').VOICE_CONFIG_DEFAULTS;
   const A = 'const __VOICE_CONFIG_DEFAULTS__ = ' + JSON.stringify(contractDefaults) + ';\n';
@@ -511,7 +501,7 @@ function mutate(src, kind) {
   }
   if (kind === 'freeze-frames') {
     // 帧数退回固定常量派生（不再动态）→ P03 必须红
-    const anchor = '  const poll = 100; // = recorder.js 的 VAD_POLL_MS（内部轮询，不对外暴露）\n  return Math.max(1, Math.round(ms / poll));';
+    const anchor = '    const poll = 100; // = 录音轮询粒度（内部实现，不对外暴露）\n    return Math.max(1, Math.round(ms / poll));';
     assert.ok(src.includes(anchor), '变异锚点须存在');
     const m = src.replace(anchor, '  const poll = 100;\n  return 20;');
     // 同时摘掉归一化，避免被归一化掩盖

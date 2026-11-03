@@ -37,8 +37,6 @@ function buildClient() {
   const voiceCorrectionChunk = require('../src/client/voice/correction.js');
   // 目标模式：清口水词已迁为普通 CommonJS 模块，由共享运行时统一打包。
   const voiceFillerChunk = null;
-  const voiceStateChunk = require('../src/client/voice/state.js');
-  const voiceRecorderChunk = require('../src/client/voice/recorder.js');
   // P2-补做（2026-10-13 · CHG-011 / §4.6.2.6 · UD-0014 选 B）：官方录音路径增值桥
   // （包装标准 API 只观测；静音监测 + 自动增强挂到官方路径 ⇒ 两条入口能力一致）
   const voiceOfficialBridgeChunk = require('../src/client/voice/official-bridge.js');
@@ -62,6 +60,10 @@ function buildClient() {
   const navigationRuntime = bundleModules({
     root,
     entry: 'src/client/components/navigation-runtime.cjs',
+  });
+  const voiceStateRuntime = bundleModules({
+    root,
+    entry: 'src/client/voice/state-module.cjs',
   });
   const modelSettingsRuntime = bundleModules({
     root,
@@ -98,6 +100,9 @@ function buildClient() {
   if (!modelSettingsRuntime.modules.includes('src/client/components/fallback-row-module.cjs')
     || !modelSettingsRuntime.modules.includes('src/client/components/model-main-section-module.cjs')) {
     throw new Error('[build-client] 模型设置运行时打包不完整：缺少模型配置组件模块');
+  }
+  if (!voiceStateRuntime.modules.includes('src/client/voice/state-module.cjs')) {
+    throw new Error('[build-client] 语音运行时打包不完整：缺少语音配置状态模块');
   }
   const sharedRuntimeChunk = 'const __DSH_SHARED__ = ' + sharedContractsRuntime.code
     + ';\nconst __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'
@@ -164,8 +169,19 @@ function buildClient() {
     ['// @dsh-client-comp-model-plugins-section-inject\n', modelPluginsSectionChunk],
     ['// @dsh-client-voice-correction-inject\n', voiceCorrectionChunk],
     ['// @dsh-client-voice-filler-inject\n', ''],
-    ['// @dsh-client-voice-state-inject\n', voiceStateChunk],
-    ['// @dsh-client-voice-recorder-inject\n', voiceRecorderChunk],
+    ['// @dsh-client-voice-state-inject\n', 'const __DSH_VOICE_STATE__ = ' + voiceStateRuntime.code + ';'
+      + '\nconst {\n'
+      + '  VOICE_CFG_KEY, VOICE_CFG_DEFAULTS, normalizeVadSilenceMs, vadSilenceMsOf, vadRequiredQuiet,\n'
+      + '  voiceCfgState, mergeVoice, saveVoiceCfg, subscribeVoiceConfig, syncVoiceFromHost,\n'
+      + '} = __DSH_VOICE_STATE__.createVoiceState({\n'
+      + '  host,\n'
+      + '  storage: typeof localStorage !== "undefined" ? localStorage : null,\n'
+      + '  timerSvc,\n'
+      + '  fillerState,\n'
+      + '  defaults: __VOICE_CONFIG_DEFAULTS__,\n'
+      + '  console: typeof console !== "undefined" ? console : null,\n'
+      + '});\n'],
+    ['// @dsh-client-voice-recorder-inject\n', ''],
     ['// @dsh-client-voice-official-bridge-inject\n', voiceOfficialBridgeChunk],
     ['// @dsh-client-voice-hotkey-inject\n', voiceHotkeyChunk],
     ['// @dsh-client-voice-comp-section-inject\n', voiceSectionChunk],

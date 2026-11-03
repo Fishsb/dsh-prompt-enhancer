@@ -13,12 +13,12 @@ function loadVoiceState() {
   return factory(localStorage, { call: () => Promise.resolve({ ok: false }) });
 }
 
-test('VCONF-01 键集合与 client voice/state.js 同形', () => {
+test('VCONF-01 键集合与 client voice/state-module.cjs 同形', () => {
   const actual = loadVoiceState().VOICE_CFG_DEFAULTS;
   assert.deepEqual([...VOICE_CONFIG_KEYS].sort(), Object.keys(actual).sort());
 });
 
-test('VCONF-02 默认值与 client voice/state.js 逐字段相等', () => {
+test('VCONF-02 默认值与 client voice/state-module.cjs 逐字段相等', () => {
   const actual = loadVoiceState().VOICE_CFG_DEFAULTS;
   assert.deepEqual(JSON.parse(JSON.stringify(VOICE_CONFIG_DEFAULTS)), actual);
 });
@@ -35,7 +35,7 @@ test('VCONF-04 事实源冻结', () => {
   assert.equal(Object.isFrozen(VOICE_CONFIG_DEFAULTS), true);
 });
 
-test('VCONF-05 产物面：共享运行时已由打包器注入且只注入一次（state.js 不再自带第二份）', () => {
+test('VCONF-05 产物面：共享运行时已由打包器注入且只注入一次（状态模块不再自带第二份）', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const client = fs.readFileSync(path.join(__dirname, '..', 'lib', 'client.cjs'), 'utf8');
@@ -49,9 +49,11 @@ test('VCONF-05 产物面：共享运行时已由打包器注入且只注入一�
     assert.ok(client.includes(escapedId), '共享运行时模块 id 未内联：' + mod);
   }
   assert.ok(client.includes('const __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'),
-    'state.js 的默认值必须来自打包后的共享契约');
+    '状态模块的默认值必须来自打包后的共享契约');
+  assert.ok(client.includes('src/client/voice/state-module.cjs'), '产物须内联语音状态普通模块');
+  assert.ok(client.includes('__DSH_VOICE_STATE__.createVoiceState'), '状态工厂须在既有注入位实例化');
   assert.equal(client.includes('const VOICE_CFG_DEFAULTS = {\n'), false,
-    'state.js 不得再内联第二份默认值对象（单一事实源）');
+    '状态模块不得再内联第二份默认值对象（单一事实源）');
   assert.equal(client.includes("require('../src/shared/contracts/"), false,
     '产物不得保留外部 require（共享模块必须由打包器内联）');
   assert.equal(client.includes("require('../src/shared/voice/"), false,

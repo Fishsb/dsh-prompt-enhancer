@@ -114,7 +114,7 @@ test('CS-04 host 门 fail-closed：src/host 目录缺位 ⇒ 不得静默判绿'
 
 test('CS-05 两门对拍：同一变异形态下，client 门与 host 门**都得给出裁决**（对称性）', () => {
   // client 侧（既有门）：改回裸 JS ⇒ 必红
-  withFixture((dir) => unwrapToBareJs(dir, path.join('src', 'client', 'voice', 'recorder.js')), (dir) => {
+  withFixture((dir) => unwrapToBareJs(dir, path.join('src', 'client', 'components', 'enhance-bar.js')), (dir) => {
     const r = runScript(dir, path.join('scripts', 'build-client.mjs'), ['--check']);
     assert.equal(r.code, 1, 'client 既有门必须仍判红（本批不得改弱它）');
     assert.match(r.out, /chunk 契约违反/, 'client 门仍须给出契约裁决');

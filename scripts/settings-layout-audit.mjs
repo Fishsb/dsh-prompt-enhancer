@@ -53,7 +53,7 @@ const CHUNKS = [
   'src/client/constants-module.cjs',
   'src/client/model-helpers-module.cjs',
   'src/client/helpers-module.cjs',
-  'src/client/voice/state.js',
+  'src/client/voice/state-module.cjs',
   'src/client/components/collapsible-section-module.cjs',
   'src/client/components/marquee-select-module.cjs',
   'src/client/components/model-main-section-module.cjs',

@@ -27,6 +27,7 @@ module.exports = {
   fillerSnapshot: filler.fillerSnapshot,
   subscribeFiller: filler.subscribeFiller,
   notifyFiller: filler.notifyFiller,
+  fillerState: filler.fillerState,
   CORRECTION_PHASES: correctionState.CORRECTION_PHASES,
   correctionPhaseKnown: correctionState.correctionPhaseKnown,
   correctionPhaseOf: correctionState.correctionPhaseOf,

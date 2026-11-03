@@ -497,11 +497,11 @@ function unwrapChunkToBareJs(dir, rel) {
 
 test('R7 变异自证（源码层）：任一 chunk 改回裸 JS ⇒ R7 必红且点名该文件', () => {
   // ⚠ **任取一个** chunk（不是只有 correction.js）⇒ 证明覆盖面是「每个 chunk」而非「某文件」
-  const rel = 'src/client/voice/' + 'recorder' + '.js'; // 运行时拼接，避免本文件被误当成实现点位
+  const rel = 'src/client/components/' + 'enhance-bar' + '.js'; // 运行时拼接，避免本文件被误当成实现点位
   withFixture((dir) => unwrapChunkToBareJs(dir, rel), (dir) => {
     const r = runGate(dir);
     assert.equal(r.code, 1, '源码层契约违反必须 exit 1（若为 0 则 R7 是恒真判据 = 假绿）');
-    assert.match(r.out, /FAIL \| R7 \|[^\n]*recorder\.js/, 'R7 必须点名违规 chunk');
+    assert.match(r.out, /FAIL \| R7 \|[^\n]*enhance-bar\.js/, 'R7 必须点名违规 chunk');
     assert.match(r.out, /导出形态违反/, 'R7 必须说明是导出形态（不是别的理由）');
   });
 });
