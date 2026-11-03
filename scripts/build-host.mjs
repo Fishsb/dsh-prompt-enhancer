@@ -86,6 +86,14 @@ function buildHost() {
   const templateRpcChunk = 'const __DSH_TEMPLATE_RPC__ = ' + templateRpcBundle.code
     + ';\nconst {\n' + Object.keys(require('../src/host/template-rpc.cjs')).map((k) => '  ' + k + ',').join('\n')
     + '\n} = __DSH_TEMPLATE_RPC__;\n';
+  // 目标模式：publish/V2 上下文运行时迁为普通模块。
+  const contextRuntimeBundle = bundleModules({ root, entry: 'src/host/context-runtime.cjs' });
+  if (!contextRuntimeBundle.modules.includes('src/host/context-runtime.cjs')) {
+    throw new Error('[build-host] 上下文运行时模块未进入打包图');
+  }
+  const contextRuntimeChunk = 'const __DSH_CONTEXT_RUNTIME__ = ' + contextRuntimeBundle.code
+    + ';\nconst {\n' + Object.keys(require('../src/host/context-runtime.cjs')).map((k) => '  ' + k + ',').join('\n')
+    + '\n} = __DSH_CONTEXT_RUNTIME__;\n';
   // 目标模式：增强阶段执行器迁为普通模块，由打包器内联；阶段顺序仍来自共享契约。
   const pipelineBundle = bundleModules({ root, entry: 'src/host/enhance-pipeline.cjs' });
   if (!pipelineBundle.modules.includes('src/host/enhance-pipeline.cjs')
@@ -170,6 +178,7 @@ function buildHost() {
     ['// @dsh-models-inject', modelsChunk],
     ['// @dsh-models-rpc-inject', modelsRpcChunk],
     ['// @dsh-template-rpc-inject', templateRpcChunk],
+    ['// @dsh-context-runtime-inject', contextRuntimeChunk],
     ['// @dsh-pure-inject', pureChunk],
     ['// @dsh-enhance-pipeline-inject', pipelineChunk],
     ['// @dsh-correction-switch-inject', correctionSwitchChunk],
