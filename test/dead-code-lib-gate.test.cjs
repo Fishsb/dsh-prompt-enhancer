@@ -559,16 +559,13 @@ test('R2 fail-closed（H2 活例修复）：读不出包裹的 chunk 不得再�
   });
 });
 
-test('R7 覆盖面（host 面同族）：src/host 的字符串 chunk 也在契约门内 ⇒ 改回裸 JS 必红', () => {
-  // host 侧仅存的字符串 chunk 是 app.js；.cjs 是普通模块，由模块图完整性门约束。
-  const rel = 'src/host/' + 'app' + '.js'; // 运行时拼接（同既有纪律）
+test('R7 覆盖面（host 面同族）：host 装配图新增未接线模块 ⇒ R4 必红', () => {
+  // 目标模式：host 已无字符串 chunk；host 面由 R4 的装配图可达集校验。
   withFixture((dir) => {
-    const abs = path.join(dir, rel);
-    fs.writeFileSync(abs, "'use strict';\n" + decodeChunkText(fs.readFileSync(abs, 'utf8'), rel), 'utf8');
+    fs.writeFileSync(path.join(dir, 'src', 'host', 'orphan-module.cjs'), "'use strict';\nmodule.exports = {};\n");
   }, (dir) => {
     const r = runGate(dir);
-    assert.equal(r.code, 1, 'host chunk 契约违反必须 exit 1（不得只盯 client）');
-    assert.match(r.out, /FAIL \| R7 \|[^\n]*src[\\/]host[\\/]app\.js/, 'R7 必须点名 host 违规 chunk');
-    assert.match(r.out, /载入失败|导出形态违反|漂移检测失败|契约违反/, 'R7 必须给出可归因的契约裁决');
+    assert.equal(r.code, 1, 'host 未接线模块必须 exit 1（不得只盯 client）');
+    assert.match(r.out, /FAIL \| R4 \|[^\n]*orphan-module\.cjs/, 'R4 必须点名未接线模块');
   });
 });

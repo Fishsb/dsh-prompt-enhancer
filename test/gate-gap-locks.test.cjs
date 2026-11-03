@@ -3,9 +3,9 @@
 //
 // 病历（本锁要防的形态）：
 //   ① `npm run build` 不含 sync-prompts ⇒ 只改 prompts/** 后跑 build，提示词改动从未进产物。
-//      ⚠ 本批**实测复现且已定位归因**：该形态被既有 gate 的 prompts 环抓住（md 与 src/host/app.js
+//      ⚠ 本批**实测复现且已定位归因**：该形态被既有 gate 的 prompts 环抓住（md 与 src/host/prompts-module.cjs
 //        生成区不一致 ⇒ FAIL），故**不是**无判据的缺口；真正缺的是下面 ② 的产物面判据。
-//   ② gate 的 prompts 环旧口径只比 «md ↔ src/host/app.js 生成区»，**不比 plugin-host.js**。
+//   ② gate 的 prompts 环旧口径只比 «md ↔ src/host/prompts-module.cjs 生成区»，**不比 plugin-host.js**。
 //      跑了 sync-prompts 但漏跑 build-host ⇒ 该环判绿，而**真正被装载的产物**里仍是旧提示词。
 //      ⇒ 本批给该环补「产物面判据」：产物内同一生成区必须与刚算出的生成区逐字相同。
 //   ③ scripts/build-host.mjs:88 把 JS 字符串长度（UTF-16 码元）标成 "bytes"（CJK 下差 ~10 万）。
@@ -45,7 +45,7 @@ const PROMPT = path.join('prompts', 'enhance', 'discipline.md');
 const readP = (dir, rel) => fs.readFileSync(path.join(dir, rel), 'utf8');
 const writeP = (dir, rel, s) => fs.writeFileSync(path.join(dir, rel), s, 'utf8');
 
-/** 把夹具拉到「md / app.js 生成区 / 产物 三者一致」的干净态 */
+/** 把夹具拉到「md / prompts-module.cjs 生成区 / 产物 三者一致」的干净态 */
 function settle(dir) {
   assert.equal(runScript(dir, 'scripts/sync-prompts.mjs').code, 0, '夹具预置：sync-prompts 应成功');
   assert.equal(runScript(dir, 'scripts/build-host.mjs').code, 0, '夹具预置：build-host 应成功');
@@ -56,13 +56,13 @@ function settle(dir) {
 test('GAP-1 缺陷②变异自证：跑了 sync-prompts 而漏跑 build-host ⇒ prompts 环**必红**', () => {
   withFixture((dir) => {
     settle(dir);
-    // 缺陷形态：改 md → 只跑 sync-prompts（app.js 生成区更新），**不跑** build-host
+    // 缺陷形态：改 md → 只跑 sync-prompts（prompts-module.cjs 生成区更新），**不跑** build-host
     writeP(dir, PROMPT, readP(dir, PROMPT) + NL + 'SENTINEL-GAP-2' + NL);
     const sync = runScript(dir, 'scripts/sync-prompts.mjs');
     assert.equal(sync.code, 0, '同步（写）调用应成功：' + sync.out);
     // 前置自检：缺陷形态**真的成立**——改动进了 app.js，但**没进**产物
-    assert.ok(readP(dir, path.join('src', 'host', 'app.js')).includes('SENTINEL-GAP-2'),
-      '夹具失效：改动应已进 src/host/app.js 生成区');
+    assert.ok(readP(dir, path.join('src', 'host', 'prompts-module.cjs')).includes('SENTINEL-GAP-2'),
+      '夹具失效：改动应已进 src/host/prompts-module.cjs 生成区');
     assert.ok(!readP(dir, 'plugin-host.js').includes('SENTINEL-GAP-2'),
       '夹具失效：本形态下产物**不应**含该改动（否则验不到 ②）');
     // 判据：必须红，且归因指向「产物未同步」（不得只说「md 与生成区不一致」——那不是本形态的病因）
@@ -73,7 +73,7 @@ test('GAP-1 缺陷②变异自证：跑了 sync-prompts 而漏跑 build-host ⇒
   });
 });
 
-test('GAP-2 缺陷②负控：完整跑完 build（md→app.js→产物）⇒ **不得误报**，绿', () => {
+test('GAP-2 缺陷②负控：完整跑完 build（md→prompts-module.cjs→产物）⇒ **不得误报**，绿', () => {
   withFixture((dir) => {
     settle(dir);
     writeP(dir, PROMPT, readP(dir, PROMPT) + NL + 'SENTINEL-NC' + NL);

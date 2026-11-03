@@ -230,23 +230,28 @@ for (const line of git(diffArgs).split('\n')) {
 }
 
 // ---- R4 src/host 不得再长出死层（P1b 2026-09-19：RC-C「双架构无淘汰机制」的结构判据）----
-// 背景：退役前 src/host 有 25 件，其中 18 件（995 物理行）是「从未接线的 M2 目标架构骨架」，
-// 且互相 import 伪装成「有入边」，任何按入边判死的脚本都识别不出整个簇。本门改用**装配清单等值**：
-// src/host 的磁盘文件集必须与 build-host.mjs 引用的清单完全一致——多一件即死层复长。
+// 目标模式：src/host 全部为普通 CommonJS 模块，由 src/host/app-module.cjs 单入口
+// 经 module-bundler 装配。R4 判据改为「磁盘模块集 == 从装配入口可达的模块集」：
+// 多一件（死层复长）或缺一件（装配断链）都 FAIL。
+// ⚠ 可达性以 module-bundler 的同一解析规则为准（相对 require/import），不另写第二套清单。
 {
   const hostDir = path.join(ROOT, 'src', 'host');
   if (!fs.existsSync(hostDir)) fail('R4', 'src/host 目录缺失');
   else {
-    const onDisk = fs.readdirSync(hostDir).filter((f) => f.endsWith('.js'));
-    const builder = fs.readFileSync(path.join(ROOT, 'scripts', 'build-host.mjs'), 'utf8');
-    const referenced = new Set();
-    for (const m of builder.matchAll(/['"](?:\.\.\/)*src\/host\/([A-Za-z0-9_.-]+\.js)['"]/g)) referenced.add(m[1]);
-    referenced.add('app.js'); // bundle 骨架由构建器隐式装配
-    const extra = onDisk.filter((f) => !referenced.has(f));
-    const missing = [...referenced].filter((f) => !onDisk.includes(f));
-    if (extra.length) fail('R4', 'src/host 出现装配清单外的文件（死层复长 / 双架构回归）: ' + extra.join(', '));
-    if (missing.length) fail('R4', '装配清单声明的文件磁盘缺失: ' + missing.join(', '));
-    if (!extra.length && !missing.length) pass('R4', 'src/host ' + onDisk.length + ' 件与 build-host 装配清单一致（无死层）');
+    const onDisk = fs.readdirSync(hostDir, { withFileTypes: true })
+      .filter((e) => e.isFile() && (e.name.endsWith('.js') || e.name.endsWith('.cjs')))
+      .map((e) => e.name).sort();
+    const { bundleModules } = createRequire(import.meta.url)('./lib/module-bundler.mjs');
+    const graph = bundleModules({ root: ROOT, entry: 'src/host/app-module.cjs' });
+    const reachable = graph.modules
+      .filter((m) => m.startsWith('src/host/'))
+      .map((m) => m.slice('src/host/'.length))
+      .sort();
+    const extra = onDisk.filter((f) => !reachable.includes(f));
+    const missing = reachable.filter((f) => !onDisk.includes(f));
+    if (extra.length) fail('R4', 'src/host 出现装配图外文件（死层复长 / 双架构回归）: ' + extra.join(', '));
+    if (missing.length) fail('R4', '装配图引用但磁盘缺失: ' + missing.join(', '));
+    if (!extra.length && !missing.length) pass('R4', 'src/host ' + onDisk.length + ' 件与装配图可达集一致（无死层）');
   }
 }
 
@@ -472,7 +477,8 @@ for (const line of git(diffArgs).split('\n')) {
   const problems = [];
   const FACES = [
     { name: 'client', dir: path.join(ROOT, 'src', 'client'), artifact: path.join(ROOT, 'lib', 'client.cjs'), rel: 'src/client' },
-    { name: 'host', dir: path.join(ROOT, 'src', 'host'), artifact: path.join(ROOT, 'plugin-host.js'), rel: 'src/host' },
+    // 目标模式：src/host 已无字符串 chunk（全部普通 CommonJS，由构建图门 R4 校验）。
+    // host 面只保留产物可求值判据，不再要求 chunk 清单非空。
   ];
   let totalChunks = 0;
   for (const face of FACES) {
@@ -484,22 +490,23 @@ for (const line of git(diffArgs).split('\n')) {
         if (ent.name.endsWith('.js')) files.push(full);
       }
     };
-    // ── 源码层：**每个** chunk 的导出形态必须 = string（不是「某文件合格」）──
-    if (!fs.existsSync(face.dir)) problems.push(face.rel + ' chunk 目录缺位（无扫描面 ⇒ 不得判绿）');
-    else {
-      walk(face.dir);
-      if (files.length === 0) problems.push(face.rel + ' chunk 清单解析为空（不得据此判绿）');
-      totalChunks += files.length;
-      for (const f of files.sort()) {
-        const rel = path.relative(ROOT, f);
-        let v;
-        try { v = req(f); } catch (e) {
-          // 裸 JS chunk 若在定义期就引用宿主全局会在此抛错 —— 同样属契约违反（fail-closed，不吞）
-          problems.push(rel + ' 载入失败（导出契约违反 / 定义期抛错）: ' + String(e && e.message).slice(0, 120));
-          continue;
+    // ── 源码层：client 面仍以字符串 chunk 为契约；host 面由 R4 装配图门校验 ──
+    if (face.name === 'client') {
+      if (!fs.existsSync(face.dir)) problems.push(face.rel + ' chunk 目录缺位（无扫描面 ⇒ 不得判绿）');
+      else {
+        walk(face.dir);
+        if (files.length === 0) problems.push(face.rel + ' chunk 清单解析为空（不得据此判绿）');
+        totalChunks += files.length;
+        for (const f of files.sort()) {
+          const rel = path.relative(ROOT, f);
+          let v;
+          try { v = req(f); } catch (e) {
+            problems.push(rel + ' 载入失败（导出契约违反 / 定义期抛错）: ' + String(e && e.message).slice(0, 120));
+            continue;
+          }
+          if (typeof v !== 'string') problems.push(rel + ' 导出形态违反：实得 ' + typeof v + '（须为 string —— `module.exports = "<JSON 转义源码>"`）');
+          else if (v.length === 0) problems.push(rel + ' 导出空字符串（chunk 无内容）');
         }
-        if (typeof v !== 'string') problems.push(rel + ' 导出形态违反：实得 ' + typeof v + '（须为 string —— `module.exports = "<JSON 转义源码>"`）');
-        else if (v.length === 0) problems.push(rel + ' 导出空字符串（chunk 无内容）');
       }
     }
     // ── 产物层：产物必须可求值（client 复用 bundle-smoke 对 host 的同款做法）──
@@ -532,7 +539,7 @@ for (const line of git(diffArgs).split('\n')) {
     }
   }
   for (const p of problems) fail('R7', p);
-  if (!problems.length) pass('R7', totalChunks + ' 个 chunk（client+host，含将来新增）导出形态均为 string｜'
+  if (!problems.length) pass('R7', totalChunks + ' 个 client chunk 导出形态均为 string｜'
     + 'lib/client.cjs 浏览器同款求值 PARSE OK（污染 0 处）｜plugin-host.js 求值 PARSE OK（污染 0 处）');
 }
 

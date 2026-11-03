@@ -1,10 +1,6 @@
 // Build root plugin-host.js from modular host source.
-// The bundle skeleton (src/host/app.js) carries all injection markers; every
-// module bundle / chunk (pure/diagnostics/models/enhance-handlers) is injected
-// below, producing the single self-contained artifact required for dynamic
-// Cordis install.
-// ⚠ P2-0（2026-10-13）注释订正：本清单同步为实际 chunk 数（`plugins.js`/`update.js` 已于 P1-c 删除）。
-// ⚠ 目标模式（CHG-320）：diagnostics 已迁为普通模块，本清单现存 3 个字符串 chunk。
+// 目标模式：src/host 已全部为普通 CommonJS 模块，由 module-bundler 从
+// src/host/app-module.cjs 单入口打成自包含表达式；不再有字符串 chunk 与注入标记。
 //
 // v3.2.1-t（架构调整·版本单一事实源 + 漂移检测）：
 //   ① 版本单一事实源 = `package.json`，由**运行时**取得：`lib/harness.cjs` 的
@@ -18,8 +14,8 @@
 //      保留该替换语句本身是为守住既有 --check 语义（不属本批权限，见报告 §F2）。
 //   ② --check 模式：重建到内存，与磁盘现有产物对比——漂移（源码改了没重建，
 //      或产物被手改）即报错退出 1。供 sync-runtime / release / pre-commit 使用。
-import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { bundleModules } from './lib/module-bundler.mjs';
@@ -28,291 +24,38 @@ const require = createRequire(import.meta.url);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
 function buildHost() {
-  // 目标模式（CHG-320）：chunk 必须在契约门之前安全装载。裸 JS chunk 在定义期可能直接
-  // 引用宿主全局并抛错；若直接 require，构建器会在门运行前以未归因的堆栈退出，读者
-  // 拿不到“哪个文件违反了 chunk 契约”。此包装保留 fail-closed，并把文件名带进裁决。
-  function loadChunk(rel) {
-    try {
-      return require('../' + rel);
-    } catch (e) {
-      throw new Error('chunk 契约违反（载入失败）: ' + rel + ' — ' + String(e && e.message ? e.message : e));
+  // 目标模式：src/host 已全部为普通 CommonJS 模块，由打包器从单一入口
+  // src/host/app-module.cjs 打成自包含表达式；不再有字符串 chunk 与注入标记。
+  const appBundle = bundleModules({ root, entry: 'src/host/app-module.cjs' });
+  for (const required of [
+    'src/host/app-module.cjs',
+    'src/host/prompts-module.cjs',
+    'src/host/pure-module.cjs',
+    'src/host/enhance-handlers-module.cjs',
+    'src/shared/contracts/enhance-stages.cjs',
+  ]) {
+    if (!appBundle.modules.includes(required)) {
+      throw new Error('[build-host] 装配图不完整：缺少 ' + required);
     }
   }
-  // The bundle skeleton (the assembled plugin body with all injection markers)
-  // lives in src/host/app.js; every chunk is injected below.
-  let body = loadChunk('src/host/app.js');
 
-  // Normalize line endings BEFORE marker matching (see build-client.mjs).
-  body = body.replace(/\r\n/g, '\n');
-  // 目标模式：PURE 区段已是普通 CommonJS 模块（src/host/pure-module.cjs），
-  // 由打包器打成自包含表达式后注入。旧 chunk `pure.js` 已退役（R4 等值集禁止双份）。
-  // 等价比对见 test/host-pure-module.test.cjs 的冻结基准。
-  const pureModuleBundle = bundleModules({ root, entry: 'src/host/pure-module.cjs' });
-  if (!pureModuleBundle.modules.includes('src/host/pure-module.cjs')) {
-    throw new Error('[build-host] 纯函数模块未进入打包图');
-  }
-  const pureChunk = '// ==PURE-BEGIN==\nconst __DSH_PURE__ = ' + pureModuleBundle.code
-    + ';\nconst {\n' + Object.keys(require('../src/host/pure-module.cjs')).map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_PURE__;\n// ==PURE-END==\n';
-  // 目标模式：诊断日志环形缓冲迁为普通模块，由打包器内联；console 由构建期注入，
-  // 产物仍保持自包含（无外部 require）。logs/last 与 LOG_RING 契约不变。
-  const diagnosticsBundle = bundleModules({ root, entry: 'src/host/diagnostics-module.cjs' });
-  if (!diagnosticsBundle.modules.includes('src/host/diagnostics-module.cjs')) {
-    throw new Error('[build-host] 诊断日志模块未进入打包图');
-  }
-  const diagnosticsChunk = 'const __DSH_DIAGNOSTICS__ = ' + diagnosticsBundle.code
-    + ';\nconst { LOG_RING, LOG_RING_MAX, hlog, herr, logsLast } = __DSH_DIAGNOSTICS__.createDiagnostics(console);\n';
-  // 目标模式：模型域纯逻辑已迁为普通 CommonJS 模块，由打包器内联。
-  const modelsBundle = bundleModules({ root, entry: 'src/host/models-module.cjs' });
-  if (!modelsBundle.modules.includes('src/host/models-module.cjs')) {
-    throw new Error('[build-host] 模型域模块未进入打包图');
-  }
-  const modelsChunk = 'const __DSH_MODELS__ = ' + modelsBundle.code
-    + ';\nconst {\n' + Object.keys(require('../src/host/models-module.cjs')).map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_MODELS__;\n';
-  // 目标模式：模型 RPC 面迁为普通模块，注册函数集中收集后由 app 转交真实 harness。
-  const modelsRpcBundle = bundleModules({ root, entry: 'src/host/models-rpc.cjs' });
-  if (!modelsRpcBundle.modules.includes('src/host/models-rpc.cjs')) {
-    throw new Error('[build-host] 模型 RPC 模块未进入打包图');
-  }
-  const modelsRpcChunk = 'const __DSH_MODELS_RPC__ = ' + modelsRpcBundle.code
-    + ';\nconst {\n' + Object.keys(require('../src/host/models-rpc.cjs')).map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_MODELS_RPC__;\n';
-  // 目标模式：模板默认值 RPC 迁为普通模块；提示词正文仍来自生成区。
-  const templateRpcBundle = bundleModules({ root, entry: 'src/host/template-rpc.cjs' });
-  if (!templateRpcBundle.modules.includes('src/host/template-rpc.cjs')) {
-    throw new Error('[build-host] 模板 RPC 模块未进入打包图');
-  }
-  const templateRpcChunk = 'const __DSH_TEMPLATE_RPC__ = ' + templateRpcBundle.code
-    + ';\nconst {\n' + Object.keys(require('../src/host/template-rpc.cjs')).map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_TEMPLATE_RPC__;\n';
-  // 目标模式：publish/V2 上下文运行时迁为普通模块。
-  const contextRuntimeBundle = bundleModules({ root, entry: 'src/host/context-runtime.cjs' });
-  if (!contextRuntimeBundle.modules.includes('src/host/context-runtime.cjs')) {
-    throw new Error('[build-host] 上下文运行时模块未进入打包图');
-  }
-  const contextRuntimeChunk = 'const __DSH_CONTEXT_RUNTIME__ = ' + contextRuntimeBundle.code
-    + ';\nconst {\n' + Object.keys(require('../src/host/context-runtime.cjs')).map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_CONTEXT_RUNTIME__;\n';
-  // 目标模式：增强阶段执行器迁为普通模块，由打包器内联；阶段顺序仍来自共享契约。
-  const pipelineBundle = bundleModules({ root, entry: 'src/host/enhance-pipeline.cjs' });
-  if (!pipelineBundle.modules.includes('src/host/enhance-pipeline.cjs')
-    || !pipelineBundle.modules.includes('src/shared/contracts/enhance-stages.cjs')) {
-    throw new Error('[build-host] 增强阶段模块打包不完整');
-  }
-  const pipelineChunk = 'const __DSH_ENHANCE_PIPELINE__ = ' + pipelineBundle.code
-    + ';\nconst {\n' + Object.keys(require('../src/host/enhance-pipeline.cjs')).map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_ENHANCE_PIPELINE__;\n';
-  // 目标模式：纠错开关解析迁为普通模块；产物仍内联，RPC 契约不变。
-  const correctionSwitchBundle = bundleModules({ root, entry: 'src/host/correction-switch.cjs' });
-  if (!correctionSwitchBundle.modules.includes('src/host/correction-switch.cjs')) {
-    throw new Error('[build-host] 纠错开关模块未进入打包图');
-  }
-  const correctionSwitchChunk = 'const __DSH_CORRECTION_SWITCH__ = ' + correctionSwitchBundle.code
-    + ';\nconst CORRECTION_SWITCH = __DSH_CORRECTION_SWITCH__;\n';
-  // 目标模式：增强结果归一迁为普通模块；只附加可选 status，既有 RPC 字段不变。
-  const enhanceResultBundle = bundleModules({ root, entry: 'src/host/enhance-result-module.cjs' });
-  if (!enhanceResultBundle.modules.includes('src/host/enhance-result-module.cjs')
-    || !enhanceResultBundle.modules.includes('src/shared/contracts/result.cjs')) {
-    throw new Error('[build-host] 增强结果模块打包不完整');
-  }
-  const enhanceResultChunk = 'const __DSH_ENHANCE_RESULT__ = ' + enhanceResultBundle.code
-    + ';\nconst {\n' + Object.keys(require('../src/host/enhance-result-module.cjs')).map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_ENHANCE_RESULT__;\n';
-  // 目标模式：语音纠错执行域迁为普通模块；RPC 注册仍在 chunk 内，返回值不变。
-  const correctionRunnerBundle = bundleModules({ root, entry: 'src/host/correction-runner.cjs' });
-  if (!correctionRunnerBundle.modules.includes('src/host/correction-runner.cjs')
-    || !correctionRunnerBundle.modules.includes('src/host/correction-switch.cjs')) {
-    throw new Error('[build-host] 纠错执行域模块打包不完整');
-  }
-  const correctionRunnerChunk = 'const __DSH_CORRECTION_RUNNER__ = ' + correctionRunnerBundle.code
-    + ';\nconst {\n' + Object.keys(require('../src/host/correction-runner.cjs')).map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_CORRECTION_RUNNER__;\n';
-  // 目标模式：增强运行时辅助域（降级/预算/可中断闸/重试策略/进度）迁为普通模块。
-  const enhanceRuntimeBundle = bundleModules({ root, entry: 'src/host/enhance-runtime.cjs' });
-  if (!enhanceRuntimeBundle.modules.includes('src/host/enhance-runtime.cjs')) {
-    throw new Error('[build-host] 增强运行时模块未进入打包图');
-  }
-  const enhanceRuntimeChunk = 'const __DSH_ENHANCE_RUNTIME__ = ' + enhanceRuntimeBundle.code
-    + ';\nconst {\n' + Object.keys(require('../src/host/enhance-runtime.cjs')).map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_ENHANCE_RUNTIME__;\n';
-  // 目标模式：增强 analyze 阶段迁为普通模块（配置/模板/记忆/场景）。
-  const enhanceAnalyzeBundle = bundleModules({ root, entry: 'src/host/enhance-analyze.cjs' });
-  if (!enhanceAnalyzeBundle.modules.includes('src/host/enhance-analyze.cjs')) {
-    throw new Error('[build-host] 增强 analyze 模块未进入打包图');
-  }
-  const enhanceAnalyzeChunk = 'const __DSH_ENHANCE_ANALYZE__ = ' + enhanceAnalyzeBundle.code
-    + ';\nconst {\n' + Object.keys(require('../src/host/enhance-analyze.cjs')).map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_ENHANCE_ANALYZE__;\n';
-  // 目标模式：增强 retrieve 阶段与检索辅助域迁为普通模块。
-  const enhanceRetrieveBundle = bundleModules({ root, entry: 'src/host/enhance-retrieve.cjs' });
-  if (!enhanceRetrieveBundle.modules.includes('src/host/enhance-retrieve.cjs')) {
-    throw new Error('[build-host] 增强 retrieve 模块未进入打包图');
-  }
-  const enhanceRetrieveChunk = 'const __DSH_ENHANCE_RETRIEVE__ = ' + enhanceRetrieveBundle.code
-    + ';\nconst {\n' + Object.keys(require('../src/host/enhance-retrieve.cjs')).map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_ENHANCE_RETRIEVE__;\n';
-  // 目标模式：增强 assemble 阶段迁为普通模块（消息组装 / 记忆链 / 日志）。
-  const enhanceAssembleBundle = bundleModules({ root, entry: 'src/host/enhance-assemble.cjs' });
-  if (!enhanceAssembleBundle.modules.includes('src/host/enhance-assemble.cjs')) {
-    throw new Error('[build-host] 增强 assemble 模块未进入打包图');
-  }
-  const enhanceAssembleChunk = 'const __DSH_ENHANCE_ASSEMBLE__ = ' + enhanceAssembleBundle.code
-    + ';\nconst {\n' + Object.keys(require('../src/host/enhance-assemble.cjs')).map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_ENHANCE_ASSEMBLE__;\n';
-  // 目标模式：增强 llm 阶段与连通性探测迁为普通模块。
-  const enhanceGenerationBundle = bundleModules({ root, entry: 'src/host/enhance-generation.cjs' });
-  if (!enhanceGenerationBundle.modules.includes('src/host/enhance-generation.cjs')) {
-    throw new Error('[build-host] 增强 llm 模块未进入打包图');
-  }
-  const enhanceGenerationChunk = 'const __DSH_ENHANCE_GENERATION__ = ' + enhanceGenerationBundle.code
-    + ';\nconst {\n' + Object.keys(require('../src/host/enhance-generation.cjs')).map((k) => '  ' + k + ',').join('\n')
-    + '\n} = __DSH_ENHANCE_GENERATION__;\n';
-  // 目标模式（CHG-344）：增强/纠错 RPC 注册域迁为普通 CommonJS 工厂。
-  const enhanceHandlersBundle = bundleModules({ root, entry: 'src/host/enhance-handlers-module.cjs' });
-  if (!enhanceHandlersBundle.modules.includes('src/host/enhance-handlers-module.cjs')) {
-    throw new Error('[build-host] 增强/纠错注册域模块未进入打包图');
-  }
-  const enhanceChunk = 'const __DSH_ENHANCE_HANDLERS__ = ' + enhanceHandlersBundle.code + ';'
-    + '\nconst __DSH_ENHANCE_HANDLERS_API__ = __DSH_ENHANCE_HANDLERS__.createEnhanceHandlers({\n'
-    + '  ctx, harness, llm, pending, hlog, herr, requestKey, markAndAbort,\n'
-    + '  createEnhancePipeline, createEnhanceRuntime, createAnalyzeStage, createRetrieveStage,\n'
-    + '  createAssembleStage, createGenerationStage, createCorrectionRunner, CORRECTION_SWITCH,\n'
-    + '  validateConfig, buildTryChain, resolveTemplateSystem, shouldInjectMemory, computeEditDelta,\n'
-    + '  filterDeltaForPublish, detectScenario, resolveEnhanceTimeoutMs, SKILL_MANIFEST, MODE_KEYS,\n'
-    + '  MEMORY_ROUNDS_MAX, STAGE_PREPARE, STAGE_ANALYZE, STAGE_HISTORY, STAGE_FILES, STAGE_EVENTS,\n'
-    + '  STAGE_CONTEXT, STAGE_LLM, DISCIPLINE_PROMPT, publishScenarioCache, publishWebMemo,\n'
-    + '  startWaitAbort, buildV2ContextBlock, collectStream, cleanOutput, cleanCorrectionOutput,\n'
-    + '  friendlyMessage, extractHistoryConclusions, extractHistory, splitHistoryRounds, rankFiles,\n'
-    + '  splitCnSegments, shouldIgnoreFile, snippetFromLines, extractKeywords, parseRelevance,\n'
-    + '  parseSearchPlan, parseIntent, parseDocsAnalysis, resolveRetrieveBudget, DEFAULT_MODE,\n'
-    + '  wrapUserText, wrapPublishText, buildMemoryDeltaHint, buildChatMessages, enhanceSuccessResult,\n'
-    + '  enhanceFailureResult, stripScenarioEcho, computeBackoffDelayMs, isRetryableFailure,\n'
-    + '  probeCacheGet, probeCacheSet, pingStream, resolvePrepareBudgetMs, V2_SEARCH_EVENTS_TIMEOUT_MS,\n'
-    + '  V2_WORKSPACE_TIMEOUT_MS, V2_PROGRESS_TIMEOUT_MS, V2_MSG_SEQ_SCAN, V2_HISTORY_LIMIT,\n'
-    + '  SCAN_FILE_LIST_MAX, V2_WORKSPACE_IGNORE_DIRS, SNIPPET_BUDGET, RELEVANCE_TIMEOUT_MS,\n'
-    + '  RELEVANCE_MAX_TOKENS, RELEVANCE_OUTPUT_LIMIT, WEB_PLAN_TIMEOUT_MS, WEB_PLAN_MAX_TOKENS,\n'
-    + '  WEB_PLAN_OUTPUT_LIMIT, WEB_MEMO_TOPICS_MAX, WEB_MEMO_MAX, RELEVANCE_PROMPT,\n'
-    + '  WEBSEARCH_PLAN_PROMPT, DEV_INTENT_PROMPT, DOC_ANALYSIS_PROMPT, REFERENCE_GUIDE,\n'
-    + '  SMART_TAIL_PROMPT, CORRECTION_PROMPT, WATCHDOG_TIMEOUT_MS, PROBE_TIMEOUT_MS,\n'
-    + '  RETRY_ALWAYS_SAFETY_CAP, WEB_SEARCH_MAX_RESULTS, WEB_SEARCH_TIMEOUT_MS, CONTINUE_PROMPT,\n'
-    + '});\n'
-    + 'const registerEnhanceStage = __DSH_ENHANCE_HANDLERS_API__.registerEnhanceStage;\n'
-    + 'const runEnhanceStages = __DSH_ENHANCE_HANDLERS_API__.runEnhanceStages;\n'
-    + 'const runEnhancePipeline = __DSH_ENHANCE_HANDLERS_API__.runEnhancePipeline;\n'
-    + 'const runCorrection = __DSH_ENHANCE_HANDLERS_API__.runCorrection;\n';
+  // 提示词生成区标记（U40 / sync-prompts 的锚点）随普通模块进入产物。
+  // 模块正文由 bundleModules 内联，不再有字符串 chunk 或 marker 注入。
+  let composed = 'const __DSH_HOST_APP__ = ' + appBundle.code + ';\n'
+    + 'return __DSH_HOST_APP__.createHostPlugin(harness, { console: typeof console !== "undefined" ? console : null });\n';
 
-  // Inject all chunks, looping until no marker remains (same policy as
-  // build-client.mjs — nested markers get expanded on later passes).
-  let composed = body;
-  const injections = [
-    ['// @dsh-diagnostics-inject', diagnosticsChunk],
-    ['// @dsh-models-inject', modelsChunk],
-    ['// @dsh-models-rpc-inject', modelsRpcChunk],
-    ['// @dsh-template-rpc-inject', templateRpcChunk],
-    ['// @dsh-context-runtime-inject', contextRuntimeChunk],
-    ['// @dsh-pure-inject', pureChunk],
-    ['// @dsh-enhance-pipeline-inject', pipelineChunk],
-    ['// @dsh-correction-switch-inject', correctionSwitchChunk],
-    ['// @dsh-enhance-result-inject', enhanceResultChunk],
-    ['// @dsh-correction-runner-inject', correctionRunnerChunk],
-    ['// @dsh-enhance-runtime-inject', enhanceRuntimeChunk],
-    ['// @dsh-enhance-retrieve-inject', enhanceRetrieveChunk],
-    ['// @dsh-enhance-analyze-inject', enhanceAnalyzeChunk],
-    ['// @dsh-enhance-assemble-inject', enhanceAssembleChunk],
-    ['// @dsh-enhance-generation-inject', enhanceGenerationChunk],
-    ['// @dsh-enhance-inject', enhanceChunk],
-  ];
-
-  // ── chunk 契约门（2026-10-17 契约面收口批 · 第 ① 件：补齐与 build-client 的**对称**）──
-  // 为什么补：事故发生形态是「**契约门只存在于两半部的一半**」——`build-client.mjs:83-97`
-  //   在**构建期**就拒绝非字符串 chunk，而本脚本此前**完全没有这道门**。两半部用**同一条**
-  //   注入方式（`composed.replace(marker, chunk)`）、写**同一份**契约
-  //   （`module.exports = "<JSON 转义源码>"`），却只有一半有门 ⇒ 该不对称本身就是缺陷。
-  // 契约：每个 chunk 必须是**字符串**（`module.exports = "…"` 包裹）。裸 JS chunk 经
-  //   `require` 返回**空对象** ⇒ 上面 `replace` 会把对象字符串化成 `[object Object]`
-  //   写进 `plugin-host.js` ⇒ `lib/index.cjs` 的 `new Function('harness', BODY)` 求值失败
-  //   ⇒ 整个 host 半部装载失败。本门在**构建期**即拒绝，并给出违规 chunk 的 marker 与实得类型。
-  //
-  // ⚠ 覆盖面 = **递归枚举** `src/host/**`（**不写死文件名**）⇒ 将来新增的 chunk 自动入网，
-  //   与 `dead-code-gate.mjs` 的 R5/R6/R7 同一派生纪律（同 build-client 门的「取全清单」口径）。
-  // ⚠ fail-closed：目录缺位 / 清单为空 / 模块载入抛错（裸 JS 在定义期引用宿主全局即抛）
-  //   一律**判红**，不静默回退、不跳过。
-  // ⚠ 归属口径：文件 → marker 用**模块身份**映射（同一 `require` 缓存项 ===），避免依赖文件名
-  //   与 marker 的命名约定；映射不到（= 该文件未被本脚本装配）时如实标注，**不猜一个 marker**。
-  const chunkDir = join(root, 'src', 'host');
-  const chunkFiles = [];
-  const walkChunks = (d) => {
-    for (const ent of readdirSync(d, { withFileTypes: true })) {
-      const full = join(d, ent.name);
-      // 与 dead-code-gate R7 同一排除口径（vendor 不属本仓契约面）
-      if (ent.isDirectory()) { if (ent.name !== 'vendor') walkChunks(full); continue; }
-      // 目标模式：`.cjs` 是普通模块（由打包器装配），不是字符串 chunk。
-      // 旧 `.js` chunk 仍受契约门约束；新模块由 bundleModules 的图完整性门约束。
-      if (ent.name.endsWith('.js')) chunkFiles.push(full);
-    }
-  };
-  walkChunks(chunkDir);
-  const badChunks = [];
-  for (const full of chunkFiles.sort()) {
-    const rel = relative(root, full);
-    let value;
-    try {
-      value = require(full);
-    } catch (e) {
-      // 裸 JS chunk 若在定义期就引用宿主全局会在此抛错 —— 同样属契约违反（不吞）
-      badChunks.push({ rel, marker: null, type: '载入抛错 ' + String(e && e.message).slice(0, 80) });
-      continue;
-    }
-    if (typeof value === 'string') continue;
-    // marker 归属：按模块身份在既有装配清单里反查（不按文件名约定猜）
-    const hit = injections.find(([, chunk]) => chunk === value);
-    badChunks.push({ rel, marker: hit ? hit[0].trim() : null, type: typeof value });
-  }
-  if (chunkFiles.length === 0) {
-    throw new Error('chunk 契约门未通过：src/host 未枚举到任何 chunk（无扫描面 ⇒ 不得判绿）');
-  }
-  if (badChunks.length) {
-    console.error('[build-host] chunk 契约违反 —— 以下 chunk 未导出字符串：');
-    for (const b of badChunks) {
-      console.error('  · ' + (b.marker ? b.marker + '（' + b.rel + '）' : b.rel)
-        + (b.marker ? '' : '（⚠ 未被本脚本装配 ⇒ 见门禁 R4）')
-        + '  → 实得 ' + b.type);
-    }
-    console.error('  修复：把 chunk 源码包成 module.exports = "<JSON 转义后的源码>";');
-    throw new Error('chunk 契约门未通过（' + badChunks.length + ' 个）');
-  }
-
-  let previous;
-  do {
-    previous = composed;
-    for (const [marker, chunk] of injections) {
-      if (composed.includes(marker)) {
-        composed = composed.replace(marker, chunk);
-      }
-    }
-  } while (composed !== previous);
-
-  // Normalize line endings (see build-client.mjs): source files may carry CRLF
-  // after a git checkout with core.autocrlf; committed artifacts are LF.
+  // Normalize line endings: source files may carry CRLF after a git checkout.
   composed = composed.replace(/\r\n/g, '\n');
 
-  // ⚠ 版本占位符替换（口径订正 · F2 · 2026-10-16）：本条**当前为空转**——`src/host/**`
-  //   无 `__DASH_PLUGIN_VERSION__` 引用点（实测命中 0），故没有任何字面量可替换，
-  //   产物内**不含版本**。**版本单一事实源实际由 `lib/harness.cjs` 的 `readPluginVersion()`
-  //   运行时直读 `package.json` 达成**（见文件头注①）。此处保留语句是为不改变既有构建
-  //   行为与 --check 判定（本批只订正文案，不改逻辑）。
+  // ⚠ 版本占位符替换当前为空转：src/host/** 无 __DASH_PLUGIN_VERSION__ 引用点。
+  // 版本单一事实源由 lib/harness.cjs 的 readPluginVersion() 运行时直读 package.json。
   const pkgVersion = require('../package.json').version;
   composed = composed.split('__DASH_PLUGIN_VERSION__').join("'" + pkgVersion + "'");
 
-  // Keep the legacy header but mark it as a generated artifact.
-  // P2-0（2026-10-13）：清单订正为**实际 5 件** —— `plugins.js` / `update.js` 已于 P1-c 删除
-  //   （设置第三 tab 退役 + 更新执行器退役）。⚠ 该行会逐字写进 `plugin-host.js` 产物首行，
-  //   旧的 7 件清单会让读者以为装配清单有 7 件（并与 R4「等值集」判据互为反证）。
-  const header = `// GENERATED by scripts/build-host.mjs — do not edit by hand.\n// Source: src/host/app.js + src/host/*.cjs (+ generated prompt block in app.js)\n`;
+  const header = '// GENERATED by scripts/build-host.mjs — do not edit by hand.\n'
+    + '// Source: src/host/app-module.cjs + src/host/*.cjs (+ generated prompt module)\n';
   return composed.startsWith('// GENERATED') ? composed : header + composed;
 }
-
 const output = buildHost();
 const args = process.argv.slice(2);
 
@@ -333,7 +76,7 @@ if (args.includes('--check')) {
   //     app.js 生成区与产物**同为旧** ⇒ 本检查仍 exit 0（该形态由 gate 的 prompts 环 / 单测 U40 咬住，
   //     不落此支）。故下面③的措辞严格写成「已跑 sync-prompts 但漏跑 build-host」。
   //   ⚠ 本批**只改这两行文案**：判定逻辑 / 退出码 / 比较对象一字未动。
-  console.error('  原因：① 改过 src/host/* 后未重建；② 产物被手工修改；③ 改过 prompts/** 并已跑 sync-prompts、却漏跑 build-host（生成区已在 src/host/app.js 更新，产物仍是旧的）。');
+  console.error('  原因：① 改过 src/host/* 后未重建；② 产物被手工修改；③ 改过 prompts/** 并已跑 sync-prompts、却漏跑 build-host（生成区已在 src/host/prompts-module.cjs 更新，产物仍是旧的）。');
   console.error('  修复：若是 ③ ⇒ node scripts/build-host.mjs（sync-prompts 已跑过，重建产物即可）；若是 ①② ⇒ node scripts/build-host.mjs（重建产物），或还原被手改的产物。'
     + '｜提示：提示词改动生效须**两步都跑**——node scripts/sync-prompts.mjs && node scripts/build-host.mjs（npm run build 不带前者）。');
   process.exit(1);

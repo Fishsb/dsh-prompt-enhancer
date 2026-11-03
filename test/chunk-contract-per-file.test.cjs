@@ -31,7 +31,7 @@ test('CH-01 枚举面非空且与 R7 自报读数同值（跨实现交叉校验�
   assert.ok(CHUNKS.length > 0, '枚举必须非空（空清单 ⇒ 后面的逐件断言全部空转）');
   // 与既有门禁**对拍**：R7 的自报行里那个数字是它自己枚出来的面。两侧不一致 ⇒ 有一侧漏了。
   const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'dead-code-gate.mjs')], { cwd: ROOT, encoding: 'utf8' });
-  const m = String(r.stdout || '').match(/R7 \| (\d+) 个 chunk/);
+  const m = String(r.stdout || '').match(/R7 \| (\d+) 个 client chunk/);
   assert.ok(m, 'R7 自报行必须可读（读不到 ⇒ 本交叉校验无被测物，不得静默跳过）：' + String(r.stdout || '').slice(0, 200));
   assert.equal(String(CHUNKS.length), m[1],
     'listChunkFiles 与 R7 枚举面必须逐数同值（两侧各自实现 ⇒ 借此互相咬住）');

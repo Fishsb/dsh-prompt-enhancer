@@ -67,66 +67,51 @@ function listChunks(dir, relDir) {
 
 // ─────────────── ① 两个构建期门**对称** ───────────────
 
-test('CS-01 host 构建期契约门**在位**：源码面形态锁（两个半部都要有门）', () => {
+test('CS-01 client 构建期契约门在位；host 改为单入口装配图门', () => {
   const host = fs.readFileSync(path.join(ROOT, 'scripts', 'build-host.mjs'), 'utf8');
   const client = fs.readFileSync(path.join(ROOT, 'scripts', 'build-client.mjs'), 'utf8');
-  // 两处都必须在**源码面**就具备「导出形态是否 string」的判定 + 契约裁决（fail-closed）。
-  // ⚠ 只锁**语义**（存在 string 形态判定 + 契约裁决），不锁两家逐字的写法差异：
-  //   client 写 `filter(([, c]) => typeof c !== 'string')`（取违规集），
-  //   host   写 `if (typeof value === 'string') continue;`（取通过集）—— 形态不同、判定等价。
-  for (const [name, src] of [['build-host.mjs', host], ['build-client.mjs', client]]) {
-    assert.match(src, /typeof\s+\w+\s*(?:!==|===)\s*'string'/,
-      name + ' 必须有「导出形态是否 string」的判定（本批补的正是 host 侧的它）');
-    assert.match(src, /chunk 契约/,
-      name + ' 必须给出 chunk 契约违规的裁决（点名 + 抛错）');
-  }
-  // host 门必须**递归枚举**、不得写死文件名（将来新增自动入网）
-  assert.match(host, /readdirSync/, 'build-host 的覆盖须为目录枚举（不得写死 5 个文件名）');
+  assert.match(client, /typeof\s+\w+\s*(?:!==|===)\s*'string'/, 'build-client 必须有导出形态判定');
+  assert.match(client, /chunk 契约/, 'build-client 必须给出 chunk 契约违规裁决');
+  assert.match(host, /bundleModules\(\{ root, entry: 'src\/host\/app-module\.cjs' \}\)/, 'build-host 必须从单一普通模块入口打包');
+  assert.match(host, /装配图不完整/, 'build-host 必须对模块图完整性 fail-closed');
 });
 
-test('CS-02 host 门变异自证：任一 host chunk 改回裸 JS ⇒ **必红**且点名文件', () => {
-  withFixture((dir) => { fs.appendFileSync(path.join(dir, 'src', 'host', 'enhance-handlers-module.cjs'), '\n}}}\n', 'utf8'); }, (dir) => {
-    const r = runScript(dir, path.join('scripts', 'build-host.mjs'), ['--check']);
-    assert.equal(r.code, 1, 'host chunk 契约违反必须 exit 1（若为 0 则该门是恒真判据 = 假绿）');
-    // 裸 JS 在定义期即抛错 ⇒ 载入阶段裁决（点名文件 + 契约口径）；marker 归属不适用。
-    assert.match(r.out, /漂移检测失败|chunk 契约违反/, '门必须给出可归因的构建裁决（不是裸堆栈）');
-    assert.match(r.out, /build-host --check|enhance-handlers-module\.cjs/, '门必须给出可归因的构建裁决');
-  });
-});
-
-test('CS-03 host 门覆盖面：新增**未装配**的非字符串文件也入网（无硬编码）', () => {
+test('CS-02 host 装配图门变异自证：入口引用缺失模块 ⇒ 必红且点名', () => {
   withFixture((dir) => {
-    fs.writeFileSync(path.join(dir, 'src', 'host', 'brandnew.js'), "'use strict';\nmodule.exports = {};\n", 'utf8');
+    const p = path.join(dir, 'src', 'host', 'app-module.cjs');
+    const s = fs.readFileSync(p, 'utf8');
+    fs.writeFileSync(p, s.replace("require('./pure-module.cjs')", "require('./missing-module.cjs')"), 'utf8');
   }, (dir) => {
     const r = runScript(dir, path.join('scripts', 'build-host.mjs'), ['--check']);
-    assert.equal(r.code, 1, '新增的非字符串 chunk 必须入网（否则覆盖面是硬编码的）');
-    assert.match(r.out, /brandnew\.js/, '必须点名新增文件（证明是目录枚举而非固定清单）');
+    assert.equal(r.code, 1, '装配图缺模块必须 exit 1');
+    assert.match(r.out, /无法解析相对导入|missing-module\.cjs/, '门必须给出可归因的构建裁决');
   });
 });
 
-test('CS-04 host 门 fail-closed：src/host 目录缺位 ⇒ 不得静默判绿', () => {
-  withFixture((dir) => { fs.rmSync(path.join(dir, 'src', 'host'), { recursive: true, force: true }); }, (dir) => {
+test('CS-03 host 门覆盖面：新增未被装配的模块 ⇒ R4 必红（无硬编码）', () => {
+  withFixture((dir) => {
+    fs.writeFileSync(path.join(dir, 'src', 'host', 'brandnew.cjs'), "'use strict';\nmodule.exports = {};\n", 'utf8');
+  }, (dir) => {
+    const r = runScript(dir, path.join('scripts', 'dead-code-gate.mjs'), []);
+    assert.equal(r.code, 1, '新增未装配模块必须入网（否则覆盖面是硬编码的）');
+    assert.match(r.out, /brandnew\.cjs/, '必须点名新增文件（证明是装配图可达集而非固定清单）');
+  });
+});
+
+test('CS-04 host 门 fail-closed：装配入口缺位 ⇒ 不得静默判绿', () => {
+  withFixture((dir) => { fs.rmSync(path.join(dir, 'src', 'host', 'app-module.cjs'), { recursive: true, force: true }); }, (dir) => {
     const r = runScript(dir, path.join('scripts', 'build-host.mjs'), ['--check']);
-    assert.equal(r.code, 1, '扫描面缺位必须非 0 退出（不得"没有就不判"）');
+    assert.equal(r.code, 1, '装配入口缺位必须非 0 退出（不得"没有就不判"）');
   });
 });
 
-test('CS-05 两门对拍：同一变异形态下，client 门与 host 门**都得给出裁决**（对称性）', () => {
-  // client 侧（既有门）：改回裸 JS ⇒ 必红
+test('CS-05 client 门仍拒绝裸 JS 源码 chunk', () => {
   withFixture((dir) => unwrapToBareJs(dir, path.join('src', 'client', 'skeleton.js')), (dir) => {
     const r = runScript(dir, path.join('scripts', 'build-client.mjs'), ['--check']);
     assert.equal(r.code, 1, 'client 既有门必须仍判红（本批不得改弱它）');
     assert.match(r.out, /chunk 契约违反/, 'client 门仍须给出契约裁决');
   });
-  // host 侧（本批补的门）：同一形态 ⇒ 同样判红
-  withFixture((dir) => { fs.appendFileSync(path.join(dir, 'src', 'host', 'enhance-handlers-module.cjs'), '\n}}}\n', 'utf8'); }, (dir) => {
-    const r = runScript(dir, path.join('scripts', 'build-host.mjs'), ['--check']);
-    assert.equal(r.code, 1, 'host 门必须与 client 门同形判红');
-    assert.match(r.out, /漂移检测失败|chunk 契约违反/, 'host 门须给出可归因的构建裁决');
-  });
 });
-
-// ─────────────── ② `decodeChunk` 单一事实源 ───────────────
 
 test('CS-06 单一事实源：test/ 面**不得**再出现任何内联 chunk 解码实现', () => {
   // ⚠ 判定前先剥注释行：本批的迁移注释里**引用**了旧正则原文（病历性说明），
@@ -185,12 +170,11 @@ test('CS-08 判别力**只升不降**：旧 `client-enhance-flow` 正则的覆�
 });
 
 test('CS-09 取值等价：共享解码器与旧实现口径在**全部** chunk 上逐字同值', () => {
-  const chunks = [...listChunks(ROOT, path.join('src', 'client')), ...listChunks(ROOT, path.join('src', 'host'))];
-  // 分母按当前真实文件集派生（目标模式下 host 纯函数已迁为 .cjs，不再计入 chunk）。
+  const chunks = listChunks(ROOT, path.join('src', 'client'));
+  // 目标模式：host 已无字符串 chunk；client 仍是唯一 chunk 面。
   const clientChunks = listChunks(ROOT, path.join('src', 'client'));
-  const hostChunks = listChunks(ROOT, path.join('src', 'host'));
-  assert.equal(chunks.length, clientChunks.length + hostChunks.length,
-    '扫描面必须等于 client+host 的实际 chunk 文件集（不得写死件数）');
+  assert.equal(chunks.length, clientChunks.length,
+    '扫描面必须等于 client 的实际 chunk 文件集（不得写死件数）');
   assert.ok(chunks.length > 0, '扫描面不得为空');
   const OLD_LOOSE = /module\.exports\s*=\s*"([\s\S]*)";?\s*$/;
   for (const rel of chunks) {
