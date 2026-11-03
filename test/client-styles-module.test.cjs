@@ -28,7 +28,7 @@ test('CSTYLE-02 关键布局选择器与属性逐字保留', () => {
 
 test('CSTYLE-03 源模块体不含 module.exports，模块导出仅一份', () => {
   const source = stylesSource();
-  assert.equal((source.match(/module\.exports\s*=/g) || []).length, 1);
+  assert.equal(source.split('module.exports =').length - 1, 1);
   assert.ok(source.includes('module.exports = { CSS };'));
 });
 
