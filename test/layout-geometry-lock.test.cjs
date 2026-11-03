@@ -202,6 +202,10 @@ test('GEOLOCK-12 变异自证 + 负控（R2 锁有牙）', () => {
 /** 读某 client chunk 的**代码面**（已剥注释）。 */
 async function codeOf(rel) {
   const { codeOnly } = await import('../scripts/lib/code-only.mjs');
+  if (rel.endsWith('.cjs')) {
+    const fs = require('node:fs');
+    return codeOnly(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+  }
   return codeOnly(decodeChunk(rel));
 }
 
@@ -571,7 +575,7 @@ test('GEOLOCK-B3 模型名选择器是行内**唯一弹性项**（它吃掉全�
 });
 
 test('GEOLOCK-B4 行内子项清单 = 本预算的分母（多出/少一项都会让预算失真）', async () => {
-  const row = await codeOf('src/client/components/fallback-row.js');
+  const row = await codeOf('src/client/components/fallback-row-module.cjs');
   // 图标组：4 个（⛓ ↑ ↓ ✕）
   const icons = (row.match(/dsh-plg-btn dsh-plg-btn-icononly/g) || []).length;
   assert.equal(icons, MODEL_ROW_ICON_COUNT,

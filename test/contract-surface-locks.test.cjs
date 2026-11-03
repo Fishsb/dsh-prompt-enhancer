@@ -174,14 +174,15 @@ test('CS-07 共享解码器 fail-closed 且**点名声**：裸 JS / 空文件 / 
 });
 
 test('CS-08 判别力**只升不降**：旧 `client-enhance-flow` 正则的覆盖洞不得复发', () => {
-  // 病历：旧变体要求结尾恰为 `\n`，在 `model-main-section.js`（以 `\r\n"` 结束）上 NO-MATCH。
-  // 共享解码器必须能解出它 —— 这是本批实测发现的**真实覆盖洞**，锁住防回归。
-  const rel = path.join('src', 'client', 'components', 'model-main-section.js');
-  const raw = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  // 病历：旧变体要求结尾恰为 `\n`，在历史 chunk `model-main-section.js`
+  // （以 `\r\n"` 结束）上 NO-MATCH。目标模式已退役该 chunk，故用等价合成的
+  // CRLF 结尾包裹锁住同一判别洞，不再依赖已退役文件。
+  const rel = path.join('src', 'client', 'components', 'CRLF-FIXTURE.js');
+  const raw = 'module.exports = "var A = 1;\\r\\n\\r\\n";';
   const OLD = /module\.exports\s*=\s*"([\s\S]*)";?\s*\n$/;
   assert.equal(raw.match(OLD), null, '夹具前提：该 chunk 在旧正则下应 NO-MATCH（否则本断言空转）');
   const now = decodeChunkText(raw, rel);
-  assert.ok(now.length > 0, '共享解码器必须能解出该 chunk（判别力上升的证据）');
+  assert.equal(now, 'var A = 1;\r\n\r\n', '共享解码器必须能解出 CRLF 结尾 chunk（判别力上升的证据）');
 });
 
 test('CS-09 取值等价：共享解码器与旧实现口径在**全部** chunk 上逐字同值', () => {

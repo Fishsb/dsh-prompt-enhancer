@@ -115,9 +115,14 @@ function browserDriver() {
       setItem: function (k, val) { lsBacking.set(k, String(val)); },
       removeItem: function (k) { lsBacking.delete(k); },
     };
-    var stateFactory = new Function('localStorage', 'host', SRC['src/client/voice/state.js']
+    var voiceConfigFactory = new Function(
+      SRC['src/shared/contracts/voice-config.cjs']
+      + '\n;return { VOICE_CONFIG_DEFAULTS: VOICE_CONFIG_DEFAULTS };');
+    var voiceConfig = voiceConfigFactory();
+    var __VOICE_CONFIG_DEFAULTS__ = voiceConfig.VOICE_CONFIG_DEFAULTS;
+    var stateFactory = new Function('localStorage', 'host', '__VOICE_CONFIG_DEFAULTS__', SRC['src/client/voice/state.js']
       + '\n;return { normalizeVadSilenceMs: normalizeVadSilenceMs, vadSilenceMsOf: vadSilenceMsOf, vadRequiredQuiet: vadRequiredQuiet, VOICE_CFG_DEFAULTS: VOICE_CFG_DEFAULTS, voiceCfgState: voiceCfgState, mergeVoice: mergeVoice, saveVoiceCfg: saveVoiceCfg, subscribeVoiceConfig: subscribeVoiceConfig, syncVoiceFromHost: syncVoiceFromHost };');
-    var S = stateFactory(localStorageStub, host);
+    var S = stateFactory(localStorageStub, host, __VOICE_CONFIG_DEFAULTS__);
     S.voiceCfgState.value = JSON.parse(JSON.stringify(scn.voice));
 
     var i18nFactory = new Function(SRC['src/client/i18n-module.cjs'] + '\n;return { ZH: ZH, EN: EN };');
@@ -132,6 +137,7 @@ function browserDriver() {
     var over = kind === 'worst' ? P.realisticMax : (kind === 'path' ? makePathological() : {});
     var ZH = Object.assign({}, dict, over);
     var t = function (k) { return ZH[k] !== undefined ? ZH[k] : k; };
+    var makeT = function (props) { return (props && typeof props.t === 'function') ? props.t : t; };
     function makePathological() {
       var o = {};
       Object.keys(P.realisticMax).forEach(function (k) { o[k] = '超长文案超长文案超长文案超长文案超长文案超长文案超长文案超长文案超长文案超长文案超长文案超长文案超长文案'; });
@@ -151,6 +157,18 @@ function browserDriver() {
       SRC['src/client/components/marquee-select-module.cjs']
       + '\n;return createMarqueeSelect({ React: React, window: window, document: document });');
     var MarqueeSelect = marqueeFactory(React, window, document);
+    var modelSettingsFactory = new Function(
+      'React', 'CollapsibleSection', 'MarqueeSelect', 'makeT', 'host', 'DEFAULT_MODEL_CHAIN', 'getLastDraft', 'timerSvc',
+      SRC['src/client/components/model-main-section-module.cjs'] + '\n'
+      + SRC['src/client/components/fallback-row-module.cjs'] + '\n'
+      + ';return {'
+      + ' ModelMainSection: createModelMainSection({ React: React, CollapsibleSection: CollapsibleSection, makeT: makeT, host: host, DEFAULT_MODEL_CHAIN: DEFAULT_MODEL_CHAIN, getLastDraft: getLastDraft, timerSvc: timerSvc }),'
+      + ' FallbackRow: createFallbackRow({ React: React, MarqueeSelect: MarqueeSelect, makeT: makeT, host: host })'
+      + ' };');
+    var modelSettings = modelSettingsFactory(React, CollapsibleSection, MarqueeSelect,
+      makeT, host, C.DEFAULT_MODEL_CHAIN, function () { return ''; }, null);
+    var ModelMainSection = modelSettings.ModelMainSection;
+    var FallbackRow = modelSettings.FallbackRow;
 
     var dSnap = Object.assign({ installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 0, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false, feedbackMessage: '', stopMissed: 0, startClicks: 0, stopClicks: 0, vadHeardSpeech: false, vadQuietFrames: 0, vadThreshold: 0, vadNoiseFloor: 0, vadSkipped: 0 }, scn.diag || {});
     var fSnap = Object.assign({ runs: 0, cleaned: 0, removedTotal: 0, skipped: 0, lastRemoved: [], legacyChecked: false, legacyCleaned: false }, scn.filler || {});
@@ -160,23 +178,20 @@ function browserDriver() {
     var configState = { value: JSON.parse(JSON.stringify(scn.cfg)), fresh: false, hostSync: true, unsupported: false };
 
     var compCode = [
-      SRC['src/client/components/model-main-section.js'],
-      SRC['src/client/components/fallback-row.js'],
       SRC['src/client/components/model-config-tab.js'],
       SRC['src/client/components/params-tab.js'],
       SRC['src/client/components/model-plugins-section.js'],
       SRC['src/client/voice/voice-section.js'],
     ].join('\n');
-    var NAMES = ['React', 'CollapsibleSection', 'MarqueeSelect', 'ZH', 'EN', 't', 'makeT', 'host', 'configState', 'saveConfig', 'subscribeConfig', 'subscribeSaveStatus', 'saveStatus',
+    var NAMES = ['React', 'CollapsibleSection', 'MarqueeSelect', 'ModelMainSection', 'FallbackRow', 'ZH', 'EN', 't', 'makeT', 'host', 'configState', 'saveConfig', 'subscribeConfig', 'subscribeSaveStatus', 'saveStatus',
       'voiceCfgState', 'saveVoiceCfg', 'subscribeVoiceConfig', 'syncVoiceFromHost', 'vadSilenceMsOf', 'normalizeVadSilenceMs',
       'voiceHotkeyDisplay', 'officialVoiceBridge', 'fillerSnapshot', 'correctionSnapshot', 'subscribeFiller', 'subscribeCorrection',
       'dshEnhId', 'timerSvc', 'getLastDraft', 'buildCandidates', 'DEFAULT_MODEL_CHAIN', 'MODE_OPTIONS', 'MODE_VALUES',
       'MODE_BUDGET_OPTIONS', 'MODE_TIMEOUT_OPTIONS', 'MODE_MAXTOKENS_OPTIONS', 'MODE_OUTPUTLIMIT_OPTIONS', 'MODE_PARAMS_DEFAULT',
       'MODE_BUDGET_DEFAULT', 'modeShortLabel', 'modeLabel', 'TEMPLATE_BUILTIN_KEYS', 'TEMPLATE_CUSTOM_MAX', 'TEMPLATE_TEXT_MAX',
       'TEMPLATE_NAME_MAX', 'customPickIndex'];
-    var makeT = function (props) { return (props && typeof props.t === 'function') ? props.t : t; };
     var idSeq = 0;
-    var values = [React, CollapsibleSection, MarqueeSelect, ZH, dicts.EN, t, makeT, host, configState, function () {}, noop, noop, saveStatus,
+    var values = [React, CollapsibleSection, MarqueeSelect, ModelMainSection, FallbackRow, ZH, dicts.EN, t, makeT, host, configState, function () {}, noop, noop, saveStatus,
       S.voiceCfgState, function () {}, noop, function () {}, S.vadSilenceMsOf, S.normalizeVadSilenceMs,
       function (c) { return String(c || ''); }, officialVoiceBridge,
       function () { return fSnap; }, function () { return cSnap; }, noop, noop,

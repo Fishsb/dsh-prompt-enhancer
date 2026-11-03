@@ -26,8 +26,6 @@ function buildClient() {
   const enhanceButtonChunk = require('../src/client/components/enhance-button.js');
   // CHG-184（纠错状态可视化批）：输入框旁的五态指示 chunk（与 ✨ 按钮同槽位、同族样式）
   const enhanceBarChunk = require('../src/client/components/enhance-bar.js');
-  const modelMainSectionChunk = require('../src/client/components/model-main-section.js');
-  const fallbackRowChunk = require('../src/client/components/fallback-row.js');
   const modelConfigTabChunk = require('../src/client/components/model-config-tab.js');
   const paramsTabChunk = require('../src/client/components/params-tab.js');
   const modelPluginsSectionChunk = require('../src/client/components/model-plugins-section.js');
@@ -65,6 +63,10 @@ function buildClient() {
     root,
     entry: 'src/client/components/navigation-runtime.cjs',
   });
+  const modelSettingsRuntime = bundleModules({
+    root,
+    entry: 'src/client/components/model-settings-runtime.cjs',
+  });
   if (!clientSharedRuntime.modules.includes('src/client/voice/filler-module.cjs')) {
     throw new Error('[build-client] 客户端共享运行时打包不完整：缺少清口水词模块');
   }
@@ -92,6 +94,10 @@ function buildClient() {
   if (!navigationRuntime.modules.includes('src/client/components/collapsible-section-module.cjs')
     || !navigationRuntime.modules.includes('src/client/components/marquee-select-module.cjs')) {
     throw new Error('[build-client] 导航组件运行时打包不完整：缺少基础 UI 组件模块');
+  }
+  if (!modelSettingsRuntime.modules.includes('src/client/components/fallback-row-module.cjs')
+    || !modelSettingsRuntime.modules.includes('src/client/components/model-main-section-module.cjs')) {
+    throw new Error('[build-client] 模型设置运行时打包不完整：缺少模型配置组件模块');
   }
   const sharedRuntimeChunk = 'const __DSH_SHARED__ = ' + sharedContractsRuntime.code
     + ';\nconst __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'
@@ -146,8 +152,13 @@ function buildClient() {
       + '  window: typeof window !== "undefined" ? window : null,\n'
       + '  document: typeof document !== "undefined" ? document : null,\n'
       + '});\n'],
-    ['// @dsh-client-comp-model-main-section-inject\n', modelMainSectionChunk],
-    ['// @dsh-client-comp-fallback-row-inject\n', fallbackRowChunk],
+    ['// @dsh-client-comp-model-main-section-inject\n', 'const __DSH_MODEL_SETTINGS__ = ' + modelSettingsRuntime.code
+      + ';\nconst ModelMainSection = __DSH_MODEL_SETTINGS__.createModelMainSection({\n'
+      + '  React, CollapsibleSection, makeT, host, DEFAULT_MODEL_CHAIN, getLastDraft, timerSvc,\n'
+      + '});\n'],
+    ['// @dsh-client-comp-fallback-row-inject\n', 'const FallbackRow = __DSH_MODEL_SETTINGS__.createFallbackRow({\n'
+      + '  React, MarqueeSelect, makeT, host,\n'
+      + '});\n'],
     ['// @dsh-client-comp-model-config-tab-inject\n', modelConfigTabChunk],
     ['// @dsh-client-comp-params-tab-inject\n', paramsTabChunk],
     ['// @dsh-client-comp-model-plugins-section-inject\n', modelPluginsSectionChunk],

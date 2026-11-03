@@ -48,6 +48,7 @@ const ONLY = argOf('--only', '');
 const ROW1_W = Number(argOf('--row1', '')) || 0;
 
 const CHUNKS = [
+  'src/shared/contracts/voice-config.cjs',
   'src/client/i18n-module.cjs',
   'src/client/constants-module.cjs',
   'src/client/model-helpers-module.cjs',
@@ -55,8 +56,8 @@ const CHUNKS = [
   'src/client/voice/state.js',
   'src/client/components/collapsible-section-module.cjs',
   'src/client/components/marquee-select-module.cjs',
-  'src/client/components/model-main-section.js',
-  'src/client/components/fallback-row.js',
+  'src/client/components/model-main-section-module.cjs',
+  'src/client/components/fallback-row-module.cjs',
   'src/client/components/model-config-tab.js',
   'src/client/components/params-tab.js',
   'src/client/components/model-plugins-section.js',
