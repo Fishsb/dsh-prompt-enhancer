@@ -70,6 +70,14 @@ function buildHost() {
   const modelsChunk = 'const __DSH_MODELS__ = ' + modelsBundle.code
     + ';\nconst {\n' + Object.keys(require('../src/host/models-module.cjs')).map((k) => '  ' + k + ',').join('\n')
     + '\n} = __DSH_MODELS__;\n';
+  // 目标模式：模型 RPC 面迁为普通模块，注册函数集中收集后由 app 转交真实 harness。
+  const modelsRpcBundle = bundleModules({ root, entry: 'src/host/models-rpc.cjs' });
+  if (!modelsRpcBundle.modules.includes('src/host/models-rpc.cjs')) {
+    throw new Error('[build-host] 模型 RPC 模块未进入打包图');
+  }
+  const modelsRpcChunk = 'const __DSH_MODELS_RPC__ = ' + modelsRpcBundle.code
+    + ';\nconst {\n' + Object.keys(require('../src/host/models-rpc.cjs')).map((k) => '  ' + k + ',').join('\n')
+    + '\n} = __DSH_MODELS_RPC__;\n';
   // 目标模式：增强阶段执行器迁为普通模块，由打包器内联；阶段顺序仍来自共享契约。
   const pipelineBundle = bundleModules({ root, entry: 'src/host/enhance-pipeline.cjs' });
   if (!pipelineBundle.modules.includes('src/host/enhance-pipeline.cjs')
@@ -152,6 +160,7 @@ function buildHost() {
   const injections = [
     ['// @dsh-diagnostics-inject', diagnosticsChunk],
     ['// @dsh-models-inject', modelsChunk],
+    ['// @dsh-models-rpc-inject', modelsRpcChunk],
     ['// @dsh-pure-inject', pureChunk],
     ['// @dsh-enhance-pipeline-inject', pipelineChunk],
     ['// @dsh-correction-switch-inject', correctionSwitchChunk],
