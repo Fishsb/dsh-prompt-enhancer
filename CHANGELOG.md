@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+- **目标模式：增强 llm 阶段与探测迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：新增 `src/host/enhance-generation.cjs`，把模型链调用、流式收集、退避重试、看门狗、连通性探测与结果提交从 `enhance-handlers.js` 迁为普通 CommonJS 模块；`build-host.mjs` 由打包器内联并解构导出，`registerEnhanceStage('llm', …)` 与四阶段顺序不变。新增 `test/host-enhance-generation.test.cjs`（5 条）。**已实测**：llm + analyze + assemble + runtime + pipeline + 清单 34/34；P0 24/24；bundle smoke 22/22；dead-code R1–R7、RPC 15 条、prompts 20 常量通过；`build-host --check` 一致；host 产物外部 require 0。未 bump/tag/发布/安装/重启。
+
 - **目标模式：增强 assemble 阶段迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：新增 `src/host/enhance-assemble.cjs`，把消息组装、记忆链、继续模式包装与配置日志从 `enhance-handlers.js` 迁为普通 CommonJS 模块；`build-host.mjs` 由打包器内联并解构导出，`registerEnhanceStage('assemble', …)` 与四阶段顺序不变。新增 `test/host-enhance-assemble.test.cjs`（5 条）。**已实测**：assemble + analyze + runtime + pipeline + 清单 29/29；P0 24/24；bundle smoke 22/22；`build-host --check` 与 `build-client --check` 一致；dead-code R1–R7 与 RPC/prompts 环通过；`arch-claims` A194-1 实测 13 件 / 2378 行；host 产物外部 require 0。未 bump/tag/发布/安装/重启。
 
 - **目标模式：增强 analyze 阶段迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：新增 `src/host/enhance-analyze.cjs`，把配置解析、模型链建立、模板/纪律组装、记忆轮次准备、publish 场景缓存与 `state` 字段写入从 `enhance-handlers.js` 迁为普通 CommonJS 模块；`build-host.mjs` 由打包器内联并解构导出，`registerEnhanceStage('analyze', …)` 与四阶段顺序不变。新增 `test/host-enhance-analyze.test.cjs`（4 条）。**已实测**：analyze + bundle + 阶段 + P0 59/59；`build-host --check` 一致；host 产物外部 require 0。未 bump/tag/发布/安装/重启。

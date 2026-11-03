@@ -128,6 +128,14 @@ function buildHost() {
   const enhanceAssembleChunk = 'const __DSH_ENHANCE_ASSEMBLE__ = ' + enhanceAssembleBundle.code
     + ';\nconst {\n' + Object.keys(require('../src/host/enhance-assemble.cjs')).map((k) => '  ' + k + ',').join('\n')
     + '\n} = __DSH_ENHANCE_ASSEMBLE__;\n';
+  // 目标模式：增强 llm 阶段与连通性探测迁为普通模块。
+  const enhanceGenerationBundle = bundleModules({ root, entry: 'src/host/enhance-generation.cjs' });
+  if (!enhanceGenerationBundle.modules.includes('src/host/enhance-generation.cjs')) {
+    throw new Error('[build-host] 增强 llm 模块未进入打包图');
+  }
+  const enhanceGenerationChunk = 'const __DSH_ENHANCE_GENERATION__ = ' + enhanceGenerationBundle.code
+    + ';\nconst {\n' + Object.keys(require('../src/host/enhance-generation.cjs')).map((k) => '  ' + k + ',').join('\n')
+    + '\n} = __DSH_ENHANCE_GENERATION__;\n';
   const enhanceChunk = loadChunk('src/host/enhance-handlers.js');
 
   // Inject all chunks, looping until no marker remains (same policy as
@@ -144,6 +152,7 @@ function buildHost() {
     ['// @dsh-enhance-runtime-inject', enhanceRuntimeChunk],
     ['// @dsh-enhance-analyze-inject', enhanceAnalyzeChunk],
     ['// @dsh-enhance-assemble-inject', enhanceAssembleChunk],
+    ['// @dsh-enhance-generation-inject', enhanceGenerationChunk],
     ['// @dsh-enhance-inject', enhanceChunk],
   ];
 
