@@ -51,7 +51,7 @@ const CHUNKS = [
   'src/client/i18n.js',
   'src/client/constants-module.cjs',
   'src/client/model-helpers-module.cjs',
-  'src/client/helpers.js',
+  'src/client/helpers-module.cjs',
   'src/client/voice/state.js',
   'src/client/components/collapsible-section.js',
   'src/client/components/marquee-select.js',

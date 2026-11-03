@@ -24,7 +24,6 @@ function buildClient() {
   // committed artifacts stay byte-stable (LF).
   body = body.replace(/\r\n/g, '\n');
   const i18nChunk = require('../src/client/i18n.js');
-  const helpersChunk = require('../src/client/helpers.js');
   const enhanceButtonChunk = require('../src/client/components/enhance-button.js');
   // CHG-184（纠错状态可视化批）：输入框旁的五态指示 chunk（与 ✨ 按钮同槽位、同族样式）
   const enhanceBarChunk = require('../src/client/components/enhance-bar.js');
@@ -81,6 +80,9 @@ function buildClient() {
   if (!clientSharedRuntime.modules.includes('src/client/state-module.cjs')) {
     throw new Error('[build-client] 客户端共享运行时打包不完整：缺少状态模块');
   }
+  if (!clientSharedRuntime.modules.includes('src/client/helpers-module.cjs')) {
+    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少增强会话模块');
+  }
   const sharedRuntimeChunk = 'const __DSH_SHARED__ = ' + sharedContractsRuntime.code
     + ';\nconst __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'
     + '\nconst planVoicePostprocess = __DSH_SHARED__.planVoicePostprocess;'
@@ -111,7 +113,19 @@ function buildClient() {
       + Object.keys(require('../src/client/state-module.cjs').createClientState({ host: { call: () => Promise.resolve({ ok: true, config: null }) } }))
         .map((k) => '  ' + k + ',').join('\n')
       + '\n} = __DSH_CLIENT_STATE__;\n'],
-    ['// @dsh-client-helpers-inject', helpersChunk],
+    ['// @dsh-client-helpers-inject', 'const __DSH_CLIENT_HELPERS__ = createClientHelpers({\n'
+      + '  host,\n'
+      + '  configState,\n'
+      + '  dictionary: ZH,\n'
+      + '  storage: typeof localStorage !== "undefined" ? localStorage : null,\n'
+      + '  resultStatusOf: typeof __DSH_SHARED__.resultStatusOf === "function" ? __DSH_SHARED__.resultStatusOf : null,\n'
+      + '});\nconst {\n'
+      + Object.keys(require('../src/client/helpers-module.cjs').createClientHelpers({
+        host: { call: () => Promise.resolve({ ok: true }) },
+        configState: { value: {} },
+      }))
+        .map((k) => '  ' + k + ',').join('\n')
+      + '\n} = __DSH_CLIENT_HELPERS__;\n'],
     ['// @dsh-client-comp-enhance-button-inject\n', enhanceButtonChunk],
     ['// @dsh-client-comp-enhance-bar-inject\n', enhanceBarChunk],
     ['// @dsh-client-comp-marquee-select-inject\n', marqueeSelectChunk],

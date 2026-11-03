@@ -7,6 +7,7 @@ const correctionState = require('./voice/correction-state-module.cjs');
 const modelHelpers = require('./model-helpers-module.cjs');
 const constants = require('./constants-module.cjs');
 const clientState = require('./state-module.cjs');
+const clientHelpers = require('./helpers-module.cjs');
 
 module.exports = {
   ...constants,
@@ -28,4 +29,5 @@ module.exports = {
   correctionFailureConsume: correctionState.correctionFailureConsume,
   buildCandidates: modelHelpers.buildCandidates,
   createClientState: clientState.createClientState,
+  createClientHelpers: clientHelpers.createClientHelpers,
 };

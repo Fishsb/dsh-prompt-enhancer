@@ -13,7 +13,7 @@
 //   ④ 纠错开 + 增强开 ⇒ 纠错 1 次、增强 1 次，**且纠错先于增强**（顺序可证）
 //
 // ⚠ 手动 ✨ 不纠错（用户第四项裁定）：由「增强入口不碰纠错」保证 —— 本文件用源码面判据锁住
-//   （`enhance` 调用链里不得出现纠错调用），并实测 `src/client/helpers.js` 的 `enhance()`
+//   （`enhance` 调用链里不得出现纠错调用），并实测增强会话模块的 `enhance()`
 //   **不发起** `voice/correct`（零调用）。
 // ============================================================================
 'use strict';
@@ -280,7 +280,7 @@ test('CHG143-C9 未识别出口 · 纠错开 + 增强关 ⇒ 只纠错、无增�
 // ───────────────────── ⭐ 手动 ✨ 零纠错调用（用户第四项裁定） ─────────────────────
 
 test('CHG143-M1 ⭐ 手动 ✨ 增强零纠错调用：helpers.js 的 enhance() 不含 voice/correct', () => {
-  const helpers = decodeChunk('src/client/helpers.js');
+  const helpers = fs.readFileSync(path.join(ROOT, 'src/client/helpers-module.cjs'), 'utf8');
   assert.ok(!helpers.includes('voice/correct'), '⭐ 手动 ✨ 的增强入口不得出现 voice/correct（用户明选：手动 ✨ 不纠错）');
   assert.ok(!helpers.includes('runCorrectionThenMaybeEnhance'), '增强入口不得调用纠错调度器');
   // 正向：手动路径确实存在（防"删掉整个入口"式的假绿）
@@ -300,20 +300,18 @@ test('CHG143-M2 ⭐ 纠错调度器**只**在语音链路的两个出口被调�
   const enhanceStart = hostBundle.indexOf("harness.handle('enhance'");
   const corrStart = hostBundle.indexOf("harness.handle('voice/correct'");
   assert.ok(enhanceStart > 0 && corrStart > 0, '两个 handler 都须在产物内');
-  // `enhance` handler 体的**上界** = 纠错块自身的起始标记（纠错块紧随 enhance handler 之后）。
-  //   ⚠ 不能用 `harness.handle('cancel'` 作界：纠错块正插在 enhance 与 cancel **之间**
-  //   ⇒ 那样的切片会把纠错块算进 enhance 体内（本席第一版即栽在此处，实测报红）。
-  const corrMarker = hostBundle.indexOf('// ================= CHG-143');
-  assert.ok(corrMarker > 0 && corrMarker < corrStart, '纠错块起始标记须在 voice/correct 注册之前');
-  const enhanceBody = hostBundle.slice(enhanceStart, corrMarker);
+  // `enhance` handler 体的上界 = 纠错执行函数的定义起点。目标模式已把纠错逻辑迁为普通模块，
+  // 旧 CHG-143 注释锚点不再存在；仍以“纠错函数定义开始”为界，排除定义本身的同名命中。
+  const corrFnStart = hostBundle.indexOf('async function runCorrection', enhanceStart);
+  assert.ok(corrFnStart > enhanceStart && corrFnStart < corrStart, '纠错执行函数须定义在 voice/correct 注册之前');
+  const enhanceBody = hostBundle.slice(enhanceStart, corrFnStart);
   assert.ok(!/voice\/correct|runCorrection/.test(enhanceBody), '⭐ 增强 handler 体内不得有任何纠错调用（不绑进增强管线）');
   // 正向对照：纠错块**确实存在**且注册了 RPC（防"把整个功能删掉"式的假绿）
-  assert.ok(corrMarker > 0, '纠错块须存在（正向对照）');
-  assert.ok(/harness\.handle\('voice\/correct'/.test(hostBundle.slice(corrMarker)), '纠错块内须注册 voice/correct');
+  assert.ok(/harness\.handle\('voice\/correct'/.test(hostBundle.slice(corrStart)), '纠错块内须注册 voice/correct');
 });
 
 test('CHG143-M3 ⭐ 手动增强路径（helpers.enhance）与语音纠错在源码面**可分辨**', () => {
-  const helpers = decodeChunk('src/client/helpers.js');
+  const helpers = fs.readFileSync(path.join(ROOT, 'src/client/helpers-module.cjs'), 'utf8');
   // 手动路径：唯一的 RPC 是 enhance（增强），且不读 correction 开关
   assert.ok(helpers.includes("host.call('enhance'"), '手动路径走 enhance RPC');
   assert.ok(!/correction/.test(helpers), '手动路径不得读 correction 配置（来源显式区分，不靠"增强里顺手带"）');

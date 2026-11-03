@@ -1,10 +1,13 @@
 'use strict';
 // client-enhance-flow —— 增强完成回调行为级测试（2026-08-24「优化完成但草稿未替换」事故防回归）
-// 手法：解码 src/client/helpers.js 单行 chunk，注入浏览器桩（localStorage/host/configState）后
-// 求值出内部函数，直接驱动 enhance()/cancelEnhance() 断言写回/暂存/丢弃/失败四路；
+// 手法：实例化 helpers-module 工厂并注入浏览器桩（storage/host/configState）后，
+// 直接驱动 enhance()/cancelEnhance() 断言写回/暂存/丢弃/失败四路；
 // 另加接线契约断言（button/bar 源码必须含关键接线标记），专防 f6fa822 式"注释有、代码无"半成品。
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { createClientHelpers } = require('../src/client/helpers-module.cjs');
 
 // ⚠ 契约面收口批（2026-10-17 · 第 ② 件）：本地 `decodeChunk` 副本已删除，改共享单一事实源
 //   （`scripts/lib/chunk-decode.mjs`）。随副本一并删去不再使用的 `fs` / `path` / `ROOT`
@@ -13,10 +16,9 @@ const assert = require('node:assert/strict');
 //   `/module\.exports\s*=\s*"([\s\S]*)";?\s*\n$/` 要求结尾恰为换行，实测在
 //   `src/client/components/model-main-section.js`（该文件以 `\r\n"` 结束）上 **NO-MATCH**；
 //   共享解码器取 `;?[ \t\r\n]*$`，该 chunk 现能被正确解出。
-const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
+const { decodeChunk, REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
 
 function loadHelpers() {
-  const src = decodeChunk('src/client/helpers.js');
   const lsBacking = new Map();
   const localStorageStub = {
     getItem: (k) => (lsBacking.has(k) ? lsBacking.get(k) : null),
@@ -31,11 +33,11 @@ function loadHelpers() {
       return Promise.resolve(this.respond(method, args));
     },
   };
-  const factory = new Function(
-    'host', 'configState', 'localStorage', 'MEMORY_ROUNDS_MAX', 'SEEN_KEY_PREFIX', '__DSH_SHARED__',
-    src + '\n;return { enhance, undo, cancelEnhance, guardPasses, setActiveSession, getActiveSession, storeFor, isEnhancing };'
-  );
-  const api = factory(hostStub, { value: { memory: false } }, localStorageStub, 4, 'dsh-enh-seen:', {
+  const api = createClientHelpers({
+    host: hostStub,
+    configState: { value: { memory: false } },
+    storage: localStorageStub,
+    dictionary: {},
     resultStatusOf: require('../src/shared/contracts/result.cjs').resultStatusOf,
   });
   return { api, hostStub, lsBacking };
@@ -161,12 +163,10 @@ test('ENH-FLOW wiring: bar 卸载不得 cancel 在途优化 + 消费效应须豁
   assert.ok(bar.includes('draft !== s.backup'), 'bar 消费效应缺 backup 豁免（暂存未写回态会被误清）');
 });
 test('ENH-FLOW wiring: helpers 完成分支三路持久化调用齐备', () => {
-  const h = decodeChunk('src/client/helpers.js');
+  const h = fs.readFileSync(path.join(REPO_ROOT, 'src/client/helpers-module.cjs'), 'utf8');
   for (const marker of [
-    'saveResultStore(sessionId, s.backup',
-    'clearResultStore(sessionId); // v3.3.x 新一轮覆盖旧结果',
-    'clearResultStore(sessionId); // v3.3.x-fix：取消',
-    'clearResultStore(sessionId); // v3.3.x-fix：丢弃',
+    'saveResultStore(sessionId, session.backup, finalText)',
+    'clearResultStore(sessionId);',
   ]) {
     if (!marker) continue;
     assert.ok(h.includes(marker), 'helpers 缺持久化接线标记: ' + marker);

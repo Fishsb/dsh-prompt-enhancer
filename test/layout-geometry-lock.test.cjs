@@ -190,7 +190,7 @@ test('GEOLOCK-12 变异自证 + 负控（R2 锁有牙）', () => {
 //   scripts/settings-layout-audit.mjs（人工/部署前预检），两者互补。
 //
 // ⚠ 判据范围（否定性断言的**范围**必须写明）：
-//   · A 组只判 src/client/components/** 与 src/client/voice/** 这 24 个 client chunk 的
+//   · A 组只判 src/client/components/** 与 src/client/voice/** 这些 client chunk 的
 //     **代码面**（已剥注释）—— ⛔ 不判 lib/client.cjs 产物字节、⛔ 不判运行期 DOM 层级、
 //     ⛔ 不判样式"看起来是否平级"（后者是像素锁的面）。
 //   · B 组只判 .dsh-plg-row（模型链条目行）内**本仓自己声明**的宽度；⛔ 不判宿主侧容器
@@ -311,7 +311,11 @@ test('GEOLOCK-A4 VoiceSection 全 client chunk 只挂载**一处**，且该处�
   const { listChunkFiles } = require('../scripts/lib/chunk-decode.mjs');
   const { codeOnly } = await import('../scripts/lib/code-only.mjs');
   const clients = listChunkFiles(ROOT).filter((f) => f.indexOf('src/client/') === 0);
-  assert.ok(clients.length > 20, '前置：client chunk 枚举须非空（实得 ' + clients.length + '）');
+  // 目标模式会持续把 chunk 迁为普通模块，因此不能把当前剩余数量写成前置阈值。
+  // 只锁“枚举非空 + 关键挂载点文件在扫描面内”，防止空枚举导致后面的否定断言空转。
+  assert.ok(clients.length > 0, '前置：client chunk 枚举须非空（实得 ' + clients.length + '）');
+  assert.ok(clients.includes('src/client/components/model-config-tab.js'),
+    '前置：VoiceSection 的合法挂载点须在扫描面内');
   const sites = [];
   for (const rel of clients) {
     const code = codeOnly(decodeChunk(rel));
