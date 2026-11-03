@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+- **目标模式：清理更新执行器与 agent 查询死残留（架构/维护 · 2026-11-03 · [PE-F01]）**：从 `app.js` 删除已零消费的 `updateCache`、`pullInFlight`、`resolveSessionPolicy` 与 `resolveAgent`，以及对应历史注释块；更新执行仍由独立执行器路径承担，15 条线上 RPC 不受影响。新增 `test/host-app-residue.test.cjs`（2 条）锁住源码与产物不得复活。**已实测**：残留锁 + bundle smoke + 清单 33/33；dead-code R1–R7、RPC 15 条一致；`build-host --check` / `node --check plugin-host.js` 一致。未 bump/tag/发布/安装/重启。
+
 - **目标模式：publish/V2 上下文运行时迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：新增 `src/host/context-runtime.cjs`，把可中断等待、任务进度解析、工作区/会话检索、网络补充与上下文块组装从 `app.js` 迁为普通 CommonJS 模块；`startWaitAbort` 与 `buildV2ContextBlock` 保持原函数名，增强 retrieve/生成预算继续消费同一实现。新增 `test/context-runtime.test.cjs`（5 条）。**已实测**：上下文 + 模板 + models + bundle smoke + 清单 45/45（上下文修正后 5/5；bundle smoke 22/22）；dead-code R1–R7、RPC 15 条一致；`build-host --check` / `node --check plugin-host.js` 一致；host 产物外部 require 0。未 bump/tag/发布/安装/重启。
 
 - **目标模式：模板默认值与诊断出口迁为普通模块（架构/构建 · 2026-11-03 · [PE-F01/PE-F02]）**：新增 `src/host/template-rpc.cjs`，把 `template/default` 的五模式 `defaults` 与 `catalog` 返回结构迁为纯模块；`diagnostics-module.cjs` 增导 `logsLast`，`logs/last` 仍返回环形缓冲副本。`app.js` 改为装配 `harness.handle('template/default', …)` 与 `harness.handle('logs/last', logsLast)`，方法名、返回字段与提示词正文不变。新增 `test/template-rpc.test.cjs`（3 条），诊断模块增加 `HDM-06` 副本隔离锁。**已实测**：模板 + 诊断 + models + bundle smoke + 清单 46/46；dead-code R1–R7 与 RPC 15 条一致；`build-host --check` / `node --check plugin-host.js` 一致；host 产物外部 require 0。未 bump/tag/发布/安装/重启。
