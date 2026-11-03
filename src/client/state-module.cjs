@@ -10,6 +10,10 @@ const {
 function createClientState(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};
   const host = d.host;
+  // 目标模式：存储能力由装配层显式注入；保留全局 localStorage 兜底供独立使用/旧测试。
+  const storage = d.storage !== undefined
+    ? d.storage
+    : (typeof localStorage !== 'undefined' ? localStorage : null);
   // app apply 时同步同一个可变引用；调用方未注入时保持自持有（单测/独立使用）。
   const timerRef = d.timerRef || { value: null };
 
@@ -170,9 +174,9 @@ function migrateFromV1(parsed) {
 }
 
 function loadConfigFromStorage() {
-  if (typeof localStorage === 'undefined') return;
+  if (!storage) return;
   try {
-    const raw = localStorage.getItem(CONFIG_KEY);
+    const raw = storage.getItem(CONFIG_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
@@ -187,19 +191,19 @@ function loadConfigFromStorage() {
         // 2026-08-18（用户指令）：main 死配置字段删除，不再迁移
         configState.value = sanitizeV2(parsed);
         configState.fresh = false;
-        try { localStorage.setItem(CONFIG_KEY, JSON.stringify(configState.value)); } catch (e) { /* 忽略 */ }
+        try { storage.setItem(CONFIG_KEY, JSON.stringify(configState.value)); } catch (e) { /* 忽略 */ }
         return;
       }
     }
-    const rawV1 = localStorage.getItem(CONFIG_KEY_V1);
+    const rawV1 = storage.getItem(CONFIG_KEY_V1);
     if (rawV1) {
       const parsed = JSON.parse(rawV1);
       if (parsed && typeof parsed === 'object') {
         configState.value = migrateFromV1(parsed);
         configState.fresh = false;
         try {
-          localStorage.setItem(CONFIG_KEY, JSON.stringify(configState.value));
-          localStorage.removeItem(CONFIG_KEY_V1);
+          storage.setItem(CONFIG_KEY, JSON.stringify(configState.value));
+          storage.removeItem(CONFIG_KEY_V1);
         } catch (e) { /* 忽略 */ }
         return;
       }
@@ -236,8 +240,8 @@ function timerDelay(ms) {
 // 真实校验：localStorage 中的配置与当前 configState 逐字一致（写入即 JSON.stringify）
 function verifyConfigSaved() {
   try {
-    if (typeof localStorage === 'undefined') return false;
-    const raw = localStorage.getItem(CONFIG_KEY);
+    if (!storage) return false;
+    const raw = storage.getItem(CONFIG_KEY);
     return raw !== null && raw === JSON.stringify(configState.value);
   } catch (e) { return false; }
 }
@@ -271,8 +275,8 @@ function scheduleSaveCheck(seq) {
 
 function saveConfig(patch) {
   configState.value = { ...configState.value, ...patch };
-  if (typeof localStorage !== 'undefined') {
-    try { localStorage.setItem(CONFIG_KEY, JSON.stringify(configState.value)); } catch (e) { /* 忽略 */ }
+  if (storage) {
+    try { storage.setItem(CONFIG_KEY, JSON.stringify(configState.value)); } catch (e) { /* 忽略 */ }
   }
   // v3.2.4（Issue #1 修复）：磁盘持久化双写——DSH Desktop 动态端口下 localStorage 按 Origin 隔离
   // 会「丢失」，磁盘配置（$DSH_HOME/dsh-prompt-enhancer.config.json）跨端口共享（fire-and-forget 失败静默）
@@ -352,15 +356,15 @@ function syncConfigFromHost() {
       }
       configState.fresh = false;
       configState.hostSync = true;
-      if (typeof localStorage !== 'undefined') {
-        try { localStorage.setItem(CONFIG_KEY, JSON.stringify(configState.value)); } catch (e) { /* 忽略 */ }
+      if (storage) {
+        try { storage.setItem(CONFIG_KEY, JSON.stringify(configState.value)); } catch (e) { /* 忽略 */ }
       }
       notifyConfig();
       return;
     }
     // 磁盘无配置：localStorage 有（固定端口 web 老用户升级）→ 迁移写盘；都空 → 保持 fresh 首次继承
     configState.hostSync = true;
-    if (!configState.fresh && typeof localStorage !== 'undefined' && localStorage.getItem(CONFIG_KEY)) {
+    if (!configState.fresh && storage && storage.getItem(CONFIG_KEY)) {
       try { host.call('config/set', { config: configState.value }).catch(() => {}); } catch (e) { /* 忽略 */ }
     }
     notifyConfig();

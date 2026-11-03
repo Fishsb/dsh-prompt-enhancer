@@ -57,14 +57,26 @@ window.__ModuleLoader__.load({
       },
     };
 
+    // styles facade: inject CSS into a dedicated <style> tag.
+    const styles = {
+      insert(css) {
+        if (document.querySelector('style[data-plugin-css="dsh-prompt-enhancer"]') !== null) return;
+        const tag = document.createElement('style');
+        tag.dataset.plugin = 'dsh-prompt-enhancer';
+        tag.dataset.pluginCss = 'dsh-prompt-enhancer';
+        tag.textContent = css;
+        document.head.appendChild(tag);
+      },
+    };
+
     // 目标模式：入口普通模块直接返回插件对象；环境依赖显式传入。
     const __DSH_CLIENT_APP__ = ${embedded};
     const plugin = __DSH_CLIENT_APP__.createClientApp({
-      React, host, window: typeof window !== 'undefined' ? window : null,
+      React, host, styles, window: typeof window !== 'undefined' ? window : null,
       document: typeof document !== 'undefined' ? document : null,
       navigator: typeof navigator !== 'undefined' ? navigator : null,
       MutationObserver: typeof MutationObserver !== 'undefined' ? MutationObserver : null,
-      localStorage: typeof localStorage !== 'undefined' ? localStorage : null,
+      storage: typeof localStorage !== 'undefined' ? localStorage : null,
       setTimeout: typeof setTimeout !== 'undefined' ? setTimeout : null,
       clearTimeout: typeof clearTimeout !== 'undefined' ? clearTimeout : null,
       setInterval: typeof setInterval !== 'undefined' ? setInterval : null,
