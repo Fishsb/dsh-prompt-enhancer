@@ -179,5 +179,7 @@ test('CMSC-06 布局审计从共享语音契约注入默认值，不再漏定义
   assert.ok(audit.includes("'src/shared/contracts/voice-config.cjs'"));
   assert.ok(driver.includes("voiceConfigFactory = new Function("));
   assert.ok(driver.includes("var __VOICE_CONFIG_DEFAULTS__ = voiceConfig.VOICE_CONFIG_DEFAULTS;"));
-  assert.ok(driver.includes("stateFactory(localStorageStub, host, __VOICE_CONFIG_DEFAULTS__)"));
+  assert.ok(driver.includes("SRC['src/client/voice/state-module.cjs']"));
+  assert.ok(driver.includes("createVoiceState({ host: host, storage: storage"));
+  assert.ok(driver.includes("stateFactory(host, localStorageStub, null, null, __VOICE_CONFIG_DEFAULTS__)"));
 });

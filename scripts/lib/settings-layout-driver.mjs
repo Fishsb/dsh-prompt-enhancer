@@ -170,6 +170,42 @@ function browserDriver() {
       makeT, host, C.DEFAULT_MODEL_CHAIN, function () { return ''; }, null);
     var ModelMainSection = modelSettings.ModelMainSection;
     var FallbackRow = modelSettings.FallbackRow;
+    var voiceSectionFactory = new Function(
+      'React', 'CollapsibleSection', 'MarqueeSelect', 'ZH', 'EN', 't', 'makeT', 'host', 'configState',
+      'saveConfig', 'subscribeConfig', 'subscribeSaveStatus', 'saveStatus', 'voiceCfgState', 'saveVoiceCfg',
+      'subscribeVoiceConfig', 'syncVoiceFromHost', 'vadSilenceMsOf', 'normalizeVadSilenceMs',
+      'voiceHotkeyDisplay', 'officialVoiceBridge', 'fillerSnapshot', 'correctionSnapshot',
+      'subscribeFiller', 'subscribeCorrection', 'dshEnhId', 'timerSvc', 'getLastDraft',
+      'buildCandidates', 'DEFAULT_MODEL_CHAIN', 'MODE_OPTIONS', 'MODE_VALUES',
+      'MODE_BUDGET_OPTIONS', 'MODE_TIMEOUT_OPTIONS', 'MODE_MAXTOKENS_OPTIONS',
+      'MODE_OUTPUTLIMIT_OPTIONS', 'MODE_PARAMS_DEFAULT', 'MODE_BUDGET_DEFAULT',
+      'modeShortLabel', 'modeLabel', 'TEMPLATE_BUILTIN_KEYS', 'TEMPLATE_CUSTOM_MAX',
+      'TEMPLATE_TEXT_MAX', 'TEMPLATE_NAME_MAX', 'customPickIndex',
+      SRC['src/client/voice/voice-section.js']
+      + '\n;return VoiceSection;');
+    var modelConfigTabFactory = new Function(
+      'React', 'makeT', 'configState', 'subscribeConfig', 'host', 'DEFAULT_MODEL_CHAIN', 'saveConfig',
+      'buildCandidates', 'ModelMainSection', 'VoiceSection',
+      SRC['src/client/components/model-config-tab-module.cjs']
+      + '\n;return createModelConfigTab({ React: React, makeT: makeT, configState: configState,'
+      + ' subscribeConfig: subscribeConfig, host: host, DEFAULT_MODEL_CHAIN: DEFAULT_MODEL_CHAIN,'
+      + ' saveConfig: saveConfig, buildCandidates: buildCandidates, ModelMainSection: ModelMainSection,'
+      + ' VoiceSection: VoiceSection });');
+    var paramsTabFactory = new Function(
+      'React', 'MarqueeSelect', 'makeT', 'dshEnhId', 'configState', 'saveConfig', 'host',
+      'MODE_OPTIONS', 'MODE_TIMEOUT_OPTIONS', 'MODE_MAXTOKENS_OPTIONS', 'MODE_OUTPUTLIMIT_OPTIONS',
+      'MODE_BUDGET_OPTIONS', 'MODE_PARAMS_DEFAULT', 'MODE_BUDGET_DEFAULT', 'modeShortLabel', 'modeLabel',
+      'TEMPLATE_BUILTIN_KEYS', 'TEMPLATE_CUSTOM_MAX', 'TEMPLATE_TEXT_MAX', 'TEMPLATE_NAME_MAX', 'customPickIndex',
+      SRC['src/client/components/params-tab-module.cjs']
+      + '\n;return createParamsTab({ React: React, MarqueeSelect: MarqueeSelect, makeT: makeT,'
+      + ' dshEnhId: dshEnhId, configState: configState, saveConfig: saveConfig, host: host,'
+      + ' MODE_OPTIONS: MODE_OPTIONS, MODE_TIMEOUT_OPTIONS: MODE_TIMEOUT_OPTIONS,'
+      + ' MODE_MAXTOKENS_OPTIONS: MODE_MAXTOKENS_OPTIONS, MODE_OUTPUTLIMIT_OPTIONS: MODE_OUTPUTLIMIT_OPTIONS,'
+      + ' MODE_BUDGET_OPTIONS: MODE_BUDGET_OPTIONS, MODE_PARAMS_DEFAULT: MODE_PARAMS_DEFAULT,'
+      + ' MODE_BUDGET_DEFAULT: MODE_BUDGET_DEFAULT, modeShortLabel: modeShortLabel, modeLabel: modeLabel,'
+      + ' TEMPLATE_BUILTIN_KEYS: TEMPLATE_BUILTIN_KEYS, TEMPLATE_CUSTOM_MAX: TEMPLATE_CUSTOM_MAX,'
+      + ' TEMPLATE_TEXT_MAX: TEMPLATE_TEXT_MAX, TEMPLATE_NAME_MAX: TEMPLATE_NAME_MAX,'
+      + ' customPickIndex: customPickIndex });');
 
     var dSnap = Object.assign({ installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 0, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false, feedbackMessage: '', stopMissed: 0, startClicks: 0, stopClicks: 0, vadHeardSpeech: false, vadQuietFrames: 0, vadThreshold: 0, vadNoiseFloor: 0, vadSkipped: 0 }, scn.diag || {});
     var fSnap = Object.assign({ runs: 0, cleaned: 0, removedTotal: 0, skipped: 0, lastRemoved: [], legacyChecked: false, legacyCleaned: false }, scn.filler || {});
@@ -178,12 +214,7 @@ function browserDriver() {
     var noop = function () { return function () {}; };
     var configState = { value: JSON.parse(JSON.stringify(scn.cfg)), fresh: false, hostSync: true, unsupported: false };
 
-    var compCode = [
-      SRC['src/client/components/model-config-tab.js'],
-      SRC['src/client/components/params-tab.js'],
-      SRC['src/client/components/model-plugins-section.js'],
-      SRC['src/client/voice/voice-section.js'],
-    ].join('\n');
+    var compCode = SRC['src/client/components/model-plugins-section.js'];
     var NAMES = ['React', 'CollapsibleSection', 'MarqueeSelect', 'ModelMainSection', 'FallbackRow', 'ZH', 'EN', 't', 'makeT', 'host', 'configState', 'saveConfig', 'subscribeConfig', 'subscribeSaveStatus', 'saveStatus',
       'voiceCfgState', 'saveVoiceCfg', 'subscribeVoiceConfig', 'syncVoiceFromHost', 'vadSilenceMsOf', 'normalizeVadSilenceMs',
       'voiceHotkeyDisplay', 'officialVoiceBridge', 'fillerSnapshot', 'correctionSnapshot', 'subscribeFiller', 'subscribeCorrection',
@@ -192,16 +223,38 @@ function browserDriver() {
       'MODE_BUDGET_DEFAULT', 'modeShortLabel', 'modeLabel', 'TEMPLATE_BUILTIN_KEYS', 'TEMPLATE_CUSTOM_MAX', 'TEMPLATE_TEXT_MAX',
       'TEMPLATE_NAME_MAX', 'customPickIndex'];
     var idSeq = 0;
+    var dshEnhId = function (p) { idSeq += 1; return (p || 'x') + '-' + idSeq; };
+    var modelConfigArgs = [React, CollapsibleSection, MarqueeSelect, ZH, dicts.EN, t, makeT, host,
+      configState, function () {}, noop, noop, saveStatus, S.voiceCfgState,
+      function () {}, noop, function () {}, S.vadSilenceMsOf, S.normalizeVadSilenceMs,
+      function (c) { return String(c || ''); }, officialVoiceBridge,
+      function () { return fSnap; }, function () { return cSnap; }, noop, noop,
+      dshEnhId, null, function () { return ''; }, MH.buildCandidates,
+      C.DEFAULT_MODEL_CHAIN, C.MODE_OPTIONS, C.MODE_VALUES, C.MODE_BUDGET_OPTIONS,
+      C.MODE_TIMEOUT_OPTIONS, C.MODE_MAXTOKENS_OPTIONS, C.MODE_OUTPUTLIMIT_OPTIONS,
+      C.MODE_PARAMS_DEFAULT, C.MODE_BUDGET_DEFAULT, C.modeShortLabel, C.modeLabel,
+      C.TEMPLATE_BUILTIN_KEYS, C.TEMPLATE_CUSTOM_MAX, C.TEMPLATE_TEXT_MAX,
+      C.TEMPLATE_NAME_MAX, C.customPickIndex];
+    var VoiceSection = voiceSectionFactory.apply(null, modelConfigArgs);
+    var ModelConfigTab = modelConfigTabFactory(React, makeT, configState, noop, host,
+      C.DEFAULT_MODEL_CHAIN, function () {}, MH.buildCandidates, ModelMainSection, VoiceSection);
+    var ParamsTab = paramsTabFactory(React, MarqueeSelect, makeT, dshEnhId, configState,
+      function () {}, host, C.MODE_OPTIONS, C.MODE_TIMEOUT_OPTIONS, C.MODE_MAXTOKENS_OPTIONS,
+      C.MODE_OUTPUTLIMIT_OPTIONS, C.MODE_BUDGET_OPTIONS, C.MODE_PARAMS_DEFAULT,
+      C.MODE_BUDGET_DEFAULT, C.modeShortLabel, C.modeLabel, C.TEMPLATE_BUILTIN_KEYS,
+      C.TEMPLATE_CUSTOM_MAX, C.TEMPLATE_TEXT_MAX, C.TEMPLATE_NAME_MAX, C.customPickIndex);
     var values = [React, CollapsibleSection, MarqueeSelect, ModelMainSection, FallbackRow, ZH, dicts.EN, t, makeT, host, configState, function () {}, noop, noop, saveStatus,
       S.voiceCfgState, function () {}, noop, function () {}, S.vadSilenceMsOf, S.normalizeVadSilenceMs,
       function (c) { return String(c || ''); }, officialVoiceBridge,
       function () { return fSnap; }, function () { return cSnap; }, noop, noop,
-      function (p) { idSeq += 1; return (p || 'x') + '-' + idSeq; }, null, function () { return ''; }, MH.buildCandidates,
+      dshEnhId, null, function () { return ''; }, MH.buildCandidates,
       C.DEFAULT_MODEL_CHAIN, C.MODE_OPTIONS, C.MODE_VALUES, C.MODE_BUDGET_OPTIONS, C.MODE_TIMEOUT_OPTIONS, C.MODE_MAXTOKENS_OPTIONS,
       C.MODE_OUTPUTLIMIT_OPTIONS, C.MODE_PARAMS_DEFAULT, C.MODE_BUDGET_DEFAULT, C.modeShortLabel, C.modeLabel,
       C.TEMPLATE_BUILTIN_KEYS, C.TEMPLATE_CUSTOM_MAX, C.TEMPLATE_TEXT_MAX, C.TEMPLATE_NAME_MAX, C.customPickIndex];
-    var compFactory = new Function(NAMES.join(', '), compCode + '\n;return { ModelPluginsSection: ModelPluginsSection, ModelConfigTab: ModelConfigTab, ParamsTab: ParamsTab };');
+    var compFactory = new Function(NAMES.join(', '), compCode + '\n;return { ModelPluginsSection: ModelPluginsSection };');
     var api = compFactory.apply(null, values);
+    api.ModelConfigTab = ModelConfigTab;
+    api.ParamsTab = ParamsTab;
     return { api: api, t: t };
   }
 

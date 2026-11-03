@@ -26,8 +26,6 @@ function buildClient() {
   const enhanceButtonChunk = require('../src/client/components/enhance-button.js');
   // CHG-184（纠错状态可视化批）：输入框旁的五态指示 chunk（与 ✨ 按钮同槽位、同族样式）
   const enhanceBarChunk = require('../src/client/components/enhance-bar.js');
-  const modelConfigTabChunk = require('../src/client/components/model-config-tab.js');
-  const paramsTabChunk = require('../src/client/components/params-tab.js');
   const modelPluginsSectionChunk = require('../src/client/components/model-plugins-section.js');
   const appChunk = require('../src/client/app.js');
   // P1-a（2026-10-13 缩批）：RecordRTC vendor chunk 已退役（采集改浏览器原生 MediaRecorder）；
@@ -69,6 +67,14 @@ function buildClient() {
     root,
     entry: 'src/client/components/model-settings-runtime.cjs',
   });
+  const modelConfigTabRuntime = bundleModules({
+    root,
+    entry: 'src/client/components/model-config-tab-module.cjs',
+  });
+  const paramsTabRuntime = bundleModules({
+    root,
+    entry: 'src/client/components/params-tab-module.cjs',
+  });
   if (!clientSharedRuntime.modules.includes('src/client/voice/filler-module.cjs')) {
     throw new Error('[build-client] 客户端共享运行时打包不完整：缺少清口水词模块');
   }
@@ -103,6 +109,12 @@ function buildClient() {
   }
   if (!voiceStateRuntime.modules.includes('src/client/voice/state-module.cjs')) {
     throw new Error('[build-client] 语音运行时打包不完整：缺少语音配置状态模块');
+  }
+  if (!modelConfigTabRuntime.modules.includes('src/client/components/model-config-tab-module.cjs')) {
+    throw new Error('[build-client] 模型配置 tab 运行时打包不完整');
+  }
+  if (!paramsTabRuntime.modules.includes('src/client/components/params-tab-module.cjs')) {
+    throw new Error('[build-client] 优化参数 tab 运行时打包不完整');
   }
   const sharedRuntimeChunk = 'const __DSH_SHARED__ = ' + sharedContractsRuntime.code
     + ';\nconst __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'
@@ -164,8 +176,16 @@ function buildClient() {
     ['// @dsh-client-comp-fallback-row-inject\n', 'const FallbackRow = __DSH_MODEL_SETTINGS__.createFallbackRow({\n'
       + '  React, MarqueeSelect, makeT, host,\n'
       + '});\n'],
-    ['// @dsh-client-comp-model-config-tab-inject\n', modelConfigTabChunk],
-    ['// @dsh-client-comp-params-tab-inject\n', paramsTabChunk],
+    ['// @dsh-client-comp-model-config-tab-inject\n', 'const ModelConfigTab = ' + modelConfigTabRuntime.code + '.createModelConfigTab({\n'
+      + '  React, makeT, configState, subscribeConfig, host, DEFAULT_MODEL_CHAIN, saveConfig,\n'
+      + '  buildCandidates, ModelMainSection, VoiceSection,\n'
+      + '});\n'],
+    ['// @dsh-client-comp-params-tab-inject\n', 'const ParamsTab = ' + paramsTabRuntime.code + '.createParamsTab({\n'
+      + '  React, MarqueeSelect, makeT, dshEnhId, configState, saveConfig, host,\n'
+      + '  MODE_OPTIONS, MODE_TIMEOUT_OPTIONS, MODE_MAXTOKENS_OPTIONS, MODE_OUTPUTLIMIT_OPTIONS,\n'
+      + '  MODE_BUDGET_OPTIONS, MODE_PARAMS_DEFAULT, MODE_BUDGET_DEFAULT, modeShortLabel, modeLabel,\n'
+      + '  TEMPLATE_BUILTIN_KEYS, TEMPLATE_CUSTOM_MAX, TEMPLATE_TEXT_MAX, TEMPLATE_NAME_MAX, customPickIndex,\n'
+      + '});\n'],
     ['// @dsh-client-comp-model-plugins-section-inject\n', modelPluginsSectionChunk],
     ['// @dsh-client-voice-correction-inject\n', voiceCorrectionChunk],
     ['// @dsh-client-voice-filler-inject\n', ''],
