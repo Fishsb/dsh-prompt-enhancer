@@ -26,8 +26,6 @@ function buildClient() {
   const enhanceButtonChunk = require('../src/client/components/enhance-button.js');
   // CHG-184（纠错状态可视化批）：输入框旁的五态指示 chunk（与 ✨ 按钮同槽位、同族样式）
   const enhanceBarChunk = require('../src/client/components/enhance-bar.js');
-  const marqueeSelectChunk = require('../src/client/components/marquee-select.js');
-  const collapsibleSectionChunk = require('../src/client/components/collapsible-section.js');
   const modelMainSectionChunk = require('../src/client/components/model-main-section.js');
   const fallbackRowChunk = require('../src/client/components/fallback-row.js');
   const modelConfigTabChunk = require('../src/client/components/model-config-tab.js');
@@ -63,6 +61,10 @@ function buildClient() {
     root,
     entry: 'src/client/shared-runtime.cjs',
   });
+  const navigationRuntime = bundleModules({
+    root,
+    entry: 'src/client/components/navigation-runtime.cjs',
+  });
   if (!clientSharedRuntime.modules.includes('src/client/voice/filler-module.cjs')) {
     throw new Error('[build-client] 客户端共享运行时打包不完整：缺少清口水词模块');
   }
@@ -86,6 +88,10 @@ function buildClient() {
   }
   if (!clientSharedRuntime.modules.includes('src/client/helpers-module.cjs')) {
     throw new Error('[build-client] 客户端共享运行时打包不完整：缺少增强会话模块');
+  }
+  if (!navigationRuntime.modules.includes('src/client/components/collapsible-section-module.cjs')
+    || !navigationRuntime.modules.includes('src/client/components/marquee-select-module.cjs')) {
+    throw new Error('[build-client] 导航组件运行时打包不完整：缺少基础 UI 组件模块');
   }
   const sharedRuntimeChunk = 'const __DSH_SHARED__ = ' + sharedContractsRuntime.code
     + ';\nconst __VOICE_CONFIG_DEFAULTS__ = __DSH_SHARED__.VOICE_CONFIG_DEFAULTS;'
@@ -132,8 +138,14 @@ function buildClient() {
       + '\n} = __DSH_CLIENT_HELPERS__;\n'],
     ['// @dsh-client-comp-enhance-button-inject\n', enhanceButtonChunk],
     ['// @dsh-client-comp-enhance-bar-inject\n', enhanceBarChunk],
-    ['// @dsh-client-comp-marquee-select-inject\n', marqueeSelectChunk],
-    ['// @dsh-client-comp-collapsible-section-inject\n', collapsibleSectionChunk],
+    ['// @dsh-client-comp-marquee-select-inject\n', ''],
+    ['// @dsh-client-comp-collapsible-section-inject\n', 'const __DSH_NAVIGATION__ = ' + navigationRuntime.code
+      + ';\nconst CollapsibleSection = __DSH_NAVIGATION__.createCollapsibleSection({ React, dshEnhId });\n'
+      + 'const MarqueeSelect = __DSH_NAVIGATION__.createMarqueeSelect({\n'
+      + '  React,\n'
+      + '  window: typeof window !== "undefined" ? window : null,\n'
+      + '  document: typeof document !== "undefined" ? document : null,\n'
+      + '});\n'],
     ['// @dsh-client-comp-model-main-section-inject\n', modelMainSectionChunk],
     ['// @dsh-client-comp-fallback-row-inject\n', fallbackRowChunk],
     ['// @dsh-client-comp-model-config-tab-inject\n', modelConfigTabChunk],

@@ -143,6 +143,14 @@ function browserDriver() {
     var C = constantsFactory();
     var mhFactory = new Function(SRC['src/client/model-helpers-module.cjs'] + '\n;return { buildCandidates: buildCandidates };');
     var MH = mhFactory();
+    var collapsibleFactory = new Function('React', 'dshEnhId',
+      SRC['src/client/components/collapsible-section-module.cjs']
+      + '\n;return createCollapsibleSection({ React: React, dshEnhId: dshEnhId });');
+    var CollapsibleSection = collapsibleFactory(React, function (p) { return (p || 'x') + '-nav'; });
+    var marqueeFactory = new Function('React', 'window', 'document',
+      SRC['src/client/components/marquee-select-module.cjs']
+      + '\n;return createMarqueeSelect({ React: React, window: window, document: document });');
+    var MarqueeSelect = marqueeFactory(React, window, document);
 
     var dSnap = Object.assign({ installed: true, abandonReason: '', selfCapture: false, startMissed: 0, sessionsStarted: 0, endedInFeedback: false, sessionsMissed: 0, vadEnabled: true, recording: false, feedbackSeen: 0, lastSessionFailed: false, feedbackMessage: '', stopMissed: 0, startClicks: 0, stopClicks: 0, vadHeardSpeech: false, vadQuietFrames: 0, vadThreshold: 0, vadNoiseFloor: 0, vadSkipped: 0 }, scn.diag || {});
     var fSnap = Object.assign({ runs: 0, cleaned: 0, removedTotal: 0, skipped: 0, lastRemoved: [], legacyChecked: false, legacyCleaned: false }, scn.filler || {});
@@ -152,8 +160,6 @@ function browserDriver() {
     var configState = { value: JSON.parse(JSON.stringify(scn.cfg)), fresh: false, hostSync: true, unsupported: false };
 
     var compCode = [
-      SRC['src/client/components/collapsible-section.js'],
-      SRC['src/client/components/marquee-select.js'],
       SRC['src/client/components/model-main-section.js'],
       SRC['src/client/components/fallback-row.js'],
       SRC['src/client/components/model-config-tab.js'],
@@ -161,7 +167,7 @@ function browserDriver() {
       SRC['src/client/components/model-plugins-section.js'],
       SRC['src/client/voice/voice-section.js'],
     ].join('\n');
-    var NAMES = ['React', 'ZH', 'EN', 't', 'makeT', 'host', 'configState', 'saveConfig', 'subscribeConfig', 'subscribeSaveStatus', 'saveStatus',
+    var NAMES = ['React', 'CollapsibleSection', 'MarqueeSelect', 'ZH', 'EN', 't', 'makeT', 'host', 'configState', 'saveConfig', 'subscribeConfig', 'subscribeSaveStatus', 'saveStatus',
       'voiceCfgState', 'saveVoiceCfg', 'subscribeVoiceConfig', 'syncVoiceFromHost', 'vadSilenceMsOf', 'normalizeVadSilenceMs',
       'voiceHotkeyDisplay', 'officialVoiceBridge', 'fillerSnapshot', 'correctionSnapshot', 'subscribeFiller', 'subscribeCorrection',
       'dshEnhId', 'timerSvc', 'getLastDraft', 'buildCandidates', 'DEFAULT_MODEL_CHAIN', 'MODE_OPTIONS', 'MODE_VALUES',
@@ -170,7 +176,7 @@ function browserDriver() {
       'TEMPLATE_NAME_MAX', 'customPickIndex'];
     var makeT = function (props) { return (props && typeof props.t === 'function') ? props.t : t; };
     var idSeq = 0;
-    var values = [React, ZH, dicts.EN, t, makeT, host, configState, function () {}, noop, noop, saveStatus,
+    var values = [React, CollapsibleSection, MarqueeSelect, ZH, dicts.EN, t, makeT, host, configState, function () {}, noop, noop, saveStatus,
       S.voiceCfgState, function () {}, noop, function () {}, S.vadSilenceMsOf, S.normalizeVadSilenceMs,
       function (c) { return String(c || ''); }, officialVoiceBridge,
       function () { return fSnap; }, function () { return cSnap; }, noop, noop,
