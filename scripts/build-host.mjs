@@ -61,7 +61,7 @@ function buildHost() {
     throw new Error('[build-host] 诊断日志模块未进入打包图');
   }
   const diagnosticsChunk = 'const __DSH_DIAGNOSTICS__ = ' + diagnosticsBundle.code
-    + ';\nconst { LOG_RING, LOG_RING_MAX, hlog, herr } = __DSH_DIAGNOSTICS__.createDiagnostics(console);\n';
+    + ';\nconst { LOG_RING, LOG_RING_MAX, hlog, herr, logsLast } = __DSH_DIAGNOSTICS__.createDiagnostics(console);\n';
   // 目标模式：模型域纯逻辑已迁为普通 CommonJS 模块，由打包器内联。
   const modelsBundle = bundleModules({ root, entry: 'src/host/models-module.cjs' });
   if (!modelsBundle.modules.includes('src/host/models-module.cjs')) {
@@ -78,6 +78,14 @@ function buildHost() {
   const modelsRpcChunk = 'const __DSH_MODELS_RPC__ = ' + modelsRpcBundle.code
     + ';\nconst {\n' + Object.keys(require('../src/host/models-rpc.cjs')).map((k) => '  ' + k + ',').join('\n')
     + '\n} = __DSH_MODELS_RPC__;\n';
+  // 目标模式：模板默认值 RPC 迁为普通模块；提示词正文仍来自生成区。
+  const templateRpcBundle = bundleModules({ root, entry: 'src/host/template-rpc.cjs' });
+  if (!templateRpcBundle.modules.includes('src/host/template-rpc.cjs')) {
+    throw new Error('[build-host] 模板 RPC 模块未进入打包图');
+  }
+  const templateRpcChunk = 'const __DSH_TEMPLATE_RPC__ = ' + templateRpcBundle.code
+    + ';\nconst {\n' + Object.keys(require('../src/host/template-rpc.cjs')).map((k) => '  ' + k + ',').join('\n')
+    + '\n} = __DSH_TEMPLATE_RPC__;\n';
   // 目标模式：增强阶段执行器迁为普通模块，由打包器内联；阶段顺序仍来自共享契约。
   const pipelineBundle = bundleModules({ root, entry: 'src/host/enhance-pipeline.cjs' });
   if (!pipelineBundle.modules.includes('src/host/enhance-pipeline.cjs')
@@ -161,6 +169,7 @@ function buildHost() {
     ['// @dsh-diagnostics-inject', diagnosticsChunk],
     ['// @dsh-models-inject', modelsChunk],
     ['// @dsh-models-rpc-inject', modelsRpcChunk],
+    ['// @dsh-template-rpc-inject', templateRpcChunk],
     ['// @dsh-pure-inject', pureChunk],
     ['// @dsh-enhance-pipeline-inject', pipelineChunk],
     ['// @dsh-correction-switch-inject', correctionSwitchChunk],

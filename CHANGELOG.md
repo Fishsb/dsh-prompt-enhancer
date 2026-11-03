@@ -17,6 +17,8 @@
 
 ## [Unreleased]
 
+- **目标模式：模板默认值与诊断出口迁为普通模块（架构/构建 · 2026-11-03 · [PE-F01/PE-F02]）**：新增 `src/host/template-rpc.cjs`，把 `template/default` 的五模式 `defaults` 与 `catalog` 返回结构迁为纯模块；`diagnostics-module.cjs` 增导 `logsLast`，`logs/last` 仍返回环形缓冲副本。`app.js` 改为装配 `harness.handle('template/default', …)` 与 `harness.handle('logs/last', logsLast)`，方法名、返回字段与提示词正文不变。新增 `test/template-rpc.test.cjs`（3 条），诊断模块增加 `HDM-06` 副本隔离锁。**已实测**：模板 + 诊断 + models + bundle smoke + 清单 46/46；dead-code R1–R7 与 RPC 15 条一致；`build-host --check` / `node --check plugin-host.js` 一致；host 产物外部 require 0。未 bump/tag/发布/安装/重启。
+
 - **目标模式：模型 RPC 面迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：新增 `src/host/models-rpc.cjs`，把 `models/list`、`models/resolve`、`models/current`、`models/autochain`、`models/test` 与 `models/stats` 的处理函数及会话统计缓存从 `app.js` 迁为普通 CommonJS 模块；模块内部只用收集器 harness 保留原注册正文，app 再逐条转交真实 harness。新增 `test/host-models-rpc.test.cjs`（6 条）。**已实测**：模型 RPC + retrieve + bundle smoke + 清单 42/42；dead-code R1–R7 与 RPC 15 条一致；`build-host --check` / `node --check plugin-host.js` 一致；host 产物外部 require 0。未 bump/tag/发布/安装/重启。
 
 - **目标模式：增强 retrieve 阶段与检索辅助域迁为普通模块（架构/构建 · 2026-11-03 · [PE-F02]）**：新增 `src/host/enhance-retrieve.cjs`，把会话历史、相关性/开发意向判定、工作区文档与代码检索、网络主题规划、publish 上下文管道与参考注入从 `enhance-handlers.js` 迁为普通 CommonJS 模块；`build-host.mjs` 由打包器内联并解构导出，`registerEnhanceStage('retrieve', …)` 与四阶段顺序不变。新增 `test/host-enhance-retrieve.test.cjs`（5 条）。**已实测**：retrieve + generation + assemble + analyze + runtime + pipeline + 清单 39/39；P0 24/24；bundle smoke 22/22；dead-code R1–R7、RPC 15 条、prompts 20 常量通过；`build-host --check` 与 `node --check plugin-host.js` 一致；host 产物外部 require 0。未 bump/tag/发布/安装/重启。

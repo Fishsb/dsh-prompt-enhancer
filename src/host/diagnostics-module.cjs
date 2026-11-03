@@ -39,7 +39,11 @@ function createDiagnostics(consoleLike) {
     if (typeof out.error === 'function') out.error(line);
   }
 
-  return { LOG_RING: ring, LOG_RING_MAX, hlog, herr };
+  async function logsLast() {
+    return { ok: true, lines: ring.slice() };
+  }
+
+  return { LOG_RING: ring, LOG_RING_MAX, hlog, herr, logsLast };
 }
 
 module.exports = { LOG_RING_MAX, createDiagnostics };
