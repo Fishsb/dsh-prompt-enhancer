@@ -21,6 +21,7 @@ const ROOT = path.resolve(__dirname, '..');
 //   `require()` 一个 ESM 模块拿到的是命名空间对象，不可直接调用（实测）。
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 const { i18nSource } = require('./helpers/client-i18n.cjs');
+const { stylesBody } = require('./helpers/client-styles.cjs');
 const { voiceStateChunkWithDefaults } = require('./helpers/voice-state-chunk.cjs');
 
 // 求值 state.js：得到归一化 / 帧数派生（§7.4 的单一事实源）
@@ -346,7 +347,7 @@ test('VADSIL-P14c 滑块档位订正 1–5 ⇒ 0–5（0 = 关闭；档位域 si
   for (const n of [1, 2, 3, 4, 5]) assert.equal(S.normalizeVadSilenceMs(n), n * 1000, '档位 ' + n + ' 秒仍合法');
   // ⚠ 2026-10-17（残项收口批 · 补回）：以下三条**自绘滑块样式**断言系布局批（CHG-144）改写 P14 时
   //   **误删**（原在旧 P14 末尾），属「放宽既有断言」⇒ 本批按原样**补回**（不是新增判据，是恢复）。
-  const st = decodeChunk('src/client/styles.js');
+  const st = stylesBody();
   assert.ok(st.includes('.dsh-vi-slider'), 'styles.js 缺自绘滑块样式');
   assert.ok(st.includes('::-webkit-slider-thumb'), '缺 WebKit 自绘（轨道/握手）');
   assert.ok(st.includes('::-moz-range-thumb'), '缺 Firefox 自绘（轨道/握手）');
@@ -459,7 +460,7 @@ test('VADSIL-P14i 静音行：滑块吃满 + 读数有槽（关/开两态滑块�
   const { row2 } = layoutRows({ vad: { enabled: true, silenceMs: 3000 } });
   assert.ok(/\bdsh-vi-silence-row\b/.test(row2.props.className), '静音行须带 dsh-vi-silence-row（读数槽的挂载点）');
   assert.equal(row2.props.style.flexWrap, 'nowrap', '⛔ 静音行三件须在同一行（不得折行 —— 折行会让读数跑到滑块下面）');
-  const st = decodeChunk('src/client/styles.js');
+  const st = stylesBody();
   // 滑块：flex:1 1 auto（⛔ 不是 1 1 0 —— 0 基线在无显式宽度的容器里会塌成一小段）
   const m = st.match(/'\.dsh-vi-slider\{([^}]*)\}'/);
   assert.ok(m, 'styles.js 须有 .dsh-vi-slider 规则');

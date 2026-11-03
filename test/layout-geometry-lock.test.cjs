@@ -21,12 +21,13 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 const { ZH, EN } = require('./helpers/client-i18n.cjs');
+const { stylesBody } = require('./helpers/client-styles.cjs');
 
 function voiceSrc() {
   return decodeChunk('src/client/voice/voice-section.js');
 }
 function styleSrc() {
-  return decodeChunk('src/client/styles.js');
+  return stylesBody();
 }
 
 // 取某段源码（用起止锚点切），供"只在开关块内判"这类**范围限定**判据使用。
@@ -520,7 +521,7 @@ function modelRowBudget(stylesSrc) {
 }
 
 test('GEOLOCK-B1 模型行 = 单行 flex + gap 可算（"合计 ≤ 可用宽"的前提）', () => {
-  const styles = decodeChunk('src/client/styles.js');
+  const styles = stylesBody();
   const rowRule = cssRule(styles, '.dsh-plg-row');
   assert.ok(rowRule !== null, '前置：styles.js 须有 .dsh-plg-row 规则');
   assert.ok(/display:\s*flex/.test(rowRule), '模型行须是 flex 容器');
@@ -532,7 +533,7 @@ test('GEOLOCK-B1 模型行 = 单行 flex + gap 可算（"合计 ≤ 可用宽"�
 });
 
 test('GEOLOCK-B2 固定宽项逐项列出，且「固定合计 + 模型名下限」≤ 真机可用宽', () => {
-  const styles = decodeChunk('src/client/styles.js');
+  const styles = stylesBody();
   const b = modelRowBudget(styles);
   assert.ok(b.ok, '预算须可算：' + b.reason);
   const listing = b.items.map((x) => x.id + '=' + x.floor).join(' · ');
@@ -553,7 +554,7 @@ test('GEOLOCK-B2 固定宽项逐项列出，且「固定合计 + 模型名下限
 });
 
 test('GEOLOCK-B3 模型名选择器是行内**唯一弹性项**（它吃掉全部剩余空间）', () => {
-  const styles = decodeChunk('src/client/styles.js');
+  const styles = stylesBody();
   const b = modelRowBudget(styles);
   assert.ok(b.ok, '预算须可算：' + b.reason);
   // ① 弹性项 = flex-grow ≥ 1 且 basis 为 0（剩余空间全给它，不是按内容宽参与分配）
@@ -586,7 +587,7 @@ test('GEOLOCK-B4 行内子项清单 = 本预算的分母（多出/少一项都�
     '⛔ 行内选择器不得带 dsh-plg-ms-fill / dsh-plg-ms-content（会覆盖 flex ⇒ 预算失真）');
   // 失效徽标（预算里那 20px 上界的对象）必须在位——它若被删，B2 的上界就该同步下调。
   //   ⚠ 2026-10-19（清债批 D-2）：该节点原先挂的 `dsh-plg-badge-invalid` 是**孤儿类**
-  //     （styles.js 解码全文零规则）⇒ 类名已换成既有 `.dsh-plg-upd-outdated`（告警色），
+//     （styles 模块全文零规则）⇒ 类名已换成既有 `.dsh-plg-upd-outdated`（告警色），
   //     **节点本身与 `⚠` 字形、title 一字未动**。本断言据此改判**节点在不在**（沿用"失效徽标在位"
   //     这一语义），⛔ 不再绑定那个已退役的类名——否则锁会把"删孤儿类"判成"删了徽标"（假红）。
   assert.equal((row.match(/className: 'dsh-plg-upd-outdated', title: t\('cfgRowInvalid'\)/g) || []).length, 1,
@@ -632,7 +633,7 @@ test('GEOLOCK-B5 真机可用宽只以**具名常量**出现一次（⛔ 不许�
 });
 
 test('GEOLOCK-B-V 变异自证：provider 下限回 104 ⇒ B2/B3 必红（锁 B 有牙）+ 历史形态复算 + 负控', () => {
-  const styles = decodeChunk('src/client/styles.js');
+  const styles = stylesBody();
   const current = modelRowBudget(styles);
   assert.ok(current.ok, '前置：当前树预算须可算：' + current.reason);
   const provider = current.items.find((x) => x.id === 'provider');

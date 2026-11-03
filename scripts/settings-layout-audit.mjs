@@ -13,7 +13,7 @@
 //   ④ 出现省略号（overflow/ellipsis 生效）
 //
 // 装置形态与**已知边界（如实声明，勿当"真机"读）**：
-//   · 真实 CSS：直接取 src/client/styles.js 的 CSS 字符串（逐字）；
+//   · 真实 CSS：直接取 src/client/styles-module.cjs 的 CSS 字符串（逐字）；
 //   · 真实 DOM 结构：直接执行 src/client/**.js 的 chunk 源码（经 scripts/lib/chunk-decode.mjs 解码），
 //     由 scripts/lib/settings-layout-driver.mjs 的最小 React shim 产出**真实 DOM**
 //     （类名、内联样式、文本逐字同源）；
@@ -61,7 +61,7 @@ const CHUNKS = [
   'src/client/components/params-tab.js',
   'src/client/components/model-plugins-section.js',
   'src/client/voice/voice-section.js',
-  'src/client/styles.js',
+  'src/client/styles-module.cjs',
 ];
 
 function readChunk(rel) {
@@ -328,10 +328,10 @@ function nativePath(browser, p) {
 function buildPage() {
   const chunks = {};
   for (const rel of CHUNKS) chunks[rel] = readChunk(rel);
-  // styles chunk 的源码是 JS（const CSS = [...].join('\n')）——必须**求值**才拿到 CSS 文本，
+  // styles 模块正文是 JS（const CSS = [...].join('\n')）——必须**求值**才拿到 CSS 文本，
   // 不能把 JS 源码直接塞进 <style>（那样一条样式都不生效，量到的是浏览器默认盒 = 假绿）。
-  const cssSrc = chunks['src/client/styles.js'];
-  delete chunks['src/client/styles.js'];
+  const cssSrc = chunks['src/client/styles-module.cjs'];
+  delete chunks['src/client/styles-module.cjs'];
   const css = new Function(cssSrc + '\n;return CSS;')();
   if (typeof css !== 'string' || css.length < 500) throw new Error('styles chunk 未产出 CSS 字符串（实得 ' + typeof css + '）');
   const payload = { chunks, realisticMax: REALISTIC_MAX, scenarios: scenarios(), row1W: ROW1_W };

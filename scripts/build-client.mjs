@@ -33,7 +33,6 @@ function buildClient() {
   const modelConfigTabChunk = require('../src/client/components/model-config-tab.js');
   const paramsTabChunk = require('../src/client/components/params-tab.js');
   const modelPluginsSectionChunk = require('../src/client/components/model-plugins-section.js');
-  const stylesChunk = require('../src/client/styles.js');
   const appChunk = require('../src/client/app.js');
   // P1-a（2026-10-13 缩批）：RecordRTC vendor chunk 已退役（采集改浏览器原生 MediaRecorder）；
   // mic-button / voice-insert 已退役（按钮 UI 交官方；热键与填入逻辑搬入 hotkey.js）。
@@ -78,6 +77,9 @@ function buildClient() {
   }
   if (!clientSharedRuntime.modules.includes('src/client/i18n-module.cjs')) {
     throw new Error('[build-client] 客户端共享运行时打包不完整：缺少文案模块');
+  }
+  if (!clientSharedRuntime.modules.includes('src/client/styles-module.cjs')) {
+    throw new Error('[build-client] 客户端共享运行时打包不完整：缺少样式模块');
   }
   if (!clientSharedRuntime.modules.includes('src/client/state-module.cjs')) {
     throw new Error('[build-client] 客户端共享运行时打包不完整：缺少状态模块');
@@ -144,7 +146,7 @@ function buildClient() {
     ['// @dsh-client-voice-official-bridge-inject\n', voiceOfficialBridgeChunk],
     ['// @dsh-client-voice-hotkey-inject\n', voiceHotkeyChunk],
     ['// @dsh-client-voice-comp-section-inject\n', voiceSectionChunk],
-    ['// @dsh-client-styles-inject\n', stylesChunk],
+    ['// @dsh-client-styles-inject\n', ''],
     ['// @dsh-client-app-inject\n', appChunk],
   ];
   // ── chunk 契约门（2026-10-17 事故根治）────────────────────────────────

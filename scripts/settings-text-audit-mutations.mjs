@@ -117,13 +117,13 @@ expectCase('M5 删掉 abandon 异常分支文案', 'RED', async (root) => {
 });
 
 expectCase('M6 挤压根因回退：读数规则删掉 + 关闭态长句回来', 'FAIL', async (root) => {
-  await patchChunk(root, 'src/client/styles.js', [["  '.dsh-plg-row > .dsh-plg-muted{flex:none;white-space:nowrap;max-width:40%;overflow:hidden;text-overflow:ellipsis}',\n", '']]);
+  await patchPlainModule(root, 'src/client/styles-module.cjs', [["  '.dsh-plg-row > .dsh-plg-muted{flex:none;white-space:nowrap;max-width:40%;overflow:hidden;text-overflow:ellipsis}',\n", '']]);
   await patchChunk(root, 'src/client/voice/voice-section.js', [["vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : ''", "vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : t('voiceSilenceOff')"]]);
   return runAudit(root);
 });
 
 expectCase('M7 label 列改回内容定宽', 'FAIL', async (root) => {
-  await patchChunk(root, 'src/client/styles.js', [["'.dsh-plg-label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);flex:none;width:120px;min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'", "'.dsh-plg-label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);flex:none;min-width:96px}'"]]);
+  await patchPlainModule(root, 'src/client/styles-module.cjs', [["'.dsh-plg-label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);flex:none;width:120px;min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'", "'.dsh-plg-label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);flex:none;min-width:96px}'"]]);
   return runAudit(root);
 });
 

@@ -4,7 +4,7 @@
 // 由 scripts/settings-layout-audit.mjs 注入页面后执行，再经 --dump-dom 取回读数。
 // 它只用**真实 chunk 源码** + **真实 CSS** 构造 DOM，不重写任何布局规则。
 //
-// ⚠ 与生产逐字同源的两处：① CSS 取自 src/client/styles.js；② DOM 结构由 src/client/**.js 的
+// ⚠ 与生产逐字同源的两处：① CSS 取自 src/client/styles-module.cjs；② DOM 结构由 src/client/**.js 的
 //   解码后源码执行产出（React 由最小 shim 顶替：只做元素构造/状态，不参与布局）。
 // ⚠ 本文件**不实现**任何“挤压判据”：判据在 Node 侧（scripts/settings-layout-audit.mjs 的 cmp()），
 //   浏览器只负责产出读数（宽度 / scrollWidth / clientWidth / 行高 / 计算后的 overflow 等）。
