@@ -5,6 +5,17 @@
 function createVoiceState(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};
   const host = d.host || null;
+  // 归一化入口由装配层注入（与 host 共用契约实现）；未注入时使用契约默认值兜底。
+  const normalizeVadSilenceMs = typeof d.normalizeVadSilenceMs === 'function'
+    ? d.normalizeVadSilenceMs
+    : (value) => {
+      const n = typeof value === 'number' ? value : NaN;
+      if (Number.isInteger(n)) {
+        if (n >= 1000 && n <= 5000 && n % 1000 === 0) return n;
+        if (n >= 1 && n <= 5) return n * 1000;
+      }
+      return VOICE_CFG_DEFAULTS.vad.silenceMs;
+    };
   const storage = d.storage !== undefined
     ? d.storage
     : (typeof localStorage !== 'undefined' ? localStorage : null);
@@ -14,18 +25,6 @@ function createVoiceState(deps) {
   const VOICE_CFG_DEFAULTS = JSON.parse(JSON.stringify(d.defaults || {}));
   const VOICE_CFG_KEY = 'dsh.prompt-enhancer.voice';
 
-  const VAD_SILENCE_MS_DEFAULT = VOICE_CFG_DEFAULTS.vad.silenceMs;
-  const VAD_SILENCE_SEC_MIN = 1;
-  const VAD_SILENCE_SEC_MAX = 5;
-
-  function normalizeVadSilenceMs(v) {
-    const n = typeof v === 'number' ? v : NaN;
-    if (Number.isInteger(n)) {
-      if (n >= 1000 && n <= 5000 && n % 1000 === 0) return n;
-      if (n >= VAD_SILENCE_SEC_MIN && n <= VAD_SILENCE_SEC_MAX) return n * 1000;
-    }
-    return VAD_SILENCE_MS_DEFAULT;
-  }
 
   function vadSilenceMsOf(v) {
     return normalizeVadSilenceMs(v && v.vad ? v.vad.silenceMs : undefined);

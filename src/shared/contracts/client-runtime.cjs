@@ -10,6 +10,7 @@ module.exports = {
   VOICE_CONFIG_KEYS: voiceConfig.VOICE_CONFIG_KEYS,
   VOICE_CONFIG_DEFAULTS: voiceConfig.VOICE_CONFIG_DEFAULTS,
   cloneVoiceConfigDefaults: voiceConfig.cloneVoiceConfigDefaults,
+  normalizeVadSilenceMs: voiceConfig.normalizeVadSilenceMs,
   VOICE_POSTPROCESS_STEPS: postprocessPlan.VOICE_POSTPROCESS_STEPS,
   VOICE_POSTPROCESS_STEP_ORDER: postprocessPlan.VOICE_POSTPROCESS_STEP_ORDER,
   planVoicePostprocess: postprocessPlan.planVoicePostprocess,

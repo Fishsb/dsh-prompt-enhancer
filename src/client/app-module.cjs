@@ -55,7 +55,7 @@ function createClientApp(deps) {
   const configApi = createClientState({ host: d.host, timerRef, storage });
   const configState = configApi.configState;
   const helpers = createClientHelpers({ host: d.host, configState, dictionary: ZH, storage, resultStatusOf: contracts.resultStatusOf });
-  const voiceApi = createVoiceState({ host: d.host, storage, timerSvc, fillerState: shared.fillerState, defaults: contracts.VOICE_CONFIG_DEFAULTS, console: d.console });
+  const voiceApi = createVoiceState({ host: d.host, storage, timerSvc, fillerState: shared.fillerState, defaults: contracts.VOICE_CONFIG_DEFAULTS, normalizeVadSilenceMs: contracts.normalizeVadSilenceMs, console: d.console });
   const voiceCfgState = voiceApi.voiceCfgState;
   const correction = createCorrectionState({ voiceCfgState, correctionStateCore: { CORRECTION_PHASES: shared.CORRECTION_PHASES, correctionPhaseKnown: shared.correctionPhaseKnown, correctionPhaseOf: shared.correctionPhaseOf, correctionFailureTicket: shared.correctionFailureTicket, correctionFailureConsume: shared.correctionFailureConsume } });
   const officialVoiceBridge = createOfficialVoiceBridge({

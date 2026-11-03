@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { VOICE_CONFIG_KEYS, VOICE_CONFIG_DEFAULTS, cloneVoiceConfigDefaults } = require('../src/shared/contracts/voice-config.cjs');
+const { VOICE_CONFIG_KEYS, VOICE_CONFIG_DEFAULTS, cloneVoiceConfigDefaults, normalizeVadSilenceMs } = require('../src/shared/contracts/voice-config.cjs');
 const { voiceStateChunkWithDefaults } = require('./helpers/voice-state-chunk.cjs');
 
 function loadVoiceState() {
@@ -46,4 +46,17 @@ test('VCONF-05 产物面：共享运行时已由打包器注入且只注入一�
   assert.ok(client.includes('src/client/voice/state-module.cjs'), '产物须内联语音状态普通模块');
   assert.equal(client.includes("require('../src/shared/contracts/"), false, '产物不得保留外部 require');
   assert.equal(client.includes("require('../src/shared/voice/"), false, '产物不得保留外部 require');
+});
+
+test('VCONF-06 VAD 档位归一为契约单一入口：client 与 host 同值', () => {
+  const asr = require('../lib/asr.cjs');
+  for (const input of [1, 2, 3, 4, 5, 1000, 3000, 5000]) {
+    assert.equal(normalizeVadSilenceMs(input), input <= 5 ? input * 1000 : input, '契约合法值：' + input);
+  }
+  for (const input of [0, 6, 1.5, '3000', null, undefined, NaN, -1000]) {
+    assert.equal(normalizeVadSilenceMs(input), VOICE_CONFIG_DEFAULTS.vad.silenceMs, '契约非法值回落：' + String(input));
+    assert.equal(asr.sanitizeVoiceCfg({ vad: { silenceMs: input } }).vad.silenceMs,
+      VOICE_CONFIG_DEFAULTS.vad.silenceMs, 'host 必须与契约同值：' + String(input));
+  }
+  assert.equal(asr.sanitizeVoiceCfg({ vad: { silenceMs: 5000 } }).vad.silenceMs, 5000);
 });
