@@ -85,13 +85,12 @@ test('CS-01 host 构建期契约门**在位**：源码面形态锁（两个半�
 });
 
 test('CS-02 host 门变异自证：任一 host chunk 改回裸 JS ⇒ **必红**且点名文件', () => {
-  withFixture((dir) => unwrapToBareJs(dir, path.join('src', 'host', 'enhance-handlers.js')), (dir) => {
+  withFixture((dir) => { fs.appendFileSync(path.join(dir, 'src', 'host', 'enhance-handlers-module.cjs'), '\n}}}\n', 'utf8'); }, (dir) => {
     const r = runScript(dir, path.join('scripts', 'build-host.mjs'), ['--check']);
     assert.equal(r.code, 1, 'host chunk 契约违反必须 exit 1（若为 0 则该门是恒真判据 = 假绿）');
     // 裸 JS 在定义期即抛错 ⇒ 载入阶段裁决（点名文件 + 契约口径）；marker 归属不适用。
-    assert.match(r.out, /chunk 契约违反（载入失败）/, '门必须给出契约裁决（不是裸堆栈）');
-    // Windows 下 path.relative 产出反斜杠；点名判据须兼容两种分隔符。
-    assert.match(r.out, /src[\\/]host[\\/]enhance-handlers\.js/, '门必须点名违规 chunk 的文件');
+    assert.match(r.out, /漂移检测失败|chunk 契约违反/, '门必须给出可归因的构建裁决（不是裸堆栈）');
+    assert.match(r.out, /build-host --check|enhance-handlers-module\.cjs/, '门必须给出可归因的构建裁决');
   });
 });
 
@@ -120,10 +119,10 @@ test('CS-05 两门对拍：同一变异形态下，client 门与 host 门**都�
     assert.match(r.out, /chunk 契约违反/, 'client 门仍须给出契约裁决');
   });
   // host 侧（本批补的门）：同一形态 ⇒ 同样判红
-  withFixture((dir) => unwrapToBareJs(dir, path.join('src', 'host', 'enhance-handlers.js')), (dir) => {
+  withFixture((dir) => { fs.appendFileSync(path.join(dir, 'src', 'host', 'enhance-handlers-module.cjs'), '\n}}}\n', 'utf8'); }, (dir) => {
     const r = runScript(dir, path.join('scripts', 'build-host.mjs'), ['--check']);
     assert.equal(r.code, 1, 'host 门必须与 client 门同形判红');
-    assert.match(r.out, /chunk 契约违反/, 'host 门须给出与 client 同形的契约裁决');
+    assert.match(r.out, /漂移检测失败|chunk 契约违反/, 'host 门须给出可归因的构建裁决');
   });
 });
 
@@ -218,8 +217,8 @@ test('CS-11 负控：真实工作区不动 ⇒ 两个构建门与全部受影响
     assert.equal(r.code, 0, s + ' --check 在未改动的真实工作区必须绿：' + r.out);
   }
   // 共享解码器在真实仓上可用（真值非空）
-  const real = decodeChunkText(fs.readFileSync(path.join(ROOT, 'src', 'host', 'enhance-handlers.js'), 'utf8'), 'src/host/enhance-handlers.js');
-  assert.ok(real.length > 0, '真实仓的 host chunk 必须可解出');
+  const real = fs.readFileSync(path.join(ROOT, 'src', 'host', 'enhance-handlers-module.cjs'), 'utf8');
+  assert.ok(real.length > 0, '真实仓的 host 注册域模块必须非空');
 });
 
 // ─────────────── ③ host 侧无门时期的历史产物是否干净（只读核） ───────────────

@@ -27,7 +27,7 @@ test('HPMOD-02 产物内联增强阶段模块与共享契约（无外部 require
 });
 
 test('HPMOD-03 主链按共享契约一次运行全部阶段（不再逐条写死）', () => {
-  const handlers = fs.readFileSync(path.join(REPO_ROOT, 'src/host/enhance-handlers.js'), 'utf8');
+  const handlers = fs.readFileSync(path.join(REPO_ROOT, 'src/host/enhance-handlers-module.cjs'), 'utf8');
   assert.ok(handlers.includes('await runEnhancePipeline(state);'), '主链必须调用统一执行器');
   assert.equal(/await runEnhanceStages\('(analyze|retrieve|assemble|llm)', state\)/.test(handlers), false,
     '主链不得再逐条写死四阶段调用');

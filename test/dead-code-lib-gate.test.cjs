@@ -559,20 +559,16 @@ test('R2 fail-closed（H2 活例修复）：读不出包裹的 chunk 不得再�
   });
 });
 
-test('R7 覆盖面（host 面同族）：src/host 的 chunk 也在契约门内 ⇒ 改回裸 JS 必红', () => {
-  // ⚠ host 面**实读为同族**：现存字符串 chunk 全部写 `module.exports = "…"` 同一契约，
-  //   且 build-host.mjs 用同一 `body.replace(marker, chunk)` 注入 ⇒ 一并纳入。
-  //   目标模式（CHG-320）：diagnostics 已迁为普通模块，变异目标改用仍在位的 chunk。
-  const rel = 'src/host/' + 'enhance-handlers' + '.js'; // 运行时拼接（同既有纪律）
+test('R7 覆盖面（host 面同族）：src/host 的字符串 chunk 也在契约门内 ⇒ 改回裸 JS 必红', () => {
+  // host 侧仅存的字符串 chunk 是 app.js；.cjs 是普通模块，由模块图完整性门约束。
+  const rel = 'src/host/' + 'app' + '.js'; // 运行时拼接（同既有纪律）
   withFixture((dir) => {
     const abs = path.join(dir, rel);
-    // ⚠ 第 8 处同契约副本（本批收敛）：改用共享解码器，取值不变（本批实测 29 chunk 上
-    //   loose/anchored 两形态逐字同值）、点名声更强。
     fs.writeFileSync(abs, "'use strict';\n" + decodeChunkText(fs.readFileSync(abs, 'utf8'), rel), 'utf8');
   }, (dir) => {
     const r = runGate(dir);
     assert.equal(r.code, 1, 'host chunk 契约违反必须 exit 1（不得只盯 client）');
-    assert.match(r.out, /FAIL \| R7 \|[^\n]*src[\\/]host[\\/]enhance-handlers\.js/, 'R7 必须点名 host 违规 chunk');
-    assert.match(r.out, /载入失败|导出形态违反/, 'R7 必须给出契约裁决');
+    assert.match(r.out, /FAIL \| R7 \|[^\n]*src[\\/]host[\\/]app\.js/, 'R7 必须点名 host 违规 chunk');
+    assert.match(r.out, /载入失败|导出形态违反|漂移检测失败|契约违反/, 'R7 必须给出可归因的契约裁决');
   });
 });
