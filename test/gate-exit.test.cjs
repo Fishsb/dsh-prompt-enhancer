@@ -5,14 +5,16 @@
 // 本文件的每条断言都对应一个**可证伪的形态**（真值表 + 真跑 gate.mjs），不是"跑过就算"。
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync, spawnSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
 const os = require('node:os');
 const NL = String.fromCharCode(10);
 
 const ROOT = path.join(__dirname, '..');
 const GATE = path.join(ROOT, 'scripts', 'gate.mjs');
+const importLocal = (rel) => import(pathToFileURL(path.join(ROOT, rel)).href);
 /** 真跑 gate（返回退出码 + 解析后的 --json；退出码取自**进程**，不是 --json 里的字段） */
 const runGate = (args = ['--json'], env = {}) => {
   const p = spawnSync(process.execPath, [GATE, ...args], {
@@ -24,7 +26,7 @@ const runGate = (args = ['--json'], env = {}) => {
 };
 
 test('GATEEXIT-01 三态码值锁：0 全过 / 1 有 FAIL / 2 未判全（三个数互不相同）', async () => {
-  const m = await import(path.join(ROOT, 'scripts', 'lib', 'gate-exit.mjs'));
+  const m = await importLocal('scripts/lib/gate-exit.mjs');
   assert.equal(m.GATE_EXIT.ALL_PASS, 0, '全过必须仍是 0（不破坏既有"绿=0"约定）');
   assert.equal(m.GATE_EXIT.FAIL, 1, '失败必须仍是 1（不破坏既有"红=1"约定）');
   assert.equal(m.GATE_EXIT.NOT_FULLY_JUDGED, 2, '未判全必须是**独立**码（N3 的全部要点）');
@@ -33,7 +35,7 @@ test('GATEEXIT-01 三态码值锁：0 全过 / 1 有 FAIL / 2 未判全（三个
 });
 
 test('GATEEXIT-02 verdictOf 真值表：失败优先；非 PASS（含空表）一律未判全，不判绿', async () => {
-  const m = await import(path.join(ROOT, 'scripts', 'lib', 'gate-exit.mjs'));
+  const m = await importLocal('scripts/lib/gate-exit.mjs');
   const V = m.verdictOf;
   assert.equal(V(['PASS', 'PASS']), 'ALL_PASS');
   assert.equal(V(['PASS', 'SKIP']), 'NOT_FULLY_JUDGED', '有 SKIP 即未判全');
@@ -46,7 +48,7 @@ test('GATEEXIT-02 verdictOf 真值表：失败优先；非 PASS（含空表）�
 });
 
 test('GATEEXIT-03 applyBaseline 真值表：仅"未判非空且 ⊆ 非空基线"才降 0，其余一律 2', async () => {
-  const m = await import(path.join(ROOT, 'scripts', 'lib', 'gate-exit.mjs'));
+  const m = await importLocal('scripts/lib/gate-exit.mjs');
   const A = m.applyBaseline;
   // 恰好覆盖 → 接纳
   assert.equal(A('NOT_FULLY_JUDGED', ['x', 'y'], ['x', 'y']).code, 0);
@@ -65,7 +67,7 @@ test('GATEEXIT-03 applyBaseline 真值表：仅"未判非空且 ⊆ 非空基线
 });
 
 test('GATEEXIT-04 解析：--accept-unjudged 两种写法等价；未给出为 null；去重去空', async () => {
-  const m = await import(path.join(ROOT, 'scripts', 'lib', 'gate-exit.mjs'));
+  const m = await importLocal('scripts/lib/gate-exit.mjs');
   assert.equal(m.parseAcceptBaseline(['--json']), null, '未给出 ⇒ null（不接纳任何未判）');
   assert.deepEqual(m.parseAcceptBaseline(['--accept-unjudged=a,b']), ['a', 'b']);
   assert.deepEqual(m.parseAcceptBaseline(['--accept-unjudged', 'a,b']), ['a', 'b']);
@@ -184,7 +186,7 @@ test('GATEEXIT-06b 夹具形态：**确定**「无 FAIL 且有未判环」⇒ �
 });
 
 test('GATEEXIT-11 穷举不变量：accepted ⇔（verdict=NOT_FULLY_JUDGED ∧ 未判非空 ∧ 基线非空 ∧ 未判⊆基线）', async () => {
-  const m = await import(path.join(ROOT, 'scripts', 'lib', 'gate-exit.mjs'));
+  const m = await importLocal('scripts/lib/gate-exit.mjs');
   // ⚠ 集合里**必须含重复元素**（独立复核席 D1 实测：全不重复时 Array.from(new Set()) 无事可做，
   //   去重行为零覆盖 ⇒ 删掉实现里的 Set 仍 11/11 绿）。故下列集合刻意混入重复项。
   const unjudgedSets = [[], ['a'], ['b'], ['a', 'b'], ['a', 'x'], ['a', 'a', 'b'], ['a', 'b', 'a', 'b']];
@@ -228,7 +230,7 @@ test('GATEEXIT-11 穷举不变量：accepted ⇔（verdict=NOT_FULLY_JUDGED ∧ 
 });
 
 test('GATEEXIT-12 不可接纳面（D2）：非 PASS 且非 SKIP 的环即便 id 在基线内也不得被接纳', async () => {
-  const m = await import(path.join(ROOT, 'scripts', 'lib', 'gate-exit.mjs'));
+  const m = await importLocal('scripts/lib/gate-exit.mjs');
   // 复现独立复核席实测的形态：零输出的静默死环（UNKNOWN）恰好 id 就是基线内的那一环
   const r = m.applyBaseline('NOT_FULLY_JUDGED', ['arch-claims'], ['arch-claims'], ['arch-claims']);
   assert.equal(r.accepted, false, 'UNKNOWN 环不得被基线吸收（否则"换空脚本"即可让链级报 0）');

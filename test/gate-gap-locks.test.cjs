@@ -200,10 +200,10 @@ test('GAP-8 F1 变异自证：改一处 package.json ⇒ 该前置**必红**（�
     // 判别力自证：其余未动文件必须仍 match（否则是"整片报红"，无判别力）
     assert.ok(c.rows.filter((r) => r.file !== 'package.json').every((r) => r.state === 'match'),
       '未改动的文件不得连带报红（否则本对照无判别力）');
-    // 同口径复核：md5 必须与 md5sum 同值（复用既有算法，不新造）
-    const { execFileSync } = require('node:child_process');
-    const real = execFileSync('md5sum', [path.join(dir, 'package.json')], { encoding: 'utf8' }).split(/\s+/)[0];
-    assert.equal(row.treeMd5, real, '本模块 md5 应与 md5sum 同值（同一算法，不新造机制）');
+    // 同口径复核：Node crypto 独立复算 MD5，避免测试依赖 Windows 默认没有的 md5sum。
+    const { createHash } = require('node:crypto');
+    const real = createHash('md5').update(fs.readFileSync(path.join(dir, 'package.json'))).digest('hex');
+    assert.equal(row.treeMd5, real, '本模块 md5 应与独立 Node crypto 复算值一致（同一算法）');
   });
 });
 

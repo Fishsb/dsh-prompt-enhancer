@@ -931,12 +931,20 @@ test('U39b 模式专属默认模板契约（v3.1.8）', () => {
     assert.ok(text.includes('语义等价是底线'), name + ' 应保留语义等价底线');
     assert.ok(text.includes('不得歪曲、臆造、遗漏原文任何已明确的信息'), name + ' 应保留禁臆造');
   }
-  // ④ BUILTIN_TEMPLATES 已按模式指向专属模板（plugin-host.js 生成物）——T1 默认 + T2 增量均每模式专属
-  assert.ok(src.includes('base: [SYSTEM_PROMPT, SYSTEM_INCREMENT_PROMPT]'), 'BUILTIN_TEMPLATES base 应指向通用默认 + 通用增量');
-  assert.ok(src.includes('lite: [SYSTEM_LITE_PROMPT, SYSTEM_INCREMENT_LITE_PROMPT]'), 'BUILTIN_TEMPLATES lite 应指向 SYSTEM_LITE_PROMPT + 专属增量');
-  assert.ok(src.includes('standard: [SYSTEM_STANDARD_PROMPT, SYSTEM_INCREMENT_STANDARD_PROMPT]'), 'BUILTIN_TEMPLATES standard 应指向 SYSTEM_STANDARD_PROMPT + 专属增量');
-  assert.ok(src.includes('smart: [SYSTEM_SMART_PROMPT, SYSTEM_INCREMENT_SMART_PROMPT]'), 'BUILTIN_TEMPLATES smart 应指向 SYSTEM_SMART_PROMPT + 专属增量');
-  assert.ok(src.includes('publish: [SYSTEM_PUBLISH_PROMPT, SYSTEM_INCREMENT_PUBLISH_PROMPT]'), 'BUILTIN_TEMPLATES publish 应指向 SYSTEM_PUBLISH_PROMPT + 专属增量');
+  // ④ SKILL_MANIFEST 已按模式声明 T1 默认 + T2 增量；analyze 阶段由 manifest 构造 builtinTemplates。
+  const manifest = src.match(/const SKILL_MANIFEST = \{([\s\S]*?)\n\};/);
+  assert.ok(manifest, 'SKILL_MANIFEST 未在产物生成区');
+  const expectedTemplates = [
+    ['base', 'SYSTEM_PROMPT', 'SYSTEM_INCREMENT_PROMPT'],
+    ['lite', 'SYSTEM_LITE_PROMPT', 'SYSTEM_INCREMENT_LITE_PROMPT'],
+    ['standard', 'SYSTEM_STANDARD_PROMPT', 'SYSTEM_INCREMENT_STANDARD_PROMPT'],
+    ['smart', 'SYSTEM_SMART_PROMPT', 'SYSTEM_INCREMENT_SMART_PROMPT'],
+    ['publish', 'SYSTEM_PUBLISH_PROMPT', 'SYSTEM_INCREMENT_PUBLISH_PROMPT'],
+  ];
+  for (const [mode, t1, t2] of expectedTemplates) {
+    assert.ok(manifest[1].includes('templates: { t1: ' + t1 + ', t2: ' + t2 + ' }'),
+      'SKILL_MANIFEST ' + mode + ' 应声明 ' + t1 + ' + ' + t2);
+  }
   // ⑤ 五步法强化按模式差异化（用户指令：每模式方向/场景不同 → 强化调整不同）
   assert.ok(lite.includes('参考中已确认的决策'), 'lite 五步法应含「参考中已确认决策」强化（v3.2.28 参考分层）');
   assert.ok(lite.includes('参考延续强化'), 'lite 五步法标题应标注参考延续强化（v3.2.28）');
