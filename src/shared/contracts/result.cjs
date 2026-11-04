@@ -2,11 +2,12 @@
 
 // 统一结果状态：changed | unchanged | skipped | failed
 // 只做语义映射，不改变 RPC 返回结构；调用方按需取 status。
+const { RESULT_STATUSES } = require('./contract-data.cjs');
 const RESULT_STATUS = Object.freeze({
-  CHANGED: 'changed',
-  UNCHANGED: 'unchanged',
-  SKIPPED: 'skipped',
-  FAILED: 'failed',
+  CHANGED: RESULT_STATUSES[0],
+  UNCHANGED: RESULT_STATUSES[1],
+  SKIPPED: RESULT_STATUSES[2],
+  FAILED: RESULT_STATUSES[3],
 });
 
 function resultStatusOf(result) {

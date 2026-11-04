@@ -32,9 +32,15 @@ test('CFG-P04 config/set 缺 config 拒绝（MISSING_ARG）', () => {
 
 test('CFG-P05 rpc-schema 单一事实源：lib 副本含 config/*，死层副本不得复活', () => {
   const src = readFileSync(join(__dirname, '..', 'lib', 'rpc-schema.cjs'), 'utf8');
-  assert.ok(src.includes("'config/get'"), 'lib/rpc-schema.cjs 缺 config/get');
-  assert.ok(src.includes("'config/set'"), 'lib/rpc-schema.cjs 缺 config/set');
-  assert.ok(src.includes("required: ['config']"), 'config/set 缺 required 校验');
+  // 契约收敛批（2026-11-04）：方法名与 required 已迁至 lib/contracts.cjs；
+  // rpc-schema 只保留派生逻辑。这里锁「实现确实存在且从契约取数」，不再要求第二份字面量。
+  const contract = readFileSync(join(__dirname, '..', 'lib', 'contracts.cjs'), 'utf8');
+  assert.ok(contract.includes("CONFIG_GET: 'config/get'"), 'lib/contracts.cjs 缺 config/get 契约');
+  assert.ok(contract.includes("CONFIG_SET: 'config/set'"), 'lib/contracts.cjs 缺 config/set 契约');
+  assert.ok(contract.includes("required: ['config']"), 'config/set 缺 required 契约');
+  assert.ok(src.includes("require('./contracts.cjs')"), 'rpc-schema 必须从契约派生');
+  assert.equal(libSchema.schemas['config/get'] !== undefined, true, 'config/get 必须有派生 schema');
+  assert.equal(libSchema.schemas['config/set'] !== undefined, true, 'config/set 必须有派生 schema');
   assert.ok(!existsSync(join(__dirname, '..', 'src', 'host', 'rpc-schema.js')),
     '死层副本 src/host/rpc-schema.js 复活了——双架构不得回归（P1b）');
 });

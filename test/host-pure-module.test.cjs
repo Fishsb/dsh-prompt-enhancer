@@ -26,15 +26,55 @@ test('HPM-02 新模块正文与冻结基准逐字相同（仅尾部允许追加�
   const actual = pureModuleText();
   assert.ok(baseline.length > 50000, '冻结基准必须非空（实得 ' + baseline.length + '）');
   const beginMarker = '// ==PURE-BEGIN==  (unit-testable pure functions; keep free of ctx/harness/pending/module-state)\n\n';
-  const head = '// 目标模式：原 PURE 区段依赖的三个上游常量由 models 模块注入；\n// 迁移为普通模块后改为显式依赖，不再复制常量、也不再靠构建切片注入。\nconst { DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TOKENS, DEFAULT_OUTPUT_LIMIT } = require(\'./models-constants.cjs\');\n\n';
+  const head = '// 目标模式：原 PURE 区段依赖的三个上游常量由 models 模块注入；\n// 迁移为普通模块后改为显式依赖，不再复制常量、也不再靠构建切片注入。\nconst { DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TOKENS, DEFAULT_OUTPUT_LIMIT } = require(\'./models-constants.cjs\');\n';
   assert.ok(baseline.startsWith(beginMarker), '冻结基准必须以 PURE 起始标记开头');
-  const baselineBody = baseline.slice(beginMarker.length);
-  assert.ok(actual.startsWith(beginMarker + head + baselineBody),
-    '新模块正文必须逐字包含迁移前基线；差异应仅为尾部导出语句');
-  const tail = actual.slice((beginMarker + head + baselineBody).length);
+  // 契约收敛批（2026-11-04）：预算/模式/模板上限常量改由 lib/contracts.cjs 派生。
+  // 判别力不降：① 除该声明块外，正文仍须与冻结基准逐字相同；② 旧基线常量与新契约逐项同值；
+  // ③ 尾部只允许迁移说明与导出面。⛔ 不是「去掉基线比对」。
+  const contractHead = "const contractData = require('../shared/contracts/contract-data.cjs');\n";
+  const CONTRACT_BLOCK_RE = /\/\/ ================= v2\.2 模式体系[\s\S]*?(?=\/\/ 预算 → 扫描上限查表)/;
+  const TEMPLATE_LIMITS_RE = /const TEMPLATE_CUSTOM_MAX = [^\n]+;\nconst TEMPLATE_TEXT_MAX = [^\n]+;\nconst TEMPLATE_NAME_MAX = [^\n]+;\n/;
+  const baselineBlock = baseline.match(CONTRACT_BLOCK_RE);
+  const actualBlock = actual.match(CONTRACT_BLOCK_RE);
+  assert.ok(baselineBlock && actualBlock, '冻结基准与新模块都必须包含可识别的常量声明块');
+  const normalize = (s) => s.replace(CONTRACT_BLOCK_RE, '__CONTRACT_BLOCK__\n').replace(TEMPLATE_LIMITS_RE, '__TEMPLATE_LIMITS__\n');
+  // 基线从 PURE marker 起；新模块在 marker 后多了迁移说明与一行契约转发。
+  const baselineBody = baseline.slice(beginMarker.length).replace(/^\n/, '');
+  const actualAfterMarker = actual.slice(actual.indexOf(beginMarker) + beginMarker.length);
+  assert.ok(actualAfterMarker.startsWith(head + contractHead), 'PURE marker 后必须只有已声明的迁移头部与契约转发');
+  const expected = normalize(baselineBody);
+  const observed = normalize(actualAfterMarker.slice((head + contractHead).length).replace(/^\n/, ''));
+  assert.ok(observed.startsWith(expected), '除契约托管常量块外，正文必须与冻结基准逐字相同');
+  const tail = observed.slice(expected.length);
   assert.match(tail, /^\n\n\/\/ 目标模式：PURE 区段以普通 CommonJS 模块承载/, '尾部只允许迁移说明');
   assert.match(tail, /module\.exports = \{/, '尾部必须导出完整声明面');
   assert.ok(fs.existsSync(path.join(REPO_ROOT, BASELINE_REL)), '冻结基准必须在位：' + BASELINE_REL);
+
+  // 旧基线常量 ↔ 新契约逐项同值（测试内显式求值基线常量块，不在生产代码留第二份）。
+  const pick = (src) => {
+    const names = ['BUDGET_OPTIONS', 'MODE_BUDGET_OPTIONS', 'MODE_BUDGET_DEFAULT', 'MODE_PARAMS_DEFAULT'];
+    const out = {};
+    for (const name of names) {
+      const re = new RegExp('const ' + name + ' = ([\\s\\S]*?);\\n', 'm');
+      const m = src.match(re);
+      assert.ok(m, '基线缺常量 ' + name);
+      out[name] = Function('return (' + m[1] + ');')();
+    }
+    return out;
+  };
+  const legacy = pick(baselineBlock[0]);
+  const contractData = require(path.join(REPO_ROOT, 'lib', 'contracts.cjs'));
+  assert.deepEqual(contractData.BUDGET_OPTIONS, legacy.BUDGET_OPTIONS);
+  assert.deepEqual(JSON.parse(JSON.stringify(contractData.MODE_BUDGET_OPTIONS)), legacy.MODE_BUDGET_OPTIONS);
+  assert.deepEqual(JSON.parse(JSON.stringify(contractData.MODE_BUDGET_DEFAULT)), legacy.MODE_BUDGET_DEFAULT);
+  assert.deepEqual(JSON.parse(JSON.stringify(contractData.MODE_PARAMS_DEFAULT)), legacy.MODE_PARAMS_DEFAULT);
+  const legacyLimits = [
+    Number(baseline.match(/const TEMPLATE_CUSTOM_MAX = (\d+);/)[1]),
+    Number(baseline.match(/const TEMPLATE_TEXT_MAX = (\d+);/)[1]),
+    Number(baseline.match(/const TEMPLATE_NAME_MAX = (\d+);/)[1]),
+  ];
+  assert.deepEqual([contractData.TEMPLATE_CUSTOM_MAX, contractData.TEMPLATE_TEXT_MAX, contractData.TEMPLATE_NAME_MAX], legacyLimits,
+    '模板容量/长度上限必须与冻结基线逐项同值');
 });
 
 test('HPM-03 导出面与旧 chunk 顶层声明逐项同名、类型一致', () => {

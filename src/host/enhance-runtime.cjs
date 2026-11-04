@@ -12,8 +12,8 @@
 // 不读取配置、不调用模型、不写回草稿；llm/timer/日志全部由调用方注入。
 
 const RETRY_ALWAYS_SAFETY_CAP = 5;
-const contractData = require('../shared/contracts/index.json');
-const DEGRADED_REASONS = new Set(contractData.degraded || []);
+const contractData = require('../shared/contracts/contract-data.cjs');
+const DEGRADED_REASONS = new Set(contractData.DEGRADED_REASONS);
 
 function createEnhanceRuntime(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};

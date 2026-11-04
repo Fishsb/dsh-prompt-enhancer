@@ -17,12 +17,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { emitRingState, installCrashGuard, installStdoutHygiene } from './lib/ring-state.mjs';
 import * as libManifest from './lib/lib-manifest.mjs';
 
 installCrashGuard('rpc');
 installStdoutHygiene();   // 本环 --json 的 stdout 是机读数据面 ⇒ 契约行不得污染它
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(import.meta.url);
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const args = process.argv.slice(2);
 
@@ -51,16 +53,17 @@ function deriveLiveMethods() {
   return { native, bundled, live, intersection, derivedFrom };
 }
 
-/** schema 面：lib/rpc-schema.cjs 的 schemas 对象顶层键 */
-function schemaKeys() {
-  return [...read('lib/rpc-schema.cjs').matchAll(/^\s{2}'([^']+)':\s*\{/gm)].map((m) => m[1]).sort();
+/** schema 面：直接从契约注册表派生（校验实现与门禁读取同一份数据）。 */
+function schemaKeys(contract) {
+  return [...contract.RPC_SCHEMA_METHOD_LIST].sort();
 }
 
 /**
  * 显式声明的「无参数校验」清单（P2 处置声明）。
  * 分两桶，理由必须写清——**禁止按类别笼统豁免**，新增项必须具名申报。
  */
-const DECLARED_NO_SCHEMA = {
+// 历史声明留作口径对照；当前判定只读 lib/contracts.cjs（下方 `declared`）。
+const LEGACY_DECLARED_NO_SCHEMA = {
   // A 桶：无参 / 只读 / 无副作用入参——校验无可校验之物
   'models/list': 'A 无参只读：列举 provider 与模型',
   'models/current': 'A 无参只读：读当前选择的模型',
@@ -73,6 +76,7 @@ const DECLARED_NO_SCHEMA = {
   // B 桶：有入参但**保持宽松**——补校验会改变已发布对外行为，须单列 BREAKING 后由用户拍板
   'models/resolve': 'B 有参（provider/model）保持宽松：非法值由下游 resolveModelInfo 兜底，收紧急属 BREAKING',
 };
+void LEGACY_DECLARED_NO_SCHEMA;
 
 /**
  * 文档「当前清单」提取（T3 · 2026-10-13 · 判据单向 → 双向）。
@@ -107,8 +111,9 @@ function deriveCurrentDocMethods() {
   return { ok: true, methods: [...out].sort() };
 }
 
+const contract = require('../lib/contracts.cjs');
 const { native, bundled, live, intersection, derivedFrom } = deriveLiveMethods();
-const schemas = schemaKeys();
+const schemas = schemaKeys(contract);
 const doc = read('docs/compatibility-matrix.md');
 /**
  * 文档面判定（P2 复核处置批 2026-10-13 · 处置 F6：两方向**口径对称**）。
@@ -133,7 +138,7 @@ const missingInTable = live.filter((m) => !currentDoc.methods.includes(m));
 // 反向判据：文档「当前清单」小节里列出的方法名，必须在线上
 const ghostInDoc = currentDoc.methods.filter((m) => !live.includes(m));
 const gap = live.filter((m) => !schemas.includes(m));
-const declared = Object.keys(DECLARED_NO_SCHEMA).sort();
+const declared = Object.keys(contract.RPC_DECLARED_NO_SCHEMA).sort();
 const orphanSchema = schemas.filter((m) => !live.includes(m));
 
 const fails = [];

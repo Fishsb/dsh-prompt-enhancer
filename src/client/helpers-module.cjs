@@ -7,26 +7,7 @@ const {
   SEEN_KEY_PREFIX,
 } = require('./constants-module.cjs');
 
-const ERROR_KEYS = {
-  GUARD: 'errGUARD',
-  NO_LLM: 'errNO_LLM',
-  NO_MODEL: 'errNO_MODEL',
-  UNKNOWN_MODEL: 'errUNKNOWN_MODEL',
-  NO_ADAPTER: 'errNO_ADAPTER',
-  INVALID_CREDENTIAL: 'errINVALID_CREDENTIAL',
-  QUOTA: 'errQUOTA',
-  CONTEXT_WINDOW_EXCEEDED: 'errCONTEXT_WINDOW_EXCEEDED',
-  EMPTY_RESPONSE: 'errEMPTY_RESPONSE',
-  OUTPUT_TOO_LONG: 'errOUTPUT_TOO_LONG',
-  OUTPUT_TRUNCATED: 'errOUTPUT_TRUNCATED',
-  TIMEOUT: 'errTIMEOUT',
-  ABORTED: 'errABORTED',
-  LLM_FAILED: 'errLLM_FAILED',
-  NETWORK: 'errNETWORK',
-  ALL_MODELS_UNAVAILABLE: 'errAllModels',
-  STREAM_THROW: 'errModelUnreachable',
-  VOICE_BUSY: 'errVoiceBusy',
-};
+const { errorKeyOf: contractErrorKey } = require('../shared/contracts/errors.cjs');
 
 const MODEL_DISPLAY_NAMES = {
   'deepseek-v4-flash': 'DeepSeek-V4-Flash',
@@ -57,7 +38,7 @@ function createClientHelpers(deps) {
   }
 
   function errorKey(code) {
-    return ERROR_KEYS[code] || 'errUNKNOWN';
+    return contractErrorKey(code);
   }
 
   function makeT(props) {

@@ -3,6 +3,7 @@
 // 目标模式：原 PURE 区段依赖的三个上游常量由 models 模块注入；
 // 迁移为普通模块后改为显式依赖，不再复制常量、也不再靠构建切片注入。
 const { DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TOKENS, DEFAULT_OUTPUT_LIMIT } = require('./models-constants.cjs');
+const contractData = require('../shared/contracts/contract-data.cjs');
 
 // ================= v2.2 模式体系 · 常量层与行为表（表驱动，单测切片求值） =================
 // 方案「提示词优化方案.md」§4/§6：4 模式 + 记忆独立开关（memoryOn，扩散到所有模式）；
@@ -11,30 +12,18 @@ const { DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TOKENS, DEFAULT_OUTPUT_LIMIT } = require
 // v3.1.8（用户需求·预算真正生效 + 每模式独立档位）：扩展 32000 档；BUDGET_OPTIONS 为全局候选池，
 //   每模式可选档位见 MODE_BUDGET_OPTIONS（client 下拉按此渲染、validateConfig 按此校验），
 //   默认值见 MODE_BUDGET_DEFAULT（修复旧行为：base/lite 默认被 DEFAULT_BUDGET=4000 覆盖）。
-const BUDGET_OPTIONS = [0, 2000, 4000, 8000, 16000, 32000];
+const BUDGET_OPTIONS = contractData.BUDGET_OPTIONS.slice();
 // 每模式可用档位（子集；base 无上下文检索 → 仅 0）
-const MODE_BUDGET_OPTIONS = {
-  base: [0],
-  lite: [0, 2000, 4000],
-  standard: [0, 2000, 4000, 8000],
-  smart: [0, 2000, 4000, 8000, 16000],
-  publish: [0, 4000, 8000, 16000, 32000],
-};
+const MODE_BUDGET_OPTIONS = JSON.parse(JSON.stringify(contractData.MODE_BUDGET_OPTIONS));
 // 每模式默认预算（base 0 = 无上下文检索；lite 2000 = 默认启用最近 1 轮会话参考（最小检索档，
 // 0 = 显式关闭）；standard/smart/publish 默认 4000 = 中等检索）
-const MODE_BUDGET_DEFAULT = { base: 0, lite: 2000, standard: 4000, smart: 4000, publish: 4000 };
+const MODE_BUDGET_DEFAULT = JSON.parse(JSON.stringify(contractData.MODE_BUDGET_DEFAULT));
 // v3.1.8（实测驱动·用户指令）：每模式默认 params（超时/Token/字符 = 实测标准档）。
 // 2026-08-18 实测（4 模式 × 3 次，默认模板 T1、不带思考，短提示词）：
 //   base avg 2.6s / lite 5.7s / standard 2.2s / smart 6.7s（最大 9.8s）；输出 156–336 字符（≈40–85 token）。
 // 标准档 = 实测 × 余量（覆盖真实长输入与慢模型）+ 模板语义保真上限（简单 ≤800 字符、复杂可超出）；
 // smart 管道含检索/判定/工作区调用 → 标准档更高。
-const MODE_PARAMS_DEFAULT = {
-  base: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
-  lite: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
-  standard: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
-  smart: { timeoutMs: 60000, maxTokens: 4000, outputLimit: 16000 },
-  publish: { timeoutMs: 60000, maxTokens: 4000, outputLimit: 16000 }, // 2026-08-18 实测：默认模板 avg 44.3s max 51.1s / 输出 4348–8593 字符（host 硬覆盖不设限，此值仅结构默认/UI 语义）
-};
+const MODE_PARAMS_DEFAULT = JSON.parse(JSON.stringify(contractData.MODE_PARAMS_DEFAULT));
 // 预算 → 扫描上限查表（仅 scanLimit:'by-budget' 模式消费；maxFiles = 注入 Top-N 上限）
 const BUDGET_WORKSPACE_TABLE = [
   { budget: 0, maxFiles: 2, depth: 1 },
@@ -728,9 +717,9 @@ function validateConfig(raw) {
 }
 
 // 模板体系扩展（2026-08-18 修订）：模板容量与名称上限常量
-const TEMPLATE_CUSTOM_MAX = 10;
-const TEMPLATE_TEXT_MAX = 4000;
-const TEMPLATE_NAME_MAX = 40;
+const TEMPLATE_CUSTOM_MAX = contractData.TEMPLATE_CUSTOM_MAX;
+const TEMPLATE_TEXT_MAX = contractData.TEMPLATE_TEXT_MAX;
+const TEMPLATE_NAME_MAX = contractData.TEMPLATE_NAME_MAX;
 
 // 模板体系扩展（2026-08-18 修订）：每模式选中模板解析——pick key（default/increment/custom:<index>）
 // → 内置模板或自定义列表条目；旧内置键 supplement/dev（2026-08-17 时期）按 increment 处理（list[1]）；

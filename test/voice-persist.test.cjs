@@ -49,10 +49,15 @@ test('VOICE-P02r voice/transcribe 已退役 ⇒ 三面均不得回流（CHG-117�
 // ---- 2. rpc-schema 单一事实源（P1b：双份同步已终结）----
 test('VOICE-P05 rpc-schema 单一事实源：lib 副本含 voice/*，死层副本不得复活', () => {
   const src = readFileSync(join(__dirname, '..', 'lib', 'rpc-schema.cjs'), 'utf8');
-  assert.ok(src.includes("'voice/status'"), 'lib/rpc-schema.cjs 缺 voice/status');
+  // 契约收敛批（2026-11-04）：方法名迁至 lib/contracts.cjs；schema 由契约派生。
+  const contract = readFileSync(join(__dirname, '..', 'lib', 'contracts.cjs'), 'utf8');
+  assert.ok(contract.includes("VOICE_STATUS: 'voice/status'"), 'lib/contracts.cjs 缺 voice/status 契约');
+  assert.ok(src.includes("require('./contracts.cjs')"), 'rpc-schema 必须从契约派生');
+  assert.equal(libSchema.schemas['voice/status'] !== undefined, true, 'voice/status 必须有派生 schema');
   // CHG-117：原两条「voice/transcribe 须存在 + 缺 required」断言**随 RPC 退役删除**
   //   （它们锁的是"旧物应存在"；现由 VOICE-P02r 的"不得回流"锁接替）。
-  assert.ok(!src.includes("'voice/transcribe'"), 'CHG-117：voice/transcribe 的 schema 不得回流');
+  assert.ok(!contract.includes("VOICE_TRANSCRIBE: 'voice/transcribe'"), 'CHG-117：voice/transcribe 的契约不得回流');
+  assert.equal(libSchema.schemas['voice/transcribe'], undefined, 'CHG-117：voice/transcribe 的 schema 不得回流');
   assert.equal(
     JSON.stringify(libSchema.schemas['voice/status']),
     JSON.stringify(require('../lib/rpc-schema.cjs').schemas['voice/status']),
