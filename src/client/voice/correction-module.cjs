@@ -132,7 +132,9 @@ function markCorrectionSettled(res, before, sessionId) {
   // ⚠ 服务端守卫判关（CORRECTION_DISABLED）⇒ 这属于**跳过**，不属于运行。
   //   为什么单独记来源：客户端开关开着、服务端读盘判关时，
   //   若显示「已完成·无改动」就是**假读数**（实际一次模型调用都没发生）。
-  if (r.skipped === true && String(r.code || '') === 'CORRECTION_DISABLED') {
+  // ⚠ 失败优先：只有**成功响应里的 skipped** 才是真跳过。若同一包带 `ok:false`，
+  //   不得被开关跳过分支掩蔽（否则真实故障会被渲染成「因开关没跑」）。
+  if (r.ok === true && r.skipped === true && String(r.code || '') === 'CORRECTION_DISABLED') {
     correctionState.skipped += 1;
     correctionState.lastSkipReason = 'disabled';
     correctionState.lastSkipSource = 'server';

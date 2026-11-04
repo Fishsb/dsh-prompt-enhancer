@@ -1,0 +1,79 @@
+{
+  "enhancement": [
+    {
+      "id": "E1",
+      "input": "修复登录超时：token 30 分钟后过期时刷新失败，接口路径 /api/auth/refresh 不能改。",
+      "modelOutput": "请修复登录超时问题：当 token 在 30 分钟后过期时，刷新流程需要正确恢复；保持接口路径 /api/auth/refresh 不变。",
+      "facts": ["token", "30 分钟", "/api/auth/refresh"],
+      "maxGrowth": 2.5
+    },
+    {
+      "id": "E2",
+      "input": "把 handleClick 改成 300ms 防抖，保留 event 参数。",
+      "modelOutput": "请将 handleClick 改为 300ms 防抖，并保留 event 参数。",
+      "facts": ["handleClick", "300ms", "event"],
+      "maxGrowth": 2.5
+    },
+    {
+      "id": "E3",
+      "input": "写一个纸牌游戏方案，支持 2-4 人、记分和撤销操作。",
+      "modelOutput": "请设计一套纸牌游戏实现方案，支持 2-4 人游玩，并提供记分与撤销操作。",
+      "facts": ["纸牌游戏", "2-4 人", "记分", "撤销"],
+      "maxGrowth": 2.5
+    },
+    {
+      "id": "E4",
+      "input": "检查 README.md 的安装步骤，命令 npm install 不要改。",
+      "modelOutput": "请检查 README.md 中的安装步骤，并保持 npm install 命令不变。",
+      "facts": ["README.md", "npm install"],
+      "maxGrowth": 2.5
+    },
+    {
+      "id": "E5",
+      "input": "给登录页增加错误提示，失败文案用「登录失败，请重试」。",
+      "modelOutput": "请在登录页补充错误提示，失败场景使用「登录失败，请重试」。",
+      "facts": ["登录页", "错误提示", "「登录失败，请重试」"],
+      "maxGrowth": 2.5
+    },
+    {
+      "id": "E6",
+      "input": "重构 voice/correct，保留 RPC 参数 sessionId 和 text。",
+      "modelOutput": "请重构 voice/correct 的内部实现，同时保持 RPC 参数 sessionId 与 text 不变。",
+      "facts": ["voice/correct", "sessionId", "text"],
+      "maxGrowth": 2.5
+    }
+  ],
+  "correction": {
+    "protected": [
+      "「请在坐的各位看一下。」",
+      "```\n这个函数的逻辑有点问题\n```",
+      "下周在讨论这个问题，先不着急。",
+      "这个问题等下在说，先把当前这版发出去。",
+      "这个接口返回只有点问题，需要修一下。",
+      "请在座的各位先看一下这份文档。",
+      "他说：以上是优化结果",
+      "以下是优化后的提示词：把日志导出来",
+      "请把 `npm install` 执行完再继续。",
+      "配置项是 timeout-ms=30000。",
+      "文件路径保持 src/client/app-module.cjs 不变。",
+      "请求头使用 Content-Type: application/json。"
+    ],
+    "correct": [
+      ["请在坐的各位先看一下这份文档。", "请在座的各位先看一下这份文档。"],
+      ["这个问题的根本原因在已找到了，是配置写错了。", "这个问题的根本原因已经找到了，是配置写错了。"],
+      ["麻烦你把日志到出来看看，我这边看不到。", "麻烦你把日志导出来看看，我这边看不到。"],
+      ["我们下周在讨论这个问题，先不着急。", "我们下周再讨论这个问题，先不着急。"],
+      ["这个问题等下在说，先把当前这版发出去。", "这个问题等下再说，先把当前这版发出去。"],
+      ["这个接口的返回只有点问题，需要修一下。", "这个接口的返回有点问题，需要修一下。"]
+    ]
+  },
+  "thresholds": {
+    "enhancementFactRetentionMin": 1,
+    "excessiveRewriteRateMax": 0,
+    "correctionMisfireRateMax": 0,
+    "correctionRecallMin": 1,
+    "vadAutoStopPassRateMin": 1,
+    "latencyRulePassRateMin": 1,
+    "localCleanTotalMsMax": 100
+  }
+}

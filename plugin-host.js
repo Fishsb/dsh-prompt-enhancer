@@ -4747,6 +4747,7 @@ function resultStatusOf(result) {
   const r = result && typeof result === 'object' ? result : {};
   if (r.ok !== true) return RESULT_STATUS.FAILED;
   if (r.skipped === true) return RESULT_STATUS.SKIPPED;
+  if (typeof r.status === 'string' && RESULT_STATUSES.indexOf(r.status) !== -1) return r.status;
   if (typeof r.changed === 'boolean') return r.changed ? RESULT_STATUS.CHANGED : RESULT_STATUS.UNCHANGED;
   if (typeof r.text === 'string' && typeof r.before === 'string') return r.text === r.before ? RESULT_STATUS.UNCHANGED : RESULT_STATUS.CHANGED;
   // 没有可判证据时，不得声称已改动（保守：unchanged）
