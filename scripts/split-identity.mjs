@@ -19,6 +19,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { emitRingState, installCrashGuard } from './lib/ring-state.mjs';
 import {
   patchEntryIdentities, clientModuleIds, rpcRoutePrefixes, rpcMethods,
@@ -26,6 +27,8 @@ import {
 } from './lib/split-identity.mjs';
 
 installCrashGuard('pkg-identity');
+const require = createRequire(import.meta.url);
+const contract = require('../lib/contracts.cjs');
 const args = process.argv.slice(2);
 const read = (rel) => { try { return fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8'); } catch (e) { return null; } };
 
@@ -51,7 +54,7 @@ const groups = [
   // ⚠ **不得先去重再判重**（本批负控 D 实测踩到）：`[...new Set(...)]` 会把"两处注册同名方法"
   //   这一**缺陷本身**先消掉 ⇒ 判据恒绿。判重必须用**注册点**的原样列表；
   //   去重后的条数只用于 `observed` 的非空跑断言（见下方 `distinct`）。
-  { label: 'RPC 方法名', values: rpcMethods(allHostText) },
+  { label: 'RPC 方法名', values: rpcMethods(allHostText, contract.RPC_METHODS) },
 ];
 
 const fails = [];

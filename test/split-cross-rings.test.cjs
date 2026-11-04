@@ -21,6 +21,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..');
+const { RPC_METHODS } = require('../src/shared/contracts/rpc.cjs');
 
 const identity = require('../scripts/lib/split-identity.mjs');
 const shared = require('../scripts/lib/split-shared-fns.mjs');
@@ -128,7 +129,7 @@ test('SPLIT-ID-6 正向：真实仓 —— 两道判据绿，且 observed 达分
     { label: 'loader entry id', values: identity.patchEntryIdentities(patch).map((e) => e.id) },
     { label: 'client 模块 id', values: identity.clientModuleIds(client) },
     { label: 'RPC 路由前缀', values: identity.rpcRoutePrefixes(index) },
-    { label: 'RPC 方法名', values: [...new Set(identity.rpcMethods(hostText))] },
+    { label: 'RPC 方法名', values: [...new Set(identity.rpcMethods(hostText, RPC_METHODS))] },
   ];
   const r = identity.findCollisions(groups);
   assert.equal(r.ok, true, '真实仓应判绿：\n' + JSON.stringify(r.duplicates));

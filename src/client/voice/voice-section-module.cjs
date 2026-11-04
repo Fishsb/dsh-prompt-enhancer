@@ -4,6 +4,7 @@
 // 诊断组件与设置区块的可见文案、类名、ARIA 和交互不变。
 function createVoiceSection(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};
+  const rpcMethods = d.rpcMethods && typeof d.rpcMethods === 'object' ? d.rpcMethods : {};
   const React = d.React;
   const makeT = d.makeT;
   const host = d.host;
@@ -302,7 +303,7 @@ function VoiceSection(props) {
 
   // 就绪态：识别引擎（委托官方 speechToText.snapshot()）+ 规整
   const check = () => {
-    host.call('voice/status', {}).then((r) => { setStatus(r && r.ok === true ? r : null); }).catch(() => { setStatus(null); });
+    host.call(rpcMethods.VOICE_STATUS, {}).then((r) => { setStatus(r && r.ok === true ? r : null); }).catch(() => { setStatus(null); });
   };
   const speechReady = !!(status && status.speech && status.speech.available);
   const speechProviders = (status && status.speech && Array.isArray(status.speech.providers)) ? status.speech.providers : [];

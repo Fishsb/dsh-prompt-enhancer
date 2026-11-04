@@ -51,6 +51,7 @@ import { resolveGovRoot } from './lib/gov-root.mjs';
 
 installCrashGuard('arch-claims');
 const require = createRequire(import.meta.url);
+const contract = require('../lib/contracts.cjs');
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ARGS = process.argv.slice(2);
 const has = (f) => ARGS.includes(f);
@@ -114,7 +115,9 @@ const list = (p) => fs.readdirSync(abs(p));
  *   ⇒ 与 rpc-manifest.mjs 同步：枚举 `lib/` 下全部非生成 .cjs（排除构建产物 client.cjs）。
  */
 function liveMethods() {
-  const grab = (f) => [...read(f).matchAll(/harness\.handle\(\s*'([^']+)'/g)].map((m) => m[1]);
+  const grab = (f) => [...read(f).matchAll(/harness\.handle\(\s*(?:'([^']+)'|RPC_METHODS\.([A-Z0-9_]+))/g)]
+    .map((m) => m[1] || contract.RPC_METHODS[m[2]])
+    .filter(Boolean);
   // ⚠ P2 窄复核处置批（2026-10-13 · F-1）：与 dead-code-gate / rpc-manifest 共用同一事实源
   const native = libManifest.libHandwrittenTargets().flatMap((f) => grab(f));
   return { native, bundled: grab('plugin-host.js') };

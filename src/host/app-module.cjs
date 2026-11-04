@@ -19,6 +19,7 @@ const { createCorrectionRunner } = require('./correction-runner.cjs');
 const correctionSwitch = require('./correction-switch.cjs');
 const { enhanceSuccessResult, enhanceFailureResult } = require('./enhance-result-module.cjs');
 const prompts = require('./prompts-module.cjs');
+const { RPC_METHODS } = require('../shared/contracts/rpc.cjs');
 
 const V2_WORKSPACE_IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.venv', 'venv', '__pycache__', '.next', '.cache', 'coverage', 'target', '.idea', '.vscode']);
 
@@ -64,7 +65,7 @@ function createHostPlugin(harness, runtime) {
       });
       for (const [name, handler] of modelsRpc.handlers) harness.handle(name, handler);
 
-      harness.handle('logs/last', logsLast);
+      harness.handle(RPC_METHODS.LOGS_LAST, logsLast);
       const templateRpc = createTemplateRpc({
         base: prompts.SYSTEM_PROMPT, lite: prompts.SYSTEM_LITE_PROMPT, standard: prompts.SYSTEM_STANDARD_PROMPT,
         smart: prompts.SYSTEM_SMART_PROMPT, publish: prompts.SYSTEM_PUBLISH_PROMPT,
@@ -73,7 +74,7 @@ function createHostPlugin(harness, runtime) {
         incrementSmart: prompts.SYSTEM_INCREMENT_SMART_PROMPT,
         incrementPublish: prompts.SYSTEM_INCREMENT_PUBLISH_PROMPT,
       });
-      harness.handle('template/default', templateRpc.templateDefault);
+      harness.handle(RPC_METHODS.TEMPLATE_DEFAULT, templateRpc.templateDefault);
 
       const contextRuntime = createContextRuntime({
         hlog,

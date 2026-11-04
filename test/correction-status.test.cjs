@@ -21,6 +21,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
+const { RPC_METHODS } = require('../src/shared/contracts/rpc.cjs');
 const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 const { i18nSource, ZH } = require('./helpers/client-i18n.cjs');
 const voiceModules = require('./helpers/client-voice-modules.cjs');
@@ -242,6 +243,7 @@ test('CHG184-S14 ⭐ 接线（R3 迁移）：纠错状态不再注册独立元�
       + '  cancelEnhance, undo, modeShortLabel, prettifyModel, timerSvc, host, correctionSnapshot,\n'
       + '  correctionPhaseOf, CORRECTION_PHASES, correctionFailureTicket, consumeCorrectionFailure,\n'
       + '  correctionPhaseView,\n'
+      + '  rpcMethods,\n'
       + '});\n');
   assert.ok(/subscribeCorrection/.test(eb), '✨ 按钮必须订阅纠错状态机（否则删了旧的但没接新的 = 状态不可见）');
   assert.ok(/correctionPhaseOf/.test(eb), '✨ 按钮必须读纠错相位');

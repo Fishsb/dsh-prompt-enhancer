@@ -4,6 +4,7 @@
 // 依赖通过工厂显式注入；所有文案、ARIA、类名、状态优先级与行为不变。
 function createEnhanceButton(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};
+  const rpcMethods = d.rpcMethods && typeof d.rpcMethods === 'object' ? d.rpcMethods : {};
   const React = d.React;
   const makeT = d.makeT;
   const dshEnhId = d.dshEnhId;
@@ -142,7 +143,7 @@ function EnhanceButton(props) {
     setProg(null);
     if (!timerSvc || typeof timerSvc.interval !== 'function') return undefined;
     const disposer = timerSvc.interval(() => {
-      host.call('enhance/progress', { sessionId, seq }).then((r) => {
+      host.call(rpcMethods.ENHANCE_PROGRESS, { sessionId, seq }).then((r) => {
         if (disposed || !r || r.ok !== true) return;
         setProg({
           stage: typeof r.stage === 'string' ? r.stage : '',

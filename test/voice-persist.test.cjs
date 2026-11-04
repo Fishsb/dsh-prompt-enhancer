@@ -73,7 +73,7 @@ test('VOICE-P05 rpc-schema 单一事实源：lib 副本含 voice/*，死层副�
 //   —— 仍是 4 条（两条 harness.handle + asr require + merge 语义）；另加 1 条入口接线断言。
 test('VOICE-P06 voice/status RPC 注册（CHG-117：voice/transcribe 已退役）+ 入口接线', () => {
   const src = readFileSync(join(__dirname, '..', 'lib', 'rpc-voice.cjs'), 'utf8');
-  assert.ok(src.includes("harness.handle('voice/status'"), '未注册 voice/status');
+  assert.ok(src.includes('harness.handle(RPC_METHODS.VOICE_STATUS'), '未注册 voice/status');
   // CHG-117：原「须注册 voice/transcribe」断言**随 RPC 退役删除**（同样的"旧物应存在"类）；
   //   判据强度由 VOICE-P02r 的"不得回流"锁承接，未削弱。
   assert.ok(!src.includes("harness.handle('voice/transcribe'"), 'CHG-117：voice/transcribe 注册面不得回流');

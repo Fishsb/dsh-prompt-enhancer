@@ -155,11 +155,14 @@ test('RPCG-06 入口装载链 L3 冒烟：apply() 真实注册 + 派生的全部
       // 同一事实源派生「应被接线的原生方法集」（与 rpc-manifest 同口径）
       // UNC 路径兼容：动态 import 必须用 file:// URL（Node ESM 不接受裸文件系统路径）。
       const lm = await import(require('node:url').pathToFileURL(path.join(ROOT, 'scripts', 'lib', 'lib-manifest.mjs')).href);
+      const contract = require(path.join(ROOT, 'lib', 'contracts.cjs'));
       const targets = lm.libHandwrittenTargets();
       const methods = [];
       for (const f of targets) {
         const t = fs.readFileSync(path.join(ROOT, f), 'utf8');
-        for (const m of t.matchAll(/harness\\.handle\\(\\s*'([^']+)'/g)) methods.push(m[1]);
+        for (const m of t.matchAll(/harness\\.handle\\(\\s*(?:'([^']+)'|RPC_METHODS\\.([A-Z0-9_]+))/g)) {
+          methods.push(m[1] || contract.RPC_METHODS[m[2]]);
+        }
       }
       const indexMod = require(path.join(ROOT, 'lib', 'index.cjs'));
       let captured = null;

@@ -27,6 +27,7 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const args = process.argv.slice(2);
+const contract = require('../lib/contracts.cjs');
 
 /**
  * 注册面派生：插件双半部的 harness.handle 并集。
@@ -38,7 +39,13 @@ const args = process.argv.slice(2);
  *   不注册 host RPC；含 `harness.handle('x'` 即计入）。`native` 的**语义与数字（4）不变**。
  */
 function deriveLiveMethods() {
-  const grab = (f) => [...read(f).matchAll(/harness\.handle\(\s*'([^']+)'/g)].map((m) => m[1]);
+  const grab = (f) => [...read(f).matchAll(/harness\.handle\(\s*(?:'([^']+)'|RPC_METHODS\.([A-Z0-9_]+))/g)]
+    .map((m) => {
+      if (m[1]) return m[1];
+      const resolved = contract.RPC_METHODS[m[2]];
+      if (!resolved) throw new Error('[rpc-manifest] 未解析的 RPC_METHODS 键: ' + m[2]);
+      return resolved;
+    });
   // ⚠ P2 窄复核处置批（2026-10-13 · F-1）：排除集/枚举收敛到单一事实源 `scripts/lib/lib-manifest.mjs`
   //   （此前本文件自持一份 `generated` 字面量 ⇒ 与 dead-code-gate / arch-claims 三处可各自漂移）。
   const native = libManifest.libHandwrittenTargets().flatMap((f) => grab(f));
@@ -111,7 +118,6 @@ function deriveCurrentDocMethods() {
   return { ok: true, methods: [...out].sort() };
 }
 
-const contract = require('../lib/contracts.cjs');
 const { native, bundled, live, intersection, derivedFrom } = deriveLiveMethods();
 const schemas = schemaKeys(contract);
 const doc = read('docs/compatibility-matrix.md');

@@ -87,8 +87,14 @@ export function rpcRoutePrefixes(text) {
  * @param {string} text 源码文本
  * @returns {string[]} 方法名（可能重复，调用方自行去重）
  */
-export function rpcMethods(text) {
-  return [...String(text).matchAll(/harness\.handle\(\s*'([^']+)'/g)].map((m) => m[1]);
+export function rpcMethods(text, methodNames) {
+  const names = methodNames && typeof methodNames === 'object' ? methodNames : null;
+  return [...String(text).matchAll(/harness\.handle\(\s*(?:'([^']+)'|RPC_METHODS\.([A-Z0-9_]+))/g)]
+    .map((m) => {
+      if (m[1]) return m[1];
+      return names ? names[m[2]] : null;
+    })
+    .filter((name) => typeof name === 'string' && name !== '');
 }
 
 /**

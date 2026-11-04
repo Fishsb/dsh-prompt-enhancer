@@ -1,5 +1,7 @@
 'use strict';
 
+const { RPC_METHODS } = require('../shared/contracts/rpc.cjs');
+
 // 增强/纠错 RPC 注册域（目标模式：普通 CommonJS，构建期由 build-host 打包内联）。
 // 这里只把既有 apply() 内的注册正文搬入显式工厂；RPC 名、参数、返回字段与执行顺序不变。
 // 依赖由构建期装配点显式注入，产物仍保持自包含、无外部 require。
@@ -120,7 +122,7 @@ async function runEnhancePipeline(state) {
 }
 
 // v2.3（§7.3）：优化进度轮询 RPC——从 pending Map 读 stage（纯展示，失败静默降级）
-harness.handle('enhance/progress', async (args) => {
+harness.handle(RPC_METHODS.ENHANCE_PROGRESS, async (args) => {
   const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : '';
   const seq = args && typeof args.seq === 'number' ? args.seq : -1;
   const rec = pending.get(requestKey(sessionId, seq));
@@ -220,7 +222,7 @@ registerEnhanceStage('retrieve', enhanceStageRetrieve, { priority: 100 });
 registerEnhanceStage('assemble', enhanceStageAssemble, { priority: 100 });
 registerEnhanceStage('llm', enhanceStageLlm, { priority: 100 });
 
-harness.handle('enhance', async (args) => {
+harness.handle(RPC_METHODS.ENHANCE, async (args) => {
   const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : 'unknown';
   const seq = args && typeof args.seq === 'number' ? args.seq : -1;
   const text = args && typeof args.text === 'string' ? args.text : '';
@@ -306,7 +308,7 @@ async function runCorrection(args) {
   return correctionRunner.runCorrection(args);
 }
 
-harness.handle('voice/correct', async (args) => {
+harness.handle(RPC_METHODS.VOICE_CORRECT, async (args) => {
   try {
     return await runCorrection(args);
   } catch (e) {
@@ -315,7 +317,7 @@ harness.handle('voice/correct', async (args) => {
   }
 });
 
-harness.handle('cancel', async (args) => {
+harness.handle(RPC_METHODS.CANCEL, async (args) => {
   const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : 'unknown';
   const seq = args && typeof args.seq === 'number' ? args.seq : -1;
   markAndAbort(requestKey(sessionId, seq), 'cancelled');

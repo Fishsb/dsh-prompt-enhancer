@@ -55,7 +55,7 @@ function createClientApp(deps) {
   const configApi = createClientState({ host: d.host, timerRef, storage });
   const configState = configApi.configState;
   const helpers = createClientHelpers({ host: d.host, configState, dictionary: ZH, storage, resultStatusOf: contracts.resultStatusOf });
-  const voiceApi = createVoiceState({ host: d.host, storage, timerSvc, fillerState: shared.fillerState, defaults: contracts.VOICE_CONFIG_DEFAULTS, normalizeVadSilenceMs: contracts.normalizeVadSilenceMs, console: d.console });
+  const voiceApi = createVoiceState({ host: d.host, storage, timerSvc, fillerState: shared.fillerState, defaults: contracts.VOICE_CONFIG_DEFAULTS, normalizeVadSilenceMs: contracts.normalizeVadSilenceMs, rpcMethods: contracts.RPC_METHODS, console: d.console });
   const voiceCfgState = voiceApi.voiceCfgState;
   const correction = createCorrectionState({ voiceCfgState, correctionStateCore: { CORRECTION_PHASES: shared.CORRECTION_PHASES, correctionPhaseKnown: shared.correctionPhaseKnown, correctionPhaseOf: shared.correctionPhaseOf, correctionFailureTicket: shared.correctionFailureTicket, correctionFailureConsume: shared.correctionFailureConsume } });
   const officialVoiceBridge = createOfficialVoiceBridge({
@@ -68,7 +68,7 @@ function createClientApp(deps) {
     React: d.React, makeT: helpers.makeT, host: d.host, voiceCfgState,
     subscribeVoiceConfig: voiceApi.subscribeVoiceConfig, saveVoiceCfg: voiceApi.saveVoiceCfg,
     syncVoiceFromHost: voiceApi.syncVoiceFromHost, vadSilenceMsOf: voiceApi.vadSilenceMsOf,
-    normalizeVadSilenceMs: voiceApi.normalizeVadSilenceMs, CollapsibleSection, officialVoiceBridge,
+    normalizeVadSilenceMs: voiceApi.normalizeVadSilenceMs, rpcMethods: contracts.RPC_METHODS, CollapsibleSection, officialVoiceBridge,
     fillerSnapshot: shared.fillerSnapshot, subscribeFiller: shared.subscribeFiller,
     correctionSnapshot: correction.correctionSnapshot, subscribeCorrection: correction.subscribeCorrection,
     setTimeout: d.setTimeout || setTimeout, clearTimeout: d.clearTimeout || clearTimeout, window: d.window,
@@ -106,7 +106,7 @@ function createClientApp(deps) {
     prettifyModel: shared.prettifyModel, timerSvc, host: d.host, correctionSnapshot: correction.correctionSnapshot,
     correctionPhaseOf: correction.correctionPhaseOf, CORRECTION_PHASES: correction.CORRECTION_PHASES,
     correctionFailureTicket: correction.correctionFailureTicket, consumeCorrectionFailure: correction.consumeCorrectionFailure,
-    correctionPhaseView: correction.correctionPhaseView,
+    correctionPhaseView: correction.correctionPhaseView, rpcMethods: contracts.RPC_METHODS,
   });
   const EnhanceBar = createEnhanceBar({ React: d.React, makeT: helpers.makeT, subscribe: helpers.subscribe, storeFor: helpers.storeFor, notify: helpers.notify, releaseStoreIfIdle: helpers.releaseStoreIfIdle, errorKey: helpers.errorKey });
   // 共享常量/模型工具从共享运行时取，组件不再依赖隐式全局。
@@ -121,7 +121,7 @@ function createClientApp(deps) {
     markCorrectionSettled: correction.markCorrectionSettled, markCorrectionFailed: correction.markCorrectionFailed,
     notifyCorrection: correction.notifyCorrection, correctionState: correction.correctionState,
     planVoicePostprocess: contracts.planVoicePostprocess, voicePostprocessHas: contracts.voicePostprocessHas,
-    stripFillers: shared.stripFillers, runFiller: shared.runFiller,
+    stripFillers: shared.stripFillers, runFiller: shared.runFiller, rpcMethods: contracts.RPC_METHODS,
   }).VoiceHotkeyHost;
   return {
   inject: ['timer'],

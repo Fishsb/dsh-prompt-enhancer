@@ -34,6 +34,6 @@ test('TRPC-03 产物内联模板 RPC 模块，方法名不变', () => {
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
   assert.ok(host.includes('"src/host/template-rpc.cjs"'));
   assert.ok(host.includes('"src/host/template-rpc.cjs"'));
-  assert.ok(host.includes("harness.handle('template/default', templateRpc.templateDefault)"));
+  assert.ok(host.includes('harness.handle(RPC_METHODS.TEMPLATE_DEFAULT, templateRpc.templateDefault)'));
   assert.equal((host.match(/require\(/g) || []).length, 0);
 });

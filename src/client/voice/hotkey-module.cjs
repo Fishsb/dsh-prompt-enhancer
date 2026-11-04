@@ -4,6 +4,7 @@
 // 纯函数与 VoiceHotkeyHost 的行为不变；宿主、配置、纠错状态和计时器均显式注入。
 function createVoiceHotkey(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};
+  const rpcMethods = d.rpcMethods && typeof d.rpcMethods === 'object' ? d.rpcMethods : {};
   const React = d.React;
   const host = d.host;
   const voiceCfgState = d.voiceCfgState;
@@ -208,7 +209,7 @@ function VoiceHotkeyHost(props) {
         // ⚠ CHG-184（纠错状态可视化批）：相位由 correction.js 的 markCorrection* 三件**统一结算**
         //   （started / settled / failed）—— ⛔ 此处不再自行增减 correctionState 的计数。
         if (typeof markCorrectionStarted === 'function') markCorrectionStarted(sessionId);
-        api.call('voice/correct', { sessionId: sessionId, text: cur, config: config }).then((res) => {
+        api.call(rpcMethods.VOICE_CORRECT, { sessionId: sessionId, text: cur, config: config }).then((res) => {
           const r = res && typeof res === 'object' ? res : {};
           if (typeof markCorrectionSettled === 'function') markCorrectionSettled(r, cur, sessionId);
           if (r.ok === true && typeof r.text === 'string' && r.text.trim() !== '' && r.text !== cur) {

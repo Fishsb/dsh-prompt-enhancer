@@ -4,6 +4,7 @@
 // 默认值、存储、host RPC、定时器与清口水词状态均由调用方显式注入。
 function createVoiceState(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};
+  const rpcMethods = d.rpcMethods && typeof d.rpcMethods === 'object' ? d.rpcMethods : {};
   const host = d.host || null;
   // 归一化入口由装配层注入（与 host 共用契约实现）；未注入时使用契约默认值兜底。
   const normalizeVadSilenceMs = typeof d.normalizeVadSilenceMs === 'function'
@@ -108,7 +109,7 @@ function createVoiceState(deps) {
     };
     const runAttempt = () => {
       if (!host || typeof host.call !== 'function') return scheduleRetry();
-      const p = host.call('config/get', {}).then((res) => {
+      const p = host.call(rpcMethods.CONFIG_GET, {}).then((res) => {
         const r = res && typeof res === 'object' ? res : {};
         if (!r.ok) return scheduleRetry();
         const diskCfg = (r.config && typeof r.config === 'object') ? r.config : null;
@@ -133,7 +134,7 @@ function createVoiceState(deps) {
     persistVoiceLocal();
     const disk = { voice: JSON.parse(JSON.stringify(voiceCfgState.value)) };
     if (host && typeof host.call === 'function') {
-      host.call('config/set', { config: disk }).catch(() => { /* 静默：下次保存重试 */ });
+      host.call(rpcMethods.CONFIG_SET, { config: disk }).catch(() => { /* 静默：下次保存重试 */ });
     }
     notifyVoice();
   }
@@ -149,7 +150,7 @@ function createVoiceState(deps) {
     delete next.voice.refine;
     try {
       if (host && typeof host.call === 'function') {
-        host.call('config/set', { config: next }).then((w) => {
+        host.call(rpcMethods.CONFIG_SET, { config: next }).then((w) => {
           const ok = !!(w && w.ok);
           if (fillerState) {
             fillerState.legacyCleaned = ok;

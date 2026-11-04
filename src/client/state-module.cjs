@@ -6,6 +6,7 @@ const {
   CONFIG_KEY, CONFIG_KEY_V1, CONFIG_DEFAULTS, MODE_VALUES,
   TEMPLATE_CUSTOM_MAX, TEMPLATE_NAME_MAX, TEMPLATE_TEXT_MAX,
 } = require('./constants-module.cjs');
+const { RPC_METHODS } = require('../shared/contracts/rpc.cjs');
 
 function createClientState(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};
@@ -20,25 +21,9 @@ function createClientState(deps) {
 const configState = { value: { ...CONFIG_DEFAULTS }, listeners: new Set(), fresh: true, unsupported: false, hostSync: null };
 
 function cloneDefaults() {
-  return {
-    version: 2,
-    fallback: [],
-    customModels: [],
-    order: [],
-    params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 },
-    template: {
-      mode: 'builtin',
-      text: '',
-      texts: { base: '', lite: '', standard: '', smart: '', publish: '' },
-      pick: { base: 'default', lite: 'default', standard: 'default', smart: 'default', publish: 'default' },
-      custom: { base: [], lite: [], standard: [], smart: [], publish: [] },
-      touched: [],
-    },
-    mode: 'base',
-    context: { mode: 'smart', budgetChars: 4000, workspace: { maxFiles: 3, depth: 2 } },
-    memory: false,
-    updater: { repo: '', targetDir: '' },
-  };
+  // 配置默认值只有一份事实源（lib/contracts.cjs）。这里只做深拷贝，
+  // 防止迁移/清洗过程原地修改共享冻结对象。
+  return JSON.parse(JSON.stringify(CONFIG_DEFAULTS));
 }
 
 function sanitizeV2(parsed) {
@@ -302,7 +287,7 @@ function saveConfig(patch) {
       const payload = (patch && typeof patch === 'object' && !Array.isArray(patch)) ? { ...patch } : {};
       // ⚠ 兼容：调用方可能显式传「以 configState.value 为基准的整份」语义（历史行为）；
       //   本修复后仅提交 payload ⇒ 该语义由下方 merge 语义保证（磁盘既有键原样保留）。
-      host.call('config/set', { config: payload }).catch(() => {});
+      host.call(RPC_METHODS.CONFIG_SET, { config: payload }).catch(() => {});
     } catch (e) { /* 忽略 */ }
   }
   // v2.7.0：保存校验状态机——saving（转圈）→ 1s 后真实校验 → saved/failed；
@@ -343,7 +328,7 @@ function syncConfigFromHost() {
     notifyConfig();
   };
   if (typeof host === 'undefined' || !host || typeof host.call !== 'function') { retry(); return; }
-  host.call('config/get').then((res) => {
+  host.call(RPC_METHODS.CONFIG_GET).then((res) => {
     const r = res && typeof res === 'object' ? res : {};
     if (!r.ok) { retry(); return; }
     if (r.config && typeof r.config === 'object') {
@@ -365,7 +350,7 @@ function syncConfigFromHost() {
     // 磁盘无配置：localStorage 有（固定端口 web 老用户升级）→ 迁移写盘；都空 → 保持 fresh 首次继承
     configState.hostSync = true;
     if (!configState.fresh && storage && storage.getItem(CONFIG_KEY)) {
-      try { host.call('config/set', { config: configState.value }).catch(() => {}); } catch (e) { /* 忽略 */ }
+      try { host.call(RPC_METHODS.CONFIG_SET, { config: configState.value }).catch(() => {}); } catch (e) { /* 忽略 */ }
     }
     notifyConfig();
   }).catch(() => retry());

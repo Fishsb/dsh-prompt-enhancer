@@ -20,4 +20,5 @@ module.exports = {
   resultStatusOf: result.resultStatusOf,
   resultIsTerminal: result.resultIsTerminal,
   postprocessOutcomeOf: result.postprocessOutcomeOf,
+  RPC_METHODS: require('./rpc.cjs').RPC_METHODS,
 };

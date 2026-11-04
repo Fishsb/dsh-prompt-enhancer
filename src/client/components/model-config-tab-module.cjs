@@ -1,5 +1,7 @@
 'use strict';
 
+const { RPC_METHODS } = require('../../shared/contracts/rpc.cjs');
+
 // 设置页模型配置 tab 普通模块（构建期由客户端运行时内联）。
 // 只改变代码载体；请求、继承、失效清理与可见行为不变。
 function createModelConfigTab(deps) {
@@ -29,7 +31,7 @@ function ModelConfigTab(props) {
       if (!providersReady || inheritedDone) return;
       if (configState.fresh && configState.hostSync === true && configState.value.fallback.length === 0) {
         inheritedDone = true;
-        host.call('models/current').then((res2) => {
+        host.call(RPC_METHODS.MODELS_CURRENT).then((res2) => {
           const r2 = res2 && typeof res2 === 'object' ? res2 : {};
           let chain = [];
           if (r2.ok && r2.provider && r2.model) {
@@ -54,7 +56,7 @@ function ModelConfigTab(props) {
       }
     };
     off = subscribeConfig(maybeInherit);
-    host.call('models/list').then((res) => {
+    host.call(RPC_METHODS.MODELS_LIST).then((res) => {
       const r = res && typeof res === 'object' ? res : {};
       if (r.ok && Array.isArray(r.providers)) {
         setProviders(r.providers);

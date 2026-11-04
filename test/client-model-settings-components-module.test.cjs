@@ -156,8 +156,8 @@ test('CMSC-04 ModelMainSection 保留默认链、单点测试状态与折叠区�
     path.join(REPO_ROOT, 'src/client/components/model-main-section-module.cjs'),
     'utf8',
   );
-  assert.ok(source.includes("host.call('models/test'"));
-  assert.ok(source.includes("host.call('models/stats'"));
+  assert.ok(source.includes('host.call(RPC_METHODS.MODELS_TEST'));
+  assert.ok(source.includes('host.call(RPC_METHODS.MODELS_STATS'));
   assert.ok(source.includes("className: 'dsh-plg-testarea', role: 'status'"));
 });
 

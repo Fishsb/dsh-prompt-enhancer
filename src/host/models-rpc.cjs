@@ -1,5 +1,7 @@
 'use strict';
 
+const { RPC_METHODS } = require('../shared/contracts/rpc.cjs');
+
 // 模型 RPC 面（目标模式：普通 CommonJS，构建期由打包器内联）。
 //
 // 保留原 models/* 注册正文与返回结构；内部 harness 仅收集处理器，由 app 装配到真实 harness。
@@ -21,7 +23,7 @@ function createModelsRpc(deps) {
   const handlers = new Map();
   const harness = { handle: (name, fn) => { handlers.set(name, fn); } };
 
-    harness.handle('models/list', async () => {
+    harness.handle(RPC_METHODS.MODELS_LIST, async () => {
       const llmService = ctx.get('llm');
       if (!llmService || typeof llmService.listProviders !== 'function') {
         return { ok: false, code: 'NO_LLM', message: 'llm service unavailable' };
@@ -44,7 +46,7 @@ function createModelsRpc(deps) {
       }
     });
 
-    harness.handle('models/resolve', async (args) => {
+    harness.handle(RPC_METHODS.MODELS_RESOLVE, async (args) => {
       const provider = args && typeof args.provider === 'string' ? args.provider : '';
       const model = args && typeof args.model === 'string' ? args.model : '';
       const llmService = ctx.get('llm');
@@ -78,7 +80,7 @@ function createModelsRpc(deps) {
       }
     });
 
-    harness.handle('models/current', async () => {
+    harness.handle(RPC_METHODS.MODELS_CURRENT, async () => {
       const adm = ctx.get('agentDefaultModel');
       if (!adm || typeof adm.currentSelection !== 'function') {
         return { ok: false, code: 'NO_SERVICE', message: 'agentDefaultModel unavailable' };
@@ -101,7 +103,7 @@ function createModelsRpc(deps) {
     });
 
     // v19：暴露自适应解析出的默认兜底链（供 client 首装继承 / 恢复默认使用，不再硬编码 provider）
-    harness.handle('models/autochain', async (args) => {
+    harness.handle(RPC_METHODS.MODELS_AUTOCHAIN, async (args) => {
       const llmSvc = ctx.get('llm');
       const adm = ctx.get('agentDefaultModel');
       try {
@@ -114,7 +116,7 @@ function createModelsRpc(deps) {
       }
     });
 
-    harness.handle('models/test', async (args) => {
+    harness.handle(RPC_METHODS.MODELS_TEST, async (args) => {
       const provider = args && typeof args.provider === 'string' ? args.provider : '';
       const model = args && typeof args.model === 'string' ? args.model : '';
       const reasoningEffort = args && typeof args.reasoningEffort === 'string' && args.reasoningEffort !== '' ? args.reasoningEffort : undefined;
@@ -254,7 +256,7 @@ function createModelsRpc(deps) {
       return { ok: true, ...summarizeModelStats(acc) };
     }
 
-    harness.handle('models/stats', async (args) => {
+    harness.handle(RPC_METHODS.MODELS_STATS, async (args) => {
       const provider = args && typeof args.provider === 'string' ? args.provider : '';
       const model = args && typeof args.model === 'string' ? args.model : '';
       const inputChars = args && typeof args.inputChars === 'number' && Number.isFinite(args.inputChars) ? args.inputChars : 0;

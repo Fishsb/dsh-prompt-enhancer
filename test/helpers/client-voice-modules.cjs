@@ -6,6 +6,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..', '..');
+const { RPC_METHODS } = require('../../src/shared/contracts/rpc.cjs');
+const RPC_PRELUDE = 'const rpcMethods = ' + JSON.stringify(RPC_METHODS) + ';\n';
 
 // 取工厂内部正文（依赖声明之后、return 之前），供既有 new Function 沙箱按原依赖名注入。
 // 不取工厂签名本身：测试调用方已经按符号名提供依赖，重复的形参声明会触发语法错误。
@@ -17,7 +19,7 @@ function factoryBody(rel) {
   if (fnStart < 0 || bodyStart < 0 || end <= bodyStart) {
     throw new Error('语音模块正文边界读不出：' + rel);
   }
-  return raw.slice(bodyStart, end);
+  return RPC_PRELUDE + raw.slice(bodyStart, end);
 }
 
 module.exports = {

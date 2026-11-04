@@ -1,5 +1,7 @@
 'use strict';
 
+const { RPC_METHODS } = require('../../shared/contracts/rpc.cjs');
+
 // 设置页模型配置组件普通模块（构建期由客户端运行时内联）。
 // 迁移只改变代码载体；组件行为、文案、类名与 ARIA 不变。
 function createModelMainSection(deps) {
@@ -95,7 +97,7 @@ function ModelMainSection(props) {
     setTestState({ key, index, entry, phase: 'testing', result: null, live: null, hist: { loading: true } });
 
     // 实测：本次测试测量
-    host.call('models/test', { provider: entry.provider, model: entry.model, inputChars }).then((res) => {
+    host.call(RPC_METHODS.MODELS_TEST, { provider: entry.provider, model: entry.model, inputChars }).then((res) => {
       const r = res && typeof res === 'object' ? res : {};
       setTestState((prev) => (prev && prev.key === key
         ? {
@@ -140,7 +142,7 @@ function ModelMainSection(props) {
           }
         : prev));
     };
-    const histP = host.call('models/stats', { provider: entry.provider, model: entry.model, inputChars });
+    const histP = host.call(RPC_METHODS.MODELS_STATS, { provider: entry.provider, model: entry.model, inputChars });
     if (timerSvc && typeof timerSvc.timeout === 'function') {
       let dispose = null;
       const timeoutP = new Promise((resolve) => { dispose = timerSvc.timeout(() => resolve({ ok: false, code: 'STATS_TIMEOUT' }), 8000); });

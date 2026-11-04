@@ -9,11 +9,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { VOICE_CONFIG_DEFAULTS } = require('../../src/shared/contracts/voice-config.cjs');
+const { RPC_METHODS } = require('../../src/shared/contracts/rpc.cjs');
 
 function voiceStateChunkWithDefaults() {
   const prelude = 'const __VOICE_CONFIG_DEFAULTS__ = '
     + JSON.stringify(VOICE_CONFIG_DEFAULTS)
-    + ';\n';
+    + ';\nconst __RPC_METHODS__ = ' + JSON.stringify(RPC_METHODS) + ';\n';
   const modulePath = path.join(__dirname, '..', '..', 'src', 'client', 'voice', 'state-module.cjs');
   const body = fs.readFileSync(modulePath, 'utf8')
     .replace(/\nmodule\.exports\s*=\s*\{\s*createVoiceState\s*\};\s*$/, '')
@@ -24,6 +25,7 @@ function voiceStateChunkWithDefaults() {
     + '  timerSvc: typeof timerSvc !== "undefined" ? timerSvc : null,\n'
     + '  fillerState: typeof fillerState !== "undefined" ? fillerState : null,\n'
     + '  defaults: __VOICE_CONFIG_DEFAULTS__,\n'
+    + '  rpcMethods: __RPC_METHODS__,\n'
     + '  autoSync: false,\n'
     + '});\n'
     + 'const { VOICE_CFG_KEY, VOICE_CFG_DEFAULTS, normalizeVadSilenceMs, vadSilenceMsOf,\n'

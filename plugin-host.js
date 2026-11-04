@@ -2084,9 +2084,22 @@ module.exports = {
 
 return module.exports;
 },
+  "src/shared/contracts/rpc.cjs": function (exports, module, __load) {
+
+'use strict';
+
+// 源码侧 RPC 契约转发。构建器会把 lib/contracts.cjs 内联进两半部产物。
+const contracts = __load("lib/contracts.cjs");
+
+module.exports = contracts;
+
+return module.exports;
+},
   "src/host/models-rpc.cjs": function (exports, module, __load) {
 
 'use strict';
+
+const { RPC_METHODS } = __load("src/shared/contracts/rpc.cjs");
 
 // 模型 RPC 面（目标模式：普通 CommonJS，构建期由打包器内联）。
 //
@@ -2109,7 +2122,7 @@ function createModelsRpc(deps) {
   const handlers = new Map();
   const harness = { handle: (name, fn) => { handlers.set(name, fn); } };
 
-    harness.handle('models/list', async () => {
+    harness.handle(RPC_METHODS.MODELS_LIST, async () => {
       const llmService = ctx.get('llm');
       if (!llmService || typeof llmService.listProviders !== 'function') {
         return { ok: false, code: 'NO_LLM', message: 'llm service unavailable' };
@@ -2132,7 +2145,7 @@ function createModelsRpc(deps) {
       }
     });
 
-    harness.handle('models/resolve', async (args) => {
+    harness.handle(RPC_METHODS.MODELS_RESOLVE, async (args) => {
       const provider = args && typeof args.provider === 'string' ? args.provider : '';
       const model = args && typeof args.model === 'string' ? args.model : '';
       const llmService = ctx.get('llm');
@@ -2166,7 +2179,7 @@ function createModelsRpc(deps) {
       }
     });
 
-    harness.handle('models/current', async () => {
+    harness.handle(RPC_METHODS.MODELS_CURRENT, async () => {
       const adm = ctx.get('agentDefaultModel');
       if (!adm || typeof adm.currentSelection !== 'function') {
         return { ok: false, code: 'NO_SERVICE', message: 'agentDefaultModel unavailable' };
@@ -2189,7 +2202,7 @@ function createModelsRpc(deps) {
     });
 
     // v19：暴露自适应解析出的默认兜底链（供 client 首装继承 / 恢复默认使用，不再硬编码 provider）
-    harness.handle('models/autochain', async (args) => {
+    harness.handle(RPC_METHODS.MODELS_AUTOCHAIN, async (args) => {
       const llmSvc = ctx.get('llm');
       const adm = ctx.get('agentDefaultModel');
       try {
@@ -2202,7 +2215,7 @@ function createModelsRpc(deps) {
       }
     });
 
-    harness.handle('models/test', async (args) => {
+    harness.handle(RPC_METHODS.MODELS_TEST, async (args) => {
       const provider = args && typeof args.provider === 'string' ? args.provider : '';
       const model = args && typeof args.model === 'string' ? args.model : '';
       const reasoningEffort = args && typeof args.reasoningEffort === 'string' && args.reasoningEffort !== '' ? args.reasoningEffort : undefined;
@@ -2342,7 +2355,7 @@ function createModelsRpc(deps) {
       return { ok: true, ...summarizeModelStats(acc) };
     }
 
-    harness.handle('models/stats', async (args) => {
+    harness.handle(RPC_METHODS.MODELS_STATS, async (args) => {
       const provider = args && typeof args.provider === 'string' ? args.provider : '';
       const model = args && typeof args.model === 'string' ? args.model : '';
       const inputChars = args && typeof args.inputChars === 'number' && Number.isFinite(args.inputChars) ? args.inputChars : 0;
@@ -2909,6 +2922,8 @@ return module.exports;
 
 'use strict';
 
+const { RPC_METHODS } = __load("src/shared/contracts/rpc.cjs");
+
 // 增强/纠错 RPC 注册域（目标模式：普通 CommonJS，构建期由 build-host 打包内联）。
 // 这里只把既有 apply() 内的注册正文搬入显式工厂；RPC 名、参数、返回字段与执行顺序不变。
 // 依赖由构建期装配点显式注入，产物仍保持自包含、无外部 require。
@@ -3029,7 +3044,7 @@ async function runEnhancePipeline(state) {
 }
 
 // v2.3（§7.3）：优化进度轮询 RPC——从 pending Map 读 stage（纯展示，失败静默降级）
-harness.handle('enhance/progress', async (args) => {
+harness.handle(RPC_METHODS.ENHANCE_PROGRESS, async (args) => {
   const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : '';
   const seq = args && typeof args.seq === 'number' ? args.seq : -1;
   const rec = pending.get(requestKey(sessionId, seq));
@@ -3129,7 +3144,7 @@ registerEnhanceStage('retrieve', enhanceStageRetrieve, { priority: 100 });
 registerEnhanceStage('assemble', enhanceStageAssemble, { priority: 100 });
 registerEnhanceStage('llm', enhanceStageLlm, { priority: 100 });
 
-harness.handle('enhance', async (args) => {
+harness.handle(RPC_METHODS.ENHANCE, async (args) => {
   const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : 'unknown';
   const seq = args && typeof args.seq === 'number' ? args.seq : -1;
   const text = args && typeof args.text === 'string' ? args.text : '';
@@ -3215,7 +3230,7 @@ async function runCorrection(args) {
   return correctionRunner.runCorrection(args);
 }
 
-harness.handle('voice/correct', async (args) => {
+harness.handle(RPC_METHODS.VOICE_CORRECT, async (args) => {
   try {
     return await runCorrection(args);
   } catch (e) {
@@ -3224,7 +3239,7 @@ harness.handle('voice/correct', async (args) => {
   }
 });
 
-harness.handle('cancel', async (args) => {
+harness.handle(RPC_METHODS.CANCEL, async (args) => {
   const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : 'unknown';
   const seq = args && typeof args.seq === 'number' ? args.seq : -1;
   markAndAbort(requestKey(sessionId, seq), 'cancelled');
@@ -5769,6 +5784,7 @@ const { createCorrectionRunner } = __load("src/host/correction-runner.cjs");
 const correctionSwitch = __load("src/host/correction-switch.cjs");
 const { enhanceSuccessResult, enhanceFailureResult } = __load("src/host/enhance-result-module.cjs");
 const prompts = __load("src/host/prompts-module.cjs");
+const { RPC_METHODS } = __load("src/shared/contracts/rpc.cjs");
 
 const V2_WORKSPACE_IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.venv', 'venv', '__pycache__', '.next', '.cache', 'coverage', 'target', '.idea', '.vscode']);
 
@@ -5814,7 +5830,7 @@ function createHostPlugin(harness, runtime) {
       });
       for (const [name, handler] of modelsRpc.handlers) harness.handle(name, handler);
 
-      harness.handle('logs/last', logsLast);
+      harness.handle(RPC_METHODS.LOGS_LAST, logsLast);
       const templateRpc = createTemplateRpc({
         base: prompts.SYSTEM_PROMPT, lite: prompts.SYSTEM_LITE_PROMPT, standard: prompts.SYSTEM_STANDARD_PROMPT,
         smart: prompts.SYSTEM_SMART_PROMPT, publish: prompts.SYSTEM_PUBLISH_PROMPT,
@@ -5823,7 +5839,7 @@ function createHostPlugin(harness, runtime) {
         incrementSmart: prompts.SYSTEM_INCREMENT_SMART_PROMPT,
         incrementPublish: prompts.SYSTEM_INCREMENT_PUBLISH_PROMPT,
       });
-      harness.handle('template/default', templateRpc.templateDefault);
+      harness.handle(RPC_METHODS.TEMPLATE_DEFAULT, templateRpc.templateDefault);
 
       const contextRuntime = createContextRuntime({
         hlog,

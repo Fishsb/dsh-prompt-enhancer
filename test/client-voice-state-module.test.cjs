@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
 const { VOICE_CONFIG_DEFAULTS } = require('../src/shared/contracts/voice-config.cjs');
+const { RPC_METHODS } = require('../src/shared/contracts/rpc.cjs');
 const { createVoiceState } = require('../src/client/voice/state-module.cjs');
 
 function makeStorage(seed) {
@@ -33,6 +34,7 @@ test('CVSTATE-02 工厂使用共享默认值，并保留 VAD 归一化与白名�
     host: { call: () => Promise.resolve({ ok: false }) },
     storage: makeStorage(),
     defaults: VOICE_CONFIG_DEFAULTS,
+    rpcMethods: RPC_METHODS,
     autoSync: false,
   });
   assert.deepEqual(api.VOICE_CFG_DEFAULTS, VOICE_CONFIG_DEFAULTS);
@@ -66,6 +68,7 @@ test('CVSTATE-03 saveConfig 只提交 voice 顶层键，并持久化非敏感配
     },
     storage,
     defaults: VOICE_CONFIG_DEFAULTS,
+    rpcMethods: RPC_METHODS,
     autoSync: false,
   });
   api.saveVoiceCfg({ autoEnhance: true, hotkey: { enabled: true, combo: 'Alt+Backquote' } });
@@ -110,6 +113,7 @@ test('CVSTATE-04 自动同步并发去重，并把旧 refine 清理可见地写�
     storage: makeStorage(),
     fillerState,
     defaults: VOICE_CONFIG_DEFAULTS,
+    rpcMethods: RPC_METHODS,
     autoSync: true,
   });
   const same = api.syncVoiceFromHost();
@@ -141,6 +145,7 @@ test('CVSTATE-05 同步失败走注入了有界 timer，耗尽后终止而非永
       },
     },
     defaults: VOICE_CONFIG_DEFAULTS,
+    rpcMethods: RPC_METHODS,
     autoSync: true,
   });
   await settle();

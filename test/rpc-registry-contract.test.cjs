@@ -72,8 +72,35 @@ test('RCR-05 错误码映射与配置/模式默认值只有一份实现', () => 
   assert.equal(contract.CONFIG_DEFAULTS.version, 2);
   assert.equal(contract.MODE_PARAMS_DEFAULT.smart.timeoutMs, 60000);
   assert.deepEqual(contract.MODE_BUDGET_OPTIONS.lite, [0, 2000, 4000]);
+  const clientState = fs.readFileSync(path.join(ROOT, 'src', 'client', 'state-module.cjs'), 'utf8');
+  assert.ok(clientState.includes('return JSON.parse(JSON.stringify(CONFIG_DEFAULTS));'), 'cloneDefaults 必须深拷贝契约默认值');
+  assert.equal(/function cloneDefaults\(\)[\s\S]*?timeoutMs:\s*30000/.test(clientState), false,
+    '客户端不得再持有第二份完整配置默认值');
   assert.equal(require(path.join(ROOT, 'src', 'host', 'correction-switch.cjs')).CORRECTION_DISABLED_CODE,
     contract.RPC_ERROR_CODES.CORRECTION_DISABLED, '纠错跳过码必须取自契约');
   assert.equal(fs.readFileSync(path.join(ROOT, 'src', 'host', 'correction-switch.cjs'), 'utf8')
     .includes("CORRECTION_DISABLED_CODE = 'CORRECTION_DISABLED'"), false, '不得再手写纠错跳过码字面量');
+});
+
+test('RCR-06 RPC 名称不再散落：手改宿主/客户端代码只通过 RPC_METHODS / 注入面取用', () => {
+  const roots = ['src', 'lib'];
+  const files = [];
+  const walk = (dir) => {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) { walk(full); continue; }
+      if (!ent.name.endsWith('.cjs')) continue;
+      if (ent.name === 'client.cjs') continue;
+      files.push(full);
+    }
+  };
+  for (const root of roots) walk(path.join(ROOT, root));
+  const offenders = [];
+  for (const file of files) {
+    if (path.basename(file) === 'contracts.cjs') continue;
+    const code = fs.readFileSync(file, 'utf8')
+      .split('\n').filter((line) => !line.trim().startsWith('//') && !line.trim().startsWith('*')).join('\n');
+    if (/host\.call\(\s*'|api\.call\(\s*'|harness\.handle\(\s*'/.test(code)) offenders.push(path.relative(ROOT, file));
+  }
+  assert.deepEqual(offenders, [], 'RPC 方法名字面量必须集中在 lib/contracts.cjs：' + offenders.join(', '));
 });

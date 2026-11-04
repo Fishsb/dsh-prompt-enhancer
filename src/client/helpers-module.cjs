@@ -6,6 +6,7 @@ const {
   MEMORY_ROUNDS_MAX,
   SEEN_KEY_PREFIX,
 } = require('./constants-module.cjs');
+const { RPC_METHODS } = require('../shared/contracts/rpc.cjs');
 
 const { errorKeyOf: contractErrorKey } = require('../shared/contracts/errors.cjs');
 
@@ -172,7 +173,7 @@ function createClientHelpers(deps) {
     session.error = null;
     clearResultStore(sessionId);
     notify(sessionId);
-    host.call('cancel', { sessionId, seq }).catch(() => {});
+    host.call(RPC_METHODS.CANCEL, { sessionId, seq }).catch(() => {});
   }
 
   // 斜杠命令只优化正文，原命令与空白前缀保持不变。
@@ -203,7 +204,7 @@ function createClientHelpers(deps) {
     if (session.phase === 'enhancing') {
       const previousSeq = session.seq;
       session.seq += 1;
-      host.call('cancel', { sessionId, seq: previousSeq }).catch(() => {});
+      host.call(RPC_METHODS.CANCEL, { sessionId, seq: previousSeq }).catch(() => {});
     }
 
     session.backup = draft;
@@ -223,7 +224,7 @@ function createClientHelpers(deps) {
     if (actual.memory) request.memory = actual.memory;
     if (session.optimized && actual.memory && actual.memory.rounds.length > 0) request.continue = true;
 
-    host.call('enhance', request).then((response) => {
+    host.call(RPC_METHODS.ENHANCE, request).then((response) => {
       if (seq !== session.seq) return;
       const result = response && typeof response === 'object' ? response : {};
       const resultStatus = resultStatusOf({ ok: result.ok === true, text: result.text, before: session.backup, skipped: result.skipped === true });

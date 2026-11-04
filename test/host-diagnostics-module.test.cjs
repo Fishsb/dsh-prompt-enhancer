@@ -77,7 +77,7 @@ test('HDM-05 产物内联诊断模块（无外部 require），logs/last 契约�
   assert.ok(host.includes('"src/host/diagnostics-module.cjs"'), 'host 产物必须内联诊断模块 id');
   assert.ok(host.includes('"src/host/diagnostics-module.cjs"'), 'host 产物必须内联诊断模块 id');
   assert.ok(host.includes('createDiagnostics(r.console || console)'), '构建期必须把宿主 console 注入模块');
-  assert.ok(host.includes("harness.handle('logs/last', logsLast)"), 'logs/last RPC 必须仍在位');
+  assert.ok(host.includes('harness.handle(RPC_METHODS.LOGS_LAST, logsLast)'), 'logs/last RPC 必须仍在位');
   assert.ok(host.includes('lines: ring.slice()'), 'logs/last 必须仍返回环形缓冲副本');
   assert.equal((host.match(/require\(/g) || []).length, 0, 'host 产物不得含外部 require');
 });

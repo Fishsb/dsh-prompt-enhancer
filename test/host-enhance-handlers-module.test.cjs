@@ -26,14 +26,16 @@ test('HEHM-02 产物内联注册域模块，旧 chunk 与外部 require 均不�
 
 test('HEHM-03 四个线上 RPC 仍按原顺序注册（名称与顺序不变）', () => {
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
-  const names = [...host.matchAll(/harness\.handle\('([^']+)'/g)].map((m) => m[1]);
+  const { RPC_METHODS } = require('../src/shared/contracts/rpc.cjs');
+  const names = [...host.matchAll(/harness\.handle\(\s*(?:'([^']+)'|RPC_METHODS\.([A-Z0-9_]+))/g)]
+    .map((m) => m[1] || RPC_METHODS[m[2]]);
   const idx = (n) => names.indexOf(n);
-  for (const n of ['enhance/progress', 'enhance', 'voice/correct', 'cancel']) {
+  for (const n of [RPC_METHODS.ENHANCE_PROGRESS, RPC_METHODS.ENHANCE, RPC_METHODS.VOICE_CORRECT, RPC_METHODS.CANCEL]) {
     assert.ok(idx(n) >= 0, '缺少 RPC：' + n);
   }
-  assert.ok(idx('enhance/progress') < idx('enhance'));
-  assert.ok(idx('enhance') < idx('voice/correct'));
-  assert.ok(idx('voice/correct') < idx('cancel'));
+  assert.ok(idx(RPC_METHODS.ENHANCE_PROGRESS) < idx(RPC_METHODS.ENHANCE));
+  assert.ok(idx(RPC_METHODS.ENHANCE) < idx(RPC_METHODS.VOICE_CORRECT));
+  assert.ok(idx(RPC_METHODS.VOICE_CORRECT) < idx(RPC_METHODS.CANCEL));
 });
 
 test('HEHM-04 构建器以普通模块入口打包，装配点显式注入', () => {

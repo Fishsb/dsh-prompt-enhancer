@@ -1,5 +1,7 @@
 'use strict';
 
+const { RPC_METHODS } = require('../../shared/contracts/rpc.cjs');
+
 // 设置页优化参数 tab 普通模块（构建期由客户端运行时内联）。
 // 依赖由构建器显式注入；所有可见文案、ARIA、类名与配置写入不变。
 function createParamsTab(deps) {
@@ -65,7 +67,7 @@ function ParamsTab(props) {
   const catalogRef = React.useRef(null);
   const ensureCatalog = React.useCallback(() => {
     if (catalogRef.current !== null) return Promise.resolve(catalogRef.current);
-    return host.call('template/default').then((res) => {
+    return host.call(RPC_METHODS.TEMPLATE_DEFAULT).then((res) => {
       const r = res && typeof res === 'object' ? res : {};
       catalogRef.current = (r.ok && r.catalog && typeof r.catalog === 'object') ? r.catalog : {};
       return catalogRef.current;

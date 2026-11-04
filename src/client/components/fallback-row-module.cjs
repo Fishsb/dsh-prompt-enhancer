@@ -1,5 +1,7 @@
 'use strict';
 
+const { RPC_METHODS } = require('../../shared/contracts/rpc.cjs');
+
 // 设置页模型配置组件普通模块（构建期由客户端运行时内联）。
 // 迁移只改变代码载体；组件行为、文案、类名与 ARIA 不变。
 function createFallbackRow(deps) {
@@ -29,7 +31,7 @@ function FallbackRow(props) {
     let cancelled = false;
     // F1（配置卫生）：已启用思考的条目用 noCache 取新鲜能力表，用于 effort 纠偏
     const needFresh = !!(entry.reasoning && entry.reasoning.enabled === true);
-    host.call('models/resolve', { provider: entry.provider, model: entry.model, ...(needFresh ? { noCache: true } : {}) }).then((res) => {
+    host.call(RPC_METHODS.MODELS_RESOLVE, { provider: entry.provider, model: entry.model, ...(needFresh ? { noCache: true } : {}) }).then((res) => {
       if (cancelled) return;
       const r = res && typeof res === 'object' ? res : {};
       const meta = r.ok && r.reasoning && r.reasoning.efforts && r.reasoning.efforts.length > 0 ? r.reasoning : null;
