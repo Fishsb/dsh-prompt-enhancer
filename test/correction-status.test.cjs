@@ -248,11 +248,13 @@ test('CHG184-S14 ⭐ 接线（R3 迁移）：纠错状态不再注册独立元�
   assert.ok(/subscribeCorrection/.test(eb), '✨ 按钮必须订阅纠错状态机（否则删了旧的但没接新的 = 状态不可见）');
   assert.ok(/correctionPhaseOf/.test(eb), '✨ 按钮必须读纠错相位');
   assert.ok(/corrTakesOver/.test(eb), '✨ 按钮必须有「纠错接管」分支');
-  // ④ 槽位总数**净减 1**：HEAD 为 6 条（含 settings.section），删除 correction-status 后应为 5 条
+  // ④ 槽位面：删除 correction-status 后曾为 5 条；后续又移除零渲染的
+  //    sidebar.footer.action 占位 ⇒ 当前真实注册面为 4 条。此处继续锁「不得新增
+  //    独立纠错状态元素」，但不再把已退役的空占位当作现行槽位。
   const regs = (app.match(/slots\.register\(/g) || []).length;
-  assert.equal(regs, 5, '⭐ 槽位注册数必须由 6 净减为 5（⛔ 不得新增任何独立状态元素），实得：' + regs);
+  assert.equal(regs, 4, '⭐ 当前槽位注册数必须为 4（⛔ 不得新增任何独立状态元素），实得：' + regs);
   const injects = (app.match(/slots\.inject\(/g) || []).length;
-  assert.equal(injects, 5, '⭐ slots.inject 数同样必须由 6 净减为 5，实得：' + injects);
+  assert.equal(injects, 4, '⭐ 当前 slots.inject 数必须为 4，实得：' + injects);
 });
 
 test('CHG184-S15 i18n：五态键 ZH/EN 双侧齐全且逐键同形（S-7）', () => {

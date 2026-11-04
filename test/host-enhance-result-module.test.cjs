@@ -36,11 +36,15 @@ test('HER-04 失败结果保留既有 code/message，并标记 status=failed', (
   assert.deepEqual(enhanceFailureResult({}), { ok: false, code: 'LLM_FAILED', status: 'failed' });
 });
 
-test('HER-05 产物内联结果模块（无外部 require），主链调用统一归一', () => {
+test('HER-05 产物内联结果契约与 commit 阶段，生成 -> 提交统一归一', () => {
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
-  assert.ok(host.includes('"src/host/enhance-result-module.cjs"'), 'host 产物必须内联增强结果模块');
-  assert.ok(host.includes('"src/host/enhance-result-module.cjs"'));
-  assert.ok(host.includes('enhanceSuccessResult({ before: state.text'), '成功结果须走统一归一');
-  assert.ok(host.includes('enhanceFailureResult({'), '失败结果须走统一归一');
+  const handlers = fs.readFileSync(path.join(REPO_ROOT, 'src/host/enhance-handlers-module.cjs'), 'utf8');
+  const generation = fs.readFileSync(path.join(REPO_ROOT, 'src/host/enhance-generation.cjs'), 'utf8');
+  assert.ok(host.includes('"src/host/enhance-result-module.cjs"'), 'host 产物必须内联结果契约');
+  assert.ok(host.includes('"src/host/enhance-commit.cjs"'), 'host 产物必须内联 commit 阶段');
+  assert.ok(host.includes("registerEnhanceStage('commit', enhanceStageCommit"), 'commit 阶段必须接入主链');
+  assert.ok(handlers.includes('await runEnhancePipeline(state);'), '主链必须走统一阶段执行器');
+  assert.ok(generation.includes('state.enhanceCandidate'), '生成阶段须产出待提交候选');
+  assert.ok(host.includes('commitEnhanceResult(candidate)'), '候选必须由 commit 统一归一');
   assert.equal((host.match(/require\(/g) || []).length, 0, 'host 产物不得含外部 require');
 });

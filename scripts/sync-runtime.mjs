@@ -214,6 +214,26 @@ console.log('');
 console.log('✅ 运行环境已部署（' + deployTargets.length + ' 个 profile）：');
 for (const rt of deployTargets) console.log('   - ' + rt);
 console.log('   版本：' + require('../package.json').version);
+// 产物模式（P1-c、P2-3 后仍适用）：node_modules 中的安装副本必须与仓库产物逐字一致。
+// 不把 package.json 当作静态判定对象：它是 npm 安装元数据，局部安装时被 npm 正常改写。
+{
+  const modeArtifacts = ['plugin-host.js', 'lib/client.cjs'];
+  let modeOk = true;
+  for (const rt of deployTargets) {
+    for (const f of modeArtifacts) {
+      const src = join(root, f);
+      const dst = join(rt, f);
+      const same = existsSync(src) && existsSync(dst)
+        && readFileSync(src).equals(readFileSync(dst));
+      if (!same) modeOk = false;
+      console.log((same ? '✓' : '✗') + ' 发布产物形态 ' + f + ' @ ' + rt);
+    }
+  }
+  if (!modeOk) {
+    console.error('发布产物形态校验失败：安装副本与仓库产物不一致');
+    process.exit(1);
+  }
+}
 // ── 收尾：按 **host 面是否变化** 条件化打印（CHG-213 队列项）────────────────────
 //   判据不是「有没有同步动作」（每次都会同步），而是 host 面 md5 前后比的结果：
 //     · host 面**变了** ⇒ 必须重启（新 host 只在进程启动时装载）；且 client 也可能变了 ⇒ 再提 Ctrl+F5

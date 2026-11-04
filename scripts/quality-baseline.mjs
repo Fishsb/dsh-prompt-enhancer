@@ -1,24 +1,37 @@
 #!/usr/bin/env node
-// Offline quality baseline for fixed samples.
+// Quality baseline for fixed samples.
 //
-// Scope is deliberately explicit:
+// Two explicitly separate modes:
 //   · enhancement fidelity / excessive rewrite / correction precision are measured on the
 //     checked-in corpus through the same pure functions used by the product;
 //   · VAD auto-stop and latency/budget behavior reuse the existing deterministic regression
 //     suites (`official-bridge` and `p0-stop-bleed`) and count passing named tests;
-//   · this does NOT measure live LLM quality or real microphone/audio hardware. Those require
-//     a configured model and real browser/audio environment and are reported separately.
+//   · `--live` additionally runs each enhancement corpus row through the running DSH
+//     `enhance` RPC (same model chain and prompts as the product);
+//   · `--voice` is reserved for a real microphone/audio run and never counts deterministic
+//     tests as hardware evidence.
+// Default stays offline because it must remain deterministic in CI.
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { GATE_EXIT } from './lib/gate-exit.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const corpusPath = path.join(ROOT, 'test', 'fixtures', 'quality-baseline', 'corpus.json');
 const corpus = JSON.parse(fs.readFileSync(corpusPath, 'utf8'));
 const pure = require(path.join(ROOT, 'src', 'host', 'pure-module.cjs'));
+const argv = process.argv.slice(2);
+const argOf = (flag, fallback) => {
+  const i = argv.indexOf(flag);
+  return i !== -1 && argv[i + 1] ? argv[i + 1] : fallback;
+};
+const LIVE = argv.includes('--live');
+const VOICE = argv.includes('--voice');
+const URL_BASE = argOf('--url', process.env.DSH_URL || 'http://127.0.0.1:3080');
+const sessionPrefix = 'quality-' + Date.now();
 
 function percentile(values, p) {
   if (!values.length) return 0;
@@ -98,7 +111,7 @@ const checks = {
 };
 
 const report = {
-  scope: 'offline-fixed-samples',
+  scope: LIVE ? 'live-model-fixed-samples' : 'offline-fixed-samples',
   metrics,
   thresholds: t,
   checks,
@@ -108,12 +121,91 @@ const report = {
   },
   enhancementRows,
   correctionRows,
-  notMeasured: ['live-llm-quality', 'real-microphone-vad', 'real-transcription-writeback'],
+  notMeasured: LIVE ? ['real-microphone-vad', 'real-transcription-writeback'] : ['live-llm-quality', 'real-microphone-vad', 'real-transcription-writeback'],
 };
 
-if (process.argv.includes('--json')) console.log(JSON.stringify(report, null, 2));
+async function rpc(method, args) {
+  const response = await fetch(new URL('/dsh-prompt-enhancer/rpc', URL_BASE), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ method, args }),
+    signal: AbortSignal.timeout(180000),
+  });
+  const text = await response.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch { /* caller sees raw status */ }
+  if (!response.ok) throw new Error('RPC HTTP ' + response.status + ': ' + text.slice(0, 300));
+  return json;
+}
+
+if (LIVE) {
+  let config = null;
+  try {
+    const cfg = await rpc('config/get', {});
+    config = cfg && cfg.config && typeof cfg.config === 'object' ? cfg.config : null;
+  } catch (error) {
+    report.live = { status: 'failed', error: String(error && error.message || error), rows: [] };
+    checks.liveModelQuality = false;
+  }
+  if (config) {
+    const liveRows = [];
+    for (let i = 0; i < corpus.enhancement.length; i += 1) {
+      const sample = corpus.enhancement[i];
+      const request = {
+        sessionId: sessionPrefix + '-' + i,
+        seq: 1,
+        text: sample.input,
+        config,
+        mode: 'base',
+      };
+      try {
+        const out = await rpc('enhance', request);
+        const text = out && typeof out.text === 'string' ? pure.cleanOutput(out.text, sample.input) : '';
+        const kept = sample.facts.filter((fact) => text.includes(fact));
+        const growth = sample.input.length > 0 ? text.length / sample.input.length : 0;
+        liveRows.push({
+          id: sample.id,
+          ok: out && out.ok === true,
+          status: out && out.status,
+          model: out && out.model,
+          error: out && !out.ok ? { code: out.code, message: out.message } : null,
+          text,
+          factsKept: kept.length,
+          factsTotal: sample.facts.length,
+          factRetention: sample.facts.length ? kept.length / sample.facts.length : 1,
+          growth,
+          excessive: growth > sample.maxGrowth,
+        });
+      } catch (error) {
+        liveRows.push({
+          id: sample.id, ok: false, status: 'failed', error: { code: 'RPC_FAILED', message: String(error && error.message || error) },
+          text: '', factsKept: 0, factsTotal: sample.facts.length, factRetention: 0, growth: 0, excessive: false,
+        });
+      }
+    }
+    const liveMetrics = {
+      enhancementFactRetention: liveRows.reduce((sum, row) => sum + row.factRetention, 0) / Math.max(1, liveRows.length),
+      excessiveRewriteRate: liveRows.filter((row) => row.excessive).length / Math.max(1, liveRows.length),
+      successRate: liveRows.filter((row) => row.ok).length / Math.max(1, liveRows.length),
+    };
+    report.live = { status: 'measured', models: [...new Set(liveRows.map((row) => row.model).filter(Boolean))], metrics: liveMetrics, rows: liveRows };
+    checks.liveModelQuality = liveMetrics.successRate === 1
+      && liveMetrics.enhancementFactRetention >= t.enhancementFactRetentionMin
+      && liveMetrics.excessiveRewriteRate <= t.excessiveRewriteRateMax;
+  }
+}
+
+report.notMeasured = report.notMeasured.filter((item) => {
+  if (item === 'live-llm-quality') return report.live?.status !== 'measured';
+  return true;
+});
+report.voice = VOICE
+  ? { status: 'not-run', reason: 'Real microphone/audio verification requires a deviceful browser run; deterministic tests are not counted as hardware evidence.' }
+  : { status: 'skipped', reason: 'Pass --voice to request real microphone/audio verification.' };
+
+if (argv.includes('--json')) console.log(JSON.stringify(report, null, 2));
 else {
-  console.log('Offline quality baseline (fixed samples)');
+  console.log((LIVE ? 'Live model quality baseline (fixed samples)' : 'Offline quality baseline (fixed samples)'));
   console.log('  enhancement fact retention : ' + (metrics.enhancementFactRetention * 100).toFixed(1) + '%');
   console.log('  excessive rewrite rate     : ' + (metrics.excessiveRewriteRate * 100).toFixed(1) + '%');
   console.log('  correction misfire rate    : ' + (metrics.correctionMisfireRate * 100).toFixed(1) + '%');
@@ -121,11 +213,25 @@ else {
   console.log('  VAD named-test pass rate   : ' + (metrics.vadAutoStopPassRate * 100).toFixed(1) + '% (' + vadSuite.passed + '/' + vadSuite.total + ')');
   console.log('  latency rule pass rate     : ' + (metrics.latencyRulePassRate * 100).toFixed(1) + '% (' + latencySuite.passed + '/' + latencySuite.total + ')');
   console.log('  local clean total latency  : ' + metrics.localCleanTotalMs.toFixed(1) + 'ms');
-  console.log('  not measured               : live LLM quality, real microphone VAD, real transcription/write-back');
+  if (report.live?.status === 'measured') {
+    console.log('  live model success         : ' + (report.live.metrics.successRate * 100).toFixed(1) + '%');
+    console.log('  live fact retention        : ' + (report.live.metrics.enhancementFactRetention * 100).toFixed(1) + '%');
+    console.log('  live excessive rewrite     : ' + (report.live.metrics.excessiveRewriteRate * 100).toFixed(1) + '%');
+    console.log('  live models                : ' + report.live.models.join(', '));
+  } else if (report.live?.status === 'failed') {
+    console.log('  live model quality         : FAILED · ' + report.live.error);
+  }
+  console.log('  voice hardware             : ' + report.voice.status.toUpperCase() + ' · ' + report.voice.reason);
+  console.log('  not measured               : ' + (report.notMeasured.join(', ') || 'none'));
 }
 
 const failed = Object.keys(checks).filter((key) => checks[key] !== true);
 if (failed.length) {
   console.error('QUALITY FAIL: ' + failed.join(', '));
-  process.exit(1);
+  process.exit(GATE_EXIT.FAIL);
 }
+if (VOICE) {
+  console.error('QUALITY NOT FULLY JUDGED: real microphone/audio verification was not executed.');
+  process.exit(GATE_EXIT.NOT_FULLY_JUDGED);
+}
+process.exit(GATE_EXIT.ALL_PASS);

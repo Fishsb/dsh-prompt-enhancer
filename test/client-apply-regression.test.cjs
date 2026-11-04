@@ -211,7 +211,7 @@ async function withBrowserGlobals(fn) {
   }
 }
 
-test('CAP-01 产物 apply() 注入样式并按原顺序注册五个槽位', async () => {
+test('CAP-01 产物 apply() 注入样式并按原顺序注册当前槽位', async () => {
   await withBrowserGlobals(({ documentStub, windowStub }) => {
     const bundle = fs.readFileSync(path.join(ROOT, 'lib', 'client.cjs'), 'utf8');
     let captured = null;
@@ -237,11 +237,10 @@ test('CAP-01 产物 apply() 注入样式并按原顺序注册五个槽位', asyn
 
     assert.deepEqual(entries.map((e) => e.entry.meta.name + ':' + e.entry.meta.id), [
       'settings.section:model-plugins',
-      'sidebar.footer.action:cordis-panel-enh',
       'conversation.input.right:prompt-enhance',
       'conversation.input.right:voice-hotkey',
       'conversation.input.dock:prompt-enhance-status',
-    ], '槽位名称、ID 与注册顺序必须逐项不变');
+    ], '槽位名称、ID 与注册顺序必须与当前装配图一致');
 
     for (const cleanup of cleanups) {
       assert.doesNotThrow(() => cleanup(), 'apply 注册的清理函数必须可安全执行');

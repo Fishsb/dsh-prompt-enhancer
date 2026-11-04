@@ -116,7 +116,6 @@ test('CESC-04 设置页容器只保留 models/params 两 tab，且两面板均�
     ParamsTab: function ParamsTab() { return null; },
   });
   assert.equal(api.ModelPluginsSection.name, 'ModelPluginsSection');
-  assert.equal(api.CordisBadgePlaceholder.name, 'CordisBadgePlaceholder');
   const source = fs.readFileSync(path.join(REPO_ROOT, 'src/client/components/model-plugins-section-module.cjs'), 'utf8');
   assert.ok(source.includes("['models', t('tabModels')]"));
   assert.ok(source.includes("['params', t('tabParams')]"));

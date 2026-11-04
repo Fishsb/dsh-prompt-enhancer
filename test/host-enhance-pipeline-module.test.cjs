@@ -29,11 +29,12 @@ test('HPMOD-03 主链按共享契约一次运行全部阶段（不再逐条写�
   const handlers = fs.readFileSync(path.join(REPO_ROOT, 'src/host/enhance-handlers-module.cjs'), 'utf8');
   assert.ok(handlers.includes('await runEnhancePipeline(state);'), '主链必须调用统一执行器');
   assert.equal(/await runEnhanceStages\('(analyze|retrieve|assemble|llm)', state\)/.test(handlers), false,
-    '主链不得再逐条写死四阶段调用');
+    '主链不得再逐条写死阶段调用');
   assert.ok(handlers.includes("registerEnhanceStage('analyze'"), '阶段注册仍在');
   assert.ok(handlers.includes("registerEnhanceStage('retrieve'"), '阶段注册仍在');
   assert.ok(handlers.includes("registerEnhanceStage('assemble'"), '阶段注册仍在');
   assert.ok(handlers.includes("registerEnhanceStage('llm'"), '阶段注册仍在');
+  assert.ok(handlers.includes("registerEnhanceStage('commit'"), '提交阶段注册仍在');
 });
 
 test('HPMOD-04 线上阶段名未改：enhance/progress 契约仍为 llm', () => {

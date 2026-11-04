@@ -2943,6 +2943,7 @@ function createEnhanceHandlers(deps) {
   const createRetrieveStage = d.createRetrieveStage;
   const createAssembleStage = d.createAssembleStage;
   const createGenerationStage = d.createGenerationStage;
+  const createCommitStage = d.createCommitStage;
   const createCorrectionRunner = d.createCorrectionRunner;
   const CORRECTION_SWITCH = d.CORRECTION_SWITCH;
   const validateConfig = d.validateConfig;
@@ -3130,8 +3131,7 @@ const enhanceStageAssemble = assembleStage.enhanceStageAssemble;
 // 目标模式（CHG-325）：llm 阶段与探测迁为普通模块；阶段名与结果行为不变。
 const generationStage = createGenerationStage({
   ctx, llm, hlog, markDegraded, remainingBudgetMs, budgetExhausted,
-  retryPolicyFor, sleepMs, setProgress, enhanceSuccessResult,
-  enhanceFailureResult, friendlyMessage, collectStream, cleanOutput,
+  retryPolicyFor, sleepMs, setProgress, friendlyMessage, collectStream, cleanOutput,
   stripScenarioEcho, computeBackoffDelayMs, isRetryableFailure,
   probeCacheGet, probeCacheSet, pingStream, stageLlm: STAGE_LLM,
   watchdogTimeoutMs: WATCHDOG_TIMEOUT_MS, probeTimeoutMs: PROBE_TIMEOUT_MS,
@@ -3139,10 +3139,16 @@ const generationStage = createGenerationStage({
 });
 const enhanceStageLlm = generationStage.enhanceStageLlm;
 
+// ---- stage: commit——候选结果归一为既有 RPC 返回 ----
+// 内部阶段与生成阶段分离；不改变线上 enhance/progress 的既有 stage 名。
+const commitStage = createCommitStage({ hlog });
+const enhanceStageCommit = commitStage.enhanceStageCommit;
+
 registerEnhanceStage('analyze', enhanceStageAnalyze, { priority: 100 });
 registerEnhanceStage('retrieve', enhanceStageRetrieve, { priority: 100 });
 registerEnhanceStage('assemble', enhanceStageAssemble, { priority: 100 });
 registerEnhanceStage('llm', enhanceStageLlm, { priority: 100 });
+registerEnhanceStage('commit', enhanceStageCommit, { priority: 100 });
 
 harness.handle(RPC_METHODS.ENHANCE, async (args) => {
   const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : 'unknown';
@@ -3161,7 +3167,7 @@ harness.handle(RPC_METHODS.ENHANCE, async (args) => {
   const rec = { cancelled: false, timedOut: false, iterator: null, stage: STAGE_PREPARE, startedAt: Date.now(), detailKey: '', detailArgs: null, step: 0, total: 0 };
   pending.set(key, rec);
 
-  // M2 深化：请求状态经 Pipeline 四阶段链式传递（analyze→retrieve→assemble→llm）。
+  // 请求状态经 Pipeline 五阶段链式传递（analyze→retrieve→assemble→llm→commit）。
   // P0-b（2026-10-12 · 超时预算错位修复；独立复核 high 修正）：主超时计时器上移到**任何阶段之前**——
   // 准备阶段（analyze/retrieve/assemble，内含 5 处各 10–15s 的辅助调用）首次被真正限界，
   // 不再「准备阶段不设防」；辅助调用另按剩余预算钳制（helperTimeoutMs），超预算即跳过并记降级。
@@ -3257,13 +3263,14 @@ return module.exports;
 
 'use strict';
 
-// 增强阶段契约：显式声明顺序，避免主流程与各阶段注册各写一份。
-// 本批先建立契约；现有 host 仍使用内联 Pipeline，切换前须做行为对照。
+// 增强阶段契约：显式声明内部执行顺序，避免主流程与各阶段注册各写一份。
+// 内部 GENERATE 仍使用线上既有名称 `llm`，以保持 enhance/progress 契约兼容。
 const ENHANCE_STAGES = Object.freeze({
   ANALYZE: 'analyze',
   RETRIEVE: 'retrieve',
   ASSEMBLE: 'assemble',
   GENERATE: 'llm',
+  COMMIT: 'commit',
 });
 
 const ENHANCE_STAGE_ORDER = Object.freeze([
@@ -3271,6 +3278,7 @@ const ENHANCE_STAGE_ORDER = Object.freeze([
   ENHANCE_STAGES.RETRIEVE,
   ENHANCE_STAGES.ASSEMBLE,
   ENHANCE_STAGES.GENERATE,
+  ENHANCE_STAGES.COMMIT,
 ]);
 
 function isEnhanceStage(name) {
@@ -3283,6 +3291,7 @@ function nextEnhanceStage(name) {
 }
 
 module.exports = { ENHANCE_STAGES, ENHANCE_STAGE_ORDER, isEnhanceStage, nextEnhanceStage };
+
 return module.exports;
 },
   "src/host/enhance-pipeline.cjs": function (exports, module, __load) {
@@ -3296,8 +3305,8 @@ return module.exports;
 //   · 不读取配置、不调用模型、不写回草稿；
 //   · 阶段顺序唯一事实源 = src/shared/contracts/enhance-stages.cjs。
 //
-// 兼容性：线上阶段名保持 analyze / retrieve / assemble / llm 不变，
-// 因此 enhance/progress 的 stage 字段与现有 UI 文案映射不需要改动。
+// 兼容性：内部阶段为 analyze / retrieve / assemble / llm / commit；
+// 线上 enhance/progress 的既有 stage 名仍保持 llm，现有 UI 文案映射不需要改动。
 const { ENHANCE_STAGE_ORDER } = __load("src/shared/contracts/enhance-stages.cjs");
 
 function createEnhancePipeline(options) {
@@ -4229,7 +4238,7 @@ return module.exports;
 
 // 增强 llm 阶段（目标模式：普通 CommonJS，构建期由打包器内联）。
 //
-// 职责：模型链调用、流式收集、退避重试、看门狗、连通性探测与结果提交。
+// 职责：模型链调用、流式收集、退避重试、看门狗与连通性探测，产出待提交候选。
 // 不读取配置、不读写草稿；llm/timer/纯函数/结果映射/日志全部由调用方注入。
 
 function createGenerationStage(deps) {
@@ -4243,8 +4252,6 @@ function createGenerationStage(deps) {
   const retryPolicyFor = d.retryPolicyFor;
   const sleepMs = d.sleepMs;
   const setProgress = d.setProgress;
-  const enhanceSuccessResult = d.enhanceSuccessResult;
-  const enhanceFailureResult = d.enhanceFailureResult;
   const friendlyMessage = d.friendlyMessage;
   const collectStream = d.collectStream;
   const cleanOutput = d.cleanOutput;
@@ -4272,7 +4279,7 @@ function createGenerationStage(deps) {
       let lastFailure = null;
       // 2026-08-18（用户需求·删内置兜底链）：模型链为空 → 明确报「未配置模型」（不自适应补足）
       if (chain.length === 0) {
-        state.result = { ok: false, code: 'NO_MODEL', message: friendlyMessage({ code: 'NO_MODEL' }) };
+        state.enhanceCandidate = { code: 'NO_MODEL', message: friendlyMessage({ code: 'NO_MODEL' }) };
         return state;
       }
       // v3.3.3（2026-08-27 用户实测·增强易断链修复）：外层 pass 循环——首轮整链耗尽后
@@ -4283,7 +4290,7 @@ function createGenerationStage(deps) {
       for (let i = 0; i < chain.length; i++) {
         const entry = chain[i];
         if (rec.cancelled || rec.timedOut) {
-          state.result = enhanceFailureResult({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED', message: friendlyMessage({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED' }) });
+          state.enhanceCandidate = { cancelled: rec.cancelled === true, timedOut: rec.timedOut === true, code: rec.timedOut ? 'TIMEOUT' : 'ABORTED', message: friendlyMessage({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED' }) };
           return state;
         }
         hlog('[enhance] try session=' + sessionId + ' provider=' + entry.provider + ' model=' + entry.model + (entry.reasoningEffort ? ' effort=' + entry.reasoningEffort : '') + ' seq=' + seq);
@@ -4413,7 +4420,7 @@ function createGenerationStage(deps) {
               // v3.3.3（设计决策）：探测窗口已按实测放大（PROBE_TIMEOUT_MS=12s）——探测全败
               // = 实测全不可达（慢模型不再被误杀），立即报错不进入重试轮（避免无望的二次等待）；
               // 重试轮只覆盖生成级失败耗尽（EMPTY/STREAM_THROW/QUOTA/瞬时错误等自愈场景）。
-              state.result = enhanceFailureResult({ code: 'ALL_MODELS_UNAVAILABLE', message: friendlyMessage({ code: 'ALL_MODELS_UNAVAILABLE' }) });
+              state.enhanceCandidate = { code: 'ALL_MODELS_UNAVAILABLE', message: friendlyMessage({ code: 'ALL_MODELS_UNAVAILABLE' }) };
               return state;
             }
             hlog('[enhance] watchdog retry head via ' + entry.provider + '/' + entry.model + ' seq=' + seq);
@@ -4434,7 +4441,7 @@ function createGenerationStage(deps) {
             continue;
           }
           hlog('[enhance] ok session=' + sessionId + ' via ' + entry.model);
-          state.result = enhanceSuccessResult({ before: state.text, text: cleaned, model: entry.model, fallbackUsed: state.watchdogDone === true || i > 0 });
+          state.enhanceCandidate = { kind: 'ok', before: state.text, text: cleaned, model: entry.model, fallbackUsed: state.watchdogDone === true || i > 0 };
           return state;
         }
         if (result.kind === 'toolong') {
@@ -4462,7 +4469,7 @@ function createGenerationStage(deps) {
             if (cleanedMt !== '' && !stillWrapped && longEnough) {
               markDegraded(state, 'output-truncated');
               hlog('[enhance] ok(truncated by max-tokens) session=' + sessionId + ' via ' + entry.model + ' chars=' + cleanedMt.length);
-              state.result = enhanceSuccessResult({ before: state.text, text: cleanedMt, model: entry.model, truncated: true, fallbackUsed: state.watchdogDone === true || i > 0 });
+              state.enhanceCandidate = { kind: 'maxtokens', before: state.text, text: cleanedMt, model: entry.model, truncated: true, fallbackUsed: state.watchdogDone === true || i > 0 };
               return state;
             }
             hlog('[enhance] truncated output rejected session=' + sessionId + ' wrapped=' + stillWrapped + ' longEnough=' + longEnough + ' chars=' + cleanedMt.length);
@@ -4471,7 +4478,7 @@ function createGenerationStage(deps) {
           continue;
         }
         if (result.kind === 'cancelled' || result.kind === 'aborted') {
-          state.result = { ok: false, code: rec.timedOut ? 'TIMEOUT' : 'ABORTED', message: friendlyMessage({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED' }) };
+          state.enhanceCandidate = { cancelled: result.kind === 'cancelled', timedOut: rec.timedOut === true || result.kind === 'aborted', code: rec.timedOut ? 'TIMEOUT' : 'ABORTED', message: friendlyMessage({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED' }) };
           return state;
         }
         hlog('[enhance] fail session=' + sessionId + ' model=' + entry.model + ' code=' + (result.failure ? result.failure.code : '?'));
@@ -4484,7 +4491,7 @@ function createGenerationStage(deps) {
         continue;
       }
       hlog('[enhance] chain exhausted session=' + sessionId + ' last code=' + (lastFailure ? lastFailure.code : '?'));
-      state.result = enhanceFailureResult({ code: lastFailure.code || 'LLM_FAILED', message: friendlyMessage(lastFailure) });
+      state.enhanceCandidate = { code: lastFailure.code || 'LLM_FAILED', message: friendlyMessage(lastFailure) };
       return state;
       }
     }
@@ -4530,6 +4537,124 @@ function createGenerationStage(deps) {
 }
 
 module.exports = { createGenerationStage };
+
+return module.exports;
+},
+  "src/shared/contracts/result.cjs": function (exports, module, __load) {
+
+'use strict';
+
+// 统一结果状态：changed | unchanged | skipped | failed
+// 只做语义映射，不改变 RPC 返回结构；调用方按需取 status。
+const { RESULT_STATUSES } = __load("src/shared/contracts/contract-data.cjs");
+const RESULT_STATUS = Object.freeze({
+  CHANGED: RESULT_STATUSES[0],
+  UNCHANGED: RESULT_STATUSES[1],
+  SKIPPED: RESULT_STATUSES[2],
+  FAILED: RESULT_STATUSES[3],
+});
+
+function resultStatusOf(result) {
+  const r = result && typeof result === 'object' ? result : {};
+  if (r.ok !== true) return RESULT_STATUS.FAILED;
+  if (r.skipped === true) return RESULT_STATUS.SKIPPED;
+  if (typeof r.status === 'string' && RESULT_STATUSES.indexOf(r.status) !== -1) return r.status;
+  if (typeof r.changed === 'boolean') return r.changed ? RESULT_STATUS.CHANGED : RESULT_STATUS.UNCHANGED;
+  if (typeof r.text === 'string' && typeof r.before === 'string') return r.text === r.before ? RESULT_STATUS.UNCHANGED : RESULT_STATUS.CHANGED;
+  // 没有可判证据时，不得声称已改动（保守：unchanged）
+  return RESULT_STATUS.UNCHANGED;
+}
+
+function resultIsTerminal(result) {
+  const s = resultStatusOf(result);
+  return s !== RESULT_STATUS.SKIPPED && s !== RESULT_STATUS.FAILED;
+}
+
+// 统一后处理结果形状：执行层按“是否改动 / 是否跳过 / 是否降级”给读数，
+// 这里只做归一，不改任何 RPC 字段或用户可见文案。
+function postprocessOutcomeOf(result) {
+  const r = result && typeof result === 'object' ? result : {};
+  return {
+    status: resultStatusOf(r),
+    text: typeof r.text === 'string' ? r.text : '',
+    changes: Array.isArray(r.removed) ? r.removed.slice() : [],
+    reason: typeof r.reason === 'string' ? r.reason : '',
+    degraded: r.degraded === true || (Array.isArray(r.degraded) && r.degraded.length > 0),
+  };
+}
+
+module.exports = { RESULT_STATUS, resultStatusOf, resultIsTerminal, postprocessOutcomeOf };
+
+return module.exports;
+},
+  "src/shared/contracts/enhance-result.cjs": function (exports, module, __load) {
+
+'use strict';
+
+// 增强结果提交：把生成阶段候选归一成现有 RPC 返回形状。
+// 只做纯映射，不改变既有字段名与语义；可选字段仅在为 true 时出现。
+
+const { RESULT_STATUS, resultStatusOf } = __load("src/shared/contracts/result.cjs");
+
+function commitEnhanceResult(input) {
+  const v = input && typeof input === 'object' ? input : {};
+  if (v.cancelled === true || v.timedOut === true) {
+    const code = v.timedOut === true ? 'TIMEOUT' : 'ABORTED';
+    return { ok: false, status: RESULT_STATUS.FAILED, code };
+  }
+  if (v.kind === 'toolong') {
+    return { ok: false, status: RESULT_STATUS.FAILED, code: 'OUTPUT_TOO_LONG' };
+  }
+  if (v.kind === 'maxtokens') {
+    if (typeof v.text === 'string' && v.text !== '') {
+      const result = { ok: true, status: RESULT_STATUS.CHANGED, text: v.text, model: v.model, truncated: true };
+      if (v.fallbackUsed === true) result.fallbackUsed = true;
+      return result;
+    }
+    return { ok: false, status: RESULT_STATUS.FAILED, code: 'OUTPUT_TRUNCATED' };
+  }
+  if (v.kind === 'ok' && typeof v.text === 'string' && v.text !== '') {
+    const status = resultStatusOf({ ok: true, before: v.before, text: v.text });
+    const result = { ok: true, status, text: v.text, model: v.model };
+    if (v.fallbackUsed === true) result.fallbackUsed = true;
+    return result;
+  }
+  const result = { ok: false, status: RESULT_STATUS.FAILED, code: v.code || 'LLM_FAILED' };
+  if (v.message !== undefined) result.message = v.message;
+  return result;
+}
+
+module.exports = { commitEnhanceResult };
+
+return module.exports;
+},
+  "src/host/enhance-commit.cjs": function (exports, module, __load) {
+
+'use strict';
+
+// 增强提交阶段（目标模式：普通 CommonJS，构建期由打包器内联）。
+// 只把生成阶段的候选产物归一为现有 RPC 返回；不调模型、不读写草稿。
+const { commitEnhanceResult } = __load("src/shared/contracts/enhance-result.cjs");
+
+function createCommitStage(deps) {
+  const d = deps && typeof deps === 'object' ? deps : {};
+  const hlog = typeof d.hlog === 'function' ? d.hlog : () => {};
+
+  function enhanceStageCommit(state) {
+    const candidate = state && state.enhanceCandidate ? state.enhanceCandidate : null;
+    if (!candidate || typeof candidate !== 'object') {
+      state.result = { ok: false, status: 'failed', code: 'LLM_FAILED' };
+      hlog('[enhance] commit rejected: missing candidate');
+      return state;
+    }
+    state.result = commitEnhanceResult(candidate);
+    return state;
+  }
+
+  return { enhanceStageCommit };
+}
+
+module.exports = { createCommitStage };
 
 return module.exports;
 },
@@ -4744,53 +4869,6 @@ module.exports = {
 
 return module.exports;
 },
-  "src/shared/contracts/result.cjs": function (exports, module, __load) {
-
-'use strict';
-
-// 统一结果状态：changed | unchanged | skipped | failed
-// 只做语义映射，不改变 RPC 返回结构；调用方按需取 status。
-const { RESULT_STATUSES } = __load("src/shared/contracts/contract-data.cjs");
-const RESULT_STATUS = Object.freeze({
-  CHANGED: RESULT_STATUSES[0],
-  UNCHANGED: RESULT_STATUSES[1],
-  SKIPPED: RESULT_STATUSES[2],
-  FAILED: RESULT_STATUSES[3],
-});
-
-function resultStatusOf(result) {
-  const r = result && typeof result === 'object' ? result : {};
-  if (r.ok !== true) return RESULT_STATUS.FAILED;
-  if (r.skipped === true) return RESULT_STATUS.SKIPPED;
-  if (typeof r.status === 'string' && RESULT_STATUSES.indexOf(r.status) !== -1) return r.status;
-  if (typeof r.changed === 'boolean') return r.changed ? RESULT_STATUS.CHANGED : RESULT_STATUS.UNCHANGED;
-  if (typeof r.text === 'string' && typeof r.before === 'string') return r.text === r.before ? RESULT_STATUS.UNCHANGED : RESULT_STATUS.CHANGED;
-  // 没有可判证据时，不得声称已改动（保守：unchanged）
-  return RESULT_STATUS.UNCHANGED;
-}
-
-function resultIsTerminal(result) {
-  const s = resultStatusOf(result);
-  return s !== RESULT_STATUS.SKIPPED && s !== RESULT_STATUS.FAILED;
-}
-
-// 统一后处理结果形状：执行层按“是否改动 / 是否跳过 / 是否降级”给读数，
-// 这里只做归一，不改任何 RPC 字段或用户可见文案。
-function postprocessOutcomeOf(result) {
-  const r = result && typeof result === 'object' ? result : {};
-  return {
-    status: resultStatusOf(r),
-    text: typeof r.text === 'string' ? r.text : '',
-    changes: Array.isArray(r.removed) ? r.removed.slice() : [],
-    reason: typeof r.reason === 'string' ? r.reason : '',
-    degraded: r.degraded === true || (Array.isArray(r.degraded) && r.degraded.length > 0),
-  };
-}
-
-module.exports = { RESULT_STATUS, resultStatusOf, resultIsTerminal, postprocessOutcomeOf };
-
-return module.exports;
-},
   "src/host/enhance-result-module.cjs": function (exports, module, __load) {
 
 'use strict';
@@ -4838,6 +4916,7 @@ const SYSTEM_PROMPT = [
   '1. 通读原文，先在心里逐条列出已明确的信息：动作对象、执行动作、约束条件、范围、术语、数字、语气',
   '2. 区分「原文明确表达的需求」与「你自己的推测」——推测只可用于措辞，绝不写入优化结果',
   '3. 语义等价是底线：优化是「重述 + 明确化」，不是改写。动作对象、动作方向、数量、范围、禁止项、技术术语必须与原文完全一致，不得替换、扩大、缩小或颠倒',
+  '- **范围与数值逐字保真（强制）**：数字、区间连接符（如 `-` / `–` / `~` / `至`）、单位、版本号、比例与数量词必须原样保留；不得把 `2-4` 改成 `2–4` 或 `2 至 4`，也不得为“更具体”而生成原文没有的章节、条目或要求',
   '',
   '【语义重构（核心方法·五步法）】',
   '一、原子拆解（理解）：把原文拆成最小语义单元——主体、动作、对象、约束、边界、例外、语气；一个单元 = 一个不可分割的语义要素',
@@ -4904,6 +4983,7 @@ const SYSTEM_INCREMENT_PROMPT = [
   '1. 通读原文，先在心里逐条列出已明确的信息：动作对象、执行动作、约束条件、范围、术语、数字、语气',
   '2. 区分「原文明确表达的需求」与「你自己的推测」——推测只可用于措辞与保守补充，绝不改变原文已明确的信息',
   '3. 语义等价是底线：原文已明确的信息（动作对象、动作方向、数量、范围、禁止项、技术术语）必须与原文完全一致，不得替换、扩大、缩小或颠倒',
+  '- **范围与数值逐字保真（强制）**：数字、区间连接符（如 `-` / `–` / `~` / `至`）、单位、版本号、比例与数量词必须原样保留；不得把 `2-4` 改成 `2–4` 或 `2 至 4`，也不得为“更具体”而生成原文没有的章节、条目或要求',
   '',
   '【任务意图判断（本模板核心）】',
   '1. 先判断语句实际想执行什么任务：任务类型（编写/修改代码、生成文档、整理数据、设计方案、分析总结、翻译改写等）、任务对象、交付形态',
@@ -4973,6 +5053,7 @@ const SYSTEM_LITE_PROMPT = [
   '1. 通读原文，先在心里逐条列出已明确的信息：动作对象、执行动作、约束条件、范围、术语、数字、语气',
   '2. 区分「原文明确表达的需求」与「你自己的推测」——推测只可用于措辞，绝不写入优化结果',
   '3. 语义等价是底线：优化是「重述 + 明确化」，不是改写。动作对象、动作方向、数量、范围、禁止项、技术术语必须与原文完全一致，不得替换、扩大、缩小或颠倒',
+  '- **范围与数值逐字保真（强制）**：数字、区间连接符（如 `-` / `–` / `~` / `至`）、单位、版本号、比例与数量词必须原样保留；不得把 `2-4` 改成 `2–4` 或 `2 至 4`，也不得为“更具体”而生成原文没有的章节、条目或要求',
   '',
   '【参考处理（本模式核心）】',
   '参考分两类，都只作依据，不改变「草稿原意不可丢」：',
@@ -5033,6 +5114,7 @@ const SYSTEM_INCREMENT_LITE_PROMPT = [
   '1. 通读原文，先在心里逐条列出已明确的信息：动作对象、执行动作、约束条件、范围、术语、数字、语气',
   '2. 区分「原文明确表达的需求」与「你自己的推测」——推测只可用于措辞与保守补充，绝不改变原文已明确的信息',
   '3. 语义等价是底线：原文已明确的信息（动作对象、动作方向、数量、范围、禁止项、技术术语）必须与原文完全一致，不得替换、扩大、缩小或颠倒',
+  '- **范围与数值逐字保真（强制）**：数字、区间连接符（如 `-` / `–` / `~` / `至`）、单位、版本号、比例与数量词必须原样保留；不得把 `2-4` 改成 `2–4` 或 `2 至 4`，也不得为“更具体”而生成原文没有的章节、条目或要求',
   '',
   '【参考处理（本模式核心）】',
   '参考分两类，都只作依据，不改变「草稿原意不可丢」：',
@@ -5097,6 +5179,7 @@ const SYSTEM_STANDARD_PROMPT = [
   '1. 通读原文，先在心里逐条列出已明确的信息：动作对象、执行动作、约束条件、范围、术语、数字、语气',
   '2. 区分「原文明确表达的需求」与「你自己的推测」——推测只可用于措辞，绝不写入优化结果',
   '3. 语义等价是底线：优化是「重述 + 明确化」，不是改写。动作对象、动作方向、数量、范围、禁止项、技术术语必须与原文完全一致，不得替换、扩大、缩小或颠倒',
+  '- **范围与数值逐字保真（强制）**：数字、区间连接符（如 `-` / `–` / `~` / `至`）、单位、版本号、比例与数量词必须原样保留；不得把 `2-4` 改成 `2–4` 或 `2 至 4`，也不得为“更具体”而生成原文没有的章节、条目或要求',
   '',
   '【多轮脉络处理（本模式核心）】',
   '- 参考块 = 多轮讨论的演进记录（由近及远，本模式参考了前 2–10 轮）——**任务背景参考**：理解本轮任务在多轮会话中的上下文',
@@ -5158,6 +5241,7 @@ const SYSTEM_INCREMENT_STANDARD_PROMPT = [
   '1. 通读原文，先在心里逐条列出已明确的信息：动作对象、执行动作、约束条件、范围、术语、数字、语气',
   '2. 区分「原文明确表达的需求」与「你自己的推测」——推测只可用于措辞与保守补充，绝不改变原文已明确的信息',
   '3. 语义等价是底线：原文已明确的信息（动作对象、动作方向、数量、范围、禁止项、技术术语）必须与原文完全一致，不得替换、扩大、缩小或颠倒',
+  '- **范围与数值逐字保真（强制）**：数字、区间连接符（如 `-` / `–` / `~` / `至`）、单位、版本号、比例与数量词必须原样保留；不得把 `2-4` 改成 `2–4` 或 `2 至 4`，也不得为“更具体”而生成原文没有的章节、条目或要求',
   '',
   '【多轮脉络处理（本模式核心）】',
   '- 参考块 = 多轮讨论的演进记录（由近及远，本模式参考了前 2–10 轮）——**任务背景参考**：理解本轮任务在多轮会话中的上下文',
@@ -5222,6 +5306,7 @@ const SYSTEM_SMART_PROMPT = [
   '1. 通读原文，先在心里逐条列出已明确的信息：动作对象、执行动作、约束条件、范围、术语、数字、语气；**先判定语用类型（疑问/陈述/祈使/感叹）作为第一锚点——语用类型是原意组成部分，后续强化不得改变它**；语用转化允许但须锚定原意——疑问→分析判断/明确请求可接受（「为什么 X？」→「X 可能的原因有哪些？请排查」），提问焦点与隐含需求不得丢失',
   '2. 区分「原文明确表达的需求」与「你自己的推测」——推测只可用于措辞，绝不写入优化结果',
   '3. 语义等价是底线：优化是「重述 + 明确化」，不是改写。动作对象、动作方向、数量、范围、禁止项、技术术语必须与原文完全一致，不得替换、扩大、缩小或颠倒',
+  '- **范围与数值逐字保真（强制）**：数字、区间连接符（如 `-` / `–` / `~` / `至`）、单位、版本号、比例与数量词必须原样保留；不得把 `2-4` 改成 `2–4` 或 `2 至 4`，也不得为“更具体”而生成原文没有的章节、条目或要求',
   '',
   '【项目事实优先（本模式核心）】',
   '- 参考块含项目文档与代码事实（【项目文档参考】【相关代码参考】），以文档与代码为准，不得臆造接口、结构、文件名',
@@ -5281,6 +5366,7 @@ const SYSTEM_INCREMENT_SMART_PROMPT = [
   '1. 通读原文，先在心里逐条列出已明确的信息：动作对象、执行动作、约束条件、范围、术语、数字、语气',
   '2. 区分「原文明确表达的需求」与「你自己的推测」——推测只可用于措辞与保守补充，绝不改变原文已明确的信息',
   '3. 语义等价是底线：原文已明确的信息（动作对象、动作方向、数量、范围、禁止项、技术术语）必须与原文完全一致，不得替换、扩大、缩小或颠倒',
+  '- **范围与数值逐字保真（强制）**：数字、区间连接符（如 `-` / `–` / `~` / `至`）、单位、版本号、比例与数量词必须原样保留；不得把 `2-4` 改成 `2–4` 或 `2 至 4`，也不得为“更具体”而生成原文没有的章节、条目或要求',
   '',
   '【项目事实优先（本模式核心）】',
   '- 参考块含项目文档与代码事实（【项目文档参考】【相关代码参考】），以文档与代码为准，不得臆造接口、结构、文件名',
@@ -5666,7 +5752,7 @@ const DISCIPLINE_PROMPT = [
   '',
   '## 质量纪律',
   '',
-  '6. 语义保真（原意不可丢·最高原则）：优化与增量增强一律基于原草稿，草稿的原本意思绝不可丢失——动作对象、执行动作、约束条件、术语、数量、语气必须与原文完全一致；不得臆造、删减、替换、颠倒原文已明确的信息。**语用转化允许、但必须锚定原意（v3.2.26 校准）**：疑问句草稿可以转化为分析性判断/猜测或明确请求——「为什么 X？」→「X 可能的原因有哪些？请逐一排查」，分析草稿语境本就是优化重构的一部分，转化不算丢失原意；但转化的前提是**完整保留原意**：提问焦点、分析对象、隐含需求不得丢失，不得偏离到与原文无关的内容；陈述句不得改成反问。',
+  '6. 语义保真（原意不可丢·最高原则）：优化与增量增强一律基于原草稿，草稿的原本意思绝不可丢失——动作对象、执行动作、约束条件、术语、数量、语气必须与原文完全一致；不得臆造、删减、替换、颠倒原文已明确的信息。**范围与数值逐字保真（强制）**：数字、区间连接符（如 `-` / `–` / `~` / `至`）、单位、版本号、比例与数量词必须原样保留，不得把 `2-4` 改成 `2–4` 或 `2 至 4`，也不得为“更具体”而生成原文没有的章节、条目或要求。**语用转化允许、但必须锚定原意（v3.2.26 校准）**：疑问句草稿可以转化为分析性判断/猜测或明确请求——「为什么 X？」→「X 可能的原因有哪些？请逐一排查」，分析草稿语境本就是优化重构的一部分，转化不算丢失原意；但转化的前提是**完整保留原意**：提问焦点、分析对象、隐含需求不得丢失，不得偏离到与原文无关的内容；陈述句不得改成反问。',
   '7. 明确化必须有原文依据：模糊但可推断处可具体化；无法由原文推出之处不得添加；不改变原意。',
   '8. 语言匹配：主体语言跟随输入（中文输入输出中文、英文输入输出英文），保留原文中的术语与专有名词。',
   '',
@@ -5780,6 +5866,7 @@ const { createAnalyzeStage } = __load("src/host/enhance-analyze.cjs");
 const { createRetrieveStage } = __load("src/host/enhance-retrieve.cjs");
 const { createAssembleStage } = __load("src/host/enhance-assemble.cjs");
 const { createGenerationStage } = __load("src/host/enhance-generation.cjs");
+const { createCommitStage } = __load("src/host/enhance-commit.cjs");
 const { createCorrectionRunner } = __load("src/host/correction-runner.cjs");
 const correctionSwitch = __load("src/host/correction-switch.cjs");
 const { enhanceSuccessResult, enhanceFailureResult } = __load("src/host/enhance-result-module.cjs");
@@ -5884,7 +5971,7 @@ function createHostPlugin(harness, runtime) {
       createEnhanceHandlers({
         ctx, harness, llm, pending, hlog, herr, requestKey, markAndAbort,
         createEnhancePipeline, createEnhanceRuntime, createAnalyzeStage, createRetrieveStage,
-        createAssembleStage, createGenerationStage, createCorrectionRunner,
+        createAssembleStage, createGenerationStage, createCommitStage, createCorrectionRunner,
         CORRECTION_SWITCH: correctionSwitch,
         validateConfig: pure.validateConfig,
         buildTryChain: pure.buildTryChain,

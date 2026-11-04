@@ -7,8 +7,8 @@
 //   · 不读取配置、不调用模型、不写回草稿；
 //   · 阶段顺序唯一事实源 = src/shared/contracts/enhance-stages.cjs。
 //
-// 兼容性：线上阶段名保持 analyze / retrieve / assemble / llm 不变，
-// 因此 enhance/progress 的 stage 字段与现有 UI 文案映射不需要改动。
+// 兼容性：内部阶段为 analyze / retrieve / assemble / llm / commit；
+// 线上 enhance/progress 的既有 stage 名仍保持 llm，现有 UI 文案映射不需要改动。
 const { ENHANCE_STAGE_ORDER } = require('../shared/contracts/enhance-stages.cjs');
 
 function createEnhancePipeline(options) {

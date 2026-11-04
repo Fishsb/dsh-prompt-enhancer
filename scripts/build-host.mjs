@@ -32,6 +32,7 @@ function buildHost() {
     'src/host/prompts-module.cjs',
     'src/host/pure-module.cjs',
     'src/host/enhance-handlers-module.cjs',
+    'src/host/enhance-commit.cjs',
     'src/shared/contracts/enhance-stages.cjs',
   ]) {
     if (!appBundle.modules.includes(required)) {

@@ -341,6 +341,7 @@ async function main() {
     // ⚠ 断言口径未变：仍要求字段内容 **逐字等于** DRAFT（不是"非空"、不是"包含"）。
     await sleep(300);
     const filledNow = await ev(READ_EXPR);
+    // contenteditable 的同步回读只作诊断；最终判据是等待下一帧后的稳定 DOM。
     ok('draft-filled', filledNow === DRAFT, 'filled=' + JSON.stringify(String(filledNow).slice(0, 40)) + ' sync=' + String(st1).slice(0, 30));
     await sleep(300);
     const before = await ev(READ_EXPR);

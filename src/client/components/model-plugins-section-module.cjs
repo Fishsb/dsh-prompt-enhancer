@@ -78,11 +78,7 @@ function ModelPluginsSection(props) {
   );
 }
 
-function CordisBadgePlaceholder() {
-  return null;
-}
-
-  return { ModelPluginsSection, CordisBadgePlaceholder };
+  return { ModelPluginsSection };
 }
 
 module.exports = { createModelPluginsSection };

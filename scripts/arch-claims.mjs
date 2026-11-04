@@ -431,10 +431,10 @@ const CLAIMS = [
     adr: 'ADR-194', anchor: 'module:prompt-enhancer', at: '2026-09-12', level: '部分兑现',
     promise: '判定「需要架构重构，分期执行、不推倒重写」：①P0 死层退役 + 协议事实源由注册面派生；②P1 host 半部改原生模块；③P2 规范收敛；④P3 待验证',
     assertions: [
-      // 目标模式（CHG-312/329/345）：PURE、模型域、模型/模板 RPC、V2 上下文、阶段执行器、纠错开关、结果归一、诊断日志、
-      // 纠错执行域、增强运行时、四阶段主链与 app-module/prompts-module 均已迁为普通模块；`src/host` 现为 **19 件**。
+      // 目标模式（CHG-312/329/345/356）：PURE、模型域、模型/模板 RPC、V2 上下文、阶段执行器、纠错开关、结果归一、诊断日志、
+      // 纠错执行域、增强运行时、五阶段主链与 app-module/prompts-module 均已迁为普通模块；`src/host` 现为 **20 件**。
       // 件数闸由 R4 装配图可达集承担，本条保留「旧 pure.js / diagnostics.js 不得复活」的反向守卫。
-      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '19 件（含 app-module/prompts-module、纯函数、模型/模板 RPC、V2 上下文、阶段执行器、纠错开关、结果归一、诊断日志（含 logs/last）、纠错执行域、增强运行时与 analyze/retrieve/assemble/llm 四阶段普通模块；旧 pure.js / diagnostics.js 不得复活）', () => {
+      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '20 件（含 app-module/prompts-module、纯函数、模型/模板 RPC、V2 上下文、阶段执行器、纠错开关、结果归一、诊断日志（含 logs/last）、纠错执行域、增强运行时与 analyze/retrieve/assemble/llm/commit 五阶段普通模块；旧 pure.js / diagnostics.js 不得复活）', () => {
         const files = list('src/host');
         const n = files.reduce((a, f) => a + lines(`src/host/${f}`), 0);
         const legacyGone = !files.includes('pure.js') && !files.includes('diagnostics.js');
@@ -447,12 +447,13 @@ const CLAIMS = [
         const analyzeBorn = files.includes('enhance-analyze.cjs');
         const assembleBorn = files.includes('enhance-assemble.cjs');
         const generationBorn = files.includes('enhance-generation.cjs');
+        const commitBorn = files.includes('enhance-commit.cjs');
         const retrieveBorn = files.includes('enhance-retrieve.cjs');
         const modelsRpcBorn = files.includes('models-rpc.cjs');
         const templateRpcBorn = files.includes('template-rpc.cjs');
         const logsLastBorn = files.includes('diagnostics-module.cjs') && read('src/host/diagnostics-module.cjs').includes('logsLast');
         const contextBorn = files.includes('context-runtime.cjs') && read('src/host/context-runtime.cjs').includes('buildV2ContextBlock');
-        return assert(files.length === 19 && legacyGone && pipelineBorn && correctionBorn && resultBorn && diagnosticsBorn && runnerBorn && runtimeBorn && analyzeBorn && retrieveBorn && assembleBorn && generationBorn && modelsRpcBorn && templateRpcBorn && logsLastBorn && contextBorn, `${files.length} 件 / ${n} 行｜旧 pure.js/diagnostics.js ${legacyGone ? '已退役' : '仍存在'}｜阶段执行器 ${pipelineBorn ? '在位' : '缺失'}｜纠错开关 ${correctionBorn ? '在位' : '缺失'}｜结果归一 ${resultBorn ? '在位' : '缺失'}｜诊断日志 ${diagnosticsBorn ? '在位' : '缺失'}｜logs/last ${logsLastBorn ? '在位' : '缺失'}｜纠错执行域 ${runnerBorn ? '在位' : '缺失'}｜增强运行时 ${runtimeBorn ? '在位' : '缺失'}｜analyze 阶段 ${analyzeBorn ? '在位' : '缺失'}｜retrieve 阶段 ${retrieveBorn ? '在位' : '缺失'}｜assemble 阶段 ${assembleBorn ? '在位' : '缺失'}｜llm 阶段 ${generationBorn ? '在位' : '缺失'}｜模型 RPC ${modelsRpcBorn ? '在位' : '缺失'}｜模板 RPC ${templateRpcBorn ? '在位' : '缺失'}｜V2 上下文 ${contextBorn ? '在位' : '缺失'}`);
+        return assert(files.length === 20 && legacyGone && pipelineBorn && correctionBorn && resultBorn && diagnosticsBorn && runnerBorn && runtimeBorn && analyzeBorn && retrieveBorn && assembleBorn && generationBorn && commitBorn && modelsRpcBorn && templateRpcBorn && logsLastBorn && contextBorn, `${files.length} 件 / ${n} 行｜旧 pure.js/diagnostics.js ${legacyGone ? '已退役' : '仍存在'}｜阶段执行器 ${pipelineBorn ? '在位' : '缺失'}｜纠错开关 ${correctionBorn ? '在位' : '缺失'}｜结果归一 ${resultBorn ? '在位' : '缺失'}｜诊断日志 ${diagnosticsBorn ? '在位' : '缺失'}｜logs/last ${logsLastBorn ? '在位' : '缺失'}｜纠错执行域 ${runnerBorn ? '在位' : '缺失'}｜增强运行时 ${runtimeBorn ? '在位' : '缺失'}｜analyze 阶段 ${analyzeBorn ? '在位' : '缺失'}｜retrieve 阶段 ${retrieveBorn ? '在位' : '缺失'}｜assemble 阶段 ${assembleBorn ? '在位' : '缺失'}｜llm 阶段 ${generationBorn ? '在位' : '缺失'}｜commit 阶段 ${commitBorn ? '在位' : '缺失'}｜模型 RPC ${modelsRpcBorn ? '在位' : '缺失'}｜模板 RPC ${templateRpcBorn ? '在位' : '缺失'}｜V2 上下文 ${contextBorn ? '在位' : '缺失'}`);
       }),
       A('A194-2', '结构', '①协议事实源改由注册面派生（废除 protocol.js）', 'src/protocol.js 不存在且 scripts/rpc-manifest.mjs 存在', () => {
         const gone = !exists('src/protocol.js');

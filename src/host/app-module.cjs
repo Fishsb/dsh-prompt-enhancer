@@ -15,6 +15,7 @@ const { createAnalyzeStage } = require('./enhance-analyze.cjs');
 const { createRetrieveStage } = require('./enhance-retrieve.cjs');
 const { createAssembleStage } = require('./enhance-assemble.cjs');
 const { createGenerationStage } = require('./enhance-generation.cjs');
+const { createCommitStage } = require('./enhance-commit.cjs');
 const { createCorrectionRunner } = require('./correction-runner.cjs');
 const correctionSwitch = require('./correction-switch.cjs');
 const { enhanceSuccessResult, enhanceFailureResult } = require('./enhance-result-module.cjs');
@@ -119,7 +120,7 @@ function createHostPlugin(harness, runtime) {
       createEnhanceHandlers({
         ctx, harness, llm, pending, hlog, herr, requestKey, markAndAbort,
         createEnhancePipeline, createEnhanceRuntime, createAnalyzeStage, createRetrieveStage,
-        createAssembleStage, createGenerationStage, createCorrectionRunner,
+        createAssembleStage, createGenerationStage, createCommitStage, createCorrectionRunner,
         CORRECTION_SWITCH: correctionSwitch,
         validateConfig: pure.validateConfig,
         buildTryChain: pure.buildTryChain,

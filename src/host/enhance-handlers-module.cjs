@@ -21,6 +21,7 @@ function createEnhanceHandlers(deps) {
   const createRetrieveStage = d.createRetrieveStage;
   const createAssembleStage = d.createAssembleStage;
   const createGenerationStage = d.createGenerationStage;
+  const createCommitStage = d.createCommitStage;
   const createCorrectionRunner = d.createCorrectionRunner;
   const CORRECTION_SWITCH = d.CORRECTION_SWITCH;
   const validateConfig = d.validateConfig;
@@ -208,8 +209,7 @@ const enhanceStageAssemble = assembleStage.enhanceStageAssemble;
 // 目标模式（CHG-325）：llm 阶段与探测迁为普通模块；阶段名与结果行为不变。
 const generationStage = createGenerationStage({
   ctx, llm, hlog, markDegraded, remainingBudgetMs, budgetExhausted,
-  retryPolicyFor, sleepMs, setProgress, enhanceSuccessResult,
-  enhanceFailureResult, friendlyMessage, collectStream, cleanOutput,
+  retryPolicyFor, sleepMs, setProgress, friendlyMessage, collectStream, cleanOutput,
   stripScenarioEcho, computeBackoffDelayMs, isRetryableFailure,
   probeCacheGet, probeCacheSet, pingStream, stageLlm: STAGE_LLM,
   watchdogTimeoutMs: WATCHDOG_TIMEOUT_MS, probeTimeoutMs: PROBE_TIMEOUT_MS,
@@ -217,10 +217,16 @@ const generationStage = createGenerationStage({
 });
 const enhanceStageLlm = generationStage.enhanceStageLlm;
 
+// ---- stage: commit——候选结果归一为既有 RPC 返回 ----
+// 内部阶段与生成阶段分离；不改变线上 enhance/progress 的既有 stage 名。
+const commitStage = createCommitStage({ hlog });
+const enhanceStageCommit = commitStage.enhanceStageCommit;
+
 registerEnhanceStage('analyze', enhanceStageAnalyze, { priority: 100 });
 registerEnhanceStage('retrieve', enhanceStageRetrieve, { priority: 100 });
 registerEnhanceStage('assemble', enhanceStageAssemble, { priority: 100 });
 registerEnhanceStage('llm', enhanceStageLlm, { priority: 100 });
+registerEnhanceStage('commit', enhanceStageCommit, { priority: 100 });
 
 harness.handle(RPC_METHODS.ENHANCE, async (args) => {
   const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : 'unknown';
@@ -239,7 +245,7 @@ harness.handle(RPC_METHODS.ENHANCE, async (args) => {
   const rec = { cancelled: false, timedOut: false, iterator: null, stage: STAGE_PREPARE, startedAt: Date.now(), detailKey: '', detailArgs: null, step: 0, total: 0 };
   pending.set(key, rec);
 
-  // M2 深化：请求状态经 Pipeline 四阶段链式传递（analyze→retrieve→assemble→llm）。
+  // 请求状态经 Pipeline 五阶段链式传递（analyze→retrieve→assemble→llm→commit）。
   // P0-b（2026-10-12 · 超时预算错位修复；独立复核 high 修正）：主超时计时器上移到**任何阶段之前**——
   // 准备阶段（analyze/retrieve/assemble，内含 5 处各 10–15s 的辅助调用）首次被真正限界，
   // 不再「准备阶段不设防」；辅助调用另按剩余预算钳制（helperTimeoutMs），超预算即跳过并记降级。

@@ -19,3 +19,16 @@ test('contract degraded reasons are frozen and stable',function(){
   }
   assert.equal(Object.isFrozen(c.degraded),true);
 });
+
+test('contract config keys are shared with published contract',function(){
+  const published=require('../lib/contracts.cjs');
+  assert.deepEqual([...c.configKeys].sort(),[...published.CONFIG_KEYS].sort());
+  assert.equal(Object.isFrozen(c.configKeys),true);
+});
+
+test('contract defaults are directly shared with published contract',function(){
+  const published=require('../lib/contracts.cjs');
+  assert.equal(c.configDefaults,published.CONFIG_DEFAULTS);
+  assert.deepEqual([...c.status],published.RESULT_STATUSES);
+  assert.deepEqual([...c.degraded],published.DEGRADED_REASONS);
+});

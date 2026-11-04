@@ -2,7 +2,7 @@
 
 // 增强 llm 阶段（目标模式：普通 CommonJS，构建期由打包器内联）。
 //
-// 职责：模型链调用、流式收集、退避重试、看门狗、连通性探测与结果提交。
+// 职责：模型链调用、流式收集、退避重试、看门狗与连通性探测，产出待提交候选。
 // 不读取配置、不读写草稿；llm/timer/纯函数/结果映射/日志全部由调用方注入。
 
 function createGenerationStage(deps) {
@@ -16,8 +16,6 @@ function createGenerationStage(deps) {
   const retryPolicyFor = d.retryPolicyFor;
   const sleepMs = d.sleepMs;
   const setProgress = d.setProgress;
-  const enhanceSuccessResult = d.enhanceSuccessResult;
-  const enhanceFailureResult = d.enhanceFailureResult;
   const friendlyMessage = d.friendlyMessage;
   const collectStream = d.collectStream;
   const cleanOutput = d.cleanOutput;
@@ -45,7 +43,7 @@ function createGenerationStage(deps) {
       let lastFailure = null;
       // 2026-08-18（用户需求·删内置兜底链）：模型链为空 → 明确报「未配置模型」（不自适应补足）
       if (chain.length === 0) {
-        state.result = { ok: false, code: 'NO_MODEL', message: friendlyMessage({ code: 'NO_MODEL' }) };
+        state.enhanceCandidate = { code: 'NO_MODEL', message: friendlyMessage({ code: 'NO_MODEL' }) };
         return state;
       }
       // v3.3.3（2026-08-27 用户实测·增强易断链修复）：外层 pass 循环——首轮整链耗尽后
@@ -56,7 +54,7 @@ function createGenerationStage(deps) {
       for (let i = 0; i < chain.length; i++) {
         const entry = chain[i];
         if (rec.cancelled || rec.timedOut) {
-          state.result = enhanceFailureResult({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED', message: friendlyMessage({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED' }) });
+          state.enhanceCandidate = { cancelled: rec.cancelled === true, timedOut: rec.timedOut === true, code: rec.timedOut ? 'TIMEOUT' : 'ABORTED', message: friendlyMessage({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED' }) };
           return state;
         }
         hlog('[enhance] try session=' + sessionId + ' provider=' + entry.provider + ' model=' + entry.model + (entry.reasoningEffort ? ' effort=' + entry.reasoningEffort : '') + ' seq=' + seq);
@@ -186,7 +184,7 @@ function createGenerationStage(deps) {
               // v3.3.3（设计决策）：探测窗口已按实测放大（PROBE_TIMEOUT_MS=12s）——探测全败
               // = 实测全不可达（慢模型不再被误杀），立即报错不进入重试轮（避免无望的二次等待）；
               // 重试轮只覆盖生成级失败耗尽（EMPTY/STREAM_THROW/QUOTA/瞬时错误等自愈场景）。
-              state.result = enhanceFailureResult({ code: 'ALL_MODELS_UNAVAILABLE', message: friendlyMessage({ code: 'ALL_MODELS_UNAVAILABLE' }) });
+              state.enhanceCandidate = { code: 'ALL_MODELS_UNAVAILABLE', message: friendlyMessage({ code: 'ALL_MODELS_UNAVAILABLE' }) };
               return state;
             }
             hlog('[enhance] watchdog retry head via ' + entry.provider + '/' + entry.model + ' seq=' + seq);
@@ -207,7 +205,7 @@ function createGenerationStage(deps) {
             continue;
           }
           hlog('[enhance] ok session=' + sessionId + ' via ' + entry.model);
-          state.result = enhanceSuccessResult({ before: state.text, text: cleaned, model: entry.model, fallbackUsed: state.watchdogDone === true || i > 0 });
+          state.enhanceCandidate = { kind: 'ok', before: state.text, text: cleaned, model: entry.model, fallbackUsed: state.watchdogDone === true || i > 0 };
           return state;
         }
         if (result.kind === 'toolong') {
@@ -235,7 +233,7 @@ function createGenerationStage(deps) {
             if (cleanedMt !== '' && !stillWrapped && longEnough) {
               markDegraded(state, 'output-truncated');
               hlog('[enhance] ok(truncated by max-tokens) session=' + sessionId + ' via ' + entry.model + ' chars=' + cleanedMt.length);
-              state.result = enhanceSuccessResult({ before: state.text, text: cleanedMt, model: entry.model, truncated: true, fallbackUsed: state.watchdogDone === true || i > 0 });
+              state.enhanceCandidate = { kind: 'maxtokens', before: state.text, text: cleanedMt, model: entry.model, truncated: true, fallbackUsed: state.watchdogDone === true || i > 0 };
               return state;
             }
             hlog('[enhance] truncated output rejected session=' + sessionId + ' wrapped=' + stillWrapped + ' longEnough=' + longEnough + ' chars=' + cleanedMt.length);
@@ -244,7 +242,7 @@ function createGenerationStage(deps) {
           continue;
         }
         if (result.kind === 'cancelled' || result.kind === 'aborted') {
-          state.result = { ok: false, code: rec.timedOut ? 'TIMEOUT' : 'ABORTED', message: friendlyMessage({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED' }) };
+          state.enhanceCandidate = { cancelled: result.kind === 'cancelled', timedOut: rec.timedOut === true || result.kind === 'aborted', code: rec.timedOut ? 'TIMEOUT' : 'ABORTED', message: friendlyMessage({ code: rec.timedOut ? 'TIMEOUT' : 'ABORTED' }) };
           return state;
         }
         hlog('[enhance] fail session=' + sessionId + ' model=' + entry.model + ' code=' + (result.failure ? result.failure.code : '?'));
@@ -257,7 +255,7 @@ function createGenerationStage(deps) {
         continue;
       }
       hlog('[enhance] chain exhausted session=' + sessionId + ' last code=' + (lastFailure ? lastFailure.code : '?'));
-      state.result = enhanceFailureResult({ code: lastFailure.code || 'LLM_FAILED', message: friendlyMessage(lastFailure) });
+      state.enhanceCandidate = { code: lastFailure.code || 'LLM_FAILED', message: friendlyMessage(lastFailure) };
       return state;
       }
     }
