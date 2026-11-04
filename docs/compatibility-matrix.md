@@ -1,4 +1,4 @@
-# dsh-prompt-enhancer 兼容性矩阵
+# dsh-voice-prompt-enhancer 兼容性矩阵
 
 > 维护：架构重构 M0 基线
 > 用途：明确 RPC / 配置 / 形态 / 版本兼容边界，作为重构期间防回归依据。
@@ -17,7 +17,7 @@
 
 ## 2. RPC 方法清单
 
-### host RPC（`/dsh-prompt-enhancer/rpc`）
+### host RPC（`/dsh-voice-prompt-enhancer/rpc`）
 
 | 方法 | 方向 | 说明 | 权限 |
 |---|---|---|---|
@@ -32,12 +32,12 @@
 | `models/autochain` | client → host | 自适应链 | 只读 |
 | `template/default` | client → host | 默认模板 | 只读 |
 | `logs/last` | client → host | 诊断日志 | 只读 |
-| `config/get` | client → host | 读取磁盘配置（$DSH_HOME/dsh-prompt-enhancer.config.json；DSH Desktop 动态端口配置恢复） | 只读 |
+| `config/get` | client → host | 读取磁盘配置（$DSH_HOME/dsh-voice-prompt-enhancer.config.json；DSH Desktop 动态端口配置恢复） | 只读 |
 | `config/set` | client → host | 写入磁盘配置（原子写 tmp+rename，≤1MB） | 用户触发 |
 | `voice/status` | client → host | 语音引擎就绪态（**委托官方 `ctx.speechToText.snapshot()`**）+ 清口水词就绪态 | 只读 |
 | `voice/correct` | client → host | **语音输入纠错**（独立语音增值步 · `CHG-143`）：识别完成后对草稿做**字词层低争议订正**（可带**最近 1 轮显式会话参考**判语境）；**与自动增强并联**、由 `voice.correction.enabled` 开关控制 | 用户触发 |
 
-> 注：`models/*` / `logs/*` / `template/*` / `enhance*` / `cancel` / `voice/correct` 共 **12** 条注册于 `plugin-host.js`（由 `lib/index.cjs` 读出 `BODY` 并桥接）；`config/*` / `voice/status` 共 **3** 条注册于 **host 半部 `lib/` 侧的真 CommonJS 模块**——`config/*` 在 `lib/rpc-config.cjs`、`voice/status` 在 `lib/rpc-voice.cjs`（P2-3 拆分批起；`lib/index.cjs` 现为**薄装配入口**，自身不注册 RPC）。⚠ `CHG-143` 起 `voice/correct` 的**注册面在 bundle（`plugin-host.js`）内**，**不在** `lib/rpc-voice.cjs`（后者仍只注册 `voice/status`）——其参数校验 schema 仍在 `lib/rpc-schema.cjs`（schema 面与注册面**可分离**）。两侧同挂 `/dsh-prompt-enhancer/rpc`，合计 **15** 条（以 `harness.handle(` 枚举逐条对照 —— **P2-3 起派生面 = `lib/` 下全部非生成 `.cjs` + `plugin-host.js`**，可由 `node scripts/rpc-manifest.mjs` 复算）。
+> 注：`models/*` / `logs/*` / `template/*` / `enhance*` / `cancel` / `voice/correct` 共 **12** 条注册于 `plugin-host.js`（由 `lib/index.cjs` 读出 `BODY` 并桥接）；`config/*` / `voice/status` 共 **3** 条注册于 **host 半部 `lib/` 侧的真 CommonJS 模块**——`config/*` 在 `lib/rpc-config.cjs`、`voice/status` 在 `lib/rpc-voice.cjs`（P2-3 拆分批起；`lib/index.cjs` 现为**薄装配入口**，自身不注册 RPC）。⚠ `CHG-143` 起 `voice/correct` 的**注册面在 bundle（`plugin-host.js`）内**，**不在** `lib/rpc-voice.cjs`（后者仍只注册 `voice/status`）——其参数校验 schema 仍在 `lib/rpc-schema.cjs`（schema 面与注册面**可分离**）。两侧同挂 `/dsh-voice-prompt-enhancer/rpc`，合计 **15** 条（以 `harness.handle(` 枚举逐条对照 —— **P2-3 起派生面 = `lib/` 下全部非生成 `.cjs` + `plugin-host.js`**，可由 `node scripts/rpc-manifest.mjs` 复算）。
 >
 > ⚠ **历史**（**已退役，不再注册**）：`plugins/*`（4）· `update/check`·`update/pull`·`update/envcheck`（3）· `update/executorEnsure`·`update/install`·`update/restartNeeded`·`update/diagTail`（4）· `update/portRestart`·`update/makeShortcut`（2）· `voice/model*`·`voice/deploy*`（8）⇒ 共 21 条已随「插件管理 tab 退役 / 更新执行器退役 / 插件内重启能力退役 / P1-a 语音缩批」移除。**上方表格为现行集合，本节历史条目仅供旧版本对照，不代表现行能力。**
 
@@ -87,7 +87,7 @@
 
 ### updater 配置 · **已退役**
 
-> ⚠ **P1-c（2026-10-13）判定：整节为幽灵配置**。判定依据（全仓 grep 原始读数）：`updater.serviceName` / `updater.profile` / `updater.executorPort` 三键在 `lib/` · `src/` · `plugin-host.js` · `scripts/` · `test/` 中**零命中** ⇒ **无任何代码读写**（配置读写面 = `config/get`·`config/set` 的 `$DSH_HOME/dsh-prompt-enhancer.config.json`，其中不含 `updater.*`）。
+> ⚠ **P1-c（2026-10-13）判定：整节为幽灵配置**。判定依据（全仓 grep 原始读数）：`updater.serviceName` / `updater.profile` / `updater.executorPort` 三键在 `lib/` · `src/` · `plugin-host.js` · `scripts/` · `test/` 中**零命中** ⇒ **无任何代码读写**（配置读写面 = `config/get`·`config/set` 的 `$DSH_HOME/dsh-voice-prompt-enhancer.config.json`，其中不含 `updater.*`）。
 >
 > 历史键（**仅供旧版本对照，现行无代码读写**）：`updater.serviceName`（服务名，默认 `dsh-web`）· `updater.profile`（profile，默认 `web`）· `updater.executorPort`（执行器端口，默认 `3081`）——三者随「插件自建更新执行器退役」一并失活。
 

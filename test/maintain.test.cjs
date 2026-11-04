@@ -279,7 +279,7 @@ test('MAINT-16 rescueSnapshot → 破坏 → rescueRestore 忠实回写（含 ex
   fs.mkdirSync(profileDir, { recursive: true });
   fs.writeFileSync(path.join(profileDir, 'package.json'), '{"orig":true}', 'utf8');
   fs.writeFileSync(path.join(profileDir, 'cordis.patch.yml'), '[]\n', 'utf8');
-  const runtimeDir = path.join(profileDir, 'node_modules', 'dsh-prompt-enhancer');
+  const runtimeDir = path.join(profileDir, 'node_modules', 'dsh-voice-prompt-enhancer');
   fs.mkdirSync(runtimeDir, { recursive: true });
   fs.writeFileSync(path.join(runtimeDir, 'plugin-host.js'), '// original host', 'utf8');
   const root = path.join(home, 'rescue');

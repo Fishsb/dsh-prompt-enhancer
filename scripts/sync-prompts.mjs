@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ============================================================================
-// dsh-prompt-enhancer · prompts 同步脚本
+// dsh-voice-prompt-enhancer · prompts 同步脚本
 // 把 prompts/*.md（提示词事实源）生成内联到 plugin-host.js 的生成标记区。
 //
 // 为什么这样做（v2.4.6 设计决策）：

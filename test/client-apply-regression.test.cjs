@@ -96,8 +96,8 @@ function makeDocument() {
     head: { appendChild(el) { appended.push(el); return el; } },
     body: {},
     querySelector(selector) {
-      if (selector === 'style[data-plugin-css="dsh-prompt-enhancer"]') {
-        return appended.find((el) => el.dataset && el.dataset.pluginCss === 'dsh-prompt-enhancer') || null;
+      if (selector === 'style[data-plugin-css="dsh-voice-prompt-enhancer"]') {
+        return appended.find((el) => el.dataset && el.dataset.pluginCss === 'dsh-voice-prompt-enhancer') || null;
       }
       return null;
     },
@@ -231,7 +231,7 @@ test('CAP-01 产物 apply() 注入样式并按原顺序注册当前槽位', asyn
     assert.doesNotThrow(() => plugin.apply(ctx), 'apply() 不得因 styles/storage/timer 缺失而抛错');
 
     // 通过 querySelector 证明样式标签已挂载，并直接核对文本。
-    const mounted = documentStub.querySelector('style[data-plugin-css="dsh-prompt-enhancer"]');
+    const mounted = documentStub.querySelector('style[data-plugin-css="dsh-voice-prompt-enhancer"]');
     assert.ok(mounted, 'apply() 必须插入插件样式标签');
     assert.ok(String(mounted.textContent).includes('.dsh-enh-btn'), '样式标签必须承载既有 CSS');
 

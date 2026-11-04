@@ -77,7 +77,7 @@ test('readProcessIndex 解析 host 写的进程索引', () => {
   try {
     // execPath 用真实存在的 node
     const execPath = process.execPath;
-    fs.writeFileSync(path.join(tmp, 'dsh-prompt-enhancer.json'), JSON.stringify({
+    fs.writeFileSync(path.join(tmp, 'dsh-voice-prompt-enhancer.json'), JSON.stringify({
       pid: 12345, execPath, cwd: '/tmp/work', argv: ['lib/bin.js', 'web', '--port', '3080'], ts: Date.now(),
     }), 'utf8');
     const idx = ps.readProcessIndex(tmp);
@@ -96,9 +96,9 @@ test('readProcessIndex：execPath 不存在 / 缺 argv → null', () => {
   const path = require('node:path');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-idx2-'));
   try {
-    fs.writeFileSync(path.join(tmp, 'dsh-prompt-enhancer.json'), JSON.stringify({ pid: 1, execPath: 'C:/definitely/not/exists/node.exe', argv: [] }), 'utf8');
+    fs.writeFileSync(path.join(tmp, 'dsh-voice-prompt-enhancer.json'), JSON.stringify({ pid: 1, execPath: 'C:/definitely/not/exists/node.exe', argv: [] }), 'utf8');
     assert.equal(ps.readProcessIndex(tmp), null);
-    fs.writeFileSync(path.join(tmp, 'dsh-prompt-enhancer.json'), JSON.stringify({ pid: 1, execPath: process.execPath }), 'utf8');
+    fs.writeFileSync(path.join(tmp, 'dsh-voice-prompt-enhancer.json'), JSON.stringify({ pid: 1, execPath: process.execPath }), 'utf8');
     assert.equal(ps.readProcessIndex(tmp), null);
     // 无文件
     assert.equal(ps.readProcessIndex(tmp + '-nope'), null);

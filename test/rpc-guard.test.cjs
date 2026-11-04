@@ -1,7 +1,7 @@
 'use strict';
 // RPC 入口安全栅栏 + cmd 值安全化门禁（2026-09-12 只读审查 H1/H2 修复锚定）
 // 背景（实测）：本插件 RPC 路由注册在 DSH web 鉴权栅栏之外——无 token 的
-// `POST /dsh-prompt-enhancer/rpc`（text/plain，不触发 CORS 预检）返回 200 真实数据，
+// `POST /dsh-voice-prompt-enhancer/rpc`（text/plain，不触发 CORS 预检）返回 200 真实数据，
 // 而 `GET /` 是 401 ⇒ 任意网页可借用户浏览器驱动 config/set / update/portRestart 等副作用。
 // 本文件锚定修复：来源栅栏（同源/无来源头放行、跨源/跨站拒绝）+ 请求体上限 + cmd 值安全化，
 // 并用「假 ctx 挂载真实 handler」做端到端冒烟（L3 口径：模拟 handler 真实传参形态）。
@@ -75,8 +75,8 @@ test('RPCG-04 源码锚定：RPC 入口带来源栅栏与体积门（P2-3：实�
 test('RPCG-05 registerRpcRoute 端到端冒烟：跨站 403 / 同源放行分发 / 超大体积 413 / 非 POST 405', async () => {
   let captured = null;
   indexMod.registerRpcRoute({ get: (k) => (k === 'webServer' ? { register: (route) => { captured = route; } } : undefined) });
-  assert.ok(captured && captured.path === '/dsh-prompt-enhancer/rpc' && typeof captured.handler === 'function',
-    'handler 必须注册到 /dsh-prompt-enhancer/rpc');
+  assert.ok(captured && captured.path === '/dsh-voice-prompt-enhancer/rpc' && typeof captured.handler === 'function',
+    'handler 必须注册到 /dsh-voice-prompt-enhancer/rpc');
   const mkRes = () => ({ code: 0, body: '', writeHead(c) { this.code = c; }, end(b) { this.body = String(b); } });
   const mkReq = (headers, body) => {
     const r = new EventEmitter();
@@ -202,7 +202,7 @@ test('RPCG-06 入口装载链 L3 冒烟：apply() 真实注册 + 派生的全部
 
   // ① apply() 真的把路由注册上（且 path = RPC_PATH）
   assert.ok(out.hasHandler, 'apply() 未注册路由（域模块未接线 / require 路径写错？）');
-  assert.equal(out.path, '/dsh-prompt-enhancer/rpc', '注册 path 必须是 RPC_PATH');
+  assert.equal(out.path, '/dsh-voice-prompt-enhancer/rpc', '注册 path 必须是 RPC_PATH');
 
   // ② 派生的方法集非空（防「派生面归零 ⇒ 循环体不执行 ⇒ 恒绿」）
   // CHG-117（2026-10-16 · 规整改造批）：原生注册面 4 → **3**（删 `voice/transcribe`；自建链退役后无调用方）。

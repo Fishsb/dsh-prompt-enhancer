@@ -1,21 +1,23 @@
 # Changelog
 
-[3.3.3]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.2...v3.3.3
-[Unreleased]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.4.2...HEAD
-[3.4.2]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.4.1...v3.4.2
-[3.4.1]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.4.0...v3.4.1
-[3.4.0]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.3...v3.4.0
-[3.3.2]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.1...v3.3.2
-[3.3.1]: https://github.com/Fishsb/dsh-prompt-enhancer/compare/v3.3.0...v3.3.1
+[3.3.3]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.3.2...v3.3.3
+[Unreleased]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.4.2...HEAD
+[3.4.2]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.4.1...v3.4.2
+[3.4.1]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.4.0...v3.4.1
+[3.4.0]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.3.3...v3.4.0
+[3.3.2]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.3.1...v3.3.2
+[3.3.1]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.3.0...v3.3.1
 
 本项目所有重要变更记录于此文件。
-格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。完整发布说明见 [GitHub Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases)。
+格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。完整发布说明见 [GitHub Releases](https://github.com/Fishsb/dsh-voice-prompt-enhancer/releases)。
 
 > 实测标注纪律：每条变更须在文末标注「已实测：<方式/等级>」；未实测不得合入（2026-08-24 门禁化）。
 
 > 🗺️ 条目内的 `flow:` 标注为功能链路标签（原 pmg 项目地图 `docs/map/` 已随 pmg 于 2026-09-10 移除，该路径不再存在）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
 ## [Unreleased]
+
+- **BREAKING: 包名与仓库改名为 dsh-voice-prompt-enhancer（v3.5.0 · 2026-11-05 · [PE-F01]）**：npm 包名、GitHub 仓库、cordis entry id/name、RPC 路由前缀统一改为 dsh-voice-prompt-enhancer（原 dsh-prompt-enhancer 已被他人占用，无法发布 npm）。新增 engines.dsh（>=0.2.1-rc.1）与 repository/homepage/bugs，市场可显示宿主要求并自动映射 npm 下载量。配置文件名迁移到新名，首次读取时自动复制旧文件、旧文件保留 .migrated 备份；部署账本与运行目录解析均支持新名优先、旧名回退，已装用户无需手动迁移。旧包名保留在读取候选里，下一版本再整体退役。**已实测**：配置迁移四场景（全新安装/旧用户升级/新旧并存/空目录）全通过；产物重建后 build-host/build-client --check 一致；split-identity 确认 4 面 18 项 identity 唯一；dead-code R1–R7 全过。未打 tag、未发布、未安装。
 
 - **目标模式：增强生成与提交分离为独立阶段（架构/状态 · 2026-11-04 · [PE-F02]）**：原先生成阶段同时产出最终 RPC 结果，`commitEnhanceResult` 虽已有契约实现却未接入线上主链。现新增 `enhance-commit.cjs`，生成阶段只产出 `enhanceCandidate`，随后由 `commit` 阶段统一映射为既有 `{ ok, text, model, fallbackUsed?, truncated?, message? }` 返回；`fallbackUsed`、截断降级、失败消息及四态语义保持原值。内部阶段顺序改为 `analyze → retrieve → assemble → llm → commit`，线上 `enhance/progress.stage` 仍保留既有 `llm` 名称以保持 RPC 兼容。新增 `HEC-01..04` 锁定候选映射、缺候选 fail-closed、产物内联与旧进度名不变。**已实测**：生成/提交/阶段/状态定向 57/57；真实 WSL Web 模型优化写回与撤销原文精确通过；门禁 dead-code R1–R7、RPC 15 条、提示词生成区均通过。用户可见文案、RPC 方法/字段、配置键与安装形态未改。未 bump/tag/发布。
 

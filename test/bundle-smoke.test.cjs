@@ -107,7 +107,7 @@ test('SMK-05 RPC schema accepts real client payload shapes', () => {
   // 真实 client 形状（helpers.js enhance 调用）
   assert.equal(validateRpcArgs('enhance', { sessionId: 's', seq: 1, text: 'draft body', config: {}, mode: 'base' }).ok, true);
   // 真实 client 形状（updater-card doCheck）
-  assert.equal(validateRpcArgs('update/check', { repo: 'Fishsb/dsh-prompt-enhancer', sessionId: 's', tagsPayload: '[]', releasePayload: '{}' }).ok, true);
+  assert.equal(validateRpcArgs('update/check', { repo: 'Fishsb/dsh-voice-prompt-enhancer', sessionId: 's', tagsPayload: '[]', releasePayload: '{}' }).ok, true);
   // 真实 client 形状（model-main runTest）
   assert.equal(validateRpcArgs('models/test', { provider: 'p', model: 'm' }).ok, true);
   // 真实 client 形状（plugins-section act）

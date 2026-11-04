@@ -52,7 +52,7 @@ const argvPort = (() => {
 const RESULTS = [];
 const asrHome = () =>
   process.env.DSH_HOME || path.join(process.env.HOME || process.env.USERPROFILE || '', '.dsh');
-const asrDir = () => path.join(asrHome(), 'dsh-prompt-enhancer-asr');
+const asrDir = () => path.join(asrHome(), 'dsh-voice-prompt-enhancer-asr');
 // 注意：必须用函数动态计算——SYSTEM 上下文（--sys-test）注入 USERPROFILE 前，
 // 顶层 const 会在 import 时缓存 systemprofile 路径导致写入错位（2026-08-20 实测坑）
 const sysResultFile = () => path.join(asrDir(), '.voice-verify-sys.json');
@@ -97,7 +97,7 @@ function sineWavDataUrl(seconds) {
 }
 
 // worker 端口发现（**不再硬编码 3082**；本仓纪律：worker 端口动态，实际端口写 worker.port 文件）
-// 优先级：--port N > $DSH_HOME/dsh-prompt-enhancer-asr/worker.port > 常见候选扫描（按 /health 探活）
+// 优先级：--port N > $DSH_HOME/dsh-voice-prompt-enhancer-asr/worker.port > 常见候选扫描（按 /health 探活）
 // ⚠ 与生产口径对齐（lib/asr.cjs:27-31）：**worker.port 里的端口要先过健康校验**——
 //   文件可能指向一个已死的 pid（多实例/崩溃残留），按「文件即真」会读到一个死口而错过真正在跑的
 //   worker。故「文件端口不健康」不是终点，而是降级到扫描（并把原因记进 tried，保持诊断可读）。

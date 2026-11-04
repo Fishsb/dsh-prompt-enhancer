@@ -28,7 +28,7 @@ test('CDS-03 空占位组件不得保留为死符号', () => {
 
 test('CDS-04 正式产物仍保持自包含与官方加载契约', () => {
   assert.match(client, /window\.__ModuleLoader__\.load\(\{/);
-  assert.match(client, /id: "dsh-prompt-enhancer"/);
+  assert.match(client, /id: "dsh-voice-prompt-enhancer"/);
   assert.equal((client.match(/require\(['"]\.\.?\//g) || []).length, 0);
   assert.equal(client.includes('require("node:'), false);
 });

@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const REPO = 'Fishsb/dsh-prompt-enhancer';
+const REPO = 'Fishsb/dsh-voice-prompt-enhancer';
 const TOKEN = process.env.GITHUB_TOKEN || '';
 if (!TOKEN) { console.error('需要 GITHUB_TOKEN 环境变量'); process.exit(1); }
 

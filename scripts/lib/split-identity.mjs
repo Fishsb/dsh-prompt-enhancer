@@ -2,7 +2,7 @@
 //
 // 为什么需要（CHG-289 §3.3 实测）：两包若用**同一个 loader entry id**，宿主 `composeEntries`
 //   **既不报错也不告警** —— 实测输出:
-//       same id twice -> [{"id":"dsh-prompt-enhancer",…},{"id":"dsh-prompt-enhancer",…}] warns= []
+//       same id twice -> [{"id":"dsh-voice-prompt-enhancer",…},{"id":"dsh-voice-prompt-enhancer",…}] warns= []
 //   即：撞了也静默产出两条同名 entry ⇒ 装载行为不可预期，而链上零红。
 //   ⇒ 只能在**仓内机检**拦（这也是本模块存在的唯一理由）。
 //

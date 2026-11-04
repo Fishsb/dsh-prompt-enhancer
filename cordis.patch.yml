@@ -1,4 +1,4 @@
 # dsh bundle patch: inserts this plugin into a profile's layer stack.
 - insert:
-    - id: dsh-prompt-enhancer
-      name: 'dsh-prompt-enhancer'
+    - id: dsh-voice-prompt-enhancer
+      name: 'dsh-voice-prompt-enhancer'

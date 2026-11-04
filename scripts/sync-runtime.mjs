@@ -39,12 +39,14 @@ function runtimeDirs() {
   const targets = [];
   if (existsSync(profilesDir)) {
     for (const d of require('node:fs').readdirSync(profilesDir)) {
-      const cand = join(profilesDir, d, 'node_modules', 'dsh-prompt-enhancer');
-      if (existsSync(cand)) targets.push(cand);
+      for (const dirName of ['dsh-voice-prompt-enhancer', 'dsh-prompt-enhancer']) {
+        const cand = join(profilesDir, d, 'node_modules', dirName);
+        if (existsSync(cand)) targets.push(cand);
+      }
     }
   }
   if (!targets.length) {
-    throw new Error('未找到任何运行环境目录：' + profilesDir + '/<profile>/node_modules/dsh-prompt-enhancer（可用 DSH_RUNTIME_DIR 指定）');
+    throw new Error('未找到任何运行环境目录：' + profilesDir + '/<profile>/node_modules/dsh-voice-prompt-enhancer（可用 DSH_RUNTIME_DIR 指定）');
   }
   return targets;
 }

@@ -1,6 +1,6 @@
 {
-  "name": "dsh-prompt-enhancer",
-  "version": "3.4.2",
+  "name": "dsh-voice-prompt-enhancer",
+  "version": "3.5.0",
   "description": "DeepSeek Harness (DSH) plugin: prompt optimization (✨) + voice input enhancement (💬)",
   "main": "lib/index.cjs",
   "type": "commonjs",
@@ -48,5 +48,16 @@
     "prompt-enhancer",
     "dsh-plugin"
   ],
-  "dependencies": {}
+  "dependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Fishsb/dsh-voice-prompt-enhancer.git"
+  },
+  "homepage": "https://github.com/Fishsb/dsh-voice-prompt-enhancer#readme",
+  "bugs": {
+    "url": "https://github.com/Fishsb/dsh-voice-prompt-enhancer/issues"
+  },
+  "engines": {
+    "dsh": ">=0.2.1-rc.1"
+  }
 }

@@ -1,17 +1,17 @@
-# dsh-prompt-enhancer
+# dsh-voice-prompt-enhancer
 
 DeepSeek Harness（DSH）插件：**提示词优化** + **语音输入增强** —— 把输入框草稿改写得更清晰、可执行，并给语音输入加上热键、说完自动停、清口水词与纠错。
 
 草稿常常只有半句要求，交给模型后还要来回补问——点一下 ✨ 就地改写，不满意可撤回；语音则直接说，停顿即停，结果落回输入框。
 
-[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases) [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![DSH](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FFishsb%2Fdsh-prompt-enhancer%2Fmain%2Fpackage.json&query=%24.peerDependencies%5B%27%40deepseek-ai%2Fdsh-client-locale%27%5D&label=DSH&color=blue)](docs/compatibility-matrix.md)
+[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-voice-prompt-enhancer)](https://github.com/Fishsb/dsh-voice-prompt-enhancer/releases) [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-voice-prompt-enhancer)](https://github.com/Fishsb/dsh-voice-prompt-enhancer/stargazers) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![DSH](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FFishsb%2Fdsh-voice-prompt-enhancer%2Fmain%2Fpackage.json&query=%24.peerDependencies%5B%27%40deepseek-ai%2Fdsh-client-locale%27%5D&label=DSH&color=blue)](docs/compatibility-matrix.md)
 
 ## 安装
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.4.2
-dsh plugin --profile web update dsh-prompt-enhancer   # 更新
-dsh plugin --profile web remove dsh-prompt-enhancer   # 卸载
+dsh plugin --profile web add github:Fishsb/dsh-voice-prompt-enhancer#v3.4.2
+dsh plugin --profile web update dsh-voice-prompt-enhancer   # 更新
+dsh plugin --profile web remove dsh-voice-prompt-enhancer   # 卸载
 ```
 
 装完（或更新 / 卸载后）重启 DSH，输入框工具行出现 ✨ 即安装成功。需本机已装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) **≥ 0.1.0-rc.6** 且 `pnpm` 在 PATH 中。
@@ -48,6 +48,6 @@ dsh plugin --profile web remove dsh-prompt-enhancer   # 卸载
 
 ![语音输入](docs/screenshots/voice-main.png)
 
-[Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases) · [CHANGELOG](CHANGELOG.md) · [兼容性说明](docs/compatibility-matrix.md) · Licensed under [Apache-2.0](LICENSE)
+[Releases](https://github.com/Fishsb/dsh-voice-prompt-enhancer/releases) · [CHANGELOG](CHANGELOG.md) · [兼容性说明](docs/compatibility-matrix.md) · Licensed under [Apache-2.0](LICENSE)
 
 > 隐私：插件不记录、不上报任何数据；增强结果来自外部 LLM，发送前请自行核对。

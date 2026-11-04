@@ -264,7 +264,7 @@ function saveConfig(patch) {
     try { storage.setItem(CONFIG_KEY, JSON.stringify(configState.value)); } catch (e) { /* 忽略 */ }
   }
   // v3.2.4（Issue #1 修复）：磁盘持久化双写——DSH Desktop 动态端口下 localStorage 按 Origin 隔离
-  // 会「丢失」，磁盘配置（$DSH_HOME/dsh-prompt-enhancer.config.json）跨端口共享（fire-and-forget 失败静默）
+  // 会「丢失」，磁盘配置（$DSH_HOME/dsh-voice-prompt-enhancer.config.json）跨端口共享（fire-and-forget 失败静默）
   //
   // 🔴 P0 修复（2026-10-13 · 用户配置被清空）：**只写本次改动的字段**（patch），不再整份提交。
   //   病灶（实测复现 + 官方 rpc 语义实读）：此处原为 `{ config: configState.value }`（**整份**），
@@ -305,7 +305,7 @@ function subscribeConfig(fn) {
 }
 
 // v3.2.4（Issue #1 修复）：启动时从 host 磁盘同步配置（config/get·config/set，
-// $DSH_HOME/dsh-prompt-enhancer.config.json）。DSH Desktop 主进程每次启动动态分配端口，
+// $DSH_HOME/dsh-voice-prompt-enhancer.config.json）。DSH Desktop 主进程每次启动动态分配端口，
 // localStorage 按 Origin（协议://域名:端口）隔离 → 重启后新 Origin 下 localStorage 为空 →
 // 旧逻辑判定 fresh=true 用默认链覆盖用户配置。磁盘配置跨端口共享，hostSync 完成前不做首次继承。
 const HOST_SYNC_MAX_ATTEMPTS = 10;

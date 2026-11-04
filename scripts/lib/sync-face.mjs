@@ -147,8 +147,10 @@ export function resolveRuntimeDirs(env = process.env) {
   const out = [];
   if (!fs.existsSync(profilesDir)) return out;
   for (const d of fs.readdirSync(profilesDir)) {
-    const cand = path.join(profilesDir, d, 'node_modules', 'dsh-prompt-enhancer');
-    if (fs.existsSync(cand)) out.push(cand);
+    for (const dirName of ['dsh-voice-prompt-enhancer', 'dsh-prompt-enhancer']) {
+      const cand = path.join(profilesDir, d, 'node_modules', dirName);
+      if (fs.existsSync(cand)) out.push(cand);
+    }
   }
   return out;
 }

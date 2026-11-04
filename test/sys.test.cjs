@@ -11,7 +11,7 @@ const psvc = require('../lib/platform-service.cjs');
 
 test('SYS-01 executorDir 返回外部版本化目录', () => {
   const dir = sys.executorDir('0.1.6');
-  assert.ok(dir.includes('dsh-prompt-enhancer'));
+  assert.ok(dir.includes('dsh-voice-prompt-enhancer'));
   assert.ok(dir.includes('executor'));
   assert.ok(dir.endsWith(path.join('0.1.6')), '版本号作为末级目录');
 });
@@ -23,7 +23,7 @@ test('SYS-02 profileDir 返回 DSH profile 路径', () => {
 
 test('SYS-03 isLocalTarballInstallArgs 只允许 staging 内 tarball', () => {
   const good = sys.isLocalTarballInstallArgs([
-    'node', 'plugin', '--profile', 'web', 'add', path.join(sys.STAGING_DIR, 'dsh-prompt-enhancer-2.8.3.tgz'),
+    'node', 'plugin', '--profile', 'web', 'add', path.join(sys.STAGING_DIR, 'dsh-voice-prompt-enhancer-2.8.3.tgz'),
   ]);
   assert.equal(good, true, 'staging 内 tgz 应放行');
 

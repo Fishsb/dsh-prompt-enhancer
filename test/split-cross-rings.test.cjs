@@ -33,10 +33,10 @@ const shared = require('../scripts/lib/split-shared-fns.mjs');
 test('SPLIT-ID-1 反向：两个包用**同一 loader entry id** ⇒ 判红并点名该值', () => {
   const yml = [
     '- insert:',
-    '    - id: dsh-prompt-enhancer',
-    "      name: 'dsh-prompt-enhancer'",
+    '    - id: dsh-voice-prompt-enhancer',
+    "      name: 'dsh-voice-prompt-enhancer'",
     '- insert:',
-    '    - id: dsh-prompt-enhancer',          // ⚠ 撞车：第二包误用了第一包的 id
+    '    - id: dsh-voice-prompt-enhancer',          // ⚠ 撞车：第二包误用了第一包的 id
     "      name: 'dsh-voice-enhancer'",
   ].join('\n');
   const entries = identity.patchEntryIdentities(yml);
@@ -44,40 +44,40 @@ test('SPLIT-ID-1 反向：两个包用**同一 loader entry id** ⇒ 判红并�
   const r = identity.findCollisions([{ label: 'loader entry id', values: entries.map((e) => e.id) }]);
   assert.equal(r.ok, false, '同 id 两次必须判红（宿主实测不报错 ⇒ 只能这里拦）');
   assert.equal(r.duplicates.length, 1);
-  assert.equal(r.duplicates[0].value, 'dsh-prompt-enhancer');
+  assert.equal(r.duplicates[0].value, 'dsh-voice-prompt-enhancer');
   assert.equal(r.duplicates[0].count, 2);
 });
 
 test('SPLIT-ID-2 正向：两个包用**不同** id ⇒ 绿，且两条都在（不是空跑）', () => {
   const yml = [
     '- insert:',
-    '    - id: dsh-prompt-enhancer',
-    "      name: 'dsh-prompt-enhancer'",
+    '    - id: dsh-voice-prompt-enhancer',
+    "      name: 'dsh-voice-prompt-enhancer'",
     '- insert:',
     '    - id: dsh-voice-enhancer',
     "      name: 'dsh-voice-enhancer'",
   ].join('\n');
   const entries = identity.patchEntryIdentities(yml);
   assert.equal(entries.length, 2);
-  assert.deepEqual(entries.map((e) => e.id), ['dsh-prompt-enhancer', 'dsh-voice-enhancer']);
+  assert.deepEqual(entries.map((e) => e.id), ['dsh-voice-prompt-enhancer', 'dsh-voice-enhancer']);
   const r = identity.findCollisions([{ label: 'loader entry id', values: entries.map((e) => e.id) }]);
   assert.equal(r.ok, true, '不同 id 应判绿');
   assert.equal(r.observed['loader entry id'], 2, 'observed 必须是 2（证明真扫到两条）');
 });
 
 test('SPLIT-ID-3 反向：两个包用**同一 client 模块 id** ⇒ 判红', () => {
-  const a = 'window.__ModuleLoader__.load({ id: "dsh-prompt-enhancer", factory: (r) => ({}) });';
-  const b = 'window.__ModuleLoader__.load({ id: "dsh-prompt-enhancer", factory: (r) => ({}) });';
-  assert.deepEqual(identity.clientModuleIds(a), ['dsh-prompt-enhancer']);
+  const a = 'window.__ModuleLoader__.load({ id: "dsh-voice-prompt-enhancer", factory: (r) => ({}) });';
+  const b = 'window.__ModuleLoader__.load({ id: "dsh-voice-prompt-enhancer", factory: (r) => ({}) });';
+  assert.deepEqual(identity.clientModuleIds(a), ['dsh-voice-prompt-enhancer']);
   const r = identity.findCollisions([{ label: 'client 模块 id', values: [...identity.clientModuleIds(a), ...identity.clientModuleIds(b)] }]);
   assert.equal(r.ok, false, '同 client id 必须判红（宿主 client-modules 会抛 duplicate factory）');
-  assert.equal(r.duplicates[0].value, 'dsh-prompt-enhancer');
+  assert.equal(r.duplicates[0].value, 'dsh-voice-prompt-enhancer');
 });
 
 test('SPLIT-ID-4 反向：两个包**同一 RPC 前缀** ⇒ 判红', () => {
-  const one = "const RPC_PATH = '/dsh-prompt-enhancer/rpc';";
-  const two = "const RPC_PATH = '/dsh-prompt-enhancer/rpc';";
-  assert.deepEqual(identity.rpcRoutePrefixes(one), ['/dsh-prompt-enhancer/rpc']);
+  const one = "const RPC_PATH = '/dsh-voice-prompt-enhancer/rpc';";
+  const two = "const RPC_PATH = '/dsh-voice-prompt-enhancer/rpc';";
+  assert.deepEqual(identity.rpcRoutePrefixes(one), ['/dsh-voice-prompt-enhancer/rpc']);
   const r = identity.findCollisions([{ label: 'RPC 路由前缀', values: [...identity.rpcRoutePrefixes(one), ...identity.rpcRoutePrefixes(two)] }]);
   assert.equal(r.ok, false, '同前缀必须判红（宿主 webserver 重复 exact 路由会抛）');
 });

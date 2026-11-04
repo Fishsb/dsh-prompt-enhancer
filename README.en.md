@@ -1,17 +1,17 @@
-# dsh-prompt-enhancer
+# dsh-voice-prompt-enhancer
 
 A DeepSeek Harness (DSH) plugin: **prompt optimization** + **voice input enhancement** — rewrites a composer draft into something clearer and more actionable, and adds a hotkey, stop-on-silence, filler removal and correction to voice input.
 
 A draft is often half a requirement, so the model asks again — click ✨ and it is rewritten in place, undoable. With voice, just speak; it stops on a pause and the transcript lands back in the composer.
 
-[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/releases) [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-prompt-enhancer)](https://github.com/Fishsb/dsh-prompt-enhancer/stargazers) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![DSH](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FFishsb%2Fdsh-prompt-enhancer%2Fmain%2Fpackage.json&query=%24.peerDependencies%5B%27%40deepseek-ai%2Fdsh-client-locale%27%5D&label=DSH&color=blue)](docs/compatibility-matrix.md)
+[![Release](https://img.shields.io/github/v/release/Fishsb/dsh-voice-prompt-enhancer)](https://github.com/Fishsb/dsh-voice-prompt-enhancer/releases) [![Stars](https://img.shields.io/github/stars/Fishsb/dsh-voice-prompt-enhancer)](https://github.com/Fishsb/dsh-voice-prompt-enhancer/stargazers) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![DSH](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FFishsb%2Fdsh-voice-prompt-enhancer%2Fmain%2Fpackage.json&query=%24.peerDependencies%5B%27%40deepseek-ai%2Fdsh-client-locale%27%5D&label=DSH&color=blue)](docs/compatibility-matrix.md)
 
 ## Install
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-prompt-enhancer#v3.4.2
-dsh plugin --profile web update dsh-prompt-enhancer   # update
-dsh plugin --profile web remove dsh-prompt-enhancer   # remove
+dsh plugin --profile web add github:Fishsb/dsh-voice-prompt-enhancer#v3.4.2
+dsh plugin --profile web update dsh-voice-prompt-enhancer   # update
+dsh plugin --profile web remove dsh-voice-prompt-enhancer   # remove
 ```
 
 Restart DSH afterwards (also after updating or removing) — the ✨ button appears in the composer toolbar. Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) **≥ 0.1.0-rc.6** installed locally and `pnpm` in PATH.
@@ -48,6 +48,6 @@ Capture, transcription and writing back are all handled by DSH's official voice 
 
 ![Voice input](docs/screenshots/voice-main.png)
 
-[Releases](https://github.com/Fishsb/dsh-prompt-enhancer/releases) · [CHANGELOG](CHANGELOG.md) · [Compatibility notes](docs/compatibility-matrix.md) · Licensed under [Apache-2.0](LICENSE)
+[Releases](https://github.com/Fishsb/dsh-voice-prompt-enhancer/releases) · [CHANGELOG](CHANGELOG.md) · [Compatibility notes](docs/compatibility-matrix.md) · Licensed under [Apache-2.0](LICENSE)
 
 > Privacy: the plugin records and reports nothing; enhanced results come from an external LLM — verify before sending.

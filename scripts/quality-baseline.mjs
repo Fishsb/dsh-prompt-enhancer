@@ -125,7 +125,7 @@ const report = {
 };
 
 async function rpc(method, args) {
-  const response = await fetch(new URL('/dsh-prompt-enhancer/rpc', URL_BASE), {
+  const response = await fetch(new URL('/dsh-voice-prompt-enhancer/rpc', URL_BASE), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ method, args }),

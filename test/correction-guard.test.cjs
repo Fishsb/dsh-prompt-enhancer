@@ -392,7 +392,7 @@ test('GUARD-E1 ⭐ 行为级：真实入口 + 真实磁盘配置，开关 false 
   const os = require('node:os');
   const { spawnSync } = require('node:child_process');
   const home = fsx.mkdtempSync(path.join(os.tmpdir(), 'cg-e1-'));
-  const CFG = path.join(home, 'dsh-prompt-enhancer.config.json');
+  const CFG = path.join(home, 'dsh-voice-prompt-enhancer.config.json');
   const seed = { version: 2, fallback: [{ provider: 'p', model: 'm' }], params: { timeoutMs: 30000, maxTokens: 2000, outputLimit: 8000 }, voice: { correction: { enabled: false } } };
   fsx.writeFileSync(CFG, JSON.stringify(seed), 'utf8');
 

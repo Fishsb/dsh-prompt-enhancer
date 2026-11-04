@@ -52,7 +52,7 @@ test('CFG-P06 config/get·config/set RPC 注册（P2-3：实现域 = lib/rpc-con
   const src = readFileSync(join(__dirname, '..', 'lib', 'rpc-config.cjs'), 'utf8');
   assert.ok(src.includes('harness.handle(RPC_METHODS.CONFIG_GET'), 'rpc-config.cjs 未注册 config/get');
   assert.ok(src.includes('harness.handle(RPC_METHODS.CONFIG_SET'), 'rpc-config.cjs 未注册 config/set');
-  assert.ok(src.includes('dsh-prompt-enhancer.config.json'), '配置文件路径常量缺失');
+  assert.ok(src.includes('dsh-voice-prompt-enhancer.config.json'), '配置文件路径常量缺失');
   assert.ok(src.includes('renameSync'), '原子写（renameSync）缺失');
   const entry = readFileSync(join(__dirname, '..', 'lib', 'index.cjs'), 'utf8');
   assert.ok(entry.includes("require('./rpc-config.cjs')"), '入口未接线 rpc-config.cjs（拆分后成为孤儿模块）');

@@ -25,7 +25,7 @@ const require = createRequire(import.meta.url);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const NODE = process.execPath;
 const PKG = join(root, 'package.json');
-const REPO = 'Fishsb/dsh-prompt-enhancer';
+const REPO = 'Fishsb/dsh-voice-prompt-enhancer';
 const TOKEN = process.env.GITHUB_TOKEN || '';
 
 function run(cmd, args) {
