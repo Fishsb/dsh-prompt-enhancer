@@ -60,3 +60,16 @@ test('VCONF-06 VAD 档位归一为契约单一入口：client 与 host 同值', 
   }
   assert.equal(asr.sanitizeVoiceCfg({ vad: { silenceMs: 5000 } }).vad.silenceMs, 5000);
 });
+
+test('VCONF-07 发布物自包含：运行时模块不得引用 src/，npm pack 必须带 lib/voice-config.cjs', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const root = path.join(__dirname, '..');
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  assert.ok(pkg.files.includes('lib'), '发布白名单必须包含 lib/');
+  const asr = fs.readFileSync(path.join(root, 'lib', 'asr.cjs'), 'utf8');
+  assert.equal(/require\(['"]\.\.\/src\//.test(asr), false, 'lib/ 运行时模块不得引用 src/（安装包不含 src/）');
+  assert.equal(/require\(['"]\.\/voice-config\.cjs['"]\)/.test(asr), true, 'asr 必须从 lib/voice-config.cjs 取契约');
+  // 发布白名单只含 lib/ ⇒ lib/voice-config.cjs 必然随包；这条用真实清单锁定，不依赖 npm 可执行文件路径。
+  assert.ok(pkg.files.some((entry) => entry === 'lib' || entry.startsWith('lib/')), 'lib/voice-config.cjs 必须落在发布白名单内');
+});

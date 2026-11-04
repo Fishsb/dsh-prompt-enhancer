@@ -152,6 +152,7 @@ const PE_F01_LIB_MANIFEST = {
   // —— 拆分前既有的 lib 模块（本批未拆分，登记以维持等值集语义）——
   'sys.cjs': '既有：环境 / 路径 / probe',
   'asr.cjs': '既有：voice 配置净化 / status（CHG-117 起：清口水词已移至 client 半部）',
+  'voice-config.cjs': '既有：语音配置契约（键/默认值/VAD 归一；发布物内自包含）',
   'net-proxy.cjs': '既有：出网代理',
   'platform-service.cjs': '既有：跨平台服务',
   'integrity.cjs': '既有：sha256',

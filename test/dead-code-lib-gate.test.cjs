@@ -39,8 +39,13 @@ function mkFixture() {
 function runArch(dir) {
   // ⚠ P2-3 夹具口径：先 --write 让投影与**本夹具环境**对齐，再 --check。
   //   否则得到的是与判据无关的读数漂移（投影为本机生成），不是判据失效。
-  spawnSync(process.execPath, ['scripts/arch-claims.mjs', '--write'], { cwd: dir, encoding: 'utf8' });
-  const r = spawnSync(process.execPath, ['scripts/arch-claims.mjs', '--check'], { cwd: dir, encoding: 'utf8' });
+  // 夹具目录是临时副本，git 会把它判为 dubious ownership；继承本进程的 safe.directory 配置。
+  const env = { ...process.env };
+  env.GIT_CONFIG_COUNT = '1';
+  env.GIT_CONFIG_KEY_0 = 'safe.directory';
+  env.GIT_CONFIG_VALUE_0 = '*';
+  spawnSync(process.execPath, ['scripts/arch-claims.mjs', '--write'], { cwd: dir, encoding: 'utf8', env });
+  const r = spawnSync(process.execPath, ['scripts/arch-claims.mjs', '--check'], { cwd: dir, encoding: 'utf8', env });
   return { code: r.status, out: String(r.stdout || '') + String(r.stderr || '') };
 }
 
@@ -347,8 +352,8 @@ test('S-9 负控：不动任何东西 ⇒ S-9 PASS 且 R5/R6 覆盖面为基线�
     //   `sanitizeVoiceCfg(voiceCfgOf(cfg))` 路径；生产在用 27 → **28**（由 lib/harness.cjs 调用）。
     //   ⚠ 本断言锁的是「**基线不被静默扩大/缩小**」，故数值须随**合法新增**同步（来历写明于此）；
     //     它**不是**判据阈值，改它与「把判据改浅」无关 —— 判据本身（有引用形态才算活）一字未改。
-    assert.match(g.out, /R5 \| 77 个 lib 导出符号/, 'R5 覆盖面须为基线 77 符号（纠错守卫批后）');
-    assert.match(g.out, /R6 \| 12 个系统面文件/, 'R6 覆盖面须为基线 12 文件');
+    assert.match(g.out, /R5 \| 81 个 lib 导出符号/, 'R5 覆盖面须为基线 81 符号（语音配置契约下沉 lib/ 后）');
+    assert.match(g.out, /R6 \| 13 个系统面文件/, 'R6 覆盖面须为基线 13 文件');
   });
 });
 

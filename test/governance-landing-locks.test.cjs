@@ -141,7 +141,7 @@ const chunkFilesOnDisk = (() => {
   const { listChunkFiles } = require('../scripts/lib/chunk-decode.mjs');
   return listChunkFiles(ROOT).length;
 })();
-const TRUTH = { indexLines: 114, hostFiles: hostFilesOnDisk, hostLines: hostLinesOnDisk, rpcLive: 15, rpcBundled: 12, rpcNative: 3, libFiles: 12, templates: 10, chunks: chunkFilesOnDisk, whitelist: 5 };
+const TRUTH = { indexLines: 114, hostFiles: hostFilesOnDisk, hostLines: hostLinesOnDisk, rpcLive: 15, rpcBundled: 12, rpcNative: 3, libFiles: 13, templates: 10, chunks: chunkFilesOnDisk, whitelist: 5 };
 
 /** 与真实派生同形的替身 —— **不触碰真实工作区**，值由调用方给定。 */
 const depsFrom = (v) => ({

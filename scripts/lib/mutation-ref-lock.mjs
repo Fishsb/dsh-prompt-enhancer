@@ -72,7 +72,7 @@ const FLOATING_REF = 'HEAD';
 export const ALLOW = [
   {
     file: 'test/dead-code-lib-gate.test.cjs',
-    line: 124,
+    line: 129,
     must: "runGate(dir, ['--range', 'HEAD'])",
     why: '断言 `R5 不随 --range 变化` —— 它**故意**用 `--range HEAD` 与默认区间对比，证明两者读数相同。此处 `HEAD` = "当前提交"，是被测对象的**语义前提**，不是"缺陷原形基准"。',
   },
