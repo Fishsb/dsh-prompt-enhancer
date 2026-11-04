@@ -555,10 +555,10 @@ const CLAIMS = [
         return assert(total === 1 && inEntry === 1 && elsewhere.length === 0,
           detail + (elsewhere.length ? `｜⚠ 入口外出现装配点: ${elsewhere.map((h) => h.file).join(',')}` : ''));
       }),
-      A('A197-4', '结构', '半部通信保留 HTTP（/rpc 兼容别名）', "RPC_PATH = '/dsh-prompt-enhancer/rpc'", () => {
+      A('A197-4', '结构', '半部通信保留 HTTP（/rpc 兼容别名）', "RPC_PATH = '/dsh-voice-prompt-enhancer/rpc'", () => {
         // P2-3（2026-10-13）：RPC_PATH 仍定义在 entry `lib/index.cjs`（未随拆分搬走）⇒ 判定面不变。
         const m = read('lib/index.cjs').match(/RPC_PATH\s*=\s*'([^']+)'/);
-        return assert(!!m && m[1] === '/dsh-prompt-enhancer/rpc', m ? m[1] : '未找到 RPC_PATH');
+        return assert(!!m && m[1] === '/dsh-voice-prompt-enhancer/rpc', m ? m[1] : '未找到 RPC_PATH');
       }),
       // ── A197-5 **净增**（P3-2b 2026-10-14 · `extractPure` 求值路径终结）──────────────────────
       // **为什么必须净增（不是重复 A197-3）**：`A197-3` 的口径是 **`ASSEMBLY_EVAL`
