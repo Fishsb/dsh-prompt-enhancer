@@ -69,14 +69,15 @@ function createClientApp(deps) {
     subscribeVoiceConfig: voiceApi.subscribeVoiceConfig, saveVoiceCfg: voiceApi.saveVoiceCfg,
     syncVoiceFromHost: voiceApi.syncVoiceFromHost, vadSilenceMsOf: voiceApi.vadSilenceMsOf,
     normalizeVadSilenceMs: voiceApi.normalizeVadSilenceMs, rpcMethods: contracts.RPC_METHODS, CollapsibleSection, officialVoiceBridge,
+    voiceHotkeyDisplay: shared.voiceHotkeyDisplay,
     fillerSnapshot: shared.fillerSnapshot, subscribeFiller: shared.subscribeFiller,
     correctionSnapshot: correction.correctionSnapshot, subscribeCorrection: correction.subscribeCorrection,
     setTimeout: d.setTimeout || setTimeout, clearTimeout: d.clearTimeout || clearTimeout, window: d.window,
   }).VoiceSection;
-  const ModelMainSection = createModelMainSection({
-    React: d.React, CollapsibleSection, makeT: helpers.makeT, host: d.host, DEFAULT_MODEL_CHAIN: shared.DEFAULT_MODEL_CHAIN, getLastDraft: configApi.getLastDraft, timerSvc,
-  });
   const FallbackRow = createFallbackRow({ React: d.React, MarqueeSelect, makeT: helpers.makeT, host: d.host });
+  const ModelMainSection = createModelMainSection({
+    React: d.React, CollapsibleSection, FallbackRow, makeT: helpers.makeT, host: d.host, DEFAULT_MODEL_CHAIN: shared.DEFAULT_MODEL_CHAIN, getLastDraft: configApi.getLastDraft, timerSvc,
+  });
   const ModelConfigTab = createModelConfigTab({
     React: d.React, makeT: helpers.makeT, configState, subscribeConfig: configApi.subscribeConfig,
     host: d.host, DEFAULT_MODEL_CHAIN: shared.DEFAULT_MODEL_CHAIN, saveConfig: configApi.saveConfig,

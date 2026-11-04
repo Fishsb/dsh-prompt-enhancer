@@ -2,6 +2,15 @@
 
 // 语音热键普通模块（构建期由客户端运行时内联）。
 // 纯函数与 VoiceHotkeyHost 的行为不变；宿主、配置、纠错状态和计时器均显式注入。
+
+function voiceHotkeyDisplay(combo) {
+  const parts = String(combo || '').split('+').filter(Boolean);
+  if (!parts.length) return '';
+  const last = parts[parts.length - 1];
+  const key = last === 'Backquote' ? '`' : last;
+  return parts.length > 1 ? parts.slice(0, -1).concat(key).join('+') : key;
+}
+
 function createVoiceHotkey(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};
   const rpcMethods = d.rpcMethods && typeof d.rpcMethods === 'object' ? d.rpcMethods : {};
@@ -75,14 +84,6 @@ function parseVoiceHotkey(combo) {
 
 function matchVoiceHotkey(e, hk) {
   return hk && e.ctrlKey === hk.ctrl && e.altKey === hk.alt && e.shiftKey === hk.shift && e.metaKey === hk.meta && e.code === hk.code;
-}
-
-function voiceHotkeyDisplay(combo) {
-  const parts = String(combo || '').split('+').filter(Boolean);
-  if (!parts.length) return '';
-  const last = parts[parts.length - 1];
-  const key = last === 'Backquote' ? '`' : last;
-  return parts.length > 1 ? parts.slice(0, -1).concat(key).join('+') : key;
 }
 
 // ── 接线组件：无 UI（只取本会话 input/inputActions 并挂热键监听）───────────────
@@ -506,4 +507,4 @@ function VoiceHotkeyHost(props) {
   return { parseVoiceHotkey, matchVoiceHotkey, voiceHotkeyDisplay, VoiceHotkeyHost };
 }
 
-module.exports = { createVoiceHotkey };
+module.exports = { createVoiceHotkey, voiceHotkeyDisplay };

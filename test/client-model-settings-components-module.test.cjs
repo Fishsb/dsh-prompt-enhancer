@@ -123,13 +123,15 @@ test('CMSC-03 FallbackRow 保留 provider/model/reasoning/testing 接线', () =>
 });
 
 test('CMSC-04 ModelMainSection 保留默认链、单点测试状态与折叠区块', () => {
-  const deps = createDeps({ fallbackRow: true });
+  const deps = createDeps();
+  const FallbackRow = fallbackModule.createFallbackRow(deps);
+  deps.FallbackRow = FallbackRow;
   const ModelMainSection = mainModule.createModelMainSection(deps);
   const saves = [];
   const tree = ModelMainSection({
     t: (key) => key,
     providers: [{ provider: 'p1', name: 'P1', models: [{ id: 'm1', name: 'M1' }] }],
-    fallback: [],
+    fallback: [{ provider: 'p1', model: 'm1' }],
     candidates: [{ provider: 'p1', model: 'm1' }],
     saveFallback(value) {
       saves.push(value);
@@ -138,6 +140,8 @@ test('CMSC-04 ModelMainSection 保留默认链、单点测试状态与折叠区�
   assert.equal(tree.type.name, 'CollapsibleSection');
   assert.equal(tree.props.title, 'secMain');
   const flat = JSON.stringify(tree);
+  const rows = tree.children[0].children[0];
+  assert.equal(rows[0].type, FallbackRow, '模型链行必须由显式注入的组件渲染');
   assert.ok(flat.includes('cfgAddFallback'));
   assert.ok(flat.includes('cfgRestoreDefaults'));
   assert.ok(flat.includes('cfgRestoreNote'));

@@ -914,9 +914,10 @@ test('OVB-W02 接线：apply 安装 + 卸载（HMR）+ 热键→派发点击官�
   assert.equal(hkLive.includes('getUserMedia'), false, '自建链退役后热键不得再自行取麦');
   assert.equal(hkLive.includes('isVoiceRecording'), false, '自建链退役后热键不得再查自建录音态');
   // 纯函数（四项增值之一）必须保留且行为不变
-  for (const fn of ['parseVoiceHotkey', 'matchVoiceHotkey', 'voiceHotkeyDisplay']) {
-    assert.ok(hk.includes('function ' + fn), '热键纯函数 ' + fn + ' 必须保留（四项增值不得丢）');
-  }
+  assert.ok(hk.includes('function parseVoiceHotkey'), '热键纯函数 parseVoiceHotkey 必须保留（四项增值不得丢）');
+  assert.ok(hk.includes('function matchVoiceHotkey'), '热键纯函数 matchVoiceHotkey 必须保留（四项增值不得丢）');
+  const hotkeyModule = require('../src/client/voice/hotkey-module.cjs');
+  assert.equal(typeof hotkeyModule.voiceHotkeyDisplay, 'function', '热键纯函数 voiceHotkeyDisplay 必须保留且显式导出（四项增值不得丢）');
 });
 
 test('OVB-W03 接线：设置页诊断区在位（不静默失效的可见面）且有 i18n 键', () => {

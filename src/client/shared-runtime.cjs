@@ -4,6 +4,7 @@
 // 这里的模块必须无浏览器/宿主环境依赖：纯契约、纯规则。
 const filler = require('./voice/filler-module.cjs');
 const correctionState = require('./voice/correction-state-module.cjs');
+const voiceHotkey = require('./voice/hotkey-module.cjs');
 const modelHelpers = require('./model-helpers-module.cjs');
 const constants = require('./constants-module.cjs');
 const i18n = require('./i18n-module.cjs');
@@ -24,6 +25,7 @@ module.exports = {
   FILLER_REDUP_SAFE: filler.FILLER_REDUP_SAFE,
   stripFillers: filler.stripFillers,
   runFiller: filler.runFiller,
+  voiceHotkeyDisplay: voiceHotkey.voiceHotkeyDisplay,
   fillerSnapshot: filler.fillerSnapshot,
   subscribeFiller: filler.subscribeFiller,
   notifyFiller: filler.notifyFiller,

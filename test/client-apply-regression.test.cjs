@@ -282,6 +282,15 @@ test('CAP-02 普通模块装配：storage 走显式注入，timer 在 apply 后�
 
     const enhanceEntry = entries.find((e) => e.entry.meta.id === 'prompt-enhance');
     assert.ok(enhanceEntry, '必须注册增强按钮');
+    const settingsEntry = entries.find((e) => e.entry.meta.id === 'model-plugins');
+    assert.ok(settingsEntry, '必须注册设置页');
+    const settingsHarness = createReactHarness();
+    const tree = settingsHarness.render(settingsEntry.entry.component, { t: (key) => key });
+    assert.ok(tree, '设置页组件必须能在真实装配依赖下渲染');
+    assert.doesNotThrow(
+      () => settingsEntry.entry.component({ t: (key) => key }),
+      '语音热键显示函数必须由共享运行时显式导出（真实宿主曾因注入 undefined 整段崩溃）',
+    );
     const EnhanceButton = enhanceEntry.entry.component;
 
     // 空输入点击 = 记忆开关：saveConfig 必须写入注入的 storage（而不是未定义的全局 localStorage）。

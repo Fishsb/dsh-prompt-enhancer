@@ -13,6 +13,7 @@ function createModelMainSection(deps) {
   const DEFAULT_MODEL_CHAIN = d.DEFAULT_MODEL_CHAIN;
   const getLastDraft = d.getLastDraft;
   const timerSvc = d.timerSvc;
+  const FallbackRow = d.FallbackRow;
 function ModelMainSection(props) {
   const t = makeT(props);
   const providers = props.providers;
