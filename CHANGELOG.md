@@ -18,7 +18,7 @@
 
 ## [Unreleased]
 
-(no unreleased changes yet)
+- **模型默认常量防漂移门禁（维护/门禁 · 2026-11-05 · [PE-F02]）**：`src/host/models-constants.cjs`（供 `pure-module` 使用）与 `src/host/models-module.cjs`（供模型 RPC 域使用）各自声明 `DEFAULT_TIMEOUT_MS` / `DEFAULT_MAX_TOKENS` / `DEFAULT_OUTPUT_LIMIT`。两者是不同消费者而非同一逻辑的副本，合并会破坏 `HMM-02` 的逐字冻结基线，故保留两份定义，新增 `HMC-01..03` 一致性断言锁住数值（当前 30000 / 2000 / 8000），任一处分叉即红。**已实测**：`test/host-models-constants-sync.test.cjs` 3/3；完整 `npm test` 947/947；门禁链 exit 0（5 PASS · 2 基线接纳 SKIP）。用户可见文案、RPC、配置键与安装形态未改。未 bump/tag/发布。
 
 ## [3.5.1] - 2026-11-05
 
