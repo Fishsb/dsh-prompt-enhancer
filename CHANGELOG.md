@@ -18,7 +18,7 @@
 
 ## [Unreleased]
 
-(no unreleased changes yet)
+- **包身份对齐：`package-lock.json` 仍停在旧名旧版本（修复/发布面 · 2026-11-05 · [PE-F01]）**：改名到 `dsh-voice-prompt-enhancer` 后，`package-lock.json` 顶层与 `packages[""]` 仍是 `dsh-prompt-enhancer@3.4.2`。npm 发布读 `package.json` 所以发布物本身没错，但审计、供应链扫描、依赖图工具按 lock 判身份时会读到旧名旧版本，`engines.dsh` 也没镜像进去。现已 `npm install --package-lock-only` 重建，并新增 `PLI-01..05` 门禁锁 name / version / engines.dsh / peer 区间四面相等（含判别力自证）。**已实测**：`test/package-lock-identity.test.cjs` 5/5；lock 顶层与 root 均为 `dsh-voice-prompt-enhancer@3.5.1`，`engines.dsh = >=0.2.1-rc.1`。用户可见文案、RPC、配置键与安装形态未改。
 
 ## [3.5.1] - 2026-11-05
 
