@@ -18,13 +18,15 @@
 
 ## [Unreleased]
 
-- **模型默认常量防漂移门禁（维护/门禁 · 2026-11-05 · [PE-F02]）**：`src/host/models-constants.cjs`（供 `pure-module` 使用）与 `src/host/models-module.cjs`（供模型 RPC 域使用）各自声明 `DEFAULT_TIMEOUT_MS` / `DEFAULT_MAX_TOKENS` / `DEFAULT_OUTPUT_LIMIT`。两者是不同消费者而非同一逻辑的副本，合并会破坏 `HMM-02` 的逐字冻结基线，故保留两份定义，新增 `HMC-01..03` 一致性断言锁住数值（当前 30000 / 2000 / 8000），任一处分叉即红。**已实测**：`test/host-models-constants-sync.test.cjs` 3/3；完整 `npm test` 947/947；门禁链 exit 0（5 PASS · 2 基线接纳 SKIP）。用户可见文案、RPC、配置键与安装形态未改。未 bump/tag/发布。
+(no unreleased changes yet)
 
 ## [3.5.1] - 2026-11-05
 
+- **模型默认常量防漂移门禁（维护/门禁 · 2026-11-05 · [PE-F02]）**：`src/host/models-constants.cjs`（供 `pure-module` 使用）与 `src/host/models-module.cjs`（供模型 RPC 域使用）各自声明 `DEFAULT_TIMEOUT_MS` / `DEFAULT_MAX_TOKENS` / `DEFAULT_OUTPUT_LIMIT`。两者是不同消费者而非同一逻辑的副本，合并会破坏 `HMM-02` 的逐字冻结基线，故保留两份定义，新增 `HMC-01..03` 一致性断言锁住数值（当前 30000 / 2000 / 8000），任一处分叉即红。**已实测**：`test/host-models-constants-sync.test.cjs` 3/3；完整 `npm test` 947/947；门禁链 exit 0（5 PASS · 2 基线接纳 SKIP）。用户可见文案、RPC、配置键与安装形态未改。已随 v3.5.1 发布（npm `latest`）。
+
 - **执行器根目录随包名迁移，旧目录回退（修复 · 2026-11-05 · [PE-F01]）**：`EXECUTOR_ROOT` 此前仍拼旧包名 `dsh-prompt-enhancer`，改名后新装用户与已装用户会落到两个目录。现改为新名优先、旧名回退：已装用户的执行器仍在旧目录下则继续使用，无需重装；全新安装写入新名。**已实测**：`executorDir()` 返回新名路径；`test/sys.test.cjs` 13/13；完整 `npm test` 944/944；门禁链 exit 0（5 PASS · 2 基线接纳 SKIP）。
 
-- **BREAKING: 包名与仓库改名为 dsh-voice-prompt-enhancer（v3.5.0 · 2026-11-05 · [PE-F01]）**：npm 包名、GitHub 仓库、cordis entry id/name、RPC 路由前缀统一改为 dsh-voice-prompt-enhancer（原 dsh-prompt-enhancer 已被他人占用，无法发布 npm）。新增 engines.dsh（>=0.2.1-rc.1）与 repository/homepage/bugs，市场可显示宿主要求并自动映射 npm 下载量。配置文件名迁移到新名，首次读取时自动复制旧文件、旧文件保留 .migrated 备份；部署账本与运行目录解析均支持新名优先、旧名回退，已装用户无需手动迁移。旧包名保留在读取候选里，下一版本再整体退役。**已实测**：配置迁移四场景（全新安装/旧用户升级/新旧并存/空目录）全通过；产物重建后 build-host/build-client --check 一致；split-identity 确认 4 面 18 项 identity 唯一；dead-code R1–R7 全过。未打 tag、未发布、未安装。
+- **BREAKING: 包名与仓库改名为 dsh-voice-prompt-enhancer（v3.5.0 · 2026-11-05 · [PE-F01]）**：npm 包名、GitHub 仓库、cordis entry id/name、RPC 路由前缀统一改为 dsh-voice-prompt-enhancer（原 dsh-prompt-enhancer 已被他人占用，无法发布 npm）。新增 engines.dsh（>=0.2.1-rc.1）与 repository/homepage/bugs，市场可显示宿主要求并自动映射 npm 下载量。配置文件名迁移到新名，首次读取时自动复制旧文件、旧文件保留 .migrated 备份；部署账本与运行目录解析均支持新名优先、旧名回退，已装用户无需手动迁移。旧包名保留在读取候选里，下一版本再整体退役。**已实测**：配置迁移四场景（全新安装/旧用户升级/新旧并存/空目录）全通过；产物重建后 build-host/build-client --check 一致；split-identity 确认 4 面 18 项 identity 唯一；dead-code R1–R7 全过。已随 v3.5.0 发布（npm + GitHub Release）。
 
 - **目标模式：增强生成与提交分离为独立阶段（架构/状态 · 2026-11-04 · [PE-F02]）**：原先生成阶段同时产出最终 RPC 结果，`commitEnhanceResult` 虽已有契约实现却未接入线上主链。现新增 `enhance-commit.cjs`，生成阶段只产出 `enhanceCandidate`，随后由 `commit` 阶段统一映射为既有 `{ ok, text, model, fallbackUsed?, truncated?, message? }` 返回；`fallbackUsed`、截断降级、失败消息及四态语义保持原值。内部阶段顺序改为 `analyze → retrieve → assemble → llm → commit`，线上 `enhance/progress.stage` 仍保留既有 `llm` 名称以保持 RPC 兼容。新增 `HEC-01..04` 锁定候选映射、缺候选 fail-closed、产物内联与旧进度名不变。**已实测**：生成/提交/阶段/状态定向 57/57；真实 WSL Web 模型优化写回与撤销原文精确通过；门禁 dead-code R1–R7、RPC 15 条、提示词生成区均通过。用户可见文案、RPC 方法/字段、配置键与安装形态未改。未 bump/tag/发布。
 
