@@ -5,8 +5,8 @@
 const {
   CONFIG_KEY, CONFIG_KEY_V1, CONFIG_DEFAULTS, MODE_VALUES,
   TEMPLATE_CUSTOM_MAX, TEMPLATE_NAME_MAX, TEMPLATE_TEXT_MAX,
-} = require('./constants-module.cjs');
-const { RPC_METHODS } = require('../shared/contracts/rpc.cjs');
+} = require('./constants.cjs');
+const { RPC_METHODS } = require('../../shared/contracts/rpc.cjs');
 
 function createClientState(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};

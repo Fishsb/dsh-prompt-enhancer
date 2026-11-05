@@ -6,9 +6,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const fallbackModule = require('../src/client/components/fallback-row-module.cjs');
-const mainModule = require('../src/client/components/model-main-section-module.cjs');
-const runtime = require('../src/client/components/model-settings-runtime.cjs');
+const fallbackModule = require('../src/client/domains/settings/fallback-row.cjs');
+const mainModule = require('../src/client/domains/settings/model-main-section.cjs');
+const runtime = require('../src/client/domains/settings/model-settings.cjs');
 
 function createReactStub() {
   let effects = [];
@@ -115,7 +115,7 @@ test('CMSC-03 FallbackRow 保留 provider/model/reasoning/testing 接线', () =>
   deps.React.flushEffects();
   assert.ok(deps.calls.some((call) => call.method === 'models/resolve'));
   const source = fs.readFileSync(
-    path.join(REPO_ROOT, 'src/client/components/fallback-row-module.cjs'),
+    path.join(REPO_ROOT, 'src/client/domains/settings/fallback-row.cjs'),
     'utf8',
   );
   assert.ok(source.includes("className: 'dsh-plg-select dsh-plg-select-thinking'"));
@@ -157,7 +157,7 @@ test('CMSC-04 ModelMainSection 保留默认链、单点测试状态与折叠区�
   assert.deepEqual(saves.at(-1), [{ provider: 'deepseek-official', model: 'deepseek-v4-flash' }]);
 
   const source = fs.readFileSync(
-    path.join(REPO_ROOT, 'src/client/components/model-main-section-module.cjs'),
+    path.join(REPO_ROOT, 'src/client/domains/settings/model-main-section.cjs'),
     'utf8',
   );
   assert.ok(source.includes('host.call(RPC_METHODS.MODELS_TEST'));
@@ -168,10 +168,10 @@ test('CMSC-04 ModelMainSection 保留默认链、单点测试状态与折叠区�
 test('CMSC-05 构建产物内联模型设置运行时，旧 chunk 与相对 require 均不存在', () => {
   const build = fs.readFileSync(path.join(REPO_ROOT, 'scripts/build-client.mjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"));
-  assert.ok(client.includes('src/client/components/model-settings-runtime.cjs'));
-  assert.ok(client.includes('src/client/components/fallback-row-module.cjs'));
-  assert.ok(client.includes('src/client/components/model-main-section-module.cjs'));
+  assert.ok(build.includes("entry: 'src/client/app.cjs'"));
+  assert.ok(client.includes('src/client/domains/settings/model-settings.cjs'));
+  assert.ok(client.includes('src/client/domains/settings/fallback-row.cjs'));
+  assert.ok(client.includes('src/client/domains/settings/model-main-section.cjs'));
   assert.equal(client.includes('src/client/components/fallback-row.js'), false);
   assert.equal(client.includes('src/client/components/model-main-section.js'), false);
   assert.equal((client.match(/require\(['"]\.\.?\//g) || []).length, 0);
@@ -183,7 +183,7 @@ test('CMSC-06 布局审计从共享语音契约注入默认值，不再漏定义
   assert.ok(audit.includes("'src/shared/contracts/voice-config.cjs'"));
   assert.ok(driver.includes("voiceConfigFactory = new Function("));
   assert.ok(driver.includes("var __VOICE_CONFIG_DEFAULTS__ = voiceConfig.VOICE_CONFIG_DEFAULTS;"));
-  assert.ok(driver.includes("SRC['src/client/voice/state-module.cjs']"));
+  assert.ok(driver.includes("SRC['src/client/domains/voice/state.cjs']"));
   assert.ok(driver.includes("createVoiceState({ host: host, storage: storage"));
   assert.ok(driver.includes("stateFactory(host, localStorageStub, null, null, __VOICE_CONFIG_DEFAULTS__)"));
 });

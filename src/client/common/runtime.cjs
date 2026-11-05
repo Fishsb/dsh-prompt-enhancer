@@ -2,15 +2,15 @@
 
 // 客户端共享运行时入口（普通 CommonJS；构建期由打包器内联）。
 // 这里的模块必须无浏览器/宿主环境依赖：纯契约、纯规则。
-const filler = require('./voice/filler-module.cjs');
-const correctionState = require('./voice/correction-state-module.cjs');
-const voiceHotkey = require('./voice/hotkey-module.cjs');
-const modelHelpers = require('./model-helpers-module.cjs');
-const constants = require('./constants-module.cjs');
-const i18n = require('./i18n-module.cjs');
-const styles = require('./styles-module.cjs');
-const clientState = require('./state-module.cjs');
-const clientHelpers = require('./helpers-module.cjs');
+const filler = require('../domains/voice/filler.cjs');
+const correctionState = require('../domains/voice/correction-state.cjs');
+const voiceHotkey = require('../domains/voice/hotkey.cjs');
+const modelHelpers = require('./model-helpers.cjs');
+const constants = require('./constants.cjs');
+const i18n = require('./i18n.cjs');
+const styles = require('./styles.cjs');
+const clientState = require('./state.cjs');
+const clientHelpers = require('./helpers.cjs');
 
 module.exports = {
   ...constants,

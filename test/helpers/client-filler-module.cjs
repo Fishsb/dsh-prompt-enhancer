@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../../scripts/lib/chunk-decode.mjs');
 
-const FILLER_MODULE_REL = 'src/client/voice/filler-module.cjs';
+const FILLER_MODULE_REL = 'src/client/domains/voice/filler.cjs';
 const BASELINE_REL = 'test/fixtures/client-filler/filler-source.txt';
 
 function fillerBaselineText() {

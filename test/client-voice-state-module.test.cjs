@@ -8,7 +8,7 @@ const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
 const { VOICE_CONFIG_DEFAULTS } = require('../src/shared/contracts/voice-config.cjs');
 const { RPC_METHODS } = require('../src/shared/contracts/rpc.cjs');
-const { createVoiceState } = require('../src/client/voice/state-module.cjs');
+const { createVoiceState } = require('../src/client/domains/voice/state.cjs');
 
 function makeStorage(seed) {
   const backing = new Map(seed ? Object.entries(seed) : []);
@@ -25,7 +25,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 test('CVSTATE-01 旧状态与录音占位 chunk 退役，普通状态模块在位', () => {
   assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/voice/state.js')), false);
   assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/voice/recorder.js')), false);
-  assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/voice/state-module.cjs')), true);
+  assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/domains/voice/state.cjs')), true);
   assert.equal(typeof createVoiceState, 'function');
 });
 
@@ -160,11 +160,11 @@ test('CVSTATE-05 同步失败走注入了有界 timer，耗尽后终止而非永
 
 test('CVSTATE-06 产物内联状态模块，共享运行时暴露 fillerState，旧 chunk 与相对 require 均不存在', () => {
   const build = fs.readFileSync(path.join(REPO_ROOT, 'scripts/build-client.mjs'), 'utf8');
-  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/shared-runtime.cjs'), 'utf8');
+  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/common/runtime.cjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"), 'build-client 必须从普通入口模块打包');
+  assert.ok(build.includes("entry: 'src/client/app.cjs'"), 'build-client 必须从普通入口模块打包');
   assert.ok(shared.includes('fillerState: filler.fillerState'));
-  assert.ok(client.includes('src/client/voice/state-module.cjs'));
+  assert.ok(client.includes('src/client/domains/voice/state.cjs'));
   assert.ok(client.includes('createVoiceState({ host:'));
   assert.equal(client.includes('src/client/voice/state.js'), false);
   assert.equal(client.includes('src/client/voice/recorder.js'), false);

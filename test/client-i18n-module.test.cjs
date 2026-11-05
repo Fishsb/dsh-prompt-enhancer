@@ -36,11 +36,11 @@ test('CI18N-03 用户可见文案快照仍逐字命中', () => {
 });
 
 test('CI18N-04 共享运行时聚合文案模块，产物不再装载旧 chunk', () => {
-  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/shared-runtime.cjs'), 'utf8');
+  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/common/runtime.cjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(shared.includes("require('./i18n-module.cjs')"));
+  assert.ok(shared.includes("require('./i18n.cjs')"));
   assert.ok(shared.includes('ZH: i18n.ZH'));
-  assert.ok(client.includes('src/client/i18n-module.cjs'));
+  assert.ok(client.includes('src/client/common/i18n.cjs'));
   assert.equal(client.includes('src/client/i18n.js'), false);
   assert.equal((client.match(/require\(['"]\.\.?\//g) || []).length, 0);
 });

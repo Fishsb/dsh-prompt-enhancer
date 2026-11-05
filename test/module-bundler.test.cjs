@@ -91,7 +91,7 @@ test('MB-07 正式构建入口：build-client 通过打包器生成共享运行�
   const build = fs.readFileSync(path.join(ROOT, 'scripts', 'build-client.mjs'), 'utf8');
   assert.ok(build.includes("import { bundleModules } from './lib/module-bundler.mjs';"),
     'build-client 必须使用共享打包器');
-  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"),
+  assert.ok(build.includes("entry: 'src/client/app.cjs'"),
     'build-client 必须以普通 CommonJS 入口模块为打包根');
   assert.equal(build.includes("readFileSync(join(root, 'src', 'shared', 'voice', 'postprocess-plan.cjs')"),
     false, '共享计划不得再以源码字符串直接注入');

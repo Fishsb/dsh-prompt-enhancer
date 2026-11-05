@@ -72,7 +72,7 @@ test('CS-01 两个构建器都从单一普通入口模块打包，且对装配�
   const client = fs.readFileSync(path.join(ROOT, 'scripts', 'build-client.mjs'), 'utf8');
   assert.match(host, /bundleModules\(\{ root, entry: 'src\/host\/app\.cjs' \}\)/, 'build-host 必须从单一普通模块入口打包');
   assert.match(host, /装配图不完整/, 'build-host 必须对模块图完整性 fail-closed');
-  assert.match(client, /bundleModules\(\{\s*root,\s*entry: 'src\/client\/app-module\.cjs',\s*\}\)/, 'build-client 必须从单一普通模块入口打包');
+  assert.match(client, /bundleModules\(\{\s*root,\s*entry: 'src\/client\/app\.cjs',\s*\}\)/, 'build-client 必须从单一普通模块入口打包');
   assert.match(client, /装配图不完整/, 'build-client 必须对模块图完整性 fail-closed');
 });
 
@@ -106,10 +106,10 @@ test('CS-04 host 门 fail-closed：装配入口缺位 ⇒ 不得静默判绿', (
 });
 
 test('CS-05 client 门：入口模块缺失 ⇒ 必红（装配图 fail-closed）', () => {
-  withFixture((dir) => { fs.rmSync(path.join(dir, 'src', 'client', 'app-module.cjs')); }, (dir) => {
+  withFixture((dir) => { fs.rmSync(path.join(dir, 'src', 'client', 'app.cjs')); }, (dir) => {
     const r = runScript(dir, path.join('scripts', 'build-client.mjs'), ['--check']);
     assert.equal(r.code, 1, 'client 入口缺位必须判红');
-    assert.match(r.out, /无法解析相对导入|app-module\.cjs|装配图不完整/, 'client 门须给出可归因裁决');
+    assert.match(r.out, /无法解析相对导入|app\.cjs|装配图不完整/, 'client 门须给出可归因裁决');
   });
 });
 

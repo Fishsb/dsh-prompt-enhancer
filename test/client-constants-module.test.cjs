@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const constants = require('../src/client/constants-module.cjs');
+const constants = require('../src/client/common/constants.cjs');
 
 const NAMES = [
   'CONFIG_KEY', 'CONFIG_KEY_V1', 'CONFIG_DEFAULTS', 'DEFAULT_MODEL_CHAIN',
@@ -42,10 +42,10 @@ test('CCONST-03 模式标签/自定义索引辅助边界不变', () => {
 });
 
 test('CCONST-04 共享运行时与构建产物内联常量模块', () => {
-  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/shared-runtime.cjs'), 'utf8');
+  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/common/runtime.cjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(shared.includes("require('./constants-module.cjs')"));
+  assert.ok(shared.includes("require('./constants.cjs')"));
   assert.ok(shared.includes('...constants'));
-  assert.ok(client.includes('src/client/constants-module.cjs'));
+  assert.ok(client.includes('src/client/common/constants.cjs'));
   assert.equal((client.match(/require\(['"]\.\.?\//g) || []).length, 0);
 });

@@ -1,6 +1,6 @@
 'use strict';
 
-// 求值 `src/client/voice/state-module.cjs` 的统一夹具。
+// 求值 `src/client/domains/voice/state.cjs` 的统一夹具。
 //
 // 目标模式下，语音配置默认值的事实源是 `src/shared/contracts/voice-config.cjs`；
 // 生产构建把该契约传给 `createVoiceState({ defaults })`。测试沿用同一注入形态。
@@ -15,7 +15,7 @@ function voiceStateChunkWithDefaults() {
   const prelude = 'const __VOICE_CONFIG_DEFAULTS__ = '
     + JSON.stringify(VOICE_CONFIG_DEFAULTS)
     + ';\nconst __RPC_METHODS__ = ' + JSON.stringify(RPC_METHODS) + ';\n';
-  const modulePath = path.join(__dirname, '..', '..', 'src', 'client', 'voice', 'state-module.cjs');
+  const modulePath = path.join(__dirname, '..', '..', 'src', 'client', 'domains', 'voice', 'state.cjs');
   const body = fs.readFileSync(modulePath, 'utf8')
     .replace(/\nmodule\.exports\s*=\s*\{\s*createVoiceState\s*\};\s*$/, '')
     .replace(/^'use strict';\s*/, '');

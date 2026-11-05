@@ -8,8 +8,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
-const { CONFIG_KEY } = require('../src/client/constants-module.cjs');
-const { createClientApp } = require('../src/client/app-module.cjs');
+const { CONFIG_KEY } = require('../src/client/common/constants.cjs');
+const { createClientApp } = require('../src/client/app.cjs');
 
 function createReactHarness() {
   const hooks = [];

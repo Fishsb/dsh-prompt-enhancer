@@ -10,9 +10,9 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const result = require(path.join(ROOT, 'src', 'shared', 'contracts', 'result.cjs'));
 const { commitEnhanceResult } = require(path.join(ROOT, 'src', 'shared', 'contracts', 'enhance-result.cjs'));
-const { createCorrectionState } = require(path.join(ROOT, 'src', 'client', 'voice', 'correction-module.cjs'));
-const correctionCore = require(path.join(ROOT, 'src', 'client', 'voice', 'correction-state-module.cjs'));
-const filler = require(path.join(ROOT, 'src', 'client', 'voice', 'filler-module.cjs'));
+const { createCorrectionState } = require(path.join(ROOT, 'src', 'client', 'domains', 'voice', 'correction.cjs'));
+const correctionCore = require(path.join(ROOT, 'src', 'client', 'domains', 'voice', 'correction-state.cjs'));
+const filler = require(path.join(ROOT, 'src', 'client', 'domains', 'voice', 'filler.cjs'));
 
 function correctionState() {
   const voiceCfgState = { value: { correction: { enabled: true } } };

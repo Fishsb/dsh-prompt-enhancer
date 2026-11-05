@@ -63,7 +63,7 @@ test('RCR-04 方法名只出现在契约里：schema 实现不得再写一份字
 });
 
 test('RCR-05 错误码映射与配置/模式默认值只有一份实现', () => {
-  const helpers = fs.readFileSync(path.join(ROOT, 'src', 'client', 'helpers-module.cjs'), 'utf8');
+  const helpers = fs.readFileSync(path.join(ROOT, 'src', 'client', 'common', 'helpers.cjs'), 'utf8');
   assert.equal(/const\s+ERROR_KEYS\s*=\s*\{/.test(helpers), false, '客户端不得再持有第二份 ERROR_KEYS');
   assert.ok(helpers.includes("contracts/errors.cjs"), '客户端错误映射必须来自共享契约');
   assert.equal(contract.errorKeyOf('TIMEOUT'), 'errTIMEOUT');
@@ -72,7 +72,7 @@ test('RCR-05 错误码映射与配置/模式默认值只有一份实现', () => 
   assert.equal(contract.CONFIG_DEFAULTS.version, 2);
   assert.equal(contract.MODE_PARAMS_DEFAULT.smart.timeoutMs, 60000);
   assert.deepEqual(contract.MODE_BUDGET_OPTIONS.lite, [0, 2000, 4000]);
-  const clientState = fs.readFileSync(path.join(ROOT, 'src', 'client', 'state-module.cjs'), 'utf8');
+  const clientState = fs.readFileSync(path.join(ROOT, 'src', 'client', 'common', 'state.cjs'), 'utf8');
   assert.ok(clientState.includes('return JSON.parse(JSON.stringify(CONFIG_DEFAULTS));'), 'cloneDefaults 必须深拷贝契约默认值');
   assert.equal(/function cloneDefaults\(\)[\s\S]*?timeoutMs:\s*30000/.test(clientState), false,
     '客户端不得再持有第二份完整配置默认值');

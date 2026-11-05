@@ -6,8 +6,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const collapsible = require('../src/client/components/collapsible-section-module.cjs');
-const marquee = require('../src/client/components/marquee-select-module.cjs');
+const collapsible = require('../src/client/ui/collapsible-section.cjs');
+const marquee = require('../src/client/ui/marquee-select.cjs');
 
 test('CNAV-01 旧组件 chunk 退役，两个工厂模块在位', () => {
   assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/components/collapsible-section.js')), false);
@@ -28,7 +28,7 @@ test('CNAV-02 工厂返回原组件同名函数，显式依赖生效', () => {
 });
 
 test('CNAV-03 折叠组件默认展开与 ARIA 关联逻辑保留', () => {
-  const source = fs.readFileSync(path.join(REPO_ROOT, 'src/client/components/collapsible-section-module.cjs'), 'utf8');
+  const source = fs.readFileSync(path.join(REPO_ROOT, 'src/client/ui/collapsible-section.cjs'), 'utf8');
   assert.ok(source.includes('React.useState(true)'));
   assert.ok(source.includes("'aria-controls': ids.body"));
   assert.ok(source.includes("'aria-labelledby': ids.head"));
@@ -36,7 +36,7 @@ test('CNAV-03 折叠组件默认展开与 ARIA 关联逻辑保留', () => {
 });
 
 test('CNAV-04 跑马灯组件仍消费 window/document 与键盘导航', () => {
-  const source = fs.readFileSync(path.join(REPO_ROOT, 'src/client/components/marquee-select-module.cjs'), 'utf8');
+  const source = fs.readFileSync(path.join(REPO_ROOT, 'src/client/ui/marquee-select.cjs'), 'utf8');
   assert.ok(source.includes('requestAnimationFrame'));
   assert.ok(source.includes('document.addEventListener'));
   assert.ok(source.includes('ArrowDown'));
@@ -46,10 +46,10 @@ test('CNAV-04 跑马灯组件仍消费 window/document 与键盘导航', () => {
 test('CNAV-05 构建产物内联导航运行时，不再装载旧组件 chunk', () => {
   const build = fs.readFileSync(path.join(REPO_ROOT, 'scripts/build-client.mjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"));
-  assert.ok(client.includes('src/client/components/navigation-runtime.cjs'));
-  assert.ok(client.includes('src/client/components/collapsible-section-module.cjs'));
-  assert.ok(client.includes('src/client/components/marquee-select-module.cjs'));
+  assert.ok(build.includes("entry: 'src/client/app.cjs'"));
+  assert.ok(client.includes('src/client/ui/navigation.cjs'));
+  assert.ok(client.includes('src/client/ui/collapsible-section.cjs'));
+  assert.ok(client.includes('src/client/ui/marquee-select.cjs'));
   assert.equal(client.includes('src/client/components/collapsible-section.js'), false);
   assert.equal(client.includes('src/client/components/marquee-select.js'), false);
   assert.equal((client.match(/require\(['"]\.\.?\//g) || []).length, 0);

@@ -33,11 +33,11 @@ test('CSTYLE-03 源模块体不含 module.exports，模块导出仅一份', () =
 });
 
 test('CSTYLE-04 共享运行时与产物内联 CSS，不再装载旧 chunk', () => {
-  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/shared-runtime.cjs'), 'utf8');
+  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/common/runtime.cjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(shared.includes("require('./styles-module.cjs')"));
+  assert.ok(shared.includes("require('./styles.cjs')"));
   assert.ok(shared.includes('CSS: styles.CSS'));
-  assert.ok(client.includes('src/client/styles-module.cjs'));
+  assert.ok(client.includes('src/client/common/styles.cjs'));
   assert.equal(client.includes('src/client/styles.js'), false);
   assert.equal((client.match(/require\(['"]\.\.?\//g) || []).length, 0);
 });

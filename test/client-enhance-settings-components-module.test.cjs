@@ -6,9 +6,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const { createEnhanceButton } = require('../src/client/components/enhance-button-module.cjs');
-const { createEnhanceBar } = require('../src/client/components/enhance-bar-module.cjs');
-const { createModelPluginsSection } = require('../src/client/components/model-plugins-section-module.cjs');
+const { createEnhanceButton } = require('../src/client/domains/enhance/button.cjs');
+const { createEnhanceBar } = require('../src/client/domains/enhance/bar.cjs');
+const { createModelPluginsSection } = require('../src/client/domains/settings/plugins-section.cjs');
 
 function createReactStub() {
   const effects = [];
@@ -78,8 +78,8 @@ test('CESC-01 三个旧交互 chunk 退役，普通工厂模块与聚合入口�
   assert.equal(typeof createEnhanceButton, 'function');
   assert.equal(typeof createEnhanceBar, 'function');
   assert.equal(typeof createModelPluginsSection, 'function');
-  assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/components/enhance-components-runtime.cjs')), true);
-  assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/components/settings-shell-runtime.cjs')), true);
+  assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/domains/enhance/components.cjs')), true);
+  assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/domains/settings/shell.cjs')), true);
 });
 
 test('CESC-02 EnhanceButton 工厂返回同名组件并保留 ARIA/title 结构', () => {
@@ -116,7 +116,7 @@ test('CESC-04 设置页容器只保留 models/params 两 tab，且两面板均�
     ParamsTab: function ParamsTab() { return null; },
   });
   assert.equal(api.ModelPluginsSection.name, 'ModelPluginsSection');
-  const source = fs.readFileSync(path.join(REPO_ROOT, 'src/client/components/model-plugins-section-module.cjs'), 'utf8');
+  const source = fs.readFileSync(path.join(REPO_ROOT, 'src/client/domains/settings/plugins-section.cjs'), 'utf8');
   assert.ok(source.includes("['models', t('tabModels')]"));
   assert.ok(source.includes("['params', t('tabParams')]"));
   assert.ok(source.includes('React.createElement(ModelConfigTab, props)'));
@@ -126,12 +126,12 @@ test('CESC-04 设置页容器只保留 models/params 两 tab，且两面板均�
 test('CESC-05 产物内联三个交互模块，旧 chunk 与相对 require 均不存在', () => {
   const build = fs.readFileSync(path.join(REPO_ROOT, 'scripts/build-client.mjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"));
-  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"));
+  assert.ok(build.includes("entry: 'src/client/app.cjs'"));
+  assert.ok(build.includes("entry: 'src/client/app.cjs'"));
   for (const mod of [
-    'src/client/components/enhance-button-module.cjs',
-    'src/client/components/enhance-bar-module.cjs',
-    'src/client/components/model-plugins-section-module.cjs',
+    'src/client/domains/enhance/button.cjs',
+    'src/client/domains/enhance/bar.cjs',
+    'src/client/domains/settings/plugins-section.cjs',
   ]) assert.ok(client.includes(mod), '产物缺模块 ' + mod);
   assert.ok(client.includes('createEnhanceButton({'));
   assert.ok(client.includes('createEnhanceBar({'));

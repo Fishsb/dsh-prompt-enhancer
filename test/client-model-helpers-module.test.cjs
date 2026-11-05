@@ -6,11 +6,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const { buildCandidates } = require('../src/client/model-helpers-module.cjs');
+const { buildCandidates } = require('../src/client/common/model-helpers.cjs');
 
 test('CMH-01 旧 model-helpers chunk 已退役，普通模块在位', () => {
   assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/model-helpers.js')), false);
-  assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/model-helpers-module.cjs')), true);
+  assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/common/model-helpers.cjs')), true);
 });
 
 test('CMH-02 provider/model 映射与名称回退不变', () => {
@@ -35,9 +35,9 @@ test('CMH-03 order 优先，未命中项内置优先于自定义', () => {
 
 test('CMH-04 client 产物内联候选模块，仍自包含', () => {
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/shared-runtime.cjs'), 'utf8');
-  assert.ok(shared.includes("require('./model-helpers-module.cjs')"));
-  assert.ok(client.includes('src/client/model-helpers-module.cjs'));
+  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/common/runtime.cjs'), 'utf8');
+  assert.ok(shared.includes("require('./model-helpers.cjs')"));
+  assert.ok(client.includes('src/client/common/model-helpers.cjs'));
   assert.ok(client.includes('buildCandidates: modelHelpers.buildCandidates'));
   assert.equal((client.match(/require\(['"]\.\.?\//g) || []).length, 0,
     'client 产物不得保留相对 require（React 工厂参数是既有载体契约）');

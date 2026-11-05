@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const { createClientState } = require('../src/client/state-module.cjs');
+const { createClientState } = require('../src/client/common/state.cjs');
 
 test('CSTATE-01 旧 state chunk 退役，工厂在位', () => {
   assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/state.js')), false);
@@ -52,12 +52,12 @@ test('CSTATE-04 host 启动同步成功后写入 sanitize 结果并解除 fresh'
 });
 
 test('CSTATE-05 产物内联状态模块，app 同步 timerRef', () => {
-  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/shared-runtime.cjs'), 'utf8');
-  const app = fs.readFileSync(path.join(REPO_ROOT, 'src/client/app-module.cjs'), 'utf8');
+  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/common/runtime.cjs'), 'utf8');
+  const app = fs.readFileSync(path.join(REPO_ROOT, 'src/client/app.cjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(shared.includes("require('./state-module.cjs')"));
+  assert.ok(shared.includes("require('./state.cjs')"));
   assert.ok(app.includes("timerRef.value = ctx.get('timer')"));
-  assert.ok(client.includes('src/client/state-module.cjs'));
+  assert.ok(client.includes('src/client/common/state.cjs'));
   assert.ok(client.includes('createClientState({ host: d.host, timerRef, storage })'));
   assert.ok(client.includes('const configState = configApi.configState;'));
 });

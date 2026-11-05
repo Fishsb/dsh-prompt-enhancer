@@ -13,12 +13,12 @@ function loadVoiceState() {
   return factory(localStorage, { call: () => Promise.resolve({ ok: false }) });
 }
 
-test('VCONF-01 键集合与 client voice/state-module.cjs 同形', () => {
+test('VCONF-01 键集合与 client domains/voice/state.cjs 同形', () => {
   const actual = loadVoiceState().VOICE_CFG_DEFAULTS;
   assert.deepEqual([...VOICE_CONFIG_KEYS].sort(), Object.keys(actual).sort());
 });
 
-test('VCONF-02 默认值与 client voice/state-module.cjs 逐字段相等', () => {
+test('VCONF-02 默认值与 client domains/voice/state.cjs 逐字段相等', () => {
   const actual = loadVoiceState().VOICE_CFG_DEFAULTS;
   assert.deepEqual(JSON.parse(JSON.stringify(VOICE_CONFIG_DEFAULTS)), actual);
 });
@@ -43,7 +43,7 @@ test('VCONF-05 产物面：共享运行时已由打包器注入且只注入一�
     assert.ok(client.includes('"' + mod + '"'), '共享运行时模块 id 未内联：' + mod);
   }
   assert.ok(client.includes('defaults: contracts.VOICE_CONFIG_DEFAULTS'), '状态模块的默认值必须来自共享契约');
-  assert.ok(client.includes('src/client/voice/state-module.cjs'), '产物须内联语音状态普通模块');
+  assert.ok(client.includes('src/client/domains/voice/state.cjs'), '产物须内联语音状态普通模块');
   assert.equal(client.includes("require('../src/shared/contracts/"), false, '产物不得保留外部 require');
   assert.equal(client.includes("require('../src/shared/voice/"), false, '产物不得保留外部 require');
 });

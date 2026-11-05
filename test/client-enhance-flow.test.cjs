@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { createClientHelpers } = require('../src/client/helpers-module.cjs');
+const { createClientHelpers } = require('../src/client/common/helpers.cjs');
 
 // ⚠ 契约面收口批（2026-10-17 · 第 ② 件）：本地 `decodeChunk` 副本已删除，改共享单一事实源
 //   （`scripts/lib/chunk-decode.mjs`）。随副本一并删去不再使用的 `fs` / `path` / `ROOT`
@@ -153,17 +153,17 @@ test('ENH-FLOW cancel: 在途取消 → 还原 backup + 取消 RPC + 清持久�
 
 // ---------- 接线契约：专防"注释有、代码无"（f6fa822 事故类） ----------
 test('ENH-FLOW wiring: button 必须登记活动会话且声明 actions ref', () => {
-  const btn = fs.readFileSync(path.join(REPO_ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8');
+  const btn = fs.readFileSync(path.join(REPO_ROOT, 'src/client/domains/enhance/button.cjs'), 'utf8');
   assert.ok(/setActiveSession\(sessionId\)/.test(btn), 'button 缺 setActiveSession 登记（恒 null → 完成回调恒判已切走）');
   assert.ok(btn.includes('inputActionsRef'), 'button 缺 inputActionsRef 声明（恢复效应将 ReferenceError）');
 });
 test('ENH-FLOW wiring: bar 卸载不得 cancel 在途优化 + 消费效应须豁免暂存态', () => {
-  const bar = fs.readFileSync(path.join(REPO_ROOT, 'src/client/components/enhance-bar-module.cjs'), 'utf8');
+  const bar = fs.readFileSync(path.join(REPO_ROOT, 'src/client/domains/enhance/bar.cjs'), 'utf8');
   assert.equal(/host\.call\('cancel'/.test(bar), false, 'bar 卸载残留 cancel——与「后台继续」冲突');
   assert.ok(bar.includes('draft !== s.backup'), 'bar 消费效应缺 backup 豁免（暂存未写回态会被误清）');
 });
 test('ENH-FLOW wiring: helpers 完成分支三路持久化调用齐备', () => {
-  const h = fs.readFileSync(path.join(REPO_ROOT, 'src/client/helpers-module.cjs'), 'utf8');
+  const h = fs.readFileSync(path.join(REPO_ROOT, 'src/client/common/helpers.cjs'), 'utf8');
   for (const marker of [
     'saveResultStore(sessionId, session.backup, finalText)',
     'clearResultStore(sessionId);',

@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..');
-const STYLES_MODULE_REL = 'src/client/styles-module.cjs';
+const STYLES_MODULE_REL = 'src/client/common/styles.cjs';
 const ABS = path.join(ROOT, STYLES_MODULE_REL);
 const SOURCE = fs.readFileSync(ABS, 'utf8').replace(/\r\n/g, '\n');
 const { CSS } = require(ABS);

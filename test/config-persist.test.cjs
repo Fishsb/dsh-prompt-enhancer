@@ -99,7 +99,7 @@ test('CFG-P09 config/set merge 行为：传单键保留其他键（模拟两写�
 //   （`cloneDefaults().fallback = []`）⇒ 用户模型链被清空（实测：删最后一条模型 → 磁盘 fallback=[]）。
 // 修法：**只提交本次 patch**。本组用例断言该契约，并给变异自证（退回整份 ⇒ 必红）。
 // 目标模式（CHG-333）：client state 已是普通 CommonJS 源码，静态契约直接读模块正文。
-const STATE_MODULE = join(__dirname, '..', 'src', 'client', 'state-module.cjs');
+const STATE_MODULE = join(__dirname, '..', 'src', 'client', 'common', 'state.cjs');
 
 test('CFG-P10 P0：saveConfig 只提交本次 patch（不得整份提交 configState.value）', () => {
   const src = readFileSync(STATE_MODULE, 'utf8');

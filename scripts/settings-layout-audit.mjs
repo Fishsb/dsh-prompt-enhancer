@@ -13,7 +13,7 @@
 //   ④ 出现省略号（overflow/ellipsis 生效）
 //
 // 装置形态与**已知边界（如实声明，勿当"真机"读）**：
-//   · 真实 CSS：直接取 src/client/styles-module.cjs 的 CSS 字符串（逐字）；
+//   · 真实 CSS：直接取 src/client/common/styles.cjs 的 CSS 字符串（逐字）；
 //   · 真实 DOM 结构：直接执行 src/client/**.js 的 chunk 源码（经 scripts/lib/chunk-decode.mjs 解码），
 //     由 scripts/lib/settings-layout-driver.mjs 的最小 React shim 产出**真实 DOM**
 //     （类名、内联样式、文本逐字同源）；
@@ -49,20 +49,20 @@ const ROW1_W = Number(argOf('--row1', '')) || 0;
 
 const CHUNKS = [
   'src/shared/contracts/voice-config.cjs',
-  'src/client/i18n-module.cjs',
-  'src/client/constants-module.cjs',
-  'src/client/model-helpers-module.cjs',
-  'src/client/helpers-module.cjs',
-  'src/client/voice/state-module.cjs',
-  'src/client/components/collapsible-section-module.cjs',
-  'src/client/components/marquee-select-module.cjs',
-  'src/client/components/model-main-section-module.cjs',
-  'src/client/components/fallback-row-module.cjs',
-  'src/client/components/model-config-tab-module.cjs',
-  'src/client/components/params-tab-module.cjs',
-  'src/client/components/model-plugins-section-module.cjs',
-  'src/client/voice/voice-section-module.cjs',
-  'src/client/styles-module.cjs',
+  'src/client/common/i18n.cjs',
+  'src/client/common/constants.cjs',
+  'src/client/common/model-helpers.cjs',
+  'src/client/common/helpers.cjs',
+  'src/client/domains/voice/state.cjs',
+  'src/client/ui/collapsible-section.cjs',
+  'src/client/ui/marquee-select.cjs',
+  'src/client/domains/settings/model-main-section.cjs',
+  'src/client/domains/settings/fallback-row.cjs',
+  'src/client/domains/settings/model-config-tab.cjs',
+  'src/client/domains/settings/params-tab.cjs',
+  'src/client/domains/settings/plugins-section.cjs',
+  'src/client/domains/voice/section.cjs',
+  'src/client/common/styles.cjs',
 ];
 
 function readChunk(rel) {
@@ -331,8 +331,8 @@ function buildPage() {
   for (const rel of CHUNKS) chunks[rel] = readChunk(rel);
   // styles 模块正文是 JS（const CSS = [...].join('\n')）——必须**求值**才拿到 CSS 文本，
   // 不能把 JS 源码直接塞进 <style>（那样一条样式都不生效，量到的是浏览器默认盒 = 假绿）。
-  const cssSrc = chunks['src/client/styles-module.cjs'];
-  delete chunks['src/client/styles-module.cjs'];
+  const cssSrc = chunks['src/client/common/styles.cjs'];
+  delete chunks['src/client/common/styles.cjs'];
   const css = new Function(cssSrc + '\n;return CSS;')();
   if (typeof css !== 'string' || css.length < 500) throw new Error('styles chunk 未产出 CSS 字符串（实得 ' + typeof css + '）');
   const payload = { chunks, realisticMax: REALISTIC_MAX, scenarios: scenarios(), row1W: ROW1_W };

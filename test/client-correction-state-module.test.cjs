@@ -10,7 +10,7 @@ const {
   correctionPhaseOf,
   correctionFailureTicket,
   correctionFailureConsume,
-} = require('../src/client/voice/correction-state-module.cjs');
+} = require('../src/client/domains/voice/correction-state.cjs');
 
 test('CCS-01 相位常量与线上取值逐项一致', () => {
   assert.deepEqual(CORRECTION_PHASES, {

@@ -1017,7 +1017,7 @@ const STRUCTURAL = [
       `[${hits[0].file}] ${arr.length} 项｜缺文件 ${missing.length ? missing.join(',') : '无'}｜白名单外 ${outside.length ? outside.join(',') : '无'}｜入口齐 ${entries}`);
   }),
   A('S-7', '结构', 'i18n 全局平衡：`ZH` 与 `EN` 顶层键集相等且非空', '两语言键集完全相同（0 差异）', () => {
-    const src = read('src/client/i18n-module.cjs');
+    const src = read('src/client/common/i18n.cjs');
     const iZ = src.indexOf('const ZH');
     const iE = src.indexOf('const EN');
     if (iZ < 0 || iE <= iZ) return no('未定位到 ZH/EN 两个表');

@@ -5,10 +5,10 @@
 const {
   MEMORY_ROUNDS_MAX,
   SEEN_KEY_PREFIX,
-} = require('./constants-module.cjs');
-const { RPC_METHODS } = require('../shared/contracts/rpc.cjs');
+} = require('./constants.cjs');
+const { RPC_METHODS } = require('../../shared/contracts/rpc.cjs');
 
-const { errorKeyOf: contractErrorKey } = require('../shared/contracts/errors.cjs');
+const { errorKeyOf: contractErrorKey } = require('../../shared/contracts/errors.cjs');
 
 const MODEL_DISPLAY_NAMES = {
   'deepseek-v4-flash': 'DeepSeek-V4-Flash',

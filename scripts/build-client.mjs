@@ -18,15 +18,15 @@ function buildClient() {
   // 不再维护字符串骨架、注入标记或逐块拼接；装配失败 fail-closed。
   const appRuntime = bundleModules({
     root,
-    entry: 'src/client/app-module.cjs',
+    entry: 'src/client/app.cjs',
   });
-  if (!appRuntime.modules.includes('src/client/app-module.cjs')) {
+  if (!appRuntime.modules.includes('src/client/app.cjs')) {
     throw new Error('[build-client] 装配图不完整：缺少入口模块');
   }
   for (const required of [
-    'src/client/shared-runtime.cjs',
+    'src/client/common/runtime.cjs',
     'src/shared/contracts/client-runtime.cjs',
-    'src/client/components/enhance-components-runtime.cjs',
+    'src/client/domains/enhance/components.cjs',
   ]) {
     if (!appRuntime.modules.includes(required)) {
       throw new Error('[build-client] 装配图不完整：缺少 ' + required);

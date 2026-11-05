@@ -16,7 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
-const CHUNK = 'src/client/voice/official-bridge-module.cjs';
+const CHUNK = 'src/client/domains/voice/official-bridge.cjs';
 
 // ⚠ 契约面收口批（2026-10-17 · 第 ② 件）：本地 `decodeChunk` 副本已删除，改共享单一事实源
 //   （`scripts/lib/chunk-decode.mjs`）。原实现的「行首锚定」依据已搬进该模块头注；
@@ -890,13 +890,13 @@ test('OVB-A05 官方路径·自动增强：跨会话基线不串（第二会话�
 // ───────────────────────────── 接线契约（防"注释有、代码无"） ─────────────────────────────
 test('OVB-W01 接线：build-client 以普通入口模块装配（无注入标记）', () => {
   const build = fs.readFileSync(path.join(ROOT, 'scripts', 'build-client.mjs'), 'utf8');
-  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"), 'build-client 缺普通入口模块');
-  const app = fs.readFileSync(path.join(ROOT, 'src', 'client', 'app-module.cjs'), 'utf8');
+  assert.ok(build.includes("entry: 'src/client/app.cjs'"), 'build-client 缺普通入口模块');
+  const app = fs.readFileSync(path.join(ROOT, 'src', 'client', 'app.cjs'), 'utf8');
   assert.ok(app.includes('createOfficialVoiceBridge'), 'client 入口装配图缺官方语音桥');
 });
 
 test('OVB-W02 接线：apply 安装 + 卸载（HMR）+ 热键→派发点击官方按钮的接线均在位', () => {
-  const app = fs.readFileSync(path.join(ROOT, 'src/client/app-module.cjs'), 'utf8');
+  const app = fs.readFileSync(path.join(ROOT, 'src/client/app.cjs'), 'utf8');
   assert.ok(app.includes('officialVoiceBridge.install()'), 'apply 缺安装调用');
   assert.ok(app.includes('officialVoiceBridge.uninstall()'), 'apply 缺卸载（HMR 恢复）');
   assert.ok(app.includes('officialVoiceBridge.setTimer'), 'apply 缺 timer 注入');
@@ -916,7 +916,7 @@ test('OVB-W02 接线：apply 安装 + 卸载（HMR）+ 热键→派发点击官�
   // 纯函数（四项增值之一）必须保留且行为不变
   assert.ok(hk.includes('function parseVoiceHotkey'), '热键纯函数 parseVoiceHotkey 必须保留（四项增值不得丢）');
   assert.ok(hk.includes('function matchVoiceHotkey'), '热键纯函数 matchVoiceHotkey 必须保留（四项增值不得丢）');
-  const hotkeyModule = require('../src/client/voice/hotkey-module.cjs');
+  const hotkeyModule = require('../src/client/domains/voice/hotkey.cjs');
   assert.equal(typeof hotkeyModule.voiceHotkeyDisplay, 'function', '热键纯函数 voiceHotkeyDisplay 必须保留且显式导出（四项增值不得丢）');
 });
 

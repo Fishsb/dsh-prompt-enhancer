@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
 const { resultStatusOf } = require('../src/shared/contracts/result.cjs');
-const { createClientHelpers } = require('../src/client/helpers-module.cjs');
+const { createClientHelpers } = require('../src/client/common/helpers.cjs');
 
 function createStorage(seed) {
   const backing = new Map(seed ? Object.entries(seed) : []);
@@ -46,10 +46,10 @@ const RESULT_KEY = (sessionId) => 'dsh-enh-result:' + sessionId;
 
 test('CHELP-01 旧 helpers chunk 退役，工厂在位并纳入共享运行时', () => {
   assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/helpers.js')), false);
-  assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/helpers-module.cjs')), true);
+  assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/common/helpers.cjs')), true);
   assert.equal(typeof createClientHelpers, 'function');
-  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/shared-runtime.cjs'), 'utf8');
-  assert.ok(shared.includes("require('./helpers-module.cjs')"));
+  const shared = fs.readFileSync(path.join(REPO_ROOT, 'src/client/common/runtime.cjs'), 'utf8');
+  assert.ok(shared.includes("require('./helpers.cjs')"));
   assert.ok(shared.includes('createClientHelpers: clientHelpers.createClientHelpers'));
 });
 
@@ -183,7 +183,7 @@ test('CHELP-08 取消在途增强会还原草稿、清结果并发送 cancel RPC
 
 test('CHELP-09 产物内联增强会话模块，仍自包含', () => {
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(client.includes('src/client/helpers-module.cjs'));
+  assert.ok(client.includes('src/client/common/helpers.cjs'));
   assert.ok(client.includes('createClientHelpers('));
   assert.ok(client.includes('createClientHelpers({ host: d.host, configState, dictionary: ZH, storage, resultStatusOf: contracts.resultStatusOf })'),
     '入口必须把装配层归一化后的 storage 显式传入增强会话模块');

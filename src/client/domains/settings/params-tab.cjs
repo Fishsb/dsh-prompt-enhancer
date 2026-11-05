@@ -1,6 +1,6 @@
 'use strict';
 
-const { RPC_METHODS } = require('../../shared/contracts/rpc.cjs');
+const { RPC_METHODS } = require('../../../shared/contracts/rpc.cjs');
 
 // 设置页优化参数 tab 普通模块（构建期由客户端运行时内联）。
 // 依赖由构建器显式注入；所有可见文案、ARIA、类名与配置写入不变。

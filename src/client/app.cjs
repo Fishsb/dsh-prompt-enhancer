@@ -2,21 +2,20 @@
 
 // 客户端插件装配入口普通模块（构建期由打包器内联）。
 // apply 的注册顺序、槽位 ID、标签与卸载行为不变。
-const shared = require('./shared-runtime.cjs');
+const shared = require('./common/runtime.cjs');
 const contracts = require('../shared/contracts/client-runtime.cjs');
-const { createClientState } = require('./state-module.cjs');
-const { createClientHelpers } = require('./helpers-module.cjs');
-const { createVoiceState } = require('./voice/state-module.cjs');
-const { createCorrectionState } = require('./voice/correction-module.cjs');
-const { createOfficialVoiceBridge } = require('./voice/official-bridge-module.cjs');
-const { createVoiceHotkey } = require('./voice/hotkey-module.cjs');
-const { createVoiceSection } = require('./voice/voice-section-module.cjs');
-const { createCollapsibleSection, createMarqueeSelect } = require('./components/navigation-runtime.cjs');
-const { createModelMainSection, createFallbackRow } = require('./components/model-settings-runtime.cjs');
-const { createModelConfigTab } = require('./components/model-config-tab-module.cjs');
-const { createParamsTab } = require('./components/params-tab-module.cjs');
-const { createModelPluginsSection } = require('./components/settings-shell-runtime.cjs');
-const { createEnhanceButton, createEnhanceBar } = require('./components/enhance-components-runtime.cjs');
+const { createClientState } = require('./common/state.cjs');
+const { createClientHelpers } = require('./common/helpers.cjs');
+const {
+  createVoiceState, createCorrectionState, createOfficialVoiceBridge,
+  createVoiceHotkey, createVoiceSection,
+} = require('./domains/voice/index.cjs');
+const { createCollapsibleSection, createMarqueeSelect } = require('./ui/navigation.cjs');
+const { createModelMainSection, createFallbackRow } = require('./domains/settings/model-settings.cjs');
+const { createModelConfigTab } = require('./domains/settings/model-config-tab.cjs');
+const { createParamsTab } = require('./domains/settings/params-tab.cjs');
+const { createModelPluginsSection } = require('./domains/settings/shell.cjs');
+const { createEnhanceButton, createEnhanceBar } = require('./domains/enhance/components.cjs');
 function createClientApp(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};
   const styles = d.styles;

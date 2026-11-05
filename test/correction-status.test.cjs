@@ -26,7 +26,7 @@ const { decodeChunk } = require('../scripts/lib/chunk-decode.mjs');
 const { i18nSource, ZH } = require('./helpers/client-i18n.cjs');
 const voiceModules = require('./helpers/client-voice-modules.cjs');
 // 目标模式：纠错业务模块消费构建期注入的纠错状态模块；测试沙箱必须提供同一符号。
-const CORRECTION_STATE = require('../src/client/voice/correction-state-module.cjs');
+const CORRECTION_STATE = require('../src/client/domains/voice/correction-state.cjs');
 
 /** 求值纠错业务模块正文，注入一个可控的 voiceCfgState（开关真值）。 */
 function loadCorrection(opts) {
@@ -225,14 +225,14 @@ test('CHG184-S13 ⭐ 接线：hotkey 调度口调用 markCorrectionStarted / Set
 });
 
 test('CHG184-S14 ⭐ 接线（R3 迁移）：纠错状态不再注册独立元素，改由 ✨ 按钮承载；槽位面零新增', () => {
-  const app = fs.readFileSync(path.join(ROOT, 'src/client/app-module.cjs'), 'utf8');
+  const app = fs.readFileSync(path.join(ROOT, 'src/client/app.cjs'), 'utf8');
   // ① 注册面：order 12 的独立纠错条目必须已删除
   assert.equal(/id: 'correction-status'/.test(app), false, '⛔ 不得再注册独立的纠错状态槽位条目');
   // ② 但 ✨ 增强按钮仍必须注册在同一槽位（它是新的承载者）
   assert.ok(/id: 'prompt-enhance'/.test(app), '✨ 增强按钮必须仍注册（新承载者）');
   assert.ok(app.indexOf('conversation.input.right') >= 0, '✨ 仍必须在输入框右槽位');
   // ③ 承载者必须真的接上了纠错相位（不是只删了旧的、没接新的）
-  const eb = fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8')
+  const eb = fs.readFileSync(path.join(ROOT, 'src/client/domains/enhance/button.cjs'), 'utf8')
     .replace(/^'use strict';\s*/, '')
     .replace(/function createEnhanceButton\(deps\) \{/, 'function __enhanceButtonFactory(deps) {')
     .replace(/\n  return EnhanceButton;\n\}\n\nmodule\.exports = \{ createEnhanceButton \};\s*$/, '\n  return EnhanceButton;\n}\nconst EnhanceButton = __enhanceButtonFactory({\n'
@@ -409,7 +409,7 @@ function readTree(node) {
 function loadButton(opts) {
   const o = opts || {};
   const mini = makeRenderReact();
-  const eb = fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8')
+  const eb = fs.readFileSync(path.join(ROOT, 'src/client/domains/enhance/button.cjs'), 'utf8')
     .replace(/^'use strict';\s*/, '')
     .replace(/function createEnhanceButton\(deps\) \{/, 'function __enhanceButtonFactory(deps) {')
     .replace(/\n  return EnhanceButton;\n\}\n\nmodule\.exports = \{ createEnhanceButton \};\s*$/, '\n  return EnhanceButton;\n}\nconst EnhanceButton = __enhanceButtonFactory({\n'
@@ -496,7 +496,7 @@ test('R3-B ⭐ 纠错结束 ⇒ 按钮回到默认态（逐字比对「优化」
 });
 
 test('R3-C ⭐ 不存在独立的状态元素（搜索范围：src/client/** 全量）', () => {
-  const app = fs.readFileSync(path.join(ROOT, 'src/client/app-module.cjs'), 'utf8');
+  const app = fs.readFileSync(path.join(ROOT, 'src/client/app.cjs'), 'utf8');
   // ① 注册面：不得再有 correction-status 注册
   assert.equal(/id: 'correction-status'/.test(app), false, '⛔ 不得再注册独立的纠错状态槽位条目');
   // ② 文件面：correction-status.js 必须已删除（范围：src/client/voice/）
@@ -518,7 +518,7 @@ test('R3-D ⭐ 忙态相撞：增强在跑 + 纠错也跑 ⇒ 显示「正在优
 
 test('R3-E ⭐ 失败态不静默：短暂提示「纠错失败」后自动复原（时长 4000ms）', () => {
   const { decodeChunk: dc } = require('../scripts/lib/chunk-decode.mjs');
-  const eb = fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8');
+  const eb = fs.readFileSync(path.join(ROOT, 'src/client/domains/enhance/button.cjs'), 'utf8');
   // ① 失败提示的时长必须是 4000（与报告 §D 一致）
   assert.ok(/timerSvc\.timeout\(function \(\) \{ setFlash\(false\); \}, 4000\)/.test(eb),
     '⚠ 失败提示须经既有 timer 服务定时复原，时长 4000ms');
@@ -562,14 +562,14 @@ test('R3-F ⭐ 「没跑（开关关）」与「跑了但没改」的区分改�
 });
 
 test('R3-G 变异自证：删掉按钮的纠错接管分支 ⇒ R3-A 必红（判据有牙）', () => {
-  const eb = fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8');
+  const eb = fs.readFileSync(path.join(ROOT, 'src/client/domains/enhance/button.cjs'), 'utf8');
   const mutated = eb.replace(/if \(corrTakesOver\) \{ cls = 'dsh-enh-btn dsh-enh-btn-busy dsh-enh-btn-text'; \}/, '');
   assert.notEqual(mutated, eb, '前置：变异锚点须命中');
   assert.equal(/if \(corrTakesOver\)/.test(mutated), false, '变异后接管分支应消失 ⇒ R3-A 的 busy 断言必红');
 });
 
 test('R3-H 负控：不动任何文件 ⇒ 本组全绿（防恒红）', () => {
-  const eb = fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8');
+  const eb = fs.readFileSync(path.join(ROOT, 'src/client/domains/enhance/button.cjs'), 'utf8');
   assert.ok(eb.includes('corrTakesOver'), '接管变量在位');
   assert.ok(eb.includes('voiceCorrectionRunningOnButton'), '按钮纠错文案键在位');
 });
@@ -727,7 +727,7 @@ test('SCOPE-R2 ⭐ 渲染层负控：A 自己也必须仍可见失败（防「�
 });
 
 test('SCOPE-R3 ⭐ 变异自证：按钮不回传归属 ⇒ SCOPE-R1 的判据必红（判据有牙）', () => {
-  const eb = fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8');
+  const eb = fs.readFileSync(path.join(ROOT, 'src/client/domains/enhance/button.cjs'), 'utf8');
   const mutant = eb.replace('correctionPhaseOf(corrSnap, sessionId)', 'correctionPhaseOf(corrSnap)');
   assert.notEqual(mutant, eb, '前置：变异锚点须命中（否则本条恒绿、没有判别力）');
   // 变异后：B 观察者拿到的是**全局** phase（= failed）⇒ R1 的核心断言必然失败
@@ -1076,7 +1076,7 @@ test('C5 边界：消费是**高水位**，只前进不后退，且幂等', () =
 
 const VS_SRC = () => voiceModules.voiceSectionSource();
 const CORR_SRC = () => voiceModules.correctionBody();
-const EB_SRC = () => fs.readFileSync(path.join(ROOT, 'src/client/components/enhance-button-module.cjs'), 'utf8');
+const EB_SRC = () => fs.readFileSync(path.join(ROOT, 'src/client/domains/enhance/button.cjs'), 'utf8');
 
 /** 用「改过的 voice-section」渲染诊断行（变异自证用）。 */
 function renderDiagFromSrc(src, snap, cfgOn) {

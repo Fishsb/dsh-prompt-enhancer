@@ -1,6 +1,6 @@
 'use strict';
 
-const { RPC_METHODS } = require('../../shared/contracts/rpc.cjs');
+const { RPC_METHODS } = require('../../../shared/contracts/rpc.cjs');
 
 // 设置页模型配置 tab 普通模块（构建期由客户端运行时内联）。
 // 只改变代码载体；请求、继承、失效清理与可见行为不变。

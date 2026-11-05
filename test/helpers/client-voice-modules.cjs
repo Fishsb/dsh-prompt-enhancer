@@ -23,18 +23,18 @@ function factoryBody(rel) {
 }
 
 module.exports = {
-  correctionBody: () => factoryBody('src/client/voice/correction-module.cjs'),
-  officialBridgeBody: () => factoryBody('src/client/voice/official-bridge-module.cjs'),
-  hotkeyBody: () => factoryBody('src/client/voice/hotkey-module.cjs'),
-  voiceSectionBody: () => factoryBody('src/client/voice/voice-section-module.cjs'),
-  correctionSource: () => factoryBody('src/client/voice/correction-module.cjs')
+  correctionBody: () => factoryBody('src/client/domains/voice/correction.cjs'),
+  officialBridgeBody: () => factoryBody('src/client/domains/voice/official-bridge.cjs'),
+  hotkeyBody: () => factoryBody('src/client/domains/voice/hotkey.cjs'),
+  voiceSectionBody: () => factoryBody('src/client/domains/voice/section.cjs'),
+  correctionSource: () => factoryBody('src/client/domains/voice/correction.cjs')
     + '\nreturn { correctionState, correctionSnapshot, subscribeCorrection, notifyCorrection,'
     + ' markCorrectionSkipped, markCorrectionStarted, markCorrectionSettled, markCorrectionFailed,'
     + ' correctionPhaseOf, correctionPhaseView, correctionPhaseKnown, CORRECTION_PHASES,'
     + ' correctionFailureTicket, consumeCorrectionFailure };',
-  officialBridgeSource: () => factoryBody('src/client/voice/official-bridge-module.cjs')
+  officialBridgeSource: () => factoryBody('src/client/domains/voice/official-bridge.cjs')
     + '\nreturn officialVoiceBridge;',
-  hotkeySource: () => factoryBody('src/client/voice/hotkey-module.cjs'),
-  voiceSectionSource: () => factoryBody('src/client/voice/voice-section-module.cjs')
+  hotkeySource: () => factoryBody('src/client/domains/voice/hotkey.cjs'),
+  voiceSectionSource: () => factoryBody('src/client/domains/voice/section.cjs')
     + '\nreturn { ovbSinceLabel, OfficialVoiceDiag, FillerDiag, CorrectionDiag, VoiceSection };',
 };

@@ -10,7 +10,7 @@ const { FILLER_MODULE_REL, BASELINE_REL, fillerBaselineText, fillerModuleText, l
 
 test('CFM-01 旧 chunk 已退役，普通模块在位（不得双份）', () => {
   assert.equal(fs.existsSync(path.join(REPO_ROOT, 'src/client/voice/filler.js')), false,
-    'src/client/voice/filler.js 已退役；不得与 filler-module.cjs 并存');
+    'src/client/domains/voice/filler.js 已退役；不得与 filler.cjs 并存');
   assert.equal(fs.existsSync(path.join(REPO_ROOT, FILLER_MODULE_REL)), true, '普通模块必须存在：' + FILLER_MODULE_REL);
 });
 
@@ -38,9 +38,9 @@ test('CFM-03 导出面与旧 chunk 顶层声明逐项同名、类型一致', () 
 
 test('CFM-04 产物面：lib/client.cjs 由打包器内联清口水词模块（无外部 require）', () => {
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib', 'client.cjs'), 'utf8');
-  assert.ok(client.includes('"src/client/voice/filler-module.cjs"'), '产物必须内联清口水词模块 id');
+  assert.ok(client.includes('"src/client/domains/voice/filler.cjs"'), '产物必须内联清口水词模块 id');
   assert.ok(client.includes('createClientHelpers'), '产物必须含客户端共享运行时入口');
   assert.ok(client.includes('function stripFillers'), '产物必须含清理器定义');
-  assert.equal(client.includes("require('../src/client/voice/filler-module.cjs')"), false,
+  assert.equal(client.includes("require('../src/client/domains/voice/filler.cjs')"), false,
     '产物不得保留外部 require');
 });

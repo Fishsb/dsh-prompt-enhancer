@@ -55,7 +55,7 @@
       "以下是优化后的提示词：把日志导出来",
       "请把 `npm install` 执行完再继续。",
       "配置项是 timeout-ms=30000。",
-      "文件路径保持 src/client/app-module.cjs 不变。",
+      "文件路径保持 src/client/app.cjs 不变。",
       "请求头使用 Content-Type: application/json。"
     ],
     "correct": [

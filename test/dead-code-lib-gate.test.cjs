@@ -504,15 +504,15 @@ function unwrapChunkToBareJs(dir, rel) {
 }
 
 test('R7 变异自证（源码层）：client 入口引用缺失模块 ⇒ 构建必红且点名', () => {
-  const rel = 'src/client/' + 'app-module' + '.cjs';
+  const rel = 'src/client/' + 'app' + '.cjs';
   withFixture((dir) => {
     const abs = path.join(dir, rel);
     const src = fs.readFileSync(abs, 'utf8');
-    fs.writeFileSync(abs, src.replace("require('./state-module.cjs')", "require('./missing-state-module.cjs')"), 'utf8');
+    fs.writeFileSync(abs, src.replace("require('./common/state.cjs')", "require('./common/missing-state.cjs')"), 'utf8');
   }, (dir) => {
     const r = runGate(dir);
     assert.equal(r.code, 1, '源码层装配失败必须 exit 1');
-    assert.match(r.out, /app-module\.cjs|missing-state-module\.cjs|装配图不完整|无法解析/, 'R7 必须点名入口模块');
+    assert.match(r.out, /app\.cjs|missing-state\.cjs|装配图不完整|无法解析/, 'R7 必须点名入口模块');
   });
 });
 
@@ -556,11 +556,11 @@ test('R7 fail-closed：产物缺位 / chunk 目录缺位 ⇒ FAIL，不得静默
 });
 
 test('R2 fail-closed：client 入口模块缺失 ⇒ 构建期不得静默判绿', () => {
-  const rel = 'src/client/' + 'app-module' + '.cjs';
+  const rel = 'src/client/' + 'app' + '.cjs';
   withFixture((dir) => { fs.rmSync(path.join(dir, rel)); }, (dir) => {
     const r = runGate(dir);
     assert.equal(r.code, 1, '入口缺位必须 exit 1');
-    assert.match(r.out, /app-module\.cjs|装配图不完整|无法解析/, 'R2 必须显式报装配失败');
+    assert.match(r.out, /app\.cjs|装配图不完整|无法解析/, 'R2 必须显式报装配失败');
   });
 });
 

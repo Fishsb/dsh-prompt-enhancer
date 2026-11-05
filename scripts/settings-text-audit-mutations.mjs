@@ -90,47 +90,47 @@ const CASES = [];
 const expectCase = (name, kind, fn) => CASES.push({ name, kind, fn });
 
 expectCase('M1 超长文案（40 字）塞进 label 列', 'FAIL', async (root) => {
-  await patchPlainModule(root, 'src/client/i18n-module.cjs', [["cfgMaxTokens: '回复长度上限'", "cfgMaxTokens: '" + '超长文案'.repeat(10) + "'"]]);
+  await patchPlainModule(root, 'src/client/common/i18n.cjs', [["cfgMaxTokens: '回复长度上限'", "cfgMaxTokens: '" + '超长文案'.repeat(10) + "'"]]);
   return runAudit(root);
 });
 
 expectCase('M2 超长文案塞进固定宽开关（不换行控件）', 'FAIL', async (root) => {
-  await patchPlainModule(root, 'src/client/i18n-module.cjs', [["voiceAutoEnhance: '自动增强'", "voiceAutoEnhance: '" + '超长文案'.repeat(10) + "'"]]);
+  await patchPlainModule(root, 'src/client/common/i18n.cjs', [["voiceAutoEnhance: '自动增强'", "voiceAutoEnhance: '" + '超长文案'.repeat(10) + "'"]]);
   return runAudit(root);
 });
 
 expectCase('M3 关闭态（0 档）改回渲染长句读数', 'RED', async (root) => {
-  await patchPlainModule(root, 'src/client/voice/voice-section-module.cjs', [["vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : ''", "vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : t('voiceSilenceOff')"]]);
+  await patchPlainModule(root, 'src/client/domains/voice/section.cjs', [["vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : ''", "vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : t('voiceSilenceOff')"]]);
   return runTest(root, 'test/vad-silence.test.cjs', 'VADSIL-P14e');
 });
 
 expectCase('M4 删掉 startMissed 异常分支文案', 'RED', async (root) => {
   // 行为判据：该态改报正常分支 ⇒ VTP-C 必红（文本层查子串抓不到这种形态）
-  await patchPlainModule(root, 'src/client/voice/voice-section-module.cjs', [["else if (snap.startMissed > 0 && snap.sessionsStarted === 0) { text = t('voiceOfficialStartMissed'); cls = 'dsh-plg-note dsh-plg-upd-outdated'; }", "else if (snap.startMissed > 0 && snap.sessionsStarted === 0) { text = t('voiceOfficialArmed'); }"]]);
+  await patchPlainModule(root, 'src/client/domains/voice/section.cjs', [["else if (snap.startMissed > 0 && snap.sessionsStarted === 0) { text = t('voiceOfficialStartMissed'); cls = 'dsh-plg-note dsh-plg-upd-outdated'; }", "else if (snap.startMissed > 0 && snap.sessionsStarted === 0) { text = t('voiceOfficialArmed'); }"]]);
   return runTest(root, 'test/voice-text-position.test.cjs', 'VTP-C');
 });
 
 expectCase('M5 删掉 abandon 异常分支文案', 'RED', async (root) => {
   // 行为判据（VTP-C 求值真实分支链）：删掉该分支后降级态落到别的键 ⇒ 必红。
-  await patchPlainModule(root, 'src/client/voice/voice-section-module.cjs', [["else if (snap.abandonReason) { text = t('voiceOfficialAbandon'); cls = 'dsh-plg-note dsh-plg-upd-outdated'; }", "else if (snap.abandonReason) { text = t('voiceOfficialArmed'); }"]]);
+  await patchPlainModule(root, 'src/client/domains/voice/section.cjs', [["else if (snap.abandonReason) { text = t('voiceOfficialAbandon'); cls = 'dsh-plg-note dsh-plg-upd-outdated'; }", "else if (snap.abandonReason) { text = t('voiceOfficialArmed'); }"]]);
   return runTest(root, 'test/voice-text-position.test.cjs', 'VTP-C');
 });
 
 expectCase('M6 挤压根因回退：读数规则删掉 + 关闭态长句回来', 'FAIL', async (root) => {
-  await patchPlainModule(root, 'src/client/styles-module.cjs', [["  '.dsh-plg-row > .dsh-plg-muted{flex:none;white-space:nowrap;max-width:40%;overflow:hidden;text-overflow:ellipsis}',\n", '']]);
-  await patchPlainModule(root, 'src/client/voice/voice-section-module.cjs', [["vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : ''", "vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : t('voiceSilenceOff')"]]);
+  await patchPlainModule(root, 'src/client/common/styles.cjs', [["  '.dsh-plg-row > .dsh-plg-muted{flex:none;white-space:nowrap;max-width:40%;overflow:hidden;text-overflow:ellipsis}',\n", '']]);
+  await patchPlainModule(root, 'src/client/domains/voice/section.cjs', [["vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : ''", "vadOn ? (silenceSec + ' ' + t('voiceVadSilenceUnit')) : t('voiceSilenceOff')"]]);
   return runAudit(root);
 });
 
 expectCase('M7 label 列改回内容定宽', 'FAIL', async (root) => {
-  await patchPlainModule(root, 'src/client/styles-module.cjs', [["'.dsh-plg-label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);flex:none;width:120px;min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'", "'.dsh-plg-label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);flex:none;min-width:96px}'"]]);
+  await patchPlainModule(root, 'src/client/common/styles.cjs', [["'.dsh-plg-label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);flex:none;width:120px;min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'", "'.dsh-plg-label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);flex:none;min-width:96px}'"]]);
   return runAudit(root);
 });
 
 expectCase('M8 文案 bug 回归（主谓同词）', 'RED', async (root) => {
   // 本批修法是「只改值、不改键名、不新增键」⇒ 回归的形态是**把谓词键的值改回与主语同词**
   //   （不是换键）。这正是用户当初看到「清口水词：清口水词」的那一态。
-  await patchPlainModule(root, 'src/client/i18n-module.cjs', [["voiceRefineEnabled: '这次没有口水词'", "voiceRefineEnabled: '清口水词'"]]);
+  await patchPlainModule(root, 'src/client/common/i18n.cjs', [["voiceRefineEnabled: '这次没有口水词'", "voiceRefineEnabled: '清口水词'"]]);
   return runTest(root, 'test/voice-text-audit.test.cjs', 'VTX-A');
 });
 

@@ -8,7 +8,7 @@ const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
 
 test('CRS-01 helpers 在成功分支写入统一 resultStatus', () => {
-  const src = fs.readFileSync(path.join(REPO_ROOT, 'src/client/helpers-module.cjs'), 'utf8');
+  const src = fs.readFileSync(path.join(REPO_ROOT, 'src/client/common/helpers.cjs'), 'utf8');
   assert.ok(src.includes('resultStatusOf({ ok: result.ok === true'), '必须消费共享状态映射');
   assert.ok(src.includes('session.resultStatus = resultStatus'), '结果态必须保存统一状态');
   assert.ok(src.includes("? 'changed' : 'failed'"), '缺共享面时必须有保守回退');

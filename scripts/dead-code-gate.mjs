@@ -483,7 +483,7 @@ for (const line of git(diffArgs).split('\n')) {
 
   // ── 源码层：单一入口必须能打包；失败即红（不静默回退）──
   for (const [name, entry, artifact] of [
-    ['client', 'src/client/app-module.cjs', path.join(ROOT, 'lib', 'client.cjs')],
+    ['client', 'src/client/app.cjs', path.join(ROOT, 'lib', 'client.cjs')],
     ['host', 'src/host/app.cjs', path.join(ROOT, 'plugin-host.js')],
   ]) {
     try {

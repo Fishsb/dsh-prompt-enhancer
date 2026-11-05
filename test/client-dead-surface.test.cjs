@@ -7,8 +7,8 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const client = fs.readFileSync(path.join(ROOT, 'lib', 'client.cjs'), 'utf8');
-const app = fs.readFileSync(path.join(ROOT, 'src', 'client', 'app-module.cjs'), 'utf8');
-const shell = fs.readFileSync(path.join(ROOT, 'src', 'client', 'components', 'model-plugins-section-module.cjs'), 'utf8');
+const app = fs.readFileSync(path.join(ROOT, 'src', 'client', 'app.cjs'), 'utf8');
+const shell = fs.readFileSync(path.join(ROOT, 'src', 'client', 'domains', 'settings', 'plugins-section.cjs'), 'utf8');
 
 test('CDS-01 已退役 dynamicCordisRunner 查询不得复活', () => {
   assert.equal(app.includes('dynamicCordisRunner'), false);

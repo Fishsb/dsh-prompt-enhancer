@@ -6,8 +6,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const { createModelConfigTab } = require('../src/client/components/model-config-tab-module.cjs');
-const { createParamsTab } = require('../src/client/components/params-tab-module.cjs');
+const { createModelConfigTab } = require('../src/client/domains/settings/model-config-tab.cjs');
+const { createParamsTab } = require('../src/client/domains/settings/params-tab.cjs');
 
 function createReactStub() {
   const effects = [];
@@ -173,10 +173,10 @@ test('CSTAB-04 模式切换同时重置 params 与 context 默认值', () => {
 test('CSTAB-05 构建产物内联两个 tab 运行时，旧 chunk 与相对 require 均不存在', () => {
   const build = fs.readFileSync(path.join(REPO_ROOT, 'scripts/build-client.mjs'), 'utf8');
   const client = fs.readFileSync(path.join(REPO_ROOT, 'lib/client.cjs'), 'utf8');
-  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"));
-  assert.ok(build.includes("entry: 'src/client/app-module.cjs'"));
-  assert.ok(client.includes('src/client/components/model-config-tab-module.cjs'));
-  assert.ok(client.includes('src/client/components/params-tab-module.cjs'));
+  assert.ok(build.includes("entry: 'src/client/app.cjs'"));
+  assert.ok(build.includes("entry: 'src/client/app.cjs'"));
+  assert.ok(client.includes('src/client/domains/settings/model-config-tab.cjs'));
+  assert.ok(client.includes('src/client/domains/settings/params-tab.cjs'));
   assert.ok(client.includes('createModelConfigTab({'));
   assert.ok(client.includes('createParamsTab({'));
   assert.equal(client.includes('src/client/components/model-config-tab.js'), false);

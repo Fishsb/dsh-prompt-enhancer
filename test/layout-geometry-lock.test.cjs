@@ -268,7 +268,7 @@ function parseCfgTabTopLevel(cfgCode) {
 }
 
 test('GEOLOCK-A1 页内 tab 表只能是 models / params 两项（⛔ 语音不得再是 tab）', async () => {
-  const plugins = await codeOf('src/client/components/model-plugins-section-module.cjs');
+  const plugins = await codeOf('src/client/domains/settings/plugins-section.cjs');
   const tabTable = parseTabTable(plugins);
   assert.ok(tabTable, '前置：须能定位页内 tab 表 const tabs = [...]');
   const keys = tabTable.entries.map((e) => e.key);
@@ -283,7 +283,7 @@ test('GEOLOCK-A1 页内 tab 表只能是 models / params 两项（⛔ 语音不�
 });
 
 test('GEOLOCK-A2 tab 正文分派只剩 models / params 两支（⛔ 无 voice 分支）', async () => {
-  const plugins = await codeOf('src/client/components/model-plugins-section-module.cjs');
+  const plugins = await codeOf('src/client/domains/settings/plugins-section.cjs');
   const dispatch = parseTabBodyDispatch(plugins);
   assert.equal(dispatch.models, 'ModelConfigTab', 'models 分支须渲染 ModelConfigTab');
   assert.equal(dispatch.params, 'ParamsTab', 'params 分支须渲染 ParamsTab');
@@ -295,7 +295,7 @@ test('GEOLOCK-A2 tab 正文分派只剩 models / params 两支（⛔ 无 voice �
 });
 
 test('GEOLOCK-A3 ⭐ 语音块必须在「模型配置」tab 之内，且与模型配置卡片是同级兄弟', async () => {
-  const cfgTab = await codeOf('src/client/components/model-config-tab-module.cjs');
+  const cfgTab = await codeOf('src/client/domains/settings/model-config-tab.cjs');
   // ① 语音块**在里面**（正文顶层挂一个 VoiceSection）
   assert.ok(/React\.createElement\(VoiceSection\b/.test(cfgTab),
     '⭐ ModelConfigTab 的代码里必须挂 VoiceSection（语音块回到「模型配置」tab 内）');
@@ -328,9 +328,9 @@ test('GEOLOCK-A4 VoiceSection 全 client chunk 只挂载**一处**，且该处�
   // 目标模式会持续把 chunk 迁为普通模块，因此不能把当前剩余数量写成前置阈值。
   // 只锁“枚举非空 + 关键挂载点文件在扫描面内”，防止空枚举导致后面的否定断言空转。
   assert.ok(clients.length > 0, '前置：client chunk 枚举须非空（实得 ' + clients.length + '）');
-  assert.ok(clients.includes('src/client/voice/voice-section-module.cjs'),
+  assert.ok(clients.includes('src/client/domains/voice/section.cjs'),
     '前置：VoiceSection 的合法挂载点须在扫描面内');
-  assert.ok(clients.includes('src/client/components/model-config-tab-module.cjs'),
+  assert.ok(clients.includes('src/client/domains/settings/model-config-tab.cjs'),
     '前置：ModelConfigTab 的合法挂载点须在扫描面内');
   const sites = [];
   for (const rel of clients) {
@@ -342,7 +342,7 @@ test('GEOLOCK-A4 VoiceSection 全 client chunk 只挂载**一处**，且该处�
     if (n > 0) sites.push(rel + ' x' + n);
   }
   // 唯一挂载点 = 「模型配置」tab 正文（多一处或换一处都立刻变红）
-  assert.deepEqual(sites, ['src/client/components/model-config-tab-module.cjs x1'],
+  assert.deepEqual(sites, ['src/client/domains/settings/model-config-tab.cjs x1'],
     'VoiceSection 须**只在** ModelConfigTab 正文挂载一次；实得 ' + JSON.stringify(sites));
 });
 
@@ -371,8 +371,8 @@ test('GEOLOCK-A5 语音块标题 = 「语音增强」（中英各一），且两
 });
 
 test('GEOLOCK-A-V 变异自证：两个错误方向各自打红（嵌回卡片内 / 改回独立 tab）+ 负控', async () => {
-  const plugins = await codeOf('src/client/components/model-plugins-section-module.cjs');
-  const cfgTab = await codeOf('src/client/components/model-config-tab-module.cjs');
+  const plugins = await codeOf('src/client/domains/settings/plugins-section.cjs');
+  const cfgTab = await codeOf('src/client/domains/settings/model-config-tab.cjs');
 
   // ⭐ 方向①：把语音**嵌进模型配置卡片内部**（= 退回从属；本轮之前的错误方向之一）
   //   做法：不再作为顶层子项，而是塞进 ModelMainSection 的 props 里（当成它的孩子）。
@@ -588,7 +588,7 @@ test('GEOLOCK-B3 模型名选择器是行内**唯一弹性项**（它吃掉全�
 });
 
 test('GEOLOCK-B4 行内子项清单 = 本预算的分母（多出/少一项都会让预算失真）', async () => {
-  const row = await codeOf('src/client/components/fallback-row-module.cjs');
+  const row = await codeOf('src/client/domains/settings/fallback-row.cjs');
   // 图标组：4 个（⛓ ↑ ↓ ✕）
   const icons = (row.match(/dsh-plg-btn dsh-plg-btn-icononly/g) || []).length;
   assert.equal(icons, MODEL_ROW_ICON_COUNT,

@@ -4,7 +4,7 @@
 // 由 scripts/settings-layout-audit.mjs 注入页面后执行，再经 --dump-dom 取回读数。
 // 它只用**真实 chunk 源码** + **真实 CSS** 构造 DOM，不重写任何布局规则。
 //
-// ⚠ 与生产逐字同源的两处：① CSS 取自 src/client/styles-module.cjs；② DOM 结构由 src/client/**.js 的
+// ⚠ 与生产逐字同源的两处：① CSS 取自 src/client/common/styles.cjs；② DOM 结构由 src/client/**.js 的
 //   解码后源码执行产出（React 由最小 shim 顶替：只做元素构造/状态，不参与布局）。
 // ⚠ 本文件**不实现**任何“挤压判据”：判据在 Node 侧（scripts/settings-layout-audit.mjs 的 cmp()），
 //   浏览器只负责产出读数（宽度 / scrollWidth / clientWidth / 行高 / 计算后的 overflow 等）。
@@ -121,12 +121,12 @@ function browserDriver() {
     var voiceConfig = voiceConfigFactory();
     var __VOICE_CONFIG_DEFAULTS__ = voiceConfig.VOICE_CONFIG_DEFAULTS;
     var stateFactory = new Function('host', 'storage', 'timerSvc', 'fillerState', 'defaults',
-      SRC['src/client/voice/state-module.cjs']
+      SRC['src/client/domains/voice/state.cjs']
       + '\n;return createVoiceState({ host: host, storage: storage, timerSvc: timerSvc, fillerState: fillerState, defaults: defaults, autoSync: false });');
     var S = stateFactory(host, localStorageStub, null, null, __VOICE_CONFIG_DEFAULTS__);
     S.voiceCfgState.value = JSON.parse(JSON.stringify(scn.voice));
 
-    var i18nFactory = new Function(SRC['src/client/i18n-module.cjs'] + '\n;return { ZH: ZH, EN: EN };');
+    var i18nFactory = new Function(SRC['src/client/common/i18n.cjs'] + '\n;return { ZH: ZH, EN: EN };');
     var dicts = i18nFactory();
     // overrides 形态：{ kind: 'zh' | 'en' | 'worst' | 'path' }
     //   zh    = 当前 ZH 值（基线）；
@@ -145,23 +145,23 @@ function browserDriver() {
       return o;
     }
 
-    var constantsFactory = new Function(SRC['src/client/constants-module.cjs']
+    var constantsFactory = new Function(SRC['src/client/common/constants.cjs']
       + '\n;return { CONFIG_DEFAULTS: CONFIG_DEFAULTS, DEFAULT_MODEL_CHAIN: DEFAULT_MODEL_CHAIN, MODE_OPTIONS: MODE_OPTIONS, MODE_VALUES: MODE_VALUES, MODE_BUDGET_OPTIONS: MODE_BUDGET_OPTIONS, MODE_TIMEOUT_OPTIONS: MODE_TIMEOUT_OPTIONS, MODE_MAXTOKENS_OPTIONS: MODE_MAXTOKENS_OPTIONS, MODE_OUTPUTLIMIT_OPTIONS: MODE_OUTPUTLIMIT_OPTIONS, MODE_PARAMS_DEFAULT: MODE_PARAMS_DEFAULT, MODE_BUDGET_DEFAULT: MODE_BUDGET_DEFAULT, modeShortLabel: modeShortLabel, modeLabel: modeLabel, TEMPLATE_BUILTIN_KEYS: TEMPLATE_BUILTIN_KEYS, TEMPLATE_CUSTOM_MAX: TEMPLATE_CUSTOM_MAX, TEMPLATE_TEXT_MAX: TEMPLATE_TEXT_MAX, TEMPLATE_NAME_MAX: TEMPLATE_NAME_MAX, customPickIndex: customPickIndex };');
     var C = constantsFactory();
-    var mhFactory = new Function(SRC['src/client/model-helpers-module.cjs'] + '\n;return { buildCandidates: buildCandidates };');
+    var mhFactory = new Function(SRC['src/client/common/model-helpers.cjs'] + '\n;return { buildCandidates: buildCandidates };');
     var MH = mhFactory();
     var collapsibleFactory = new Function('React', 'dshEnhId',
-      SRC['src/client/components/collapsible-section-module.cjs']
+      SRC['src/client/ui/collapsible-section.cjs']
       + '\n;return createCollapsibleSection({ React: React, dshEnhId: dshEnhId });');
     var CollapsibleSection = collapsibleFactory(React, function (p) { return (p || 'x') + '-nav'; });
     var marqueeFactory = new Function('React', 'window', 'document',
-      SRC['src/client/components/marquee-select-module.cjs']
+      SRC['src/client/ui/marquee-select.cjs']
       + '\n;return createMarqueeSelect({ React: React, window: window, document: document });');
     var MarqueeSelect = marqueeFactory(React, window, document);
     var modelSettingsFactory = new Function(
       'React', 'CollapsibleSection', 'MarqueeSelect', 'makeT', 'host', 'DEFAULT_MODEL_CHAIN', 'getLastDraft', 'timerSvc',
-      SRC['src/client/components/model-main-section-module.cjs'] + '\n'
-      + SRC['src/client/components/fallback-row-module.cjs'] + '\n'
+      SRC['src/client/domains/settings/model-main-section.cjs'] + '\n'
+      + SRC['src/client/domains/settings/fallback-row.cjs'] + '\n'
       + ';return {'
       + ' ModelMainSection: createModelMainSection({ React: React, CollapsibleSection: CollapsibleSection, makeT: makeT, host: host, DEFAULT_MODEL_CHAIN: DEFAULT_MODEL_CHAIN, getLastDraft: getLastDraft, timerSvc: timerSvc }),'
       + ' FallbackRow: createFallbackRow({ React: React, MarqueeSelect: MarqueeSelect, makeT: makeT, host: host })'
@@ -173,7 +173,7 @@ function browserDriver() {
     var modelConfigTabFactory = new Function(
       'React', 'makeT', 'configState', 'subscribeConfig', 'host', 'DEFAULT_MODEL_CHAIN', 'saveConfig',
       'buildCandidates', 'ModelMainSection', 'VoiceSection',
-      SRC['src/client/components/model-config-tab-module.cjs']
+      SRC['src/client/domains/settings/model-config-tab.cjs']
       + '\n;return createModelConfigTab({ React: React, makeT: makeT, configState: configState,'
       + ' subscribeConfig: subscribeConfig, host: host, DEFAULT_MODEL_CHAIN: DEFAULT_MODEL_CHAIN,'
       + ' saveConfig: saveConfig, buildCandidates: buildCandidates, ModelMainSection: ModelMainSection,'
@@ -183,7 +183,7 @@ function browserDriver() {
       'MODE_OPTIONS', 'MODE_TIMEOUT_OPTIONS', 'MODE_MAXTOKENS_OPTIONS', 'MODE_OUTPUTLIMIT_OPTIONS',
       'MODE_BUDGET_OPTIONS', 'MODE_PARAMS_DEFAULT', 'MODE_BUDGET_DEFAULT', 'modeShortLabel', 'modeLabel',
       'TEMPLATE_BUILTIN_KEYS', 'TEMPLATE_CUSTOM_MAX', 'TEMPLATE_TEXT_MAX', 'TEMPLATE_NAME_MAX', 'customPickIndex',
-      SRC['src/client/components/params-tab-module.cjs']
+      SRC['src/client/domains/settings/params-tab.cjs']
       + '\n;return createParamsTab({ React: React, MarqueeSelect: MarqueeSelect, makeT: makeT,'
       + ' dshEnhId: dshEnhId, configState: configState, saveConfig: saveConfig, host: host,'
       + ' MODE_OPTIONS: MODE_OPTIONS, MODE_TIMEOUT_OPTIONS: MODE_TIMEOUT_OPTIONS,'
@@ -201,7 +201,7 @@ function browserDriver() {
     var noop = function () { return function () {}; };
     var configState = { value: JSON.parse(JSON.stringify(scn.cfg)), fresh: false, hostSync: true, unsupported: false };
 
-    var compCode = SRC['src/client/components/model-plugins-section-module.cjs'];
+    var compCode = SRC['src/client/domains/settings/plugins-section.cjs'];
     var NAMES = ['React', 'CollapsibleSection', 'MarqueeSelect', 'ModelMainSection', 'FallbackRow', 'ZH', 'EN', 't', 'makeT', 'host', 'configState', 'saveConfig', 'subscribeConfig', 'subscribeSaveStatus', 'saveStatus',
       'voiceCfgState', 'saveVoiceCfg', 'subscribeVoiceConfig', 'syncVoiceFromHost', 'vadSilenceMsOf', 'normalizeVadSilenceMs',
       'voiceHotkeyDisplay', 'officialVoiceBridge', 'fillerSnapshot', 'correctionSnapshot', 'subscribeFiller', 'subscribeCorrection',
@@ -216,7 +216,7 @@ function browserDriver() {
       'vadSilenceMsOf', 'normalizeVadSilenceMs', 'CollapsibleSection', 'officialVoiceBridge',
       'fillerSnapshot', 'subscribeFiller', 'correctionSnapshot', 'subscribeCorrection',
       'setTimeout', 'clearTimeout', 'window',
-      SRC['src/client/voice/voice-section-module.cjs']
+      SRC['src/client/domains/voice/section.cjs']
       + '\n;return createVoiceSection({'
       + ' React: React, makeT: makeT, host: host, voiceCfgState: voiceCfgState,'
       + ' subscribeVoiceConfig: subscribeVoiceConfig, saveVoiceCfg: saveVoiceCfg,'

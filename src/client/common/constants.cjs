@@ -2,7 +2,7 @@
 
 // 客户端常量与配置默认值（目标模式：普通 CommonJS，构建期由共享运行时内联）。
 
-const contractData = require('../shared/contracts/contract-data.cjs');
+const contractData = require('../../shared/contracts/contract-data.cjs');
 
 const CONFIG_KEY = 'dsh.enhance.config.v2';
 const CONFIG_KEY_V1 = 'dsh.enhance.config.v1';

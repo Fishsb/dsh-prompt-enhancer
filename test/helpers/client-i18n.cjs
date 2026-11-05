@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..');
-const I18N_MODULE_REL = 'src/client/i18n-module.cjs';
+const I18N_MODULE_REL = 'src/client/common/i18n.cjs';
 const ABS = path.join(ROOT, I18N_MODULE_REL);
 const SOURCE = fs.readFileSync(ABS, 'utf8');
 const DICTS = require(ABS);

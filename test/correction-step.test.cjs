@@ -284,7 +284,7 @@ test('CHG143-C9 未识别出口 · 纠错开 + 增强关 ⇒ 只纠错、无增�
 // ───────────────────── ⭐ 手动 ✨ 零纠错调用（用户第四项裁定） ─────────────────────
 
 test('CHG143-M1 ⭐ 手动 ✨ 增强零纠错调用：helpers.js 的 enhance() 不含 voice/correct', () => {
-  const helpers = fs.readFileSync(path.join(ROOT, 'src/client/helpers-module.cjs'), 'utf8');
+  const helpers = fs.readFileSync(path.join(ROOT, 'src/client/common/helpers.cjs'), 'utf8');
   assert.ok(!helpers.includes('voice/correct'), '⭐ 手动 ✨ 的增强入口不得出现 voice/correct（用户明选：手动 ✨ 不纠错）');
   assert.ok(!helpers.includes('runCorrectionThenMaybeEnhance'), '增强入口不得调用纠错调度器');
   // 正向：手动路径确实存在（防"删掉整个入口"式的假绿）
@@ -321,7 +321,7 @@ test('CHG143-M2 ⭐ 纠错调度器**只**在语音链路的两个出口被调�
 });
 
 test('CHG143-M3 ⭐ 手动增强路径（helpers.enhance）与语音纠错在源码面**可分辨**', () => {
-  const helpers = fs.readFileSync(path.join(ROOT, 'src/client/helpers-module.cjs'), 'utf8');
+  const helpers = fs.readFileSync(path.join(ROOT, 'src/client/common/helpers.cjs'), 'utf8');
   // 手动路径：唯一的 RPC 是 enhance（增强），且不读 correction 开关
   assert.ok(helpers.includes('host.call(RPC_METHODS.ENHANCE'), '手动路径走 enhance RPC');
   assert.ok(!/correction/.test(helpers), '手动路径不得读 correction 配置（来源显式区分，不靠"增强里顺手带"）');
@@ -330,7 +330,7 @@ test('CHG143-M3 ⭐ 手动增强路径（helpers.enhance）与语音纠错在源
 // ───────────────────── 开关默认关闭（用户已定） ─────────────────────
 
 test('CHG143-S1 新开关默认**关闭**：client 默认值 + mergeVoice 白名单取形', () => {
-  const state = fs.readFileSync(path.join(ROOT, 'src/client/voice/state-module.cjs'), 'utf8');
+  const state = fs.readFileSync(path.join(ROOT, 'src/client/domains/voice/state.cjs'), 'utf8');
   // 目标模式：默认值由共享契约显式注入普通模块。
   const defaults = require('../src/shared/contracts/voice-config.cjs').VOICE_CONFIG_DEFAULTS;
   assert.equal(defaults.correction.enabled, false, 'VOICE_CFG_DEFAULTS.correction.enabled 须为 false');
@@ -341,7 +341,7 @@ test('CHG143-S1 新开关默认**关闭**：client 默认值 + mergeVoice 白名
 
 test('CHG143-S2 两侧白名单**同形**：host sanitizeVoiceCfg ↔ client mergeVoice', () => {
   const host = fs.readFileSync(path.join(ROOT, 'lib/asr.cjs'), 'utf8');
-  const client = fs.readFileSync(path.join(ROOT, 'src/client/voice/state-module.cjs'), 'utf8');
+  const client = fs.readFileSync(path.join(ROOT, 'src/client/domains/voice/state.cjs'), 'utf8');
   // host 侧（lib/asr.cjs 是普通 cjs 源文本）
   assert.ok(/correction:\s*\{\s*enabled:\s*\(cfg && cfg\.correction && cfg\.correction\.enabled === true\) \? true : false \}/.test(host),
     'host sanitizeVoiceCfg 须有同形 correction 白名单');
