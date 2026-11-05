@@ -1,6 +1,6 @@
 {
   "name": "dsh-voice-prompt-enhancer",
-  "version": "3.5.0",
+  "version": "3.5.1",
   "description": "DeepSeek Harness (DSH) plugin: prompt optimization (✨) + voice input enhancement (💬)",
   "main": "lib/index.cjs",
   "type": "commonjs",

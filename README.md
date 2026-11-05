@@ -17,7 +17,7 @@ dsh plugin --profile web remove dsh-voice-prompt-enhancer   # 卸载
 也可以从 GitHub 指定 tag 安装：
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-voice-prompt-enhancer#v3.5.0
+dsh plugin --profile web add github:Fishsb/dsh-voice-prompt-enhancer#v3.5.1
 ```
 
 装完（或更新 / 卸载后）重启 DSH，输入框工具行出现 ✨ 即安装成功。需本机已装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) **≥ 0.2.1-rc.1** 且 `pnpm` 在 PATH 中。

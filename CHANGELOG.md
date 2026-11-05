@@ -1,7 +1,8 @@
 # Changelog
 
 [3.3.3]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.3.2...v3.3.3
-[Unreleased]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.4.2...HEAD
+[Unreleased]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.5.1...HEAD
+[3.5.1]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.5.0...v3.5.1
 [3.4.2]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.4.1...v3.4.2
 [3.4.1]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.4.0...v3.4.1
 [3.4.0]: https://github.com/Fishsb/dsh-voice-prompt-enhancer/compare/v3.3.3...v3.4.0
@@ -16,6 +17,10 @@
 > 🗺️ 条目内的 `flow:` 标注为功能链路标签（原 pmg 项目地图 `docs/map/` 已随 pmg 于 2026-09-10 移除，该路径不再存在）；agent 开工前先读 [`AGENTS.md`](AGENTS.md)。
 
 ## [Unreleased]
+
+(no unreleased changes yet)
+
+## [3.5.1] - 2026-11-05
 
 - **执行器根目录随包名迁移，旧目录回退（修复 · 2026-11-05 · [PE-F01]）**：`EXECUTOR_ROOT` 此前仍拼旧包名 `dsh-prompt-enhancer`，改名后新装用户与已装用户会落到两个目录。现改为新名优先、旧名回退：已装用户的执行器仍在旧目录下则继续使用，无需重装；全新安装写入新名。**已实测**：`executorDir()` 返回新名路径；`test/sys.test.cjs` 13/13；完整 `npm test` 944/944；门禁链 exit 0（5 PASS · 2 基线接纳 SKIP）。
 
