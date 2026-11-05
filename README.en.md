@@ -9,12 +9,18 @@ A draft is often half a requirement, so the model asks again — click ✨ and i
 ## Install
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-voice-prompt-enhancer#v3.4.2
+dsh plugin --profile web add dsh-voice-prompt-enhancer
 dsh plugin --profile web update dsh-voice-prompt-enhancer   # update
 dsh plugin --profile web remove dsh-voice-prompt-enhancer   # remove
 ```
 
-Restart DSH afterwards (also after updating or removing) — the ✨ button appears in the composer toolbar. Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) **≥ 0.1.0-rc.6** installed locally and `pnpm` in PATH.
+Or install a specific tag from GitHub:
+
+```sh
+dsh plugin --profile web add github:Fishsb/dsh-voice-prompt-enhancer#v3.5.0
+```
+
+Restart DSH afterwards (also after updating or removing) — the ✨ button appears in the composer toolbar. Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) **≥ 0.2.1-rc.1** installed locally and `pnpm` in PATH.
 
 ## What it does
 

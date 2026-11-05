@@ -9,12 +9,18 @@ DeepSeek Harness（DSH）插件：**提示词优化** + **语音输入增强** �
 ## 安装
 
 ```sh
-dsh plugin --profile web add github:Fishsb/dsh-voice-prompt-enhancer#v3.4.2
+dsh plugin --profile web add dsh-voice-prompt-enhancer
 dsh plugin --profile web update dsh-voice-prompt-enhancer   # 更新
 dsh plugin --profile web remove dsh-voice-prompt-enhancer   # 卸载
 ```
 
-装完（或更新 / 卸载后）重启 DSH，输入框工具行出现 ✨ 即安装成功。需本机已装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) **≥ 0.1.0-rc.6** 且 `pnpm` 在 PATH 中。
+也可以从 GitHub 指定 tag 安装：
+
+```sh
+dsh plugin --profile web add github:Fishsb/dsh-voice-prompt-enhancer#v3.5.0
+```
+
+装完（或更新 / 卸载后）重启 DSH，输入框工具行出现 ✨ 即安装成功。需本机已装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) **≥ 0.2.1-rc.1** 且 `pnpm` 在 PATH 中。
 
 ## 能做什么
 
