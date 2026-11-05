@@ -18,11 +18,11 @@
 
 ## [Unreleased]
 
-- **包身份对齐：`package-lock.json` 仍停在旧名旧版本（修复/发布面 · 2026-11-05 · [PE-F01]）**：改名到 `dsh-voice-prompt-enhancer` 后，`package-lock.json` 顶层与 `packages[""]` 仍是 `dsh-prompt-enhancer@3.4.2`。npm 发布读 `package.json` 所以发布物本身没错，但审计、供应链扫描、依赖图工具按 lock 判身份时会读到旧名旧版本，`engines.dsh` 也没镜像进去。现已 `npm install --package-lock-only` 重建，并新增 `PLI-01..05` 门禁锁 name / version / engines.dsh / peer 区间四面相等（含判别力自证）。**已实测**：`test/package-lock-identity.test.cjs` 5/5；lock 顶层与 root 均为 `dsh-voice-prompt-enhancer@3.5.1`，`engines.dsh = >=0.2.1-rc.1`。用户可见文案、RPC、配置键与安装形态未改。
+- **包身份对齐：`package-lock.json` 仍停在旧名旧版本（修复/发布面 · 2026-11-05 · [PE-F01]）**：改名到 `dsh-voice-prompt-enhancer` 后，`package-lock.json` 顶层与 `packages[""]` 仍是 `dsh-prompt-enhancer@3.4.2`。npm 发布读 `package.json` 所以发布物本身没错，但审计、供应链扫描、依赖图工具按 lock 判身份时会读到旧名旧版本，`engines.dsh` 也没镜像进去。现已 `npm install --package-lock-only` 重建，并新增 `PLI-01..05` 门禁锁 name / version / engines.dsh / peer 区间四面相等（含判别力自证）。**已实测**：`test/package-lock-identity.test.cjs` 5/5；完整 `npm test` 952/952；门禁链 exit 0（5 PASS · 2 基线接纳 SKIP）；lock 顶层与 root 均为 `dsh-voice-prompt-enhancer@3.5.1`，`engines.dsh = >=0.2.1-rc.1`。用户可见文案、RPC、配置键与安装形态未改。
 
 ## [3.5.1] - 2026-11-05
 
-- **模型默认常量防漂移门禁（维护/门禁 · 2026-11-05 · [PE-F02]）**：`src/host/models-constants.cjs`（供 `pure-module` 使用）与 `src/host/models-module.cjs`（供模型 RPC 域使用）各自声明 `DEFAULT_TIMEOUT_MS` / `DEFAULT_MAX_TOKENS` / `DEFAULT_OUTPUT_LIMIT`。两者是不同消费者而非同一逻辑的副本，合并会破坏 `HMM-02` 的逐字冻结基线，故保留两份定义，新增 `HMC-01..03` 一致性断言锁住数值（当前 30000 / 2000 / 8000），任一处分叉即红。**已实测**：`test/host-models-constants-sync.test.cjs` 3/3；完整 `npm test` 947/947；门禁链 exit 0（5 PASS · 2 基线接纳 SKIP）。用户可见文案、RPC、配置键与安装形态未改。已随 v3.5.1 发布（npm `latest`）。
+- **模型默认常量防漂移门禁（维护/门禁 · 2026-11-05 · [PE-F02]）**：`src/host/models-constants.cjs`（供 `pure-module` 使用）与 `src/host/models-module.cjs`（供模型 RPC 域使用）各自声明 `DEFAULT_TIMEOUT_MS` / `DEFAULT_MAX_TOKENS` / `DEFAULT_OUTPUT_LIMIT`。两者是不同消费者而非同一逻辑的副本，合并会破坏 `HMM-02` 的逐字冻结基线，故保留两份定义，新增 `HMC-01..03` 一致性断言锁住数值（当前 30000 / 2000 / 8000），任一处分叉即红。**已实测**：`test/host-models-constants-sync.test.cjs` 3/3；完整 `npm test` 947/947（当批）；门禁链 exit 0（5 PASS · 2 基线接纳 SKIP）。用户可见文案、RPC、配置键与安装形态未改。已随 v3.5.1 发布（npm `latest`）。
 
 - **执行器根目录随包名迁移，旧目录回退（修复 · 2026-11-05 · [PE-F01]）**：`EXECUTOR_ROOT` 此前仍拼旧包名 `dsh-prompt-enhancer`，改名后新装用户与已装用户会落到两个目录。现改为新名优先、旧名回退：已装用户的执行器仍在旧目录下则继续使用，无需重装；全新安装写入新名。**已实测**：`executorDir()` 返回新名路径；`test/sys.test.cjs` 13/13；完整 `npm test` 944/944；门禁链 exit 0（5 PASS · 2 基线接纳 SKIP）。
 
