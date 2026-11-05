@@ -343,8 +343,8 @@ test('GUARD-V2 ⭐ 变异自证②：取形改 `!== false` ⇒ 缺省态**必调
   let mutated = ORIG.replace(FROM, TO);
   // 目标模式（CHG-321）：执行域在模块内调用 resolveCorrectionSwitch；
   // 仅改模块正文不足以让内存变异生效，必须把 runner 的导入绑定也指向变异实现。
-  mutated = mutated.replace('const { resolveCorrectionSwitch, CORRECTION_DISABLED_CODE, CORRECTION_ENABLED_REASON } = __load("src/host/correction-switch.cjs");',
-    'const { CORRECTION_DISABLED_CODE, CORRECTION_ENABLED_REASON } = __load("src/host/correction-switch.cjs");\nconst resolveCorrectionSwitch = (cfg) => ({ on: true, from: \'request-config\' });');
+  mutated = mutated.replace('const { resolveCorrectionSwitch, CORRECTION_DISABLED_CODE, CORRECTION_ENABLED_REASON } = __load("src/host/domains/voice/switch.cjs");',
+    'const { CORRECTION_DISABLED_CODE, CORRECTION_ENABLED_REASON } = __load("src/host/domains/voice/switch.cjs");\nconst resolveCorrectionSwitch = (cfg) => ({ on: true, from: \'request-config\' });');
   assert.notEqual(mutated, ORIG, '变异必须生效');
 
   const run = async (body, cfg) => {

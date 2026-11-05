@@ -70,7 +70,7 @@ function listChunks(dir, relDir) {
 test('CS-01 两个构建器都从单一普通入口模块打包，且对装配图 fail-closed', () => {
   const host = fs.readFileSync(path.join(ROOT, 'scripts', 'build-host.mjs'), 'utf8');
   const client = fs.readFileSync(path.join(ROOT, 'scripts', 'build-client.mjs'), 'utf8');
-  assert.match(host, /bundleModules\(\{ root, entry: 'src\/host\/app-module\.cjs' \}\)/, 'build-host 必须从单一普通模块入口打包');
+  assert.match(host, /bundleModules\(\{ root, entry: 'src\/host\/app\.cjs' \}\)/, 'build-host 必须从单一普通模块入口打包');
   assert.match(host, /装配图不完整/, 'build-host 必须对模块图完整性 fail-closed');
   assert.match(client, /bundleModules\(\{\s*root,\s*entry: 'src\/client\/app-module\.cjs',\s*\}\)/, 'build-client 必须从单一普通模块入口打包');
   assert.match(client, /装配图不完整/, 'build-client 必须对模块图完整性 fail-closed');
@@ -78,9 +78,9 @@ test('CS-01 两个构建器都从单一普通入口模块打包，且对装配�
 
 test('CS-02 host 装配图门变异自证：入口引用缺失模块 ⇒ 必红且点名', () => {
   withFixture((dir) => {
-    const p = path.join(dir, 'src', 'host', 'app-module.cjs');
+    const p = path.join(dir, 'src', 'host', 'app.cjs');
     const s = fs.readFileSync(p, 'utf8');
-    fs.writeFileSync(p, s.replace("require('./pure-module.cjs')", "require('./missing-module.cjs')"), 'utf8');
+    fs.writeFileSync(p, s.replace("require('./domains/enhance/pure.cjs')", "require('./missing-module.cjs')"), 'utf8');
   }, (dir) => {
     const r = runScript(dir, path.join('scripts', 'build-host.mjs'), ['--check']);
     assert.equal(r.code, 1, '装配图缺模块必须 exit 1');
@@ -99,7 +99,7 @@ test('CS-03 host 门覆盖面：新增未被装配的模块 ⇒ R4 必红（无�
 });
 
 test('CS-04 host 门 fail-closed：装配入口缺位 ⇒ 不得静默判绿', () => {
-  withFixture((dir) => { fs.rmSync(path.join(dir, 'src', 'host', 'app-module.cjs'), { recursive: true, force: true }); }, (dir) => {
+  withFixture((dir) => { fs.rmSync(path.join(dir, 'src', 'host', 'app.cjs'), { recursive: true, force: true }); }, (dir) => {
     const r = runScript(dir, path.join('scripts', 'build-host.mjs'), ['--check']);
     assert.equal(r.code, 1, '装配入口缺位必须非 0 退出（不得"没有就不判"）');
   });
@@ -202,7 +202,7 @@ test('CS-11 负控：真实工作区不动 ⇒ 两个构建门与全部受影响
     assert.equal(r.code, 0, s + ' --check 在未改动的真实工作区必须绿：' + r.out);
   }
   // 共享解码器在真实仓上可用（真值非空）
-  const real = fs.readFileSync(path.join(ROOT, 'src', 'host', 'enhance-handlers-module.cjs'), 'utf8');
+  const real = fs.readFileSync(path.join(ROOT, 'src', 'host', 'domains', 'enhance', 'handlers.cjs'), 'utf8');
   assert.ok(real.length > 0, '真实仓的 host 注册域模块必须非空');
 });
 

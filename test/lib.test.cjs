@@ -1,5 +1,5 @@
 // host 纯函数单测（node:test，零依赖）
-// 目标模式：PURE 区段已是普通 CommonJS 模块（src/host/pure-module.cjs），
+// 目标模式：PURE 区段已是普通 CommonJS 模块（src/host/domains/enhance/pure.cjs），
 // 直接求值该模块；与冻结基线逐字等价的锁在 test/host-pure-module.test.cjs。
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
@@ -1148,7 +1148,7 @@ test('U44 mergeEnvPath 已随 probeEnv 链退役（P3-2c · 判据对象整体�
   assert.equal(sys.mergeEnvPath, undefined, 'mergeEnvPath 必须已从 lib/sys.cjs 导出面退役');
   assert.equal(sys.mergedEnv, undefined, 'mergedEnv 必须已退役（它是 mergeEnvPath 的唯一消费者）');
   // 单一事实源：PURE 区不得再持有同名副本（双实现漂移即红）
-  const pureSrc = readFileSync(join(__dirname, '..', 'src', 'host', 'pure-module.cjs'), 'utf8');
+  const pureSrc = readFileSync(join(__dirname, '..', 'src', 'host', 'domains', 'enhance', 'pure.cjs'), 'utf8');
   assert.ok(!pureSrc.includes('function mergeEnvPath'), 'PURE 区不得重建 mergeEnvPath 副本');
 });
 

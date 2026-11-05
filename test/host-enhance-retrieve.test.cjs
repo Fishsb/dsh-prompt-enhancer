@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const { createRetrieveStage } = require('../src/host/enhance-retrieve.cjs');
+const { createRetrieveStage } = require('../src/host/domains/enhance/retrieve.cjs');
 
 function makeStage(overrides) {
   const logs = [];
@@ -124,8 +124,8 @@ test('HER2-05 有参考或记忆时追加 REFERENCE_GUIDE；产物内联 retriev
   const out = await stage(state('base', { memoryActive: true }));
   assert.equal(out.system, 'SYS\n\nREF');
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
-  assert.ok(host.includes('"src/host/enhance-retrieve.cjs"'));
-  assert.ok(host.includes('"src/host/enhance-retrieve.cjs"'));
+  assert.ok(host.includes('"src/host/domains/enhance/retrieve.cjs"'));
+  assert.ok(host.includes('"src/host/domains/enhance/retrieve.cjs"'));
   assert.ok(host.includes("registerEnhanceStage('retrieve', enhanceStageRetrieve"));
   assert.equal((host.match(/require\(/g) || []).length, 0);
 });

@@ -2,8 +2,8 @@
 
 // 目标模式：原 PURE 区段依赖的三个上游常量由 models 模块注入；
 // 迁移为普通模块后改为显式依赖，不再复制常量、也不再靠构建切片注入。
-const { DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TOKENS, DEFAULT_OUTPUT_LIMIT } = require('./models-constants.cjs');
-const contractData = require('../shared/contracts/contract-data.cjs');
+const { DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TOKENS, DEFAULT_OUTPUT_LIMIT } = require('../models/constants.cjs');
+const contractData = require('../../../shared/contracts/contract-data.cjs');
 
 // ================= v2.2 模式体系 · 常量层与行为表（表驱动，单测切片求值） =================
 // 方案「提示词优化方案.md」§4/§6：4 模式 + 记忆独立开关（memoryOn，扩散到所有模式）；

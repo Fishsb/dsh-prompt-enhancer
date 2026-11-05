@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../../scripts/lib/chunk-decode.mjs');
 
-const PURE_MODULE_REL = 'src/host/pure-module.cjs';
+const PURE_MODULE_REL = 'src/host/domains/enhance/pure.cjs';
 const BASELINE_REL = 'test/fixtures/host-pure/pure-source.txt';
 
 function pureBaselineText() {

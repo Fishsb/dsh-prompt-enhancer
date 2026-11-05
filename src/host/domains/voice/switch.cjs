@@ -7,7 +7,7 @@
 //   · 优先读 host 已归一化配置（harness.readVoiceConfig）；
 //   · 仅当该面缺位时回退请求随行 config；
 //   · 返回值同时给出真值与来源，供 RPC 的 switchFrom 字段使用。
-const { RPC_ERROR_CODES } = require('../shared/contracts/contract-data.cjs');
+const { RPC_ERROR_CODES } = require('../../../shared/contracts/contract-data.cjs');
 const CORRECTION_DISABLED_CODE = RPC_ERROR_CODES.CORRECTION_DISABLED;
 const CORRECTION_ENABLED_REASON = 'correction.enabled';
 

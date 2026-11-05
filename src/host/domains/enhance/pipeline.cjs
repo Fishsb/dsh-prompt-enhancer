@@ -9,7 +9,7 @@
 //
 // 兼容性：内部阶段为 analyze / retrieve / assemble / llm / commit；
 // 线上 enhance/progress 的既有 stage 名仍保持 llm，现有 UI 文案映射不需要改动。
-const { ENHANCE_STAGE_ORDER } = require('../shared/contracts/enhance-stages.cjs');
+const { ENHANCE_STAGE_ORDER } = require('../../../shared/contracts/enhance-stages.cjs');
 
 function createEnhancePipeline(options) {
   const opts = options && typeof options === 'object' ? options : {};

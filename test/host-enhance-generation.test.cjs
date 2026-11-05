@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const { createGenerationStage } = require('../src/host/enhance-generation.cjs');
+const { createGenerationStage } = require('../src/host/domains/enhance/generate.cjs');
 
 function makeStage(overrides) {
   const logs = [];
@@ -67,7 +67,7 @@ function state(overrides) {
 }
 
 function commit(out) {
-  const { createCommitStage } = require('../src/host/enhance-commit.cjs');
+  const { createCommitStage } = require('../src/host/domains/enhance/commit.cjs');
   return createCommitStage({ hlog: () => {} }).enhanceStageCommit(out);
 }
 
@@ -110,8 +110,8 @@ test('HEG-04 有文本的 max-tokens 截断直接采纳，并标注 truncated', 
 
 test('HEG-05 产物内联生成与提交模块，线上进度阶段名仍为 llm', () => {
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
-  assert.ok(host.includes('"src/host/enhance-generation.cjs"'));
-  assert.ok(host.includes('"src/host/enhance-commit.cjs"'));
+  assert.ok(host.includes('"src/host/domains/enhance/generate.cjs"'));
+  assert.ok(host.includes('"src/host/domains/enhance/commit.cjs"'));
   assert.ok(host.includes("registerEnhanceStage('llm', enhanceStageLlm"));
   assert.ok(host.includes("registerEnhanceStage('commit', enhanceStageCommit"));
   assert.equal((host.match(/require\(/g) || []).length, 0);

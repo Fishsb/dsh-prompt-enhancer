@@ -1,6 +1,6 @@
 'use strict';
 
-const { RPC_METHODS } = require('../shared/contracts/rpc.cjs');
+const { RPC_METHODS } = require('../../../shared/contracts/rpc.cjs');
 
 // 模型 RPC 面（目标模式：普通 CommonJS，构建期由打包器内联）。
 //

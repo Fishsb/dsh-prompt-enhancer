@@ -7,7 +7,7 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const corpus = JSON.parse(fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'quality-baseline', 'corpus.json'), 'utf8'));
-const pure = require(path.join(ROOT, 'src', 'host', 'pure-module.cjs'));
+const pure = require(path.join(ROOT, 'src', 'host', 'domains', 'enhance', 'pure.cjs'));
 
 test('QB-01 增强固定语料：受保护事实零丢失、过度改写为零', () => {
   let kept = 0;

@@ -10,7 +10,7 @@ const path = require('node:path');
 // integrity 的活副本是 lib/integrity.cjs（原 src/host/integrity.js 为死层，已删）→ 守卫改挂活副本。
 const { sha256File, verifySha256 } = require('../lib/integrity.cjs');
 // 目标模式（CHG-320）：诊断日志已迁为普通模块，测试直接加载真实模块并注入假 console。
-const { createDiagnostics, LOG_RING_MAX } = require('../src/host/diagnostics-module.cjs');
+const { createDiagnostics, LOG_RING_MAX } = require('../src/host/domains/diagnostics/log.cjs');
 
 test('OBS-02 sha256File and verifySha256', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-obs-'));

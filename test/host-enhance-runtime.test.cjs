@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const { RETRY_ALWAYS_SAFETY_CAP, createEnhanceRuntime } = require('../src/host/enhance-runtime.cjs');
+const { RETRY_ALWAYS_SAFETY_CAP, createEnhanceRuntime } = require('../src/host/domains/enhance/runtime.cjs');
 
 function makeRuntime(overrides) {
   const timers = [];
@@ -83,8 +83,8 @@ test('HER-05 进度写入与 sleepMs 的既有边界', async () => {
 
 test('HER-06 产物内联运行时模块（无外部 require）', () => {
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
-  assert.ok(host.includes('"src/host/enhance-runtime.cjs"'), 'host 产物必须内联运行时模块');
-  assert.ok(host.includes('"src/host/enhance-runtime.cjs"'));
+  assert.ok(host.includes('"src/host/domains/enhance/runtime.cjs"'), 'host 产物必须内联运行时模块');
+  assert.ok(host.includes('"src/host/domains/enhance/runtime.cjs"'));
   assert.ok(host.includes('createEnhanceRuntime({ ctx, llm, hlog })'), 'chunk 必须以注入依赖构造运行时');
   assert.equal((host.match(/require\(/g) || []).length, 0, 'host 产物不得含外部 require');
 });

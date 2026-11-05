@@ -5,7 +5,7 @@
 // 线上 enhance/progress 的既有 stage 名仍保持 llm，不暴露内部 commit。
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createEnhancePipeline } = require('../src/host/enhance-pipeline.cjs');
+const { createEnhancePipeline } = require('../src/host/domains/enhance/pipeline.cjs');
 const { ENHANCE_STAGE_ORDER } = require('../src/shared/contracts/enhance-stages.cjs');
 
 test('ENHP-01 默认阶段顺序来自共享契约', () => {

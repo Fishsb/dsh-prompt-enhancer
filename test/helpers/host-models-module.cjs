@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../../scripts/lib/chunk-decode.mjs');
 
-const MODELS_MODULE_REL = 'src/host/models-module.cjs';
+const MODELS_MODULE_REL = 'src/host/domains/models/chain.cjs';
 const BASELINE_REL = 'test/fixtures/host-models/models-source.txt';
 
 function modelsBaselineText() {

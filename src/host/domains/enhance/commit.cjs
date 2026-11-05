@@ -2,7 +2,7 @@
 
 // 增强提交阶段（目标模式：普通 CommonJS，构建期由打包器内联）。
 // 只把生成阶段的候选产物归一为现有 RPC 返回；不调模型、不读写草稿。
-const { commitEnhanceResult } = require('../shared/contracts/enhance-result.cjs');
+const { commitEnhanceResult } = require('../../../shared/contracts/enhance-result.cjs');
 
 function createCommitStage(deps) {
   const d = deps && typeof deps === 'object' ? deps : {};

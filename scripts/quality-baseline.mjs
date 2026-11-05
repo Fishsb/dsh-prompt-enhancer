@@ -22,7 +22,7 @@ const require = createRequire(import.meta.url);
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const corpusPath = path.join(ROOT, 'test', 'fixtures', 'quality-baseline', 'corpus.json');
 const corpus = JSON.parse(fs.readFileSync(corpusPath, 'utf8'));
-const pure = require(path.join(ROOT, 'src', 'host', 'pure-module.cjs'));
+const pure = require(path.join(ROOT, 'src', 'host', 'domains', 'enhance', 'pure.cjs'));
 const argv = process.argv.slice(2);
 const argOf = (flag, fallback) => {
   const i = argv.indexOf(flag);

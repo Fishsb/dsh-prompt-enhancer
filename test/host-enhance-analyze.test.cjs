@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const { createAnalyzeStage } = require('../src/host/enhance-analyze.cjs');
+const { createAnalyzeStage } = require('../src/host/domains/enhance/analyze.cjs');
 
 function makeStage(overrides) {
   const logs = [];
@@ -81,8 +81,8 @@ test('HEA-03 publish 场景缓存：首轮判定写入，后续轮读取且不�
 
 test('HEA-04 产物内联 analyze 模块，阶段名仍注册为 analyze', () => {
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
-  assert.ok(host.includes('"src/host/enhance-analyze.cjs"'));
-  assert.ok(host.includes('"src/host/enhance-analyze.cjs"'));
+  assert.ok(host.includes('"src/host/domains/enhance/analyze.cjs"'));
+  assert.ok(host.includes('"src/host/domains/enhance/analyze.cjs"'));
   assert.ok(host.includes("registerEnhanceStage('analyze', enhanceStageAnalyze"));
   assert.equal((host.match(/require\(/g) || []).length, 0);
 });

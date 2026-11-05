@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const { createContextRuntime } = require('../src/host/context-runtime.cjs');
+const { createContextRuntime } = require('../src/host/domains/enhance/context.cjs');
 
 function makeRuntime(overrides) {
   const logs = [];
@@ -95,8 +95,8 @@ test('CRT-04 publish 保留模式块、网络参考与跨轮主题/摘要', asyn
 
 test('CRT-05 产物内联上下文运行时，startWaitAbort/buildV2ContextBlock 已接线', () => {
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
-  assert.ok(host.includes('"src/host/context-runtime.cjs"'));
-  assert.ok(host.includes('"src/host/context-runtime.cjs"'));
+  assert.ok(host.includes('"src/host/domains/enhance/context.cjs"'));
+  assert.ok(host.includes('"src/host/domains/enhance/context.cjs"'));
   assert.ok(host.includes('contextRuntime.startWaitAbort'));
   assert.ok(host.includes('contextRuntime.buildV2ContextBlock'));
   assert.equal((host.match(/require\(/g) || []).length, 0);

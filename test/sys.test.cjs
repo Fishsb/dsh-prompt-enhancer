@@ -70,7 +70,7 @@ test('SYS-05 求值路径已终结 + env 合并肢体退役（P3-2b/P3-2c · 判
   assert.equal((src.match(/new Function\(/g) || []).length, 0,
     'lib/sys.cjs 内 new Function 计数必须为 0（P3-2b 后）');
   // ④ PURE 区侧副本不得复活（单一事实源纪律；原 PURE 版本已随本批移除）
-  const pureSrc = fs.readFileSync(path.join(REPO, 'src', 'host', 'pure-module.cjs'), 'utf8');
+  const pureSrc = fs.readFileSync(path.join(REPO, 'src', 'host', 'domains', 'enhance', 'pure.cjs'), 'utf8');
   assert.ok(!pureSrc.includes('function mergeEnvPath'),
     'PURE 区不得重建 mergeEnvPath 副本（会形成双实现漂移）');
 });

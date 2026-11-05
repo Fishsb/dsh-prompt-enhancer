@@ -5,7 +5,7 @@
 //
 // 兼容性：线上 enhance 返回仍为 { ok, text, model, fallbackUsed?, truncated?, degraded? }。
 // status 只作为**可选**的语义读数附加，供后续客户端统一状态使用。
-const { RESULT_STATUS, resultStatusOf } = require('../shared/contracts/result.cjs');
+const { RESULT_STATUS, resultStatusOf } = require('../../../shared/contracts/result.cjs');
 
 function enhanceSuccessResult(input) {
   const v = input && typeof input === 'object' ? input : {};

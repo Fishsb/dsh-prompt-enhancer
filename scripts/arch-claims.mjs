@@ -105,7 +105,26 @@ const codeOnly = importedCodeOnly;
  * ⚠ 本形态**只用于分辨「装配点」**，不主张覆盖所有 `new Function` 用法（见 A197-3 的不覆盖声明）。
  */
 const ASSEMBLY_EVAL = /new Function\(\s*'harness'/g;
+// 目录清点两种口径，**按调用点显式选择**（不要合成一个默认值——两种语义不同）：
+//   · `list(p)`   = 仅本层文件（扁平），给「lib/ 域清单等值集」这类判「本层恰好有哪些文件」的判据用；
+//   · `listDeep(p)` = 递归全部文件（相对 p 的路径），给 src/** 这类允许再分 domains/ adapters/
+//     子目录的判据用（目标模式 §三）。非递归会让子目录里的模块对「件数/存在性」判据完全不可见。
 const list = (p) => fs.readdirSync(abs(p));
+const listDeep = (p) => {
+  // 递归清点，返回**相对 p 的路径**（含子目录）。
+  // ⚠ 路径口径：入参 p 已是相对 ROOT 的路径；walk 必须沿用同一口径拼接，
+  //   不得再把「相对 p 的子路径」喂回 abs()（否则拼成 ROOT/p/p/... 假 ENOENT）。
+  const out = [];
+  const walk = (relDir) => {
+    for (const e of fs.readdirSync(abs(relDir), { withFileTypes: true })) {
+      const rel = relDir === p ? e.name : relDir.slice(p.length + 1) + '/' + e.name;
+      if (e.isDirectory()) walk(relDir + '/' + e.name);
+      else out.push(rel);
+    }
+  };
+  walk(p);
+  return out.sort();
+};
 
 /**
  * 线上 RPC 注册面派生（与 rpc-manifest.mjs 同一规则：扫插件双半部的 harness.handle）。
@@ -434,27 +453,35 @@ const CLAIMS = [
       // 目标模式（CHG-312/329/345/356）：PURE、模型域、模型/模板 RPC、V2 上下文、阶段执行器、纠错开关、结果归一、诊断日志、
       // 纠错执行域、增强运行时、五阶段主链与 app-module/prompts-module 均已迁为普通模块；`src/host` 现为 **20 件**。
       // 件数闸由 R4 装配图可达集承担，本条保留「旧 pure.js / diagnostics.js 不得复活」的反向守卫。
-      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '20 件（含 app-module/prompts-module、纯函数、模型/模板 RPC、V2 上下文、阶段执行器、纠错开关、结果归一、诊断日志（含 logs/last）、纠错执行域、增强运行时与 analyze/retrieve/assemble/llm/commit 五阶段普通模块；旧 pure.js / diagnostics.js 不得复活）', () => {
-        const files = list('src/host');
+      A('A194-1', '结构', '①P0 死层退役（src/host 收敛）', '分层后 20 件（domains/{enhance,voice,models,diagnostics,settings} + app.cjs；旧 chunk（pure.js / diagnostics.js / *-module.js / *-runtime.js）不得复活）', () => {
+        // 目录分层批（目标模式 §三）：判据从「扁平文件名白名单」改为「分层职责路径白名单」。
+        // 理由：旧写法把 20 个文件名硬编码成扁平形态，架构一旦按方案分层就必然假红；
+        // 而该条真正要守的是「P0 死层不复活」+「五阶段/纠错/诊断等职责都在」，与目录深浅无关。
+        const files = listDeep('src/host');
         const n = files.reduce((a, f) => a + lines(`src/host/${f}`), 0);
-        const legacyGone = !files.includes('pure.js') && !files.includes('diagnostics.js');
-        const pipelineBorn = files.includes('enhance-pipeline.cjs');
-        const correctionBorn = files.includes('correction-switch.cjs');
-        const resultBorn = files.includes('enhance-result-module.cjs');
-        const diagnosticsBorn = files.includes('diagnostics-module.cjs');
-        const runnerBorn = files.includes('correction-runner.cjs');
-        const runtimeBorn = files.includes('enhance-runtime.cjs');
-        const analyzeBorn = files.includes('enhance-analyze.cjs');
-        const assembleBorn = files.includes('enhance-assemble.cjs');
-        const generationBorn = files.includes('enhance-generation.cjs');
-        const commitBorn = files.includes('enhance-commit.cjs');
-        const retrieveBorn = files.includes('enhance-retrieve.cjs');
-        const modelsRpcBorn = files.includes('models-rpc.cjs');
-        const templateRpcBorn = files.includes('template-rpc.cjs');
-        const logsLastBorn = files.includes('diagnostics-module.cjs') && read('src/host/diagnostics-module.cjs').includes('logsLast');
-        const contextBorn = files.includes('context-runtime.cjs') && read('src/host/context-runtime.cjs').includes('buildV2ContextBlock');
-        return assert(files.length === 20 && legacyGone && pipelineBorn && correctionBorn && resultBorn && diagnosticsBorn && runnerBorn && runtimeBorn && analyzeBorn && retrieveBorn && assembleBorn && generationBorn && commitBorn && modelsRpcBorn && templateRpcBorn && logsLastBorn && contextBorn, `${files.length} 件 / ${n} 行｜旧 pure.js/diagnostics.js ${legacyGone ? '已退役' : '仍存在'}｜阶段执行器 ${pipelineBorn ? '在位' : '缺失'}｜纠错开关 ${correctionBorn ? '在位' : '缺失'}｜结果归一 ${resultBorn ? '在位' : '缺失'}｜诊断日志 ${diagnosticsBorn ? '在位' : '缺失'}｜logs/last ${logsLastBorn ? '在位' : '缺失'}｜纠错执行域 ${runnerBorn ? '在位' : '缺失'}｜增强运行时 ${runtimeBorn ? '在位' : '缺失'}｜analyze 阶段 ${analyzeBorn ? '在位' : '缺失'}｜retrieve 阶段 ${retrieveBorn ? '在位' : '缺失'}｜assemble 阶段 ${assembleBorn ? '在位' : '缺失'}｜llm 阶段 ${generationBorn ? '在位' : '缺失'}｜commit 阶段 ${commitBorn ? '在位' : '缺失'}｜模型 RPC ${modelsRpcBorn ? '在位' : '缺失'}｜模板 RPC ${templateRpcBorn ? '在位' : '缺失'}｜V2 上下文 ${contextBorn ? '在位' : '缺失'}`);
+        const has = (rel) => files.includes(rel);
+        // 旧 chunk 形态：扁平 .js/.cjs 或 *-module / *-runtime 后缀 —— 任一复活即红
+        const legacy = files.filter((f) => /\.js$/.test(f) || /-(module|runtime)\.cjs$/.test(f));
+        const legacyGone = legacy.length === 0;
+        const pipelineBorn = has('domains/enhance/pipeline.cjs');
+        const correctionBorn = has('domains/voice/switch.cjs');
+        const resultBorn = has('domains/enhance/result.cjs');
+        const diagnosticsBorn = has('domains/diagnostics/log.cjs');
+        const runnerBorn = has('domains/voice/correction.cjs');
+        const runtimeBorn = has('domains/enhance/runtime.cjs');
+        const analyzeBorn = has('domains/enhance/analyze.cjs');
+        const assembleBorn = has('domains/enhance/assemble.cjs');
+        const generationBorn = has('domains/enhance/generate.cjs');
+        const commitBorn = has('domains/enhance/commit.cjs');
+        const retrieveBorn = has('domains/enhance/retrieve.cjs');
+        const modelsRpcBorn = has('domains/models/rpc.cjs');
+        const templateRpcBorn = has('domains/settings/template.cjs');
+        const appBorn = has('app.cjs');
+        const logsLastBorn = diagnosticsBorn && read('src/host/domains/diagnostics/log.cjs').includes('logsLast');
+        const contextBorn = has('domains/enhance/context.cjs') && read('src/host/domains/enhance/context.cjs').includes('buildV2ContextBlock');
+        return assert(files.length === 20 && legacyGone && appBorn && pipelineBorn && correctionBorn && resultBorn && diagnosticsBorn && runnerBorn && runtimeBorn && analyzeBorn && retrieveBorn && assembleBorn && generationBorn && commitBorn && modelsRpcBorn && templateRpcBorn && logsLastBorn && contextBorn, `${files.length} 件 / ${n} 行｜旧 chunk ${legacyGone ? '已退役' : '复活: ' + legacy.join(',')}｜装配入口 ${appBorn ? '在位' : '缺失'}｜阶段执行器 ${pipelineBorn ? '在位' : '缺失'}｜纠错开关 ${correctionBorn ? '在位' : '缺失'}｜结果归一 ${resultBorn ? '在位' : '缺失'}｜诊断日志 ${diagnosticsBorn ? '在位' : '缺失'}｜logs/last ${logsLastBorn ? '在位' : '缺失'}｜纠错执行域 ${runnerBorn ? '在位' : '缺失'}｜增强运行时 ${runtimeBorn ? '在位' : '缺失'}｜analyze ${analyzeBorn ? '在位' : '缺失'}｜retrieve ${retrieveBorn ? '在位' : '缺失'}｜assemble ${assembleBorn ? '在位' : '缺失'}｜llm ${generationBorn ? '在位' : '缺失'}｜commit ${commitBorn ? '在位' : '缺失'}｜模型 RPC ${modelsRpcBorn ? '在位' : '缺失'}｜模板 RPC ${templateRpcBorn ? '在位' : '缺失'}｜V2 上下文 ${contextBorn ? '在位' : '缺失'}`);
       }),
+      
       A('A194-2', '结构', '①协议事实源改由注册面派生（废除 protocol.js）', 'src/protocol.js 不存在且 scripts/rpc-manifest.mjs 存在', () => {
         const gone = !exists('src/protocol.js');
         const born = exists('scripts/rpc-manifest.mjs');

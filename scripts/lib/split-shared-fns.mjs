@@ -252,9 +252,9 @@ export function splitSharedSources(root) {
   const out = [];
   // 目标模式：PURE 区段可由两种载体提供——
   //   ① 旧 chunk `src/host/pure.js`（字符串包裹，拆包前历史形态）
-  //   ② 普通模块 `src/host/pure-module.cjs`（目标形态，源码直接可读）
+  //   ② 普通模块 `src/host/domains/enhance/pure.cjs`（目标形态，源码直接可读）
   // 二者不得并存（R4 等值集），本函数按实际存在的那个纳入。
-  const rels = ['src/host/pure.js', 'src/host/pure-module.cjs'];
+  const rels = ['src/host/pure.js', 'src/host/domains/enhance/pure.cjs'];
   for (const rel of rels) if (fs.existsSync(path.join(base, rel))) out.push(rel);
   const pkgDir = path.join(base, 'packages');
   if (fs.existsSync(pkgDir)) {

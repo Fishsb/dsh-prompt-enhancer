@@ -230,7 +230,7 @@ for (const line of git(diffArgs).split('\n')) {
 }
 
 // ---- R4 src/host 不得再长出死层（P1b 2026-09-19：RC-C「双架构无淘汰机制」的结构判据）----
-// 目标模式：src/host 全部为普通 CommonJS 模块，由 src/host/app-module.cjs 单入口
+// 目标模式：src/host 全部为普通 CommonJS 模块，由 src/host/app.cjs 单入口
 // 经 module-bundler 装配。R4 判据改为「磁盘模块集 == 从装配入口可达的模块集」：
 // 多一件（死层复长）或缺一件（装配断链）都 FAIL。
 // ⚠ 可达性以 module-bundler 的同一解析规则为准（相对 require/import），不另写第二套清单。
@@ -238,11 +238,21 @@ for (const line of git(diffArgs).split('\n')) {
   const hostDir = path.join(ROOT, 'src', 'host');
   if (!fs.existsSync(hostDir)) fail('R4', 'src/host 目录缺失');
   else {
-    const onDisk = fs.readdirSync(hostDir, { withFileTypes: true })
-      .filter((e) => e.isFile() && (e.name.endsWith('.js') || e.name.endsWith('.cjs')))
-      .map((e) => e.name).sort();
+    // ⚠ 目录分层批（目标模式 §三）：src/host 允许再分 domains/ adapters/ 等子目录。
+    //   磁盘集必须递归清点，且与下面装配图可达集的「相对 src/host 的路径」同口径；
+    //   非递归会让子目录里的模块对 R4 完全不可见（死层复长却仍报绿）。
+    const onDisk = [];
+    const walkHost = (d, prefix) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const rel = prefix ? prefix + '/' + e.name : e.name;
+        if (e.isDirectory()) walkHost(path.join(d, e.name), rel);
+        else if (e.name.endsWith('.js') || e.name.endsWith('.cjs')) onDisk.push(rel);
+      }
+    };
+    walkHost(hostDir, '');
+    onDisk.sort();
     const { bundleModules } = createRequire(import.meta.url)('./lib/module-bundler.mjs');
-    const graph = bundleModules({ root: ROOT, entry: 'src/host/app-module.cjs' });
+    const graph = bundleModules({ root: ROOT, entry: 'src/host/app.cjs' });
     const reachable = graph.modules
       .filter((m) => m.startsWith('src/host/'))
       .map((m) => m.slice('src/host/'.length))
@@ -474,7 +484,7 @@ for (const line of git(diffArgs).split('\n')) {
   // ── 源码层：单一入口必须能打包；失败即红（不静默回退）──
   for (const [name, entry, artifact] of [
     ['client', 'src/client/app-module.cjs', path.join(ROOT, 'lib', 'client.cjs')],
-    ['host', 'src/host/app-module.cjs', path.join(ROOT, 'plugin-host.js')],
+    ['host', 'src/host/app.cjs', path.join(ROOT, 'plugin-host.js')],
   ]) {
     try {
       const graph = bundleModules({ root: ROOT, entry });

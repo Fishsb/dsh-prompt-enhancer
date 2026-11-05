@@ -10,8 +10,8 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 
 const REPO_ROOT = path.join(__dirname, '..');
-const constants = require(path.join(REPO_ROOT, 'src/host/models-constants.cjs'));
-const models = require(path.join(REPO_ROOT, 'src/host/models-module.cjs'));
+const constants = require(path.join(REPO_ROOT, 'src/host/domains/models/constants.cjs'));
+const models = require(path.join(REPO_ROOT, 'src/host/domains/models/chain.cjs'));
 
 const SHARED = ['DEFAULT_TIMEOUT_MS', 'DEFAULT_MAX_TOKENS', 'DEFAULT_OUTPUT_LIMIT'];
 

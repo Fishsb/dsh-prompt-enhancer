@@ -6,9 +6,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const { createEnhancePipeline } = require('../src/host/enhance-pipeline.cjs');
+const { createEnhancePipeline } = require('../src/host/domains/enhance/pipeline.cjs');
 
-const PIPELINE_REL = 'src/host/enhance-pipeline.cjs';
+const PIPELINE_REL = 'src/host/domains/enhance/pipeline.cjs';
 
 test('HPMOD-01 普通模块在位且可独立求值', () => {
   assert.equal(fs.existsSync(path.join(REPO_ROOT, PIPELINE_REL)), true, '增强阶段模块必须存在');
@@ -17,16 +17,16 @@ test('HPMOD-01 普通模块在位且可独立求值', () => {
 
 test('HPMOD-02 产物内联增强阶段模块与共享契约（无外部 require）', () => {
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
-  assert.ok(host.includes('"src/host/enhance-pipeline.cjs"'), 'host 产物必须内联增强阶段模块 id');
+  assert.ok(host.includes('"src/host/domains/enhance/pipeline.cjs"'), 'host 产物必须内联增强阶段模块 id');
   assert.ok(host.includes('"src/shared/contracts/enhance-stages.cjs"'), 'host 产物必须内联阶段契约');
   assert.ok(host.includes('createEnhancePipeline'), 'host 产物必须含增强阶段工厂');
-  assert.equal(host.includes("require('../src/host/enhance-pipeline.cjs')"), false,
+  assert.equal(host.includes("require('../src/host/domains/enhance/pipeline.cjs')"), false,
     'host 产物不得保留外部 require');
   assert.equal((host.match(/require\(/g) || []).length, 0, 'host 产物不得含外部 require');
 });
 
 test('HPMOD-03 主链按共享契约一次运行全部阶段（不再逐条写死）', () => {
-  const handlers = fs.readFileSync(path.join(REPO_ROOT, 'src/host/enhance-handlers-module.cjs'), 'utf8');
+  const handlers = fs.readFileSync(path.join(REPO_ROOT, 'src/host/domains/enhance/handlers.cjs'), 'utf8');
   assert.ok(handlers.includes('await runEnhancePipeline(state);'), '主链必须调用统一执行器');
   assert.equal(/await runEnhanceStages\('(analyze|retrieve|assemble|llm)', state\)/.test(handlers), false,
     '主链不得再逐条写死阶段调用');

@@ -2,24 +2,24 @@
 
 // Host 装配入口（目标模式：普通 CommonJS，构建期由打包器内联）。
 // 只做插件对象装配与 RPC 注册编排；业务逻辑在各自域模块中。
-const pure = require('./pure-module.cjs');
-const { createDiagnostics } = require('./diagnostics-module.cjs');
-const models = require('./models-module.cjs');
-const { createModelsRpc } = require('./models-rpc.cjs');
-const { createTemplateRpc } = require('./template-rpc.cjs');
-const { createContextRuntime } = require('./context-runtime.cjs');
-const { createEnhanceHandlers } = require('./enhance-handlers-module.cjs');
-const { createEnhancePipeline } = require('./enhance-pipeline.cjs');
-const { createEnhanceRuntime, RETRY_ALWAYS_SAFETY_CAP } = require('./enhance-runtime.cjs');
-const { createAnalyzeStage } = require('./enhance-analyze.cjs');
-const { createRetrieveStage } = require('./enhance-retrieve.cjs');
-const { createAssembleStage } = require('./enhance-assemble.cjs');
-const { createGenerationStage } = require('./enhance-generation.cjs');
-const { createCommitStage } = require('./enhance-commit.cjs');
-const { createCorrectionRunner } = require('./correction-runner.cjs');
-const correctionSwitch = require('./correction-switch.cjs');
-const { enhanceSuccessResult, enhanceFailureResult } = require('./enhance-result-module.cjs');
-const prompts = require('./prompts-module.cjs');
+const pure = require('./domains/enhance/pure.cjs');
+const { createDiagnostics } = require('./domains/diagnostics/log.cjs');
+const models = require('./domains/models/chain.cjs');
+const { createModelsRpc } = require('./domains/models/rpc.cjs');
+const { createTemplateRpc } = require('./domains/settings/template.cjs');
+const { createContextRuntime } = require('./domains/enhance/context.cjs');
+const { createEnhanceHandlers } = require('./domains/enhance/handlers.cjs');
+const { createEnhancePipeline } = require('./domains/enhance/pipeline.cjs');
+const { createEnhanceRuntime, RETRY_ALWAYS_SAFETY_CAP } = require('./domains/enhance/runtime.cjs');
+const { createAnalyzeStage } = require('./domains/enhance/analyze.cjs');
+const { createRetrieveStage } = require('./domains/enhance/retrieve.cjs');
+const { createAssembleStage } = require('./domains/enhance/assemble.cjs');
+const { createGenerationStage } = require('./domains/enhance/generate.cjs');
+const { createCommitStage } = require('./domains/enhance/commit.cjs');
+const { createCorrectionRunner } = require('./domains/voice/correction.cjs');
+const correctionSwitch = require('./domains/voice/switch.cjs');
+const { enhanceSuccessResult, enhanceFailureResult } = require('./domains/enhance/result.cjs');
+const prompts = require('./domains/enhance/prompts.cjs');
 const { RPC_METHODS } = require('../shared/contracts/rpc.cjs');
 
 const V2_WORKSPACE_IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.venv', 'venv', '__pycache__', '.next', '.cache', 'coverage', 'target', '.idea', '.vscode']);

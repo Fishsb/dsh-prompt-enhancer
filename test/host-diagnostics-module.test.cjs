@@ -7,9 +7,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const { createDiagnostics, LOG_RING_MAX } = require('../src/host/diagnostics-module.cjs');
+const { createDiagnostics, LOG_RING_MAX } = require('../src/host/domains/diagnostics/log.cjs');
 
-const MODULE_REL = 'src/host/diagnostics-module.cjs';
+const MODULE_REL = 'src/host/domains/diagnostics/log.cjs';
 const ISO_PREFIX = /^\[20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] /;
 
 function fakeConsole() {
@@ -74,8 +74,8 @@ test('HDM-04 序列化容错：循环对象回退 String，不抛错、不丢日
 
 test('HDM-05 产物内联诊断模块（无外部 require），logs/last 契约不变', () => {
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
-  assert.ok(host.includes('"src/host/diagnostics-module.cjs"'), 'host 产物必须内联诊断模块 id');
-  assert.ok(host.includes('"src/host/diagnostics-module.cjs"'), 'host 产物必须内联诊断模块 id');
+  assert.ok(host.includes('"src/host/domains/diagnostics/log.cjs"'), 'host 产物必须内联诊断模块 id');
+  assert.ok(host.includes('"src/host/domains/diagnostics/log.cjs"'), 'host 产物必须内联诊断模块 id');
   assert.ok(host.includes('createDiagnostics(r.console || console)'), '构建期必须把宿主 console 注入模块');
   assert.ok(host.includes('harness.handle(RPC_METHODS.LOGS_LAST, logsLast)'), 'logs/last RPC 必须仍在位');
   assert.ok(host.includes('lines: ring.slice()'), 'logs/last 必须仍返回环形缓冲副本');

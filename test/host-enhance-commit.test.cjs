@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const { createCommitStage } = require('../src/host/enhance-commit.cjs');
+const { createCommitStage } = require('../src/host/domains/enhance/commit.cjs');
 
 test('HEC-01 生成候选经 commit 映射为既有结果，不伪报改动', () => {
   const commit = createCommitStage();
@@ -30,8 +30,8 @@ test('HEC-02 缺少候选必须失败，不得当成空成功', () => {
 
 test('HEC-03 产物内联 commit 模块并接入主链，外部 require 为 0', () => {
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
-  const handlers = fs.readFileSync(path.join(REPO_ROOT, 'src/host/enhance-handlers-module.cjs'), 'utf8');
-  assert.ok(host.includes('"src/host/enhance-commit.cjs"'));
+  const handlers = fs.readFileSync(path.join(REPO_ROOT, 'src/host/domains/enhance/handlers.cjs'), 'utf8');
+  assert.ok(host.includes('"src/host/domains/enhance/commit.cjs"'));
   assert.ok(host.includes("registerEnhanceStage('commit', enhanceStageCommit"));
   assert.ok(handlers.includes('await runEnhancePipeline(state);'));
   assert.equal((host.match(/require\(/g) || []).length, 0);

@@ -9,7 +9,7 @@
 //
 // 兼容性：返回值与既有 RPC 逐项一致，包括 skipped/skippedBy/switchFrom/code、
 // changed、historyChars、fallbackUsed 与失败 code/message。
-const { resolveCorrectionSwitch, CORRECTION_DISABLED_CODE, CORRECTION_ENABLED_REASON } = require('./correction-switch.cjs');
+const { resolveCorrectionSwitch, CORRECTION_DISABLED_CODE, CORRECTION_ENABLED_REASON } = require('./switch.cjs');
 
 const CORRECTION_WINDOW = [1, 1];
 const CORRECTION_TIMEOUT_MS = 30000;

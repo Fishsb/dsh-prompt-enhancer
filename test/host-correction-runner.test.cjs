@@ -13,9 +13,9 @@ const {
   CORRECTION_MAX_TOKENS,
   CORRECTION_OUTPUT_LIMIT,
   createCorrectionRunner,
-} = require('../src/host/correction-runner.cjs');
+} = require('../src/host/domains/voice/correction.cjs');
 
-const MODULE_REL = 'src/host/correction-runner.cjs';
+const MODULE_REL = 'src/host/domains/voice/correction.cjs';
 
 function makeDeps(overrides) {
   const calls = [];
@@ -111,8 +111,8 @@ test('HCR-04 空文本 / 无模型 / 无模型链的既有错误码不变', asyn
 
 test('HCR-05 产物内联执行域模块（无外部 require），RPC 仍由 chunk 注册', () => {
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
-  assert.ok(host.includes('"src/host/correction-runner.cjs"'), 'host 产物必须内联纠错执行域模块');
-  assert.ok(host.includes('"src/host/correction-runner.cjs"'));
+  assert.ok(host.includes('"src/host/domains/voice/correction.cjs"'), 'host 产物必须内联纠错执行域模块');
+  assert.ok(host.includes('"src/host/domains/voice/correction.cjs"'));
   assert.ok(host.includes('voice/correct'), 'voice/correct RPC 必须仍在位');
   assert.ok(host.includes('return correctionRunner.runCorrection(args);'), '既有 runCorrection 包装必须委托模块');
   assert.equal((host.match(/require\(/g) || []).length, 0, 'host 产物不得含外部 require');

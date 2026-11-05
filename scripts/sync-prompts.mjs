@@ -24,9 +24,9 @@ installCrashGuard('prompts');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const ROOT = path.resolve(__dirname, '..');
-// 目标模式：提示词生成区位于独立普通模块 src/host/prompts-module.cjs，
+// 目标模式：提示词生成区位于独立普通模块 src/host/domains/enhance/prompts.cjs，
 // 由 build-host 的打包器内联进 plugin-host.js。
-const HOST = path.join(ROOT, 'src', 'host', 'prompts-module.cjs');
+const HOST = path.join(ROOT, 'src', 'host', 'domains', 'enhance', 'prompts.cjs');
 const BEGIN = '// ==PROMPTS-BEGIN==';
 const END = '// ==PROMPTS-END==';
 
@@ -186,8 +186,8 @@ const endMarker = '// ==PROMPTS-END==';
 const segStart = hostSrc.indexOf(genBegin);
 const segEndIdx = hostSrc.indexOf(endMarker, segStart === -1 ? 0 : segStart);
 if (segStart === -1 || segEndIdx === -1) {
-  emitRingState('prompts', 'FAIL', 'src/host/prompts-module.cjs 缺少生成标记区（' + BEGIN + ' / ' + END + '）——无法判定漂移');
-  console.error('✗ src/host/prompts-module.cjs 缺少生成标记区（' + BEGIN + ' / ' + END + '），请先手工建立');
+  emitRingState('prompts', 'FAIL', 'src/host/domains/enhance/prompts.cjs 缺少生成标记区（' + BEGIN + ' / ' + END + '）——无法判定漂移');
+  console.error('✗ src/host/domains/enhance/prompts.cjs 缺少生成标记区（' + BEGIN + ' / ' + END + '），请先手工建立');
   process.exit(2);
 }
 const segEnd = segEndIdx + endMarker.length;
@@ -195,7 +195,7 @@ const generated = header + buildSection() + '\n' + footer;
 const updated = hostSrc.slice(0, segStart) + generated + hostSrc.slice(segEnd);
 
 // ── 产物面判据（② · 2026-10-16 门禁缺口批）─────────────────────────────────────
-// 病：本环旧口径只比 «md ↔ src/host/prompts-module.cjs 生成区»。若有人跑了 sync-prompts 但**漏跑 build-host**
+// 病：本环旧口径只比 «md ↔ src/host/domains/enhance/prompts.cjs 生成区»。若有人跑了 sync-prompts 但**漏跑 build-host**
 //   （或产物被手改/陈旧），本环判绿，而 plugin-host.js —— **真正被装载的产物** —— 里仍是旧提示词：
 //   提示词改动从未进产物，门禁却全绿（「会掩盖问题」级）。
 // 判据：**--check** 时，产物内**同一生成区**（同 BEGIN 锚 + 同 END 锚）必须与刚算出的 generated 逐字相同。
@@ -227,7 +227,7 @@ if (updated === hostSrc) {
   if (!IS_CHECK) {
     // 写调用 + 无需写：md 与 app.js 生成区已一致。**不记 PASS**（本次是写调用，产物面未判）——
     // 旧文案在此处打印「prompts 与 plugin-host.js 生成区一致」并记 PASS，正是缺陷②的假绿措辞来源。
-    console.log('✓ 生成区无需同步（md 与 src/host/prompts-module.cjs 生成区已一致）');
+    console.log('✓ 生成区无需同步（md 与 src/host/domains/enhance/prompts.cjs 生成区已一致）');
     emitRingState('prompts', 'SKIP', '本次为同步（写）调用且无需写入：md 与生成区已一致，未判产物漂移');
     process.exit(0);
   }
@@ -237,20 +237,20 @@ if (updated === hostSrc) {
     process.exit(0);
   }
   emitRingState('prompts', 'FAIL', '产物未同步：' + productWhy);
-  console.error('✗ 产物未同步：src/host/prompts-module.cjs 生成区与 md 一致，但' + productWhy);
+  console.error('✗ 产物未同步：src/host/domains/enhance/prompts.cjs 生成区与 md 一致，但' + productWhy);
   console.error('  修复：node scripts/build-host.mjs（据 src/host 重生产物）后重跑本检查。');
   process.exit(1);
 }
 if (IS_CHECK) {
-  emitRingState('prompts', 'FAIL', '生成区漂移：' + SKILL_ROOT + ' 下的 md 源与 src/host/prompts-module.cjs 生成区不一致');
-  console.error('✗ 生成区漂移：prompts/*.md 与 src/host/prompts-module.cjs 生成区不一致。');
+  emitRingState('prompts', 'FAIL', '生成区漂移：' + SKILL_ROOT + ' 下的 md 源与 src/host/domains/enhance/prompts.cjs 生成区不一致');
+  console.error('✗ 生成区漂移：prompts/*.md 与 src/host/domains/enhance/prompts.cjs 生成区不一致。');
   console.error('  修复：node scripts/sync-prompts.mjs && node scripts/build-host.mjs（两步都要跑——只跑前者不会更新产物）');
   process.exit(1);
 }
 fs.writeFileSync(HOST, updated, 'utf8');
-console.log('✓ src/host/prompts-module.cjs 生成区已同步（' + SOURCES.map((s) => s.name).join('/') + '）');
+console.log('✓ src/host/domains/enhance/prompts.cjs 生成区已同步（' + SOURCES.map((s) => s.name).join('/') + '）');
 // ⚠ 措辞订正（② · 2026-10-16）：旧文案说「plugin-host.js 生成区已同步」——**不实**：本脚本只写
-//   src/host/prompts-module.cjs，产物要靠 build-host 重建。提示词改动要生效必须**两步都跑**，此处如实说明。
+//   src/host/domains/enhance/prompts.cjs，产物要靠 build-host 重建。提示词改动要生效必须**两步都跑**，此处如实说明。
 if (inProduct) {
   console.log('  产物 plugin-host.js 的生成区已是同源内容（本次写入未使其过期）。');
 } else {

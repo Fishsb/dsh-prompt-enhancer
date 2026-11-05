@@ -21,6 +21,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const { codeOnly } = require('../scripts/lib/code-only.mjs');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -308,7 +309,13 @@ test('CHG143-M2 ⭐ 纠错调度器**只**在语音链路的两个出口被调�
   const corrFnStart = hostBundle.indexOf('async function runCorrection', enhanceStart);
   assert.ok(corrFnStart > enhanceStart && corrFnStart < corrStart, '纠错执行函数须定义在 voice/correct 注册之前');
   const enhanceBody = hostBundle.slice(enhanceStart, corrFnStart);
-  assert.ok(!/voice\/correct|runCorrection/.test(enhanceBody), '⭐ 增强 handler 体内不得有任何纠错调用（不绑进增强管线）');
+  // ⚠ 判据强度订正（目录分层批 · 2026-11-05）：原式直接对**含注释的原文**做子串匹配，
+  //   于是「注释里提到 voice/correct 或 runCorrection」也会被判成真实调用（假红）。
+  //   本批迁移时注释里写了新路径 `src/host/domains/voice/correction.cjs` 就命中过一次。
+  //   现改为先剥注释（单一事实源 scripts/lib/code-only.mjs，与 R5 同口径）再匹配：
+  //   判的是「代码面有无纠错调用」，注释文本不再参与 —— 判定意图不变，强度更准。
+  const enhanceCode = codeOnly(enhanceBody);
+  assert.ok(!/voice\/correct|runCorrection/.test(enhanceCode), '⭐ 增强 handler 体内不得有任何纠错调用（不绑进增强管线）');
   // 正向对照：纠错块**确实存在**且注册了 RPC（防"把整个功能删掉"式的假绿）
   assert.ok(/harness\.handle\(RPC_METHODS\.VOICE_CORRECT/.test(hostBundle.slice(corrStart)), '纠错块内须注册 voice/correct');
 });

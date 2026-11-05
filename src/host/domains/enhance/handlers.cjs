@@ -1,6 +1,6 @@
 'use strict';
 
-const { RPC_METHODS } = require('../shared/contracts/rpc.cjs');
+const { RPC_METHODS } = require('../../../shared/contracts/rpc.cjs');
 
 // 增强/纠错 RPC 注册域（目标模式：普通 CommonJS，构建期由 build-host 打包内联）。
 // 这里只把既有 apply() 内的注册正文搬入显式工厂；RPC 名、参数、返回字段与执行顺序不变。
@@ -292,7 +292,7 @@ harness.handle(RPC_METHODS.ENHANCE, async (args) => {
   }
 });
 
-// 目标模式（CHG-321）：纠错执行域迁为普通模块（src/host/correction-runner.cjs）。
+// 目标模式（CHG-321）：纠错执行域迁为普通模块（src/host/domains/voice/correction.cjs）。
 // RPC 注册与既有包装名留在本 chunk；开关守卫、历史参考、模型链与结果清洗由模块提供。
 // 目标模式：开关解析由普通模块提供；以下包装保留既有调用名与语义。
 const CORRECTION_DISABLED_CODE = CORRECTION_SWITCH.CORRECTION_DISABLED_CODE;

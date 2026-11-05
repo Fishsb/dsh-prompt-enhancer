@@ -37,7 +37,7 @@ test('HMM-03 导出面与旧 chunk 顶层声明逐项同名、类型一致', () 
 
 test('HMM-04 产物面：plugin-host.js 由打包器内联模型域模块（无外部 require）', () => {
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
-  assert.ok(host.includes('"src/host/models-module.cjs"'), 'host 产物必须内联模型域模块 id');
-  assert.ok(host.includes('"src/host/models-module.cjs"'), 'host 产物必须内联模型域模块 id');
+  assert.ok(host.includes('"src/host/domains/models/chain.cjs"'), 'host 产物必须内联模型域模块 id');
+  assert.ok(host.includes('"src/host/domains/models/chain.cjs"'), 'host 产物必须内联模型域模块 id');
   assert.equal((host.match(/require\(/g) || []).length, 0, 'host 产物不得含外部 require');
 });

@@ -76,9 +76,9 @@ test('RCR-05 错误码映射与配置/模式默认值只有一份实现', () => 
   assert.ok(clientState.includes('return JSON.parse(JSON.stringify(CONFIG_DEFAULTS));'), 'cloneDefaults 必须深拷贝契约默认值');
   assert.equal(/function cloneDefaults\(\)[\s\S]*?timeoutMs:\s*30000/.test(clientState), false,
     '客户端不得再持有第二份完整配置默认值');
-  assert.equal(require(path.join(ROOT, 'src', 'host', 'correction-switch.cjs')).CORRECTION_DISABLED_CODE,
+  assert.equal(require(path.join(ROOT, 'src', 'host', 'domains', 'voice', 'switch.cjs')).CORRECTION_DISABLED_CODE,
     contract.RPC_ERROR_CODES.CORRECTION_DISABLED, '纠错跳过码必须取自契约');
-  assert.equal(fs.readFileSync(path.join(ROOT, 'src', 'host', 'correction-switch.cjs'), 'utf8')
+  assert.equal(fs.readFileSync(path.join(ROOT, 'src', 'host', 'domains', 'voice', 'switch.cjs'), 'utf8')
     .includes("CORRECTION_DISABLED_CODE = 'CORRECTION_DISABLED'"), false, '不得再手写纠错跳过码字面量');
 });
 

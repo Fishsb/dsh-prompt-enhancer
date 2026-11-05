@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { REPO_ROOT } = require('../scripts/lib/chunk-decode.mjs');
-const { createModelsRpc } = require('../src/host/models-rpc.cjs');
+const { createModelsRpc } = require('../src/host/domains/models/rpc.cjs');
 
 function makeRpc(services, overrides) {
   const logs = [];
@@ -82,8 +82,8 @@ test('HMR-05 models/autochain 与 models/test 保持原参数形态与估算字�
 
 test('HMR-06 产物内联模型 RPC 模块，15 条 RPC 面不变', () => {
   const host = fs.readFileSync(path.join(REPO_ROOT, 'plugin-host.js'), 'utf8');
-  assert.ok(host.includes('"src/host/models-rpc.cjs"'));
-  assert.ok(host.includes('"src/host/models-rpc.cjs"'));
+  assert.ok(host.includes('"src/host/domains/models/rpc.cjs"'));
+  assert.ok(host.includes('"src/host/domains/models/rpc.cjs"'));
   assert.ok(host.includes("harness.handle(name, handler)"));
   assert.equal((host.match(/require\(/g) || []).length, 0);
 });
