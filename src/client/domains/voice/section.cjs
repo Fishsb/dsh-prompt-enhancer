@@ -262,6 +262,91 @@ function CorrectionDiag(props) {
       t('voiceCorrectionSection') + '：' + text),
   );
 }
+/* UD-0055 / UD-0057（学习词典）：归一与上限一律取契约层（lib/voice-config.cjs），
+   本模块不自建筛子/合并逻辑。三处取值都写成 typeof 守卫：真实运行时由 app.cjs 注入，
+   测试夹具（test/helpers/client-voice-modules.cjs 的 factoryBody）只取工厂内部正文，
+   注入名为位置参数、没有 deps 对象，此时回落到契约层的默认值。 */
+const _dictDeps = (typeof d !== 'undefined' && d && typeof d === 'object') ? d : {};
+const normalizeDictionaryEntries = typeof _dictDeps.normalizeDictionaryEntries === 'function' ? _dictDeps.normalizeDictionaryEntries : null;
+const dictionaryMaxEntries = typeof _dictDeps.VOICE_DICTIONARY_MAX_ENTRIES === 'number' ? _dictDeps.VOICE_DICTIONARY_MAX_ENTRIES : 500;
+const dictionaryMaxTerm = typeof _dictDeps.VOICE_DICTIONARY_MAX_TERM === 'number' ? _dictDeps.VOICE_DICTIONARY_MAX_TERM : 20;
+
+// ── 学习词典编辑器（UD-0055 / UD-0057）─────────────────────────────────────
+// 口径：**自动入库**（采集侧在 hotkey 模块）+ **可编辑**（本组件）= 用户要的两件事。
+//   · 编辑 / 删除 / 新增 / 停用 四种操作全在此；⛔ 没有「待审队列」（用户明确不要审）。
+//   · 写入统一走 `saveVoiceCfg({ dictionary })` ⇒ 本地持久化 + `config/set` 落盘（既有入口，不新造）。
+//   · 归一（长度、形近、去重合并、上限淘汰）一律交契约层 —— 本组件只产出「用户想要的结果」。
+function DictionaryEditor(props) {
+  const t = makeT(props);
+  const v = voiceCfgState.value || {};
+  const entries = (v.dictionary && Array.isArray(v.dictionary.entries)) ? v.dictionary.entries : [];
+  const [buf, setBuf] = React.useState({ from: '', to: '' });
+  const commit = (list) => {
+    const normalized = normalizeDictionaryEntries ? normalizeDictionaryEntries(list) : list;
+    saveVoiceCfg({ dictionary: { entries: normalized } });
+  };
+  const patchAt = (i, patch) => {
+    const next = entries.map((e, k) => (k === i ? Object.assign({}, e, patch) : e));
+    commit(next);
+  };
+  const removeAt = (i) => { commit(entries.filter((e, k) => k !== i)); };
+  const addOne = () => {
+    const from = String(buf.from || '').trim();
+    const to = String(buf.to || '').trim();
+    if (!from || !to) return;                         // 两侧都要有；⛔ 不静默造空条目
+    commit(entries.concat([{ from: from, to: to, hits: 0, at: Date.now(), enabled: true }]));
+    setBuf({ from: '', to: '' });
+  };
+  const termInput = (value, onChange, aria) => React.createElement('input', {
+    type: 'text', className: 'dsh-plg-input', maxLength: String(dictionaryMaxTerm), 'aria-label': aria,
+    value: value, style: { width: '110px', minWidth: '90px' }, onChange: (e) => onChange(e.target.value),
+  });
+  const rows = entries.map((e, i) => React.createElement('div', {
+    className: 'dsh-plg-row', key: 'dict-' + i, style: { flexWrap: 'wrap', gap: '8px' },
+  },
+    React.createElement('span', { className: 'dsh-plg-muted' }, t('voiceDictFrom')),
+    termInput(e.from, (x) => patchAt(i, { from: x }), t('voiceDictFrom')),
+    React.createElement('span', { className: 'dsh-plg-muted' }, '→'),
+    termInput(e.to, (x) => patchAt(i, { to: x }), t('voiceDictTo')),
+    React.createElement('button', {
+      type: 'button',
+      className: 'dsh-plg-btn dsh-plg-tgl' + (e.enabled !== false ? ' dsh-plg-tgl-on' : ''),
+      'aria-label': t('voiceDictEnable'), title: t('voiceDictEnable'),
+      onClick: () => patchAt(i, { enabled: e.enabled === false }),
+    }, e.enabled !== false ? t('voiceDictEnable') : '✕'),
+    React.createElement('span', { className: 'dsh-plg-muted' }, String(e.hits || 0) + ' ' + t('voiceDictHits')),
+    React.createElement('button', {
+      type: 'button', className: 'dsh-plg-btn dsh-plg-btn-icononly',
+      title: t('voiceDictDelete'), 'aria-label': t('voiceDictDelete'),
+      onClick: () => removeAt(i),
+    }, '✕'),
+  ));
+  return React.createElement('div', { className: 'dsh-vi-section' },
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('span', { className: 'dsh-plg-label', style: { width: 'auto' }, title: t('voiceDictTip') }, t('voiceDictSection'))
+    ),
+    entries.length === 0
+      ? React.createElement('div', { className: 'dsh-plg-row' },
+        React.createElement('span', { className: 'dsh-plg-muted' }, t('voiceDictEmpty')))
+      : React.createElement('div', null, rows),
+    React.createElement('div', { className: 'dsh-plg-row', style: { flexWrap: 'wrap', gap: '8px' } },
+      termInput(buf.from, (x) => setBuf({ from: x, to: buf.to }), t('voiceDictFrom')),
+      React.createElement('span', { className: 'dsh-plg-muted' }, '→'),
+      termInput(buf.to, (x) => setBuf({ from: buf.from, to: x }), t('voiceDictTo')),
+      React.createElement('button', {
+        type: 'button', className: 'dsh-plg-btn', onClick: addOne,
+        disabled: !String(buf.from).trim() || !String(buf.to).trim(),
+      }, t('voiceDictAdd')),
+    ),
+    React.createElement('div', { className: 'dsh-plg-row' },
+      React.createElement('span', { className: 'dsh-plg-muted', style: { whiteSpace: 'normal' } }, t('voiceDictTip'))
+    ),
+    entries.length >= dictionaryMaxEntries
+      ? React.createElement('div', { className: 'dsh-plg-row' },
+        React.createElement('span', { className: 'dsh-plg-note' }, t('voiceDictFull').replace('{n}', String(dictionaryMaxEntries))))
+      : null,
+  );
+}
 function VoiceSection(props) {
   const t = makeT(props);
   const [ver, setVer] = React.useState(0);
@@ -477,6 +562,8 @@ function VoiceSection(props) {
     React.createElement(FillerDiag, props),
     // CHG-143：语音纠错的可见性读数（不得静默失效）
     React.createElement(CorrectionDiag, props),
+    // UD-0055 / UD-0057：学习词典（自动入库 + 可编辑）
+    React.createElement(DictionaryEditor, props),
   );
   return React.createElement(CollapsibleSection, { title: t('voiceSectionTitle') }, body);
 }

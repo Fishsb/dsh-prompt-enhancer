@@ -61,6 +61,15 @@ function createVoiceHotkey(deps) {
 //   · VoiceHotkeyHost：无 UI 的接线组件 —— 占用 conversation.input.right（**不是**官方
 //     conversation.input.activity 槽位）以取得本会话 inputActions/input，从而驱动
 //     「派发点击官方开始 / 停止」+ 官方链路收尾后的自动增强。
+/* UD-0055 / UD-0057（学习词典）：实现全部来自契约层 lib/voice-config.cjs。
+   ⛔ 此处不重写归一/替换/学习逻辑（避免第三份白名单，同族缺陷 M-2/M-3）。
+   取具说明：本段写在工厂正文内（测试夹具 factoryBody 只取第一处行注释之后的正文），
+   并用 typeof 守卫 —— 真实运行时由 app.cjs 注入 deps；测试沙箱按位置参数注入、没有 deps 对象。 */
+const _dictDeps = (typeof d !== 'undefined' && d && typeof d === 'object') ? d : {};
+const saveVoiceCfg = typeof _dictDeps.saveVoiceCfg === 'function' ? _dictDeps.saveVoiceCfg : null;
+const applyVoiceDictionaryFn = typeof _dictDeps.applyVoiceDictionary === 'function' ? _dictDeps.applyVoiceDictionary : null;
+const learnVoiceDictionaryDiffFn = typeof _dictDeps.learnVoiceDictionaryDiff === 'function' ? _dictDeps.learnVoiceDictionaryDiff : null;
+
 const VOICE_LONG_PRESS_MS = 500;     // 按住 ≥500ms 判定为长按（松开即停官方）
 const VOICE_RELEASE_BUFFER_MS = 500; // 长按松开后 0.5s 收尾缓冲（官方仍在采集时再点一次停止）
 // F-18 修复（2026-10-13·收尾批）：长按松开时**启动尚未落地**（官方相位仍在 requesting / 尚无可点停止按钮）
@@ -114,6 +123,60 @@ function VoiceHotkeyHost(props) {
   // 无事件可监听 ⇒ 必须主动重读草稿。上限约 12s（官方转写已在 stop 前完成，此处只等写回）。
   const officialEndRef = React.useRef(0);      // 已消费的官方结束时刻
   const officialBaseRef = React.useRef(null);  // 本会话**开始时**的草稿基线（判写回落地用，见 arm 注释）
+  // ⚠ UD-0055 / UD-0057（学习词典 · 采集侧）：**机器最后一次写进草稿的文本**。
+  //   语义 = 「这条草稿里，哪一段不是用户自己打的」。用户随后手改 ⇒ 下一次会话开始时
+  //   草稿 ≠ 本快照 ⇒ 差异即「用户纠正」，由契约层 `learnVoiceDictionaryDiff` 判断是否够形近。
+  //   ⚠ 凡是**机器**写草稿的地方都必须打卡（清口水词 / 纠错 / 增强 / 词典替换），
+  //     否则会把机器改动误学成「用户纠正」。
+  const machineTextRef = React.useRef(null);
+  const noteMachineText = (text) => { if (typeof text === 'string') machineTextRef.current = text; };
+  // 词典条目当前值（读配置；host 与 client 同形，见 `M-3`）
+  const dictionaryEntries = () => {
+    const v = voiceCfgState && voiceCfgState.value ? voiceCfgState.value : null;
+    const dic = v && v.dictionary && Array.isArray(v.dictionary.entries) ? v.dictionary.entries : [];
+    return dic;
+  };
+  // 机器侧写回**全部落地后**打一次快照：轮询到「不在增强中 且 草稿连续两次不变」才算稳定。
+  //   为什么需要它：增强是异步写回（`helpers.enhance` → `safeSetDraft`），热键侧看不到那一次写。
+  //   为什么用轮询而不是改 helpers：⛔ 本批不动增强链路，采集侧不得反向污染它。
+  const armMachineSnapshot = (sid) => {
+    const take = () => {
+      let last = null;
+      let stable = 0;
+      let tries = 0;
+      const poll = () => {
+        tries += 1;
+        const t = draftRef.current;
+        if (t === last) stable += 1; else { last = t; stable = 0; }
+        const busy = typeof isEnhancing === 'function' ? !!isEnhancing(sid) : false;
+        if (!busy && stable >= 1 && typeof t === 'string' && t !== '') { noteMachineText(t); return true; }
+        return tries > 60;                                    // 60 × 300ms ≈ 18s 上限
+      };
+      if (poll()) return;
+      if (timerSvc && typeof timerSvc.interval === 'function') {
+        let dispose = null;
+        const stop = () => { try { if (typeof dispose === 'function') dispose(); } catch (e) { /* 忽略 */ } };
+        const id = timerSvc.interval(() => { if (poll()) stop(); }, 300);
+        dispose = typeof id === 'function' ? id : () => {};
+      }
+    };
+    try { take(); } catch (e) { /* 保守：快照失败不影响语音链 */ }
+  };
+  // 把「用户纠正」并回配置（同 from 合并由契约层归一负责；此处只做拼接 + 调既有保存入口）。
+  const learnFromDraft = () => {
+    if (typeof learnVoiceDictionaryDiffFn !== 'function') return;
+    const machine = machineTextRef.current;
+    const edited = draftRef.current;
+    if (typeof machine !== 'string' || typeof edited !== 'string') return;
+    if (!machine || !edited || machine === edited) return;
+    let candidates = [];
+    try { candidates = learnVoiceDictionaryDiffFn(machine, edited) || []; } catch (e) { candidates = []; }
+    if (!candidates.length) return;
+    const merged = dictionaryEntries().concat(candidates);
+    if (typeof saveVoiceCfg === 'function') {
+      try { saveVoiceCfg({ dictionary: { entries: merged } }); } catch (e) { /* 保守：学习失败不影响语音链 */ }
+    }
+  };
   const officialWaitRef = React.useRef(null);  // 等待写回的快照 { draft, tries, stop }
 
   React.useEffect(() => subscribeVoiceConfig(() => setCfgVer((n) => n + 1)), []);
@@ -193,7 +256,7 @@ function VoiceHotkeyHost(props) {
     const runCorrectionThenMaybeEnhance = () => {
       const wantCorrect = wantPostprocessStep('correction');
       const wantEnhance = wantPostprocessStep('enhance');
-      const doEnhance = () => { if (wantEnhance) fire(); };
+      const doEnhance = () => { if (wantEnhance) fire(); armMachineSnapshot(sessionId); };
       if (!wantCorrect) {
         // 开关关闭 ⇒ 记为**跳过**（可见：区分“没跑因开关”与“跑了没事”），不静默
         if (typeof markCorrectionSkipped === 'function') markCorrectionSkipped('disabled', sessionId);
@@ -204,8 +267,23 @@ function VoiceHotkeyHost(props) {
       try {
         const api = (typeof host !== 'undefined' && host && typeof host.call === 'function') ? host : null;
         if (!api) { doEnhance(); return; }
-        const cur = draftRef.current;
-        if (typeof cur !== 'string' || cur.trim() === '') { doEnhance(); return; }
+        const cur0 = draftRef.current;
+        if (typeof cur0 !== 'string' || cur0.trim() === '') { doEnhance(); return; }
+        // ⚠ UD-0055 / UD-0057（学习词典 · 生效侧）：发纠错**之前**先做**纯字面替换**。
+        //   · 只替换 = 不改写语义；空词典 / 全停用 ⇒ `applied === 0` ⇒ 草稿**逐字不变**（不写回）。
+        //   · ⛔ 不走纠错提示词、⛔ 不改 `VOICE_CORRECT` 的调用形态（`text` 仍是整段草稿）。
+        let cur = cur0;
+        if (typeof applyVoiceDictionaryFn === 'function') {
+          try {
+            const rep = applyVoiceDictionaryFn(cur0, dictionaryEntries());
+            if (rep && typeof rep.text === 'string' && rep.applied > 0 && rep.text !== cur0) {
+              cur = rep.text;
+              if (inputActions && typeof inputActions.setDraft === 'function') {
+                try { inputActions.setDraft(cur); draftRef.current = cur; noteMachineText(cur); } catch (e) { /* 保守：写失败不改草稿 */ }
+              }
+            }
+          } catch (e) { cur = cur0; /* 保守：词典异常不改草稿 */ }
+        }
         const config = (typeof configState !== 'undefined' && configState && configState.value) ? configState.value : {};
         // ⚠ CHG-184（纠错状态可视化批）：相位由 correction.js 的 markCorrection* 三件**统一结算**
         //   （started / settled / failed）—— ⛔ 此处不再自行增减 correctionState 的计数。
@@ -215,7 +293,7 @@ function VoiceHotkeyHost(props) {
           if (typeof markCorrectionSettled === 'function') markCorrectionSettled(r, cur, sessionId);
           if (r.ok === true && typeof r.text === 'string' && r.text.trim() !== '' && r.text !== cur) {
             if (inputActions && typeof inputActions.setDraft === 'function') {
-              try { inputActions.setDraft(r.text); draftRef.current = r.text; } catch (e) { /* 保守：写失败不改草稿 */ }
+              try { inputActions.setDraft(r.text); draftRef.current = r.text; noteMachineText(r.text); } catch (e) { /* 保守：写失败不改草稿 */ }
             }
           }
           corrNotify();
@@ -254,6 +332,7 @@ function VoiceHotkeyHost(props) {
         if (inputActions && typeof inputActions.setDraft === 'function') {
           inputActions.setDraft(r.text);
           draftRef.current = r.text;
+          noteMachineText(r.text);
         }
       } catch (e) { /* 保守：清理异常不影响写回链路 */ }
     };
@@ -304,7 +383,13 @@ function VoiceHotkeyHost(props) {
       // 会话**开始**（相位出现）⇒ 记基线草稿 + 重置本会话的收口标记
       // ⚠ 字段名以 `snapshot()` 实际导出为准：它暴露的是 `recording`（= bus.active），**不是** `active`。
       //   （我第一版写成 `snap.active` ⇒ 恒 undefined ⇒ 基线永不记录 ⇒ 写回先于收口时永远测不到 delta。）
-      if (snap.recording && !snap.lastEndedAt) { if (typeof officialBaseRef.current !== 'string') officialBaseRef.current = draftRef.current; return; }
+      if (snap.recording && !snap.lastEndedAt) {
+        // ⚠ UD-0055 / UD-0057（学习词典 · 采集侧）：用户按下录音 = 上一轮编辑**已结束**。
+        //   此刻草稿 vs 机器输出快照 ⇒ 差异即「用户纠正」（形近才入库，筛选在契约层）。
+        //   ⚠ 必须在记录新基线**之前**取，否则基线已被本轮草稿覆盖（比不到差异）。
+        if (typeof officialBaseRef.current !== 'string') { learnFromDraft(); machineTextRef.current = null; officialBaseRef.current = draftRef.current; }
+        return;
+      }
       if (!snap.lastEndedAt) return;
       if (snap.lastEndedAt === officialEndRef.current) return;   // 同一会话只装臂一次
       officialEndRef.current = snap.lastEndedAt;

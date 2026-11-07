@@ -15,11 +15,11 @@ test('CI18N-01 旧 i18n chunk 退役，普通模块与测试单一入口在位',
   assert.equal(typeof EN, 'object');
 });
 
-test('CI18N-02 ZH/EN 顶层键集完全相等且保持 288 键', () => {
+test('CI18N-02 ZH/EN 顶层键集完全相等且保持 299 键', () => {
   const zhKeys = Object.keys(ZH).sort();
   const enKeys = Object.keys(EN).sort();
-  assert.equal(zhKeys.length, 288);
-  assert.equal(enKeys.length, 288);
+  assert.equal(zhKeys.length, 299);
+  assert.equal(enKeys.length, 299);
   assert.deepEqual(zhKeys, enKeys);
 });
 

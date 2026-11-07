@@ -53,7 +53,7 @@ function createClientApp(deps) {
   const configApi = createClientState({ host: d.host, timerRef, storage });
   const configState = configApi.configState;
   const helpers = createClientHelpers({ host: d.host, configState, dictionary: ZH, storage, resultStatusOf: contracts.resultStatusOf });
-  const voiceApi = createVoiceState({ host: d.host, storage, timerSvc, fillerState: shared.fillerState, defaults: contracts.VOICE_CONFIG_DEFAULTS, normalizeVadSilenceMs: contracts.normalizeVadSilenceMs, rpcMethods: contracts.RPC_METHODS, console: d.console });
+  const voiceApi = createVoiceState({ host: d.host, storage, timerSvc, fillerState: shared.fillerState, defaults: contracts.VOICE_CONFIG_DEFAULTS, normalizeVadSilenceMs: contracts.normalizeVadSilenceMs, normalizeDictionaryEntries: contracts.normalizeDictionaryEntries, rpcMethods: contracts.RPC_METHODS, console: d.console });
   const voiceCfgState = voiceApi.voiceCfgState;
   const correction = createCorrectionState({ voiceCfgState, correctionStateCore: { CORRECTION_PHASES: shared.CORRECTION_PHASES, correctionPhaseKnown: shared.correctionPhaseKnown, correctionPhaseOf: shared.correctionPhaseOf, correctionFailureTicket: shared.correctionFailureTicket, correctionFailureConsume: shared.correctionFailureConsume } });
   const officialVoiceBridge = createOfficialVoiceBridge({
@@ -70,6 +70,10 @@ function createClientApp(deps) {
     voiceHotkeyDisplay: shared.voiceHotkeyDisplay,
     fillerSnapshot: shared.fillerSnapshot, subscribeFiller: shared.subscribeFiller,
     correctionSnapshot: correction.correctionSnapshot, subscribeCorrection: correction.subscribeCorrection,
+    // UD-0055 / UD-0057（学习词典）：编辑器只产出结果，归一/筛子/上限全在契约层。
+    normalizeDictionaryEntries: contracts.normalizeDictionaryEntries,
+    VOICE_DICTIONARY_MAX_ENTRIES: contracts.VOICE_DICTIONARY_MAX_ENTRIES,
+    VOICE_DICTIONARY_MAX_TERM: contracts.VOICE_DICTIONARY_MAX_TERM,
     setTimeout: d.setTimeout || setTimeout, clearTimeout: d.clearTimeout || clearTimeout, window: d.window,
   }).VoiceSection;
   const FallbackRow = createFallbackRow({ React: d.React, MarqueeSelect, makeT: helpers.makeT, host: d.host });
@@ -120,6 +124,10 @@ function createClientApp(deps) {
     notifyCorrection: correction.notifyCorrection, correctionState: correction.correctionState,
     planVoicePostprocess: contracts.planVoicePostprocess, voicePostprocessHas: contracts.voicePostprocessHas,
     stripFillers: shared.stripFillers, runFiller: shared.runFiller, rpcMethods: contracts.RPC_METHODS,
+    // UD-0055 / UD-0057（学习词典）：生效/采集都走契约层实现（⛔ 不在热键模块重写）。
+    applyVoiceDictionary: contracts.applyVoiceDictionary,
+    learnVoiceDictionaryDiff: contracts.learnVoiceDictionaryDiff,
+    saveVoiceCfg: voiceApi.saveVoiceCfg,
   }).VoiceHotkeyHost;
   return {
   inject: ['timer'],

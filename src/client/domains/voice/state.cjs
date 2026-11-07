@@ -22,6 +22,10 @@ function createVoiceState(deps) {
     : (typeof localStorage !== 'undefined' ? localStorage : null);
   const timerSvc = d.timerSvc || null;
   const fillerState = d.fillerState || null;
+  // 词典归一实现由装配层注入（与 host 共用 `lib/voice-config.cjs`）；未注入时为恒等兜底。
+  const normalizeDictionary = typeof d.normalizeDictionaryEntries === 'function'
+    ? d.normalizeDictionaryEntries
+    : (list) => (Array.isArray(list) ? list : []);
   const consoleSvc = d.console || (typeof console !== 'undefined' ? console : null);
   const VOICE_CFG_DEFAULTS = JSON.parse(JSON.stringify(d.defaults || {}));
   const VOICE_CFG_KEY = 'dsh.prompt-enhancer.voice';
@@ -61,6 +65,10 @@ function createVoiceState(deps) {
       },
       autoEnhance: (v && v.autoEnhance === true) ? true : false,
       correction: { enabled: (v && v.correction && v.correction.enabled === true) ? true : false },
+      // UD-0055 / UD-0057（学习词典）：与 host `sanitizeVoiceCfg` **同批同形**（`M-3`）。
+      //   归一逻辑不在此重写 —— 由装配层注入的契约实现（`lib/voice-config.cjs`）提供，
+      //   避免第三份白名单（同族缺陷 M-2/M-3）。
+      dictionary: { entries: normalizeDictionary(v && v.dictionary ? v.dictionary.entries : null) },
     };
   }
 

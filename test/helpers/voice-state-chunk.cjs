@@ -8,11 +8,15 @@
 // 这里读取普通模块正文，拼出同一工厂调用并把导出解构为旧测试期待的顶层名字。
 const fs = require('node:fs');
 const path = require('node:path');
-const { VOICE_CONFIG_DEFAULTS } = require('../../src/shared/contracts/voice-config.cjs');
+const { VOICE_CONFIG_DEFAULTS, normalizeDictionaryEntries } = require('../../src/shared/contracts/voice-config.cjs');
 const { RPC_METHODS } = require('../../src/shared/contracts/rpc.cjs');
 
 function voiceStateChunkWithDefaults() {
-  const prelude = 'const __VOICE_CONFIG_DEFAULTS__ = '
+  // UD-0055 / UD-0057：生产装配层会把词典归一实现注入 `createVoiceState`；
+  //   夹具沿用同一形态 —— 调用方可在 `new Function(..., 'normalizeDictionaryEntries', src)`
+  //   里传入契约实现；未传时保持恒等兜底（与「未注入」分支等价，旧测试行为不变）。
+  const prelude = 'const __NORMALIZE_DICT__ = (typeof normalizeDictionaryEntries === "undefined") ? null : normalizeDictionaryEntries;\n'
+    + 'const __VOICE_CONFIG_DEFAULTS__ = '
     + JSON.stringify(VOICE_CONFIG_DEFAULTS)
     + ';\nconst __RPC_METHODS__ = ' + JSON.stringify(RPC_METHODS) + ';\n';
   const modulePath = path.join(__dirname, '..', '..', 'src', 'client', 'domains', 'voice', 'state.cjs');
@@ -25,6 +29,7 @@ function voiceStateChunkWithDefaults() {
     + '  timerSvc: typeof timerSvc !== "undefined" ? timerSvc : null,\n'
     + '  fillerState: typeof fillerState !== "undefined" ? fillerState : null,\n'
     + '  defaults: __VOICE_CONFIG_DEFAULTS__,\n'
+    + '  normalizeDictionaryEntries: __NORMALIZE_DICT__,\n'
     + '  rpcMethods: __RPC_METHODS__,\n'
     + '  autoSync: false,\n'
     + '});\n'
@@ -35,4 +40,4 @@ function voiceStateChunkWithDefaults() {
   return prelude + body + epilogue;
 }
 
-module.exports = { voiceStateChunkWithDefaults };
+module.exports = { voiceStateChunkWithDefaults, normalizeDictionaryEntries };

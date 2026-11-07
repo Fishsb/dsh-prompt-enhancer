@@ -355,7 +355,14 @@ test('S-9 负控：不动任何东西 ⇒ S-9 PASS 且 R5/R6 覆盖面为基线�
     // 契约收敛批（2026-11-04）：lib/contracts.cjs 合法新增 31 个导出符号（RPC 注册表、错误码、
     // 模式/预算/配置默认值；状态审计补 RPC_ERROR_CODES）⇒ 81 → **112**；R6 同因新增 1 个系统面文件 ⇒ 13 → **14**。
     // ⚠ 门槛本身（有引用形态才算活 / 全文件扫描）一字未改。
-    assert.match(g.out, /R5 \| 112 个 lib 导出符号/, 'R5 覆盖面须为基线 112 符号（契约事实源下沉 lib/ 后）');
+    // 学习词典批（2026-11-07 · UD-0055 / UD-0057）：基线 112 → **117**（逐项可归因：
+    //   `lib/voice-config.cjs` 合法新增 5 个导出 —— `VOICE_DICTIONARY_MAX_ENTRIES` /
+    //   `VOICE_DICTIONARY_MAX_TERM` / `normalizeDictionaryEntries` / `applyVoiceDictionary` /
+    //   `learnVoiceDictionaryDiff`；生产在用 63 → **68**（`lib/asr.cjs` 归一 + 契约层转发 +
+    //   客户端词典编辑器）；仅测试覆盖 49 未变；R6 仍 14，未变）。
+    //   ⚠ 本断言锁的是「**基线不被静默扩大/缩小**」，故数值须随**合法新增**同步（来历写明于此）；
+    //     它**不是**判据阈值，改它与「把判据改浅」无关 —— 判据本身（有引用形态才算活）一字未改。
+    assert.match(g.out, /R5 \| 117 个 lib 导出符号/, 'R5 覆盖面须为基线 117 符号（学习词典批新增 5 导出）');
     assert.match(g.out, /R6 \| 14 个系统面文件/, 'R6 覆盖面须为基线 14 文件');
   });
 });
