@@ -59,17 +59,21 @@ import { GATE_EXIT, verdictOf as chainVerdict, exitCodeOf, parseAcceptBaseline, 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ARGS = process.argv.slice(2);
 const has = (f) => ARGS.includes(f);
-// ── 环上限与三档硬顶（2026-09-26）────────────────────────────────────────────
-// 环上限 120s ⇒ 五环串行最坏 5×120 = **600s**，须**严格小于** CI 的两侧硬顶：
-//   环之和 600s  <  步上限 720s（.github/workflows/ci.yml gate 步 timeout-minutes: 12）  <  作业上限 900s（job timeout-minutes: 15）
-// ⚠ 旧值 180000 的病灶：5×180 = 900s **正好等于作业硬顶**（三档取等 ⇒ 零余量）——任一环挂死到上限，
-//   作业级 cancelled 先吃掉其后所有步骤（Run tests / 产物一致性）与唯一 artifact（test-report.txt）
+// ── 环上限与三档硬顶（2026-09-26 立 · 2026-11-07 按 7 环订正算式）──────────────
+// **算式口径**：串行最坏 = `RINGS.length × RING_TIMEOUT_MS`（不写死常数 ⇒ 环数一变算式自动跟着变）。
+// 现值：`RINGS.length` = 7 · `RING_TIMEOUT_MS` = 120000 ⇒ 串行最坏 **840s**。
+// ⚠ **三档硬顶**（`.github/workflows/ci.yml`：gate 步 `timeout-minutes: 12` = 720s · job `timeout-minutes: 15` = 900s）：
+//   840s **已越过**步上限 720s（并逼近作业上限 900s）—— 2026-09-26 写「环之和 < 步上限 < 作业上限」时是 **5 环**
+//   前提（5×120 = 600s），该前提在环数涨到 7 之后**已不成立**。⇒ 本文件**不再声称**"步上限只做兜底"：
+//   真出现多环挂死到上限时，步级会先被 cancelled，未打印的 RING 行即丢失读数。
+//   要回到严格递增须二选一：① `RING_TIMEOUT_MS` 调低（≤ 720000/7 ≈ 102857ms 才落回步上限之内）
+//   ② `RINGS` 收敛回 ≤ 6 环。⛔ 本轮只订正注释，**未改任何可执行值**（RINGS 与超时值逐字未动）。
+// ⚠ 旧值 180000 的病灶（历史记录 · 5 环口径）：5×180 = 900s **正好等于作业硬顶**（三档取等 ⇒ 零余量）——
+//   任一环挂死到上限，作业级 cancelled 先吃掉其后所有步骤（Run tests / 产物一致性）与唯一 artifact（test-report.txt）
 //   ⇒ 门禁与测试一起失去读数（本仓核心纪律：判据之间不得互相遮蔽）。
 // 取 120s 的依据（**本机实测，非估计**）：2026-09-26 五环全跑合计 580ms
 //   （dead-code 104ms · rpc 58ms · prompts 65ms · arch-claims 300ms · cards 52ms）⇒ 单环 120s 仍有 ~400× 头寸。
-// 步上限 720s 只做**兜底**：环之和留 120s 余量，正常路径下本编排器会先打印完 5 行 RING + 汇总退出码
-//   再退出，不被作业拦腰杀掉（被杀时未打印的 RING 行即丢失读数）。
-// 环境变量 GATE_RING_TIMEOUT_MS 仍可覆盖（排障用）；改它或改 CI 两侧时，须复核上面三档仍严格递增。
+// 环境变量 `GATE_RING_TIMEOUT_MS` 仍可覆盖（排障用）；改它、改 `RINGS` 或改 CI 两侧时，**须按上式重算串行最坏**。
 const RING_TIMEOUT_MS = Number(process.env.GATE_RING_TIMEOUT_MS || 120000);
 /** 接纳基线：null = 未声明（不接纳任何未判）；[] = 声明为空（同样不接纳，fail-closed） */
 const ACCEPT_BASELINE = parseAcceptBaseline(ARGS);
